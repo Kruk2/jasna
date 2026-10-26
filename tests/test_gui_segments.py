@@ -166,7 +166,7 @@ def _run_ltx_job(tmp_path, segments, split):
         patch("jasna.media.probe.get_video_meta_data", return_value=MagicMock(codec_name="hevc", duration=10.0)),
         patch("jasna.media.splice.validate_smart_render"),
         patch("jasna.media.splice.probe_keyframes", return_value=MagicMock()),
-        patch("jasna.media.splice.build_splice_plan", return_value=MagicMock()),
+        patch("jasna.media.splice.build_splice_plan", side_effect=lambda ranges, *_a, **_k: MagicMock(segments=ranges)),
         patch("jasna.mosaic.detection_registry.coerce_detection_model_name", side_effect=lambda name: name),
         patch("jasna.mosaic.detection_registry.require_detection_model_weights", return_value=tmp_path / "d.engine"),
         patch("jasna.session_factory.provide_restoration_models"),
@@ -178,14 +178,15 @@ def _run_ltx_job(tmp_path, segments, split):
 
 def test_ltx_auto_split_job_runs_the_split_ranges_in_the_source_codec(tmp_path) -> None:
     from jasna.segments import SegmentRestoration
-    from jasna.session_factory import AutoSplit
+    from jasna.session_factory import SegmentJob
 
-    split = AutoSplit(session_config(codec="h264"), (SegmentRange(1, 2, SegmentRestoration("ltx", 1)),), MagicMock())
+    segments = (SegmentRange(1, 2, SegmentRestoration("ltx", 1)),)
+    split = SegmentJob(session_config(codec="h264"), MagicMock(segments=segments))
     auto_split, kwargs = _run_ltx_job(tmp_path, (), split)
 
     assert auto_split.call_args.args[0].ltx_auto_split_percent == 20.0
     assert kwargs["config"] is split.config
-    assert kwargs["segments"] == split.segments
+    assert kwargs["segments"] == segments
     assert kwargs["splice_plan"] is split.splice_plan
 
 

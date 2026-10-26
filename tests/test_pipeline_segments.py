@@ -64,9 +64,6 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
             "jasna.pipeline.vendor_for_device",
             return_value=AcceleratorVendor.NVIDIA,
         ),
-        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
-        patch("jasna.pipeline.probe_keyframes") as probe_keyframes,
-        patch("jasna.pipeline.build_splice_plan") as build_splice_plan,
         patch("jasna.pipeline.VideoEncoder") as encoder,
         patch("jasna.pipeline.create_copy_fragment") as copy_fragment,
         patch("jasna.pipeline.normalize_fragment"),
@@ -75,8 +72,6 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
     ):
         pipeline._run_smart(metadata)
 
-    probe_keyframes.assert_not_called()
-    build_splice_plan.assert_not_called()
     assert copy_fragment.call_count == 2
     encoder.assert_called_once()
     assert encoder.call_args.kwargs["codec"] == "h264"
@@ -131,7 +126,6 @@ def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
     )
 
     with (
-        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
         patch("jasna.pipeline.VideoEncoder"),
         patch("jasna.pipeline.create_copy_fragment"),
         patch("jasna.pipeline.normalize_fragment"),
@@ -186,7 +180,6 @@ def test_amf_h264_full_reencode_preserves_selected_ranges(tmp_path) -> None:
 
     with (
         patch("jasna.pipeline.vendor_for_device", return_value=AcceleratorVendor.AMD),
-        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
         patch("jasna.pipeline.VideoEncoder"),
     ):
         pipeline._run_smart(metadata)
@@ -224,7 +217,6 @@ def test_smart_run_keeps_smart_render_unless_amd_exceeds_b_frame_cap(
 
     with (
         patch("jasna.pipeline.vendor_for_device", return_value=vendor),
-        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
         patch(
             "jasna.pipeline.resolve_smart_encoder_settings",
             side_effect=_SmartRenderReached,
@@ -234,28 +226,6 @@ def test_smart_run_keeps_smart_render_unless_amd_exceeds_b_frame_cap(
         pipeline._run_smart(MagicMock(duration=4.0, video_fps=30.0))
 
     pipeline._run_full.assert_not_called()
-
-
-def test_smart_run_rejects_precomputed_plan_for_different_segments() -> None:
-    pipeline = make_pipeline()
-    pipeline.restoration_model_name = "basicvsrpp"
-    pipeline.ltx_seed = 0
-    pipeline.input_video = Path("input.mp4")
-    pipeline.output_video = Path("output.mp4")
-    pipeline.codec = "h264"
-    pipeline.retarget_high_fps = False
-    pipeline.segments = (SegmentRange(1, 2),)
-    pipeline.splice_plan = SplicePlan(
-        index=KeyframeIndex((0, 60), Fraction(1, 30), 0, 120),
-        spans=(SpliceSpan("render", 0, 60, ((15, 30),)), SpliceSpan("copy", 60, 120)),
-        segments=(SegmentRange(0.5, 1),),
-    )
-
-    with (
-        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
-        pytest.raises(ValueError, match="does not match"),
-    ):
-        pipeline._run_smart(MagicMock(duration=4.0, video_fps=30.0))
 
 
 def _mixed_pipeline(tmp_path, default_model: str, segments: tuple[SegmentRange, ...], spans) -> Pipeline:
@@ -287,7 +257,6 @@ def _mixed_pipeline(tmp_path, default_model: str, segments: tuple[SegmentRange, 
 def _run_smart_mocked(pipeline):
     with (
         patch("jasna.pipeline.vendor_for_device", return_value=AcceleratorVendor.NVIDIA),
-        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
         patch("jasna.pipeline.resolve_smart_encoder_settings", return_value={}),
         patch("jasna.pipeline.VideoEncoder"),
         patch("jasna.pipeline.create_copy_fragment"),
@@ -421,7 +390,6 @@ def test_a_lut_job_encodes_the_parts_between_ranges_again_so_the_lut_covers_them
 
     with (
         patch("jasna.pipeline.vendor_for_device", return_value=AcceleratorVendor.NVIDIA),
-        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
         patch("jasna.pipeline.resolve_smart_encoder_settings", return_value={}),
         patch("jasna.pipeline.VideoEncoder") as encoder,
         patch("jasna.pipeline.Progressbar") as progressbar,
@@ -515,7 +483,7 @@ def test_ltx_smart_resume_keeps_completed_fragments_and_retries_partial_span(tmp
     pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", segments, spans)
     pipeline.input_video.touch()
     metadata = MagicMock(duration=8.0, num_frames=240, time_base=Fraction(1, 30), video_fps=30.0, video_fps_exact=Fraction(30, 1))
-    pipeline.resume = ResumeJob(pipeline.config, pipeline.input_video, pipeline.output_video, metadata, segments)
+    pipeline.resume = ResumeJob(pipeline.config, pipeline.input_video, pipeline.output_video, metadata, pipeline.splice_plan)
     pipeline.resume.prepare()
     partial = pipeline.resume.directory / "segments" / "0001-partial.nut"
     completed = partial.with_name("0001-raw.nut")
@@ -547,7 +515,6 @@ def test_ltx_smart_resume_keeps_completed_fragments_and_retries_partial_span(tmp
     pipeline._run_pass = MagicMock(side_effect=lambda **kwargs: kwargs["encoder_ctx"].path.write_bytes(b"basicvsrpp"))
     with (
         patch("jasna.pipeline.vendor_for_device", return_value=AcceleratorVendor.NVIDIA),
-        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
         patch("jasna.pipeline.resolve_smart_encoder_settings", return_value={}),
         patch("jasna.pipeline.VideoEncoder", Encoder),
         patch("jasna.pipeline.create_copy_fragment", side_effect=lambda _source, _span, _index, path, **_k: path.write_bytes(b"copy")) as copies,

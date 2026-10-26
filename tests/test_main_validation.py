@@ -1,6 +1,5 @@
 import re
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -50,21 +49,34 @@ def _run_main_with_args(tmp_path, extra_args, *, create_input=True, create_detec
 
 
 class TestMainValidation:
-    def test_segments_auto_select_source_codec_and_reach_pipeline(self, tmp_path):
+    def _run_segments(self, tmp_path, extra_args):
         metadata = MagicMock(codec_name="h264", duration=10.0)
         splice_plan = MagicMock()
         with (
             patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
             patch("jasna.media.splice.validate_smart_render"),
             patch("jasna.media.splice.probe_keyframes", return_value=MagicMock()),
-            patch("jasna.media.splice.build_splice_plan", return_value=splice_plan),
+            patch("jasna.media.splice.build_splice_plan", return_value=splice_plan) as plan,
         ):
-            pipeline_cls = _run_main_with_args(tmp_path, ["--segments", "1-2"])
-
-        assert pipeline_cls.call_args.kwargs["config"].codec == "h264"
-        assert pipeline_cls.call_args.kwargs["config"].encoder_settings == {"cq": 25}
-        assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
+            pipeline_cls = _run_main_with_args(tmp_path, ["--segments", "1-2", *extra_args])
+        assert plan.call_args.args[0] == (SegmentRange(1, 2),)
+        assert pipeline_cls.call_args.kwargs["segments"] is splice_plan.segments
         assert pipeline_cls.call_args.kwargs["splice_plan"] is splice_plan
+        return pipeline_cls.call_args.kwargs["config"]
+
+    def test_segments_auto_select_source_codec_and_reach_pipeline(self, tmp_path):
+        config = self._run_segments(tmp_path, [])
+
+        assert config.codec == "h264"
+        assert config.encoder_settings == {"cq": 25}
+
+    def test_segments_use_cq_only_when_the_codec_is_the_source_codec(self, tmp_path):
+        assert self._run_segments(tmp_path, ["--codec", "h264", "--cq", "31"]).encoder_settings == {"cq": 31}
+        assert self._run_segments(tmp_path, ["--cq", "31"]).encoder_settings == {"cq": 25}
+
+    def test_segments_reject_an_explicit_codec_other_than_the_source(self, tmp_path):
+        with pytest.raises(SystemExit):
+            self._run_segments(tmp_path, ["--codec", "av1"])
 
     def test_ltx_accepts_segments(self, tmp_path):
         metadata = MagicMock(codec_name="h264", duration=10.0)
@@ -83,14 +95,13 @@ class TestMainValidation:
 
         config = pipeline_cls.call_args.kwargs["config"]
         assert (config.restoration_model_name, config.ltx_seed) == ("ltx", 3)
-        assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
 
     def test_ltx_auto_split_reaches_pipeline_with_the_split_source_codec(self, tmp_path):
         from jasna.segments import SegmentRestoration
-        from jasna.session_factory import AutoSplit
+        from jasna.session_factory import SegmentJob
 
         segments = (SegmentRange(1, 2, SegmentRestoration("ltx", 3)),)
-        split = AutoSplit(session_config(codec="h264"), segments, MagicMock())
+        split = SegmentJob(session_config(codec="h264"), MagicMock(segments=segments))
         with (
             patch("jasna.session_factory.ltx_auto_split", return_value=split) as auto_split,
             patch("jasna.accelerator.is_nvidia_device", return_value=True),

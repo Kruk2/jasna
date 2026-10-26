@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 import threading
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import asdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -16,15 +14,7 @@ import psutil
 import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
-from jasna.job_resume import (
-    ResumeJob,
-    ResumeMismatchError,
-    commit_file,
-    has_saved_work,
-    read_json,
-    resume_directory,
-    write_json,
-)
+from jasna.job_resume import ResumeJob, resume_directory
 from jasna.media.container_utils import MOV_SUFFIXES
 from jasna.media.encoder_settings import require_encodable_size
 from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
@@ -34,16 +24,14 @@ from jasna.media.splice import (
     KeyframeIndex,
     SplicePlan,
     SpliceSpan,
-    build_splice_plan,
     concatenate_fragments,
     create_copy_fragment,
     mux_final_output,
     normalize_fragment,
-    probe_keyframes,
     require_one_model,
     resolve_smart_encoder_settings,
-    validate_smart_render,
 )
+from jasna.os_utils import commit_file
 from jasna.pipeline_threads import run_restoration_pass
 from jasna.progressbar import JobProgress, ProgressCallback, Progressbar
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
@@ -487,27 +475,9 @@ class Pipeline:
             writer.close()
 
     def _run_smart(self, metadata) -> None:
-        codec = validate_smart_render(
-            metadata,
-            output_path=self.output_video,
-            codec=self.codec,
-            retarget_high_fps=self.retarget_high_fps,
-        )
-        if self.splice_plan is None:
-            index = probe_keyframes(self.input_video, metadata)
-            plan = build_splice_plan(self.segments or (), index, duration=metadata.duration)
-        else:
-            plan = self.splice_plan
-            if plan.segments != tuple(self.segments or ()):
-                raise ValueError("Precomputed splice plan does not match pipeline segments")
-            index = plan.index
-        if self.resume is not None:
-            plan_path = self.resume.directory / "splice.json"
-            plan_data = json.loads(json.dumps(asdict(plan), default=str))
-            saved_plan = read_json(plan_path)
-            if saved_plan is not None and saved_plan != plan_data and has_saved_work(self.resume.root):
-                raise ResumeMismatchError(self.resume.root)
-            write_json(plan_path, plan_data)
+        codec = self.codec
+        plan = self.splice_plan
+        index = plan.index
         default = job_restoration(self.restoration_model_name, self.ltx_seed)
         segments_of = {
             span: resolve_restorations(segments, default)
@@ -691,7 +661,7 @@ class Pipeline:
             require_ltx_input(self.vr_resolution)
         auto_split = self.restoration_model_name == "ltx" and self.config.ltx_auto_split_percent is not None
         if uses_ltx or auto_split or (resume_directory(self.config, self.output_video) / "render").exists():
-            self.resume = ResumeJob(self.config, self.input_video, self.output_video, metadata, self.segments)
+            self.resume = ResumeJob(self.config, self.input_video, self.output_video, metadata, self.splice_plan)
             self.resume.prepare()
         if self.segments:
             if self.fmp4:

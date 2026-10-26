@@ -16,7 +16,6 @@ The same pass timings make the summary logged at the end of every run (``run_sum
 from __future__ import annotations
 
 import json
-import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +23,7 @@ from statistics import mean, median
 
 from jasna import __version__
 from jasna.engine_paths import model_weights_dir
+from jasna.os_utils import atomic_write
 
 TIMED_PASSES = ("encode", "denoise", "compose")
 SUMMARY_PASSES = ("scan", *TIMED_PASSES)
@@ -44,14 +44,12 @@ def load_rates(path: Path, key: str) -> dict[str, float]:
 
 
 def save_rates(path: Path, key: str, rates: dict[str, float]) -> None:
-    """Merge ``rates`` into ``key``'s profile; written to a temporary file and renamed, so a
-    reader never sees a partial file."""
+    """Merge ``rates`` into ``key``'s profile."""
     profiles = json.loads(path.read_text()) if path.is_file() else {}
     profiles[key] = {**profiles.get(key, {}), **rates}
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    temp.write_text(json.dumps(profiles, indent=1, sort_keys=True))
-    os.replace(temp, path)
+    with atomic_write(path, "w") as stream:
+        stream.write(json.dumps(profiles, indent=1, sort_keys=True))
 
 
 @dataclass(frozen=True)

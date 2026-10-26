@@ -1,5 +1,5 @@
 import os
-from dataclasses import asdict, replace
+from dataclasses import replace
 from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -10,7 +10,10 @@ import torch
 
 from factories import session_config
 from jasna import job_resume
-from jasna.job_resume import ResumeJob, ResumeMismatchError, atomic_write, find_resume_output, job_fingerprints, write_json
+from jasna.job_resume import ResumeJob, ResumeMismatchError, job_fingerprints
+from jasna.media.splice import KeyframeIndex, build_splice_plan
+from jasna.os_utils import atomic_write
+from jasna.session_factory import find_resume_output
 from jasna.ltx.camera import CropFrame
 from jasna.ltx.model_files import bundle_names
 from jasna.ltx.plan import TrackPlan, Window, plans_from_arrays, plans_to_arrays
@@ -34,6 +37,13 @@ def job(tmp_path):
         (models / name).write_bytes(b"weights")
     metadata = SimpleNamespace(num_frames=120, time_base=Fraction(1, 30), duration=4.0, codec_name="hevc")
     return config, source, output, metadata
+
+
+def _plan(segments):
+    """The plan of ``segments`` in the 4 s fixture video, None for a whole-video job."""
+    if not segments:
+        return None
+    return build_splice_plan(segments, KeyframeIndex((0, 30, 60, 90), Fraction(1, 30), 0, 120), duration=4.0)
 
 
 def _save_work(checkpoint: ResumeJob) -> None:
@@ -84,7 +94,7 @@ def test_latents_ignore_part_files_and_load_only_weights(tmp_path):
 def test_fingerprint_ignores_progress_and_working_directory(job, tmp_path):
     config, source, output, metadata = job
     changed = replace(config, disable_progress=True, working_dir=tmp_path / "scratch")
-    assert job_fingerprints(config, source, output, metadata, ()) == job_fingerprints(changed, source, output, metadata, ())
+    assert job_fingerprints(config, source, output, metadata, None) == job_fingerprints(changed, source, output, metadata, None)
 
 
 def test_changed_lut_contents_redo_the_output_even_with_same_size_and_timestamp(job, tmp_path):
@@ -92,13 +102,13 @@ def test_changed_lut_contents_redo_the_output_even_with_same_size_and_timestamp(
     lut = tmp_path / "colors.cube"
     lut.write_bytes(b"0 0 0\n1 1 1\n")
     config = replace(config, lut_path=str(lut))
-    checkpoint = ResumeJob(config, source, output, metadata, ())
+    checkpoint = ResumeJob(config, source, output, metadata, None)
     checkpoint.prepare()
     _save_work(checkpoint)
     stat = lut.stat()
     lut.write_bytes(b"1 1 1\n0 0 0\n")
     os.utime(lut, ns=(stat.st_atime_ns, stat.st_mtime_ns))
-    changed = ResumeJob(config, source, output, metadata, ())
+    changed = ResumeJob(config, source, output, metadata, None)
     assert changed.fingerprint != checkpoint.fingerprint
     assert changed.latents == checkpoint.latents
 
@@ -123,13 +133,13 @@ def test_model_replaced_at_the_same_path_changes_the_fingerprint(job, tmp_path, 
         path = config.restoration_model_path / bundle_names(config.ltx_model, fast=config.ltx_fast)[index]
         if encrypted:
             path = path.rename(path.with_name(path.name + ".enc"))
-    checkpoint = ResumeJob(config, source, output, metadata, ranges)
+    checkpoint = ResumeJob(config, source, output, metadata, _plan(ranges))
     checkpoint.prepare()
     _save_work(checkpoint)
     stat = path.stat()
     path.write_bytes(b"updated")
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
-    changed = ResumeJob(config, source, output, metadata, ranges)
+    changed = ResumeJob(config, source, output, metadata, _plan(ranges))
     assert changed.fingerprint != checkpoint.fingerprint
     if asset == "basicvsrpp":
         assert changed.latents == checkpoint.latents
@@ -143,12 +153,12 @@ def test_frozen_fingerprint_uses_encrypted_bundle_even_when_plaintext_exists(job
     for path in tuple(config.restoration_model_path.iterdir()):
         path.with_name(path.name + ".enc").write_bytes(b"encrypted")
     monkeypatch.setattr("jasna.ltx.model_files.is_frozen", lambda: True)
-    original = job_fingerprints(config, source, output, metadata, ())
+    original = job_fingerprints(config, source, output, metadata, None)
     transformer = config.restoration_model_path / bundle_names(config.ltx_model, fast=config.ltx_fast)[0]
     transformer.write_bytes(b"unused plaintext")
-    assert job_fingerprints(config, source, output, metadata, ()) == original
+    assert job_fingerprints(config, source, output, metadata, None) == original
     transformer.with_name(transformer.name + ".enc").write_bytes(b"changed encrypted")
-    assert job_fingerprints(config, source, output, metadata, ()) != original
+    assert job_fingerprints(config, source, output, metadata, None) != original
 
 
 def test_fingerprint_ignores_ltx_files_when_every_range_uses_basicvsrpp(job, tmp_path, monkeypatch):
@@ -157,36 +167,36 @@ def test_fingerprint_ignores_ltx_files_when_every_range_uses_basicvsrpp(job, tmp
     basic.write_bytes(b"weights")
     monkeypatch.setattr("jasna.engine_paths.default_restoration_model_path", lambda name: basic)
     ranges = (SegmentRange(0, 1, SegmentRestoration("basicvsrpp", None)),)
-    original = job_fingerprints(config, source, output, metadata, ranges)
+    original = job_fingerprints(config, source, output, metadata, _plan(ranges))
     for path in config.restoration_model_path.iterdir():
         path.unlink()
-    assert job_fingerprints(config, source, output, metadata, ranges) == original
+    assert job_fingerprints(config, source, output, metadata, _plan(ranges)) == original
 
 
 def test_removed_model_rejects_checkpoint_without_deleting_saved_progress(job):
     config, source, output, metadata = job
-    checkpoint = ResumeJob(config, source, output, metadata, ())
+    checkpoint = ResumeJob(config, source, output, metadata, None)
     checkpoint.prepare()
     _save_work(checkpoint)
     config.detection_model_path.unlink()
     with pytest.raises(ResumeMismatchError):
-        ResumeJob(config, source, output, metadata, ()).prepare()
+        ResumeJob(config, source, output, metadata, None).prepare()
     assert checkpoint.matches()
 
 
 def test_trial_fingerprint_ignores_installed_ltx_models(job):
     config, source, output, metadata = job
     config = replace(config, ltx_trial=True)
-    original = job_fingerprints(config, source, output, metadata, ())
+    original = job_fingerprints(config, source, output, metadata, None)
     for path in config.restoration_model_path.iterdir():
         path.unlink()
-    assert job_fingerprints(config, source, output, metadata, ()) == original
+    assert job_fingerprints(config, source, output, metadata, None) == original
 
 
 @pytest.mark.parametrize("change", ["seed", "model", "settings", "ranges", "input", "version", "output", "metadata"])
 def test_fingerprint_detects_changes(job, monkeypatch, change):
     config, source, output, metadata = job
-    original = job_fingerprints(config, source, output, metadata, ())
+    original = job_fingerprints(config, source, output, metadata, None)
     ranges = ()
     if change == "seed":
         config = replace(config, ltx_seed=42)
@@ -204,17 +214,17 @@ def test_fingerprint_detects_changes(job, monkeypatch, change):
         output = output.with_suffix(".mkv")
     else:
         metadata = SimpleNamespace(num_frames=120, time_base=Fraction(1, 24), duration=5.0)
-    assert job_fingerprints(config, source, output, metadata, ranges) != original
+    assert job_fingerprints(config, source, output, metadata, _plan(ranges)) != original
 
 
 def test_mismatch_preserves_every_file_until_confirmed(job):
     config, source, output, metadata = job
-    original = ResumeJob(config, source, output, metadata, ())
+    original = ResumeJob(config, source, output, metadata, None)
     original.prepare()
     latent = original.directory / "ltx" / "000000.0-1-0.reference.pt"
     latent.parent.mkdir()
     latent.write_bytes(b"saved")
-    changed = ResumeJob(replace(config, ltx_seed=7), source, output, metadata, ())
+    changed = ResumeJob(replace(config, ltx_seed=7), source, output, metadata, None)
     with pytest.raises(ResumeMismatchError) as raised:
         changed.prepare()
     assert latent.read_bytes() == b"saved"
@@ -229,7 +239,7 @@ def test_mismatch_preserves_every_file_until_confirmed(job):
 def test_find_saved_output_before_file_conflict_even_after_auto_rename(job, renamed):
     config, source, output, metadata = job
     saved = output.with_stem(output.stem + " (1)") if renamed else output
-    checkpoint = ResumeJob(config, source, saved, metadata, ())
+    checkpoint = ResumeJob(config, source, saved, metadata, None)
     checkpoint.prepare()
     saved.touch()
     with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
@@ -241,49 +251,89 @@ def test_resume_lookup_handles_brackets_and_only_follows_actual_auto_rename_name
     config, source, output, metadata = job
     output = output.with_stem("[group] output")
     unrelated = output.with_stem(output.stem + " other")
-    ResumeJob(config, source, unrelated, metadata, ()).prepare()
+    ResumeJob(config, source, unrelated, metadata, None).prepare()
     with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
         assert find_resume_output(config, source, output, ()) is None
         saved = output.with_stem(output.stem + " (1)")
-        ResumeJob(config, source, saved, metadata, ()).prepare()
+        ResumeJob(config, source, saved, metadata, None).prepare()
         assert find_resume_output(config, source, output, ()) == saved
 
 
+def _video_metadata(metadata):
+    metadata.video_width, metadata.video_height = 1920, 1080
+    metadata.sample_aspect_ratio = Fraction(1, 1)
+    return metadata
+
+
+def _splice_patches(metadata):
+    return (
+        patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
+        patch("jasna.media.splice.validate_smart_render"),
+        patch("jasna.media.splice.probe_keyframes", return_value=KeyframeIndex((0, 30, 60, 90), Fraction(1, 30), 0, 120)),
+    )
+
+
 def test_find_auto_split_checkpoint_with_effective_codec_and_ranges(job):
-    config, source, output, metadata = job
-    config = replace(config, ltx_auto_split_percent=12.0, codec="av1")
-    segments = (SegmentRange(1, 2, SegmentRestoration("ltx", 0)),)
     from jasna.session_factory import segment_job_config
 
-    effective = segment_job_config(config, metadata.codec_name, source)
-    checkpoint = ResumeJob(effective, source, output, metadata, segments)
+    config, source, output, metadata = job
+    metadata = _video_metadata(metadata)
+    config = replace(config, ltx_auto_split_percent=12.0, codec="av1", vr_mode="off")
+    segments = (SegmentRange(1, 2, SegmentRestoration("ltx", 0)),)
+    ResumeJob(config, source, output, metadata, None).save_split(segments)
+    checkpoint = ResumeJob(segment_job_config(config, "hevc", source), source, output, metadata, _plan(segments))
     checkpoint.prepare()
-    write_json(checkpoint.root / "split.json", {
-        "fingerprint": job_fingerprints(config, source, output, metadata, ())[1],
-        "segments": [asdict(segment) for segment in segments],
-    })
-    with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
+    validate, metadata_patch, keyframes = _splice_patches(metadata)
+    with validate, metadata_patch, keyframes:
+        assert find_resume_output(config, source, output, ()) == output
+        assert find_resume_output(replace(config, ltx_seed=3), source, output, ()) is None
+
+
+def test_find_ranges_checkpoint_with_effective_codec(job):
+    from jasna.session_factory import segment_job_config
+
+    config, source, output, metadata = job
+    config = replace(config, codec="av1")
+    segments = (SegmentRange(1, 2),)
+    ResumeJob(segment_job_config(config, "hevc", source), source, output, metadata, _plan(segments)).prepare()
+    validate, metadata_patch, keyframes = _splice_patches(metadata)
+    with validate, metadata_patch, keyframes:
+        assert find_resume_output(config, source, output, segments) == output
+        assert find_resume_output(config, source, output, (SegmentRange(1, 3),)) is None
+
+
+def test_auto_split_that_could_not_split_finds_its_whole_video_checkpoint(job):
+    from jasna.media.splice import SmartRenderCompatibilityError
+
+    config, source, output, metadata = job
+    config = replace(config, ltx_auto_split_percent=12.0, vr_mode="off")
+    metadata = _video_metadata(metadata)
+    ResumeJob(config, source, output, metadata, None).prepare()
+    with (
+        patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
+        patch("jasna.media.splice.validate_smart_render", side_effect=SmartRenderCompatibilityError("VFR")),
+    ):
         assert find_resume_output(config, source, output, ()) == output
 
 
 @pytest.mark.parametrize("answer", ["yes", "no", None])
 def test_cli_asks_before_replacing_progress(job, answer):
-    from jasna.main import _run_resumable_video
+    from jasna.job_resume import run_with_resume_prompt
+    from jasna.main import _ask_to_replace_progress
 
     config, source, output, metadata = job
-    checkpoint = ResumeJob(config, source, output, metadata, ())
+    checkpoint = ResumeJob(config, source, output, metadata, None)
     checkpoint.prepare()
     error = ResumeMismatchError(checkpoint.root)
-    pipeline = MagicMock()
-    pipeline.run.side_effect = [error, None]
+    run = MagicMock(side_effect=[error, "done"])
     with patch("sys.stdin.isatty", return_value=answer is not None), patch("builtins.input", return_value=answer) as prompt:
         if answer == "yes":
-            _run_resumable_video(lambda *_: pipeline, source, output)
-            assert pipeline.run.call_count == 2
+            assert run_with_resume_prompt(run, _ask_to_replace_progress) == "done"
+            assert run.call_count == 2
             assert not checkpoint.root.exists()
         else:
             with pytest.raises(ResumeMismatchError):
-                _run_resumable_video(lambda *_: pipeline, source, output)
+                run_with_resume_prompt(run, _ask_to_replace_progress)
             assert checkpoint.matches()
         assert prompt.called is (answer is not None)
 
@@ -312,7 +362,7 @@ def test_auto_split_reuses_saved_detection_and_rejects_changed_settings(job, ren
         assert first == second
         assert first is not None
         scan.assert_called_once()
-        checkpoint = ResumeJob(first.config, source, output, metadata, first.segments)
+        checkpoint = ResumeJob(first.config, source, output, metadata, first.splice_plan)
         if render_started:
             checkpoint.prepare()
         saved_split = (checkpoint.root / "split.json").read_bytes()
@@ -335,7 +385,7 @@ def test_auto_split_scans_past_a_checkpoint_without_saved_work(job):
     metadata.num_frames = 180
     metadata.video_width, metadata.video_height = 1920, 1080
     metadata.sample_aspect_ratio = Fraction(1, 1)
-    ResumeJob(replace(config, ltx_seed=42), source, output, metadata, ()).prepare()
+    ResumeJob(replace(config, ltx_seed=42), source, output, metadata, None).prepare()
     samples = MosaicSamples(times=(1.0, 3.0), scores=(0.9, 0.9), sizes=(0.05, 0.3), stride=1.0)
     with (
         patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
@@ -349,8 +399,8 @@ def test_auto_split_scans_past_a_checkpoint_without_saved_work(job):
 
 def test_changed_settings_replace_a_checkpoint_without_saved_work(job):
     config, source, output, metadata = job
-    ResumeJob(config, source, output, metadata, ()).prepare()
-    changed = ResumeJob(replace(config, ltx_seed=7), source, output, metadata, ())
+    ResumeJob(config, source, output, metadata, None).prepare()
+    changed = ResumeJob(replace(config, ltx_seed=7), source, output, metadata, None)
     changed.prepare()
     assert changed.matches()
 
@@ -358,7 +408,7 @@ def test_changed_settings_replace_a_checkpoint_without_saved_work(job):
 @pytest.mark.parametrize("work", ["plans", "latent", "fragment"])
 def test_changed_settings_ask_once_work_is_saved(job, work):
     config, source, output, metadata = job
-    checkpoint = ResumeJob(config, source, output, metadata, ())
+    checkpoint = ResumeJob(config, source, output, metadata, None)
     checkpoint.prepare()
     saved = {
         "plans": checkpoint.directory / "ltx" / "0-1.plans.npz",
@@ -368,12 +418,12 @@ def test_changed_settings_ask_once_work_is_saved(job, work):
     saved.parent.mkdir(parents=True, exist_ok=True)
     saved.write_bytes(b"saved")
     with pytest.raises(ResumeMismatchError):
-        ResumeJob(replace(config, ltx_seed=7), source, output, metadata, ()).prepare()
+        ResumeJob(replace(config, ltx_seed=7), source, output, metadata, None).prepare()
 
 
 def test_partial_files_are_not_saved_work(job):
     config, source, output, metadata = job
-    checkpoint = ResumeJob(config, source, output, metadata, ())
+    checkpoint = ResumeJob(config, source, output, metadata, None)
     checkpoint.prepare()
     for partial in (
         checkpoint.directory / "ltx" / "000000.0-1-0.reference.pt.part",
@@ -381,7 +431,7 @@ def test_partial_files_are_not_saved_work(job):
     ):
         partial.parent.mkdir(parents=True, exist_ok=True)
         partial.write_bytes(b"unfinished")
-    ResumeJob(replace(config, ltx_seed=7), source, output, metadata, ()).prepare()
+    ResumeJob(replace(config, ltx_seed=7), source, output, metadata, None).prepare()
 
 
 def test_outputs_with_the_same_name_keep_separate_checkpoints_in_a_working_directory(job, tmp_path):
@@ -390,8 +440,8 @@ def test_outputs_with_the_same_name_keep_separate_checkpoints_in_a_working_direc
     first, second = tmp_path / "a" / "clip.mp4", tmp_path / "b" / "clip.mp4"
     assert job_resume.resume_directory(config, first) != job_resume.resume_directory(config, second)
     renamed = first.with_stem("clip (1)")
-    ResumeJob(config, source, renamed, metadata, ()).prepare()
-    ResumeJob(config, source, second, metadata, ()).prepare()
+    ResumeJob(config, source, renamed, metadata, None).prepare()
+    ResumeJob(config, source, second, metadata, None).prepare()
     with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
         assert find_resume_output(config, source, first, ()) == renamed
         assert find_resume_output(config, source, second, ()) == second
@@ -406,8 +456,8 @@ def test_output_only_settings_keep_the_latent_fingerprint(job, tmp_path, change)
     if "lut_path" in change:
         (tmp_path / "lut").write_bytes(b"0 0 0\n")
         change = {"lut_path": str(tmp_path / "lut")}
-    job_key, latents = job_fingerprints(config, source, output, metadata, ())
-    changed_job, changed_latents = job_fingerprints(replace(config, **change), source, output, metadata, ())
+    job_key, latents = job_fingerprints(config, source, output, metadata, None)
+    changed_job, changed_latents = job_fingerprints(replace(config, **change), source, output, metadata, None)
     assert changed_latents == latents
     assert changed_job != job_key
 
@@ -421,23 +471,41 @@ def test_scan_encode_and_denoise_settings_change_the_latent_fingerprint(job, cha
     config, source, output, metadata = job
     for name in bundle_names("distilled2", fast=False):
         (config.restoration_model_path / name).write_bytes(b"weights")
-    latents = job_fingerprints(config, source, output, metadata, ())[1]
-    assert job_fingerprints(replace(config, **change), source, output, metadata, ())[1] != latents
+    latents = job_fingerprints(config, source, output, metadata, None)[1]
+    assert job_fingerprints(replace(config, **change), source, output, metadata, None)[1] != latents
 
 
 def test_output_only_change_keeps_latents_and_redoes_fragments(job):
     config, source, output, metadata = job
-    checkpoint = ResumeJob(config, source, output, metadata, ())
+    checkpoint = ResumeJob(config, source, output, metadata, None)
     checkpoint.prepare()
     _save_work(checkpoint)
     fragment = checkpoint.directory / "segments" / "0000-raw.nut"
     fragment.parent.mkdir()
     fragment.write_bytes(b"old codec")
     changed = replace(config, codec="av1", encoder_settings={"cq": 30})
-    ResumeJob(changed, source, output, metadata, ()).prepare()
+    ResumeJob(changed, source, output, metadata, None).prepare()
     assert (checkpoint.directory / "ltx" / "000000.0-1-0.reference.pt").exists()
     assert not fragment.exists()
-    assert ResumeJob(changed, source, output, metadata, ()).matches()
+    assert ResumeJob(changed, source, output, metadata, None).matches()
     output.touch()
     with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
         assert find_resume_output(changed, source, output, ()) == output
+
+
+def test_changed_plan_keeps_latents_and_redoes_fragments(job):
+    config, source, output, metadata = job
+    segments = (SegmentRange(1, 2),)
+    plan = _plan(segments)
+    checkpoint = ResumeJob(config, source, output, metadata, plan)
+    checkpoint.prepare()
+    _save_work(checkpoint)
+    fragment = checkpoint.directory / "segments" / "0000-raw.nut"
+    fragment.parent.mkdir()
+    fragment.write_bytes(b"old plan")
+    replanned = build_splice_plan(segments, KeyframeIndex((0, 45, 90), Fraction(1, 30), 0, 120), duration=4.0)
+    changed = ResumeJob(config, source, output, metadata, replanned)
+    assert changed.fingerprint != checkpoint.fingerprint
+    changed.prepare()
+    assert (checkpoint.directory / "ltx" / "000000.0-1-0.reference.pt").exists()
+    assert not fragment.exists()

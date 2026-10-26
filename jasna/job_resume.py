@@ -1,18 +1,19 @@
-"""Parent-owned checkpoints for offline LTX jobs."""
+"""Parent-owned checkpoints for offline LTX jobs: their storage and fingerprints. Which job a
+checkpoint belongs to is derived by ``jasna.session_factory``."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
-import os
 import re
 import shutil
-from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING, Callable, TypeVar
 
 from jasna import __version__
+from jasna.os_utils import atomic_write
 from jasna.segments import (
     SegmentRange,
     SegmentRestoration,
@@ -23,8 +24,12 @@ from jasna.segments import (
 )
 from jasna.session_config import SessionConfig
 
+if TYPE_CHECKING:
+    from jasna.media.splice import SplicePlan
+
 log = logging.getLogger(__name__)
 FORMAT_VERSION = 3
+T = TypeVar("T")
 
 
 class ResumeMismatchError(ValueError):
@@ -34,26 +39,6 @@ class ResumeMismatchError(ValueError):
 
     def discard(self) -> None:
         shutil.rmtree(self.directory)
-
-
-@contextmanager
-def atomic_write(path: Path, mode: str):
-    partial = path.with_name(path.name + ".part")
-    with partial.open(mode) as stream:
-        yield stream
-        stream.flush()
-        os.fsync(stream.fileno())
-    commit_file(partial, path)
-
-
-def commit_file(partial: Path, path: Path) -> None:
-    partial.replace(path)
-    if os.name == "posix":
-        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
 
 
 def write_json(path: Path, data) -> None:
@@ -114,26 +99,28 @@ def _digest(identity: dict) -> str:
     return hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def job_fingerprints(config: SessionConfig, source: Path, output: Path, metadata, segments) -> tuple[str, str]:
+def job_fingerprints(
+    config: SessionConfig, source: Path, output: Path, metadata, splice_plan: SplicePlan | None
+) -> tuple[str, str]:
     """``(job, latents)``: ``job`` covers everything the output depends on; ``latents`` only
     what the saved auto split, track plans and latents depend on, so a change to the rest
     (codec, quality, LUT, sharpening, BasicVSR++ settings) keeps them."""
     from jasna.ltx.model_files import bundle_paths
-    from jasna.session_factory import restoration_model_path_for
 
     stat = source.stat()
     settings = asdict(config)
     for key in ("disable_progress", "working_dir"):
         del settings[key]
     ranges = resolve_restorations(
-        normalize_segments(tuple(segments or ())), job_restoration(config.restoration_model_name, config.ltx_seed)
+        splice_plan.segments if splice_plan is not None else (),
+        job_restoration(config.restoration_model_name, config.ltx_seed),
     )
     models = job_models(config.restoration_model_name, ranges)
     latent_models = {"detection": _model_identity(config.detection_model_path)}
     if "ltx" in models and not config.ltx_trial:
         latent_models["ltx"] = [
             _model_identity(path) for path in bundle_paths(
-                restoration_model_path_for(config, "ltx"), config.ltx_model, fast=config.ltx_fast
+                config.model_path("ltx"), config.ltx_model, fast=config.ltx_fast
             )
         ]
     latents = _digest({
@@ -150,9 +137,10 @@ def job_fingerprints(config: SessionConfig, source: Path, output: Path, metadata
         "output": str(output.resolve()),
         "settings": settings,
         "basicvsrpp": (
-            _model_identity(restoration_model_path_for(config, "basicvsrpp")) if "basicvsrpp" in models else None
+            _model_identity(config.model_path("basicvsrpp")) if "basicvsrpp" in models else None
         ),
         "lut": hashlib.sha256(Path(config.lut_path).read_bytes()).hexdigest() if config.lut_path else None,
+        "plan": _digest(asdict(splice_plan)) if splice_plan is not None else None,
     })
     return job, latents
 
@@ -164,17 +152,20 @@ def segments_from_json(data) -> tuple[SegmentRange, ...]:
 
 
 class ResumeJob:
-    def __init__(self, config: SessionConfig, source: Path, output: Path, metadata, segments) -> None:
+    """The checkpoint of one output: the restored work of a job, and the LTX auto split it
+    was planned from. ``splice_plan`` None is a job that restores the whole video."""
+
+    def __init__(self, config: SessionConfig, source: Path, output: Path, metadata, splice_plan: SplicePlan | None):
         self.root = resume_directory(config, output)
         self.directory = self.root / "render"
-        self.fingerprint, self.latents = job_fingerprints(config, source, output, metadata, segments)
+        self.fingerprint, self.latents = job_fingerprints(config, source, output, metadata, splice_plan)
         self.output = output.resolve()
         self.source = source.resolve()
 
     def matches(self) -> bool:
         """Whether the saved LTX work can continue this job."""
         manifest = read_json(self.directory / "job.json")
-        return manifest is not None and manifest.get("latents") == self.latents
+        return manifest is not None and manifest["latents"] == self.latents
 
     def prepare(self) -> None:
         manifest = read_json(self.directory / "job.json")
@@ -185,50 +176,64 @@ class ResumeJob:
             log.info("Output settings changed for %s; reusing saved LTX work and redoing the rest", self.output.name)
             if (self.directory / "segments").exists():
                 shutil.rmtree(self.directory / "segments")
-        elif _has_render_work(self.directory):
-            raise ResumeMismatchError(self.root)
-        elif self.directory.exists():
-            shutil.rmtree(self.directory)
+        else:
+            self._replace_unless(_has_render_work(self.directory))
+            if self.directory.exists():
+                shutil.rmtree(self.directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         write_json(self.directory / "job.json", {
             "fingerprint": self.fingerprint, "latents": self.latents, "input": str(self.source), "output": str(self.output),
         })
 
+    def saved_split(self) -> tuple[SegmentRange, ...] | None:
+        """The LTX auto split saved for this whole-video job's settings; None when it still
+        has to be scanned."""
+        split = read_json(self.root / "split.json")
+        if split is not None and split["fingerprint"] == self.latents:
+            return segments_from_json(split["segments"])
+        self._replace_unless(has_saved_work(self.root))
+        return None
+
+    def save_split(self, segments: tuple[SegmentRange, ...]) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        write_json(self.root / "split.json", {
+            "fingerprint": self.latents, "segments": [asdict(segment) for segment in segments],
+        })
+
+    def _replace_unless(self, work_saved: bool) -> None:
+        """Saved data for other settings is replaced, except saved work: only the user may
+        discard that."""
+        if work_saved:
+            raise ResumeMismatchError(self.root)
+
     def finish(self) -> None:
         shutil.rmtree(self.root)
 
 
-def find_resume_output(config: SessionConfig, source: Path, output: Path, segments) -> Path | None:
-    """Resume wins over GUI file conflicts (idea from #415), including an earlier auto-rename."""
-    root = config.working_dir or output.parent
-    candidates = resume_directories(root, output)
-    if not candidates:
-        return None
-    from jasna.media.probe import get_video_meta_data
-    from jasna.media.splice import canonical_codec
-    from jasna.session_factory import segment_job_config
-
-    metadata = get_video_meta_data(str(source))
-    for directory in candidates:
+def saved_outputs(config: SessionConfig, output: Path) -> list[Path]:
+    """Outputs whose saved work may continue a job writing ``output``: ``output`` itself or
+    one of its auto-renamed names, in the same folder and format."""
+    found = []
+    for directory in resume_directories(config.working_dir or output.parent, output):
         manifest = read_json(directory / "render" / "job.json")
         if manifest is None:
             continue
-        saved_output = Path(manifest["output"])
+        saved = Path(manifest["output"])
         if (
-            saved_output.parent != output.parent.resolve() or saved_output.suffix.lower() != output.suffix.lower()
-            or resume_directory(config, saved_output).resolve() != directory.resolve()
+            saved.parent == output.parent.resolve() and saved.suffix.lower() == output.suffix.lower()
+            and resume_directory(config, saved).resolve() == directory.resolve()
         ):
-            continue
-        effective_config, effective_segments = config, segments
-        if not segments and config.ltx_auto_split_percent is not None and config.restoration_model_name == "ltx":
-            split = read_json(directory / "split.json")
-            key = job_fingerprints(config, source, saved_output, metadata, ())[1]
-            if split is None or split["fingerprint"] != key:
-                continue
-            effective_segments = segments_from_json(split["segments"])
-        if effective_segments:
-            effective_config = segment_job_config(config, canonical_codec(metadata.codec_name), source)
-        job = ResumeJob(effective_config, source, saved_output, metadata, effective_segments)
-        if job.matches():
-            return saved_output
-    return None
+            found.append(saved)
+    return found
+
+
+def run_with_resume_prompt(run: Callable[[], T], ask: Callable[[ResumeMismatchError], bool]) -> T:
+    """``run()``; when its saved progress no longer matches, ``ask`` whether to discard it and
+    start over. A refusal keeps the progress and raises the mismatch."""
+    while True:
+        try:
+            return run()
+        except ResumeMismatchError as error:
+            if not ask(error):
+                raise
+            error.discard()

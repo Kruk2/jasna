@@ -41,10 +41,10 @@ def test_a_failed_write_leaves_the_old_profile_whole(tmp_path, monkeypatch):
     path = tmp_path / "profile.json"
     speed.save_rates(path, "a", {"denoise/window512": 4.0})
 
-    def fail(source, target):
+    def fail(partial, target):
         raise OSError("disk full")
 
-    monkeypatch.setattr(speed.os, "replace", fail)
+    monkeypatch.setattr("jasna.os_utils.commit_file", fail)
     with pytest.raises(OSError):
         speed.save_rates(path, "a", {"denoise/window512": 1.0})
     assert json.loads(path.read_text()) == {"a": {"denoise/window512": 4.0}}

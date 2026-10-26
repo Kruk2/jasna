@@ -146,7 +146,8 @@ continue from saved work. See [Pause and continue](models.md#pause-and-continue)
   encode AV1 (NVIDIA RTX 40-series, AMD RX 7000 or newer) and a newer player.
 
 With `--segments`, the output always has the codec of the input. A different
-`--codec` stops with an error.
+`--codec` stops with an error. `--cq` and `--encoder-settings` are used only
+when `--codec` (default `hevc`) is the input codec.
 
 ### Encoder settings
 

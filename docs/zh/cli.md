@@ -143,6 +143,8 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
   系列、AMD RX 7000 或更新）和较新的播放器。
 
 使用 `--segments` 时，输出总是使用输入的编解码器。指定不同的 `--codec` 会报错停止。
+只有当 `--codec`（默认 `hevc`）与输入的编解码器相同时，才会使用 `--cq` 和
+`--encoder-settings`。
 
 ### 编码器设置
 

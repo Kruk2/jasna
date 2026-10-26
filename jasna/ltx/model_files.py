@@ -22,6 +22,7 @@ from typing import get_args
 import certifi
 
 from jasna._frozen import is_frozen
+from jasna.os_utils import commit_file
 from jasna.session_config import LtxModelName
 
 logger = logging.getLogger(__name__)
@@ -363,4 +364,4 @@ def download_files(
         if digest.hexdigest() != file.sha256:
             partial.unlink()
             raise RuntimeError(f"{file.name} is corrupted (checksum mismatch). The download was deleted.")
-        partial.replace(target)
+        commit_file(partial, target)

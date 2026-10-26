@@ -75,6 +75,15 @@ class SessionConfig:
     sharpen_strength: float
     tvai_denoise: bool
 
+    def model_path(self, name: RestorationModelName) -> Path:
+        """``restoration_model_path`` belongs to the job's model; another model loads from its
+        default path."""
+        from jasna.engine_paths import default_restoration_model_path
+
+        if name == self.restoration_model_name:
+            return self.restoration_model_path
+        return default_restoration_model_path(name)
+
     def __post_init__(self) -> None:
         if self.batch_size <= 0:
             raise ValueError("Batch size must be > 0")
