@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from test_main import _base_argv, _main_patches, _make_model_files
+from factories import cli_args, run_cli
 
 
 def test_frozen_detection_import_does_not_load_late_runtime_helpers():
@@ -91,13 +91,9 @@ def test_importing_pipeline_does_not_patch_frozen_torch():
 
 
 def test_cli_main_patches_frozen_torch(tmp_path):
-    inp, out, rest, det = _make_model_files(tmp_path)
     with (patch("jasna._frozen.patch_frozen_torch") as spy,
           patch("jasna.accelerator.device_context", return_value=nullcontext())):
-        with _main_patches():
-            with patch.object(sys, "argv", _base_argv(inp, out, rest, det)):
-                from jasna.main import main
-                main()
+        run_cli(cli_args(tmp_path))
     spy.assert_called()
 
 
