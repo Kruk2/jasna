@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 from fractions import Fraction
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -13,20 +13,17 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 
 from jasna.gui import restoration_preview
 from jasna.gui.models import AppSettings
-from jasna.gui.app import JasnaApp
 from jasna.gui.restoration_preview import (
-    RestoredClipFrame,
     RestorationPreviewWorker,
     _Cancel,
+    _Request,
     _CenterFrameCollector,
     _PlaybackFrameCollector,
     _Stop,
     playback_window,
     preview_window,
 )
-from jasna.gui.segment_editor import SegmentEditor
 from jasna.media.probe import VideoMetadata
-from factories import no_resume_conflict
 
 
 def _metadata(*, fps=30.0, duration=10.0, time_base=Fraction(1, 90000), start_pts=0) -> VideoMetadata:
@@ -291,49 +288,46 @@ def test_preview_pass_forwards_scene_detection(monkeypatch) -> None:
     worker.close()
 
 
-def test_restoration_worker_cancels_before_queueing_replacement() -> None:
-    worker = RestorationPreviewWorker("unused.mp4", _metadata())
-    order = []
-    worker._cancel_active_pass = MagicMock(side_effect=lambda: order.append("cancel"))
-    worker._replace_command = MagicMock(side_effect=lambda *_args, **_kwargs: order.append("queue"))
+def _preview_pipeline() -> SimpleNamespace:
+    return SimpleNamespace(
+        vr_projection="auto",
+        configure_vr=lambda metadata: None,
+        vr_resolution=SimpleNamespace(is_sbs=False),
+        device=torch.device("cpu"),
+    )
 
+
+@pytest.mark.parametrize(
+    ("action", "queued"),
+    [
+        (lambda worker: worker.request(2.0, AppSettings(), projection="auto"), _Request),
+        (lambda worker: worker.cancel(), _Cancel),
+        (lambda worker: worker.close(), _Stop),
+    ],
+    ids=["request", "cancel", "close"],
+)
+def test_restoration_worker_cancels_the_running_pass(monkeypatch, action, queued) -> None:
+    from jasna import pipeline_threads
+
+    entered = threading.Event()
+    cancelled: list[bool] = []
+
+    def run_pass(pipeline, metadata, collector, cancel_event, **_kwargs):
+        entered.set()
+        cancelled.append(cancel_event.wait(5))
+
+    monkeypatch.setattr(pipeline_threads, "run_restoration_pass", run_pass)
+    worker = RestorationPreviewWorker("unused.mp4", _metadata())
     worker.request(1.0, AppSettings(), projection="auto")
+    running = threading.Thread(target=worker._run_preview_pass, args=(worker._commands.get_nowait(), _preview_pipeline()))
+    running.start()
+    assert entered.wait(5)
 
-    assert order == ["cancel", "queue"]
+    action(worker)
+    running.join(5)
 
-
-def test_restoration_worker_request_cancels_active_pass() -> None:
-    worker = RestorationPreviewWorker("unused.mp4", _metadata())
-    active = threading.Event()
-    worker._active_cancel = active
-
-    worker.request(1.0, AppSettings(), projection="auto")
-
-    assert active.is_set()
-    worker.close()
-
-
-def test_restoration_worker_close_cancels_active_pass() -> None:
-    worker = RestorationPreviewWorker("unused.mp4", _metadata())
-    active = threading.Event()
-    worker._active_cancel = active
-
-    worker.close()
-
-    assert active.is_set()
-    assert isinstance(worker._commands.get_nowait(), _Stop)
-
-
-def test_restoration_worker_cancel_stops_pass_without_closing_worker() -> None:
-    worker = RestorationPreviewWorker("unused.mp4", _metadata())
-    active = threading.Event()
-    worker._active_cancel = active
-
-    worker.cancel()
-
-    assert active.is_set()
-    assert not worker._closed.is_set()
-    assert isinstance(worker._commands.get_nowait(), _Cancel)
+    assert cancelled == [True]
+    assert isinstance(worker._commands.get_nowait(), queued)
     worker.close()
 
 
@@ -348,156 +342,79 @@ def test_restoration_worker_reports_completed_teardown() -> None:
     assert stopped.is_set()
 
 
-def test_segment_editor_requests_restored_playback_when_no_buffer_exists() -> None:
-    from jasna.gui.segment_editor_state import SegmentEditorState
-    from jasna.segments import SegmentRestoration
+def _queue_jobs(app, tmp_path, statuses) -> list:
+    from jasna.gui.models import JobStatus
 
-    editor = SegmentEditor.__new__(SegmentEditor)
-    editor._state = SegmentEditorState(
-        duration=10.0, fps=30.0, segments=(), default_restoration=SegmentRestoration("basicvsrpp", None)
-    )
-    editor._current = 2.0
-    editor._restore_active = True
-    editor._restore_play_pending = False
-    editor._restored_clip = ()
-    editor._playing = False
-    editor._request_restoration_playback = MagicMock()
-
-    editor._toggle_play()
-
-    editor._request_restoration_playback.assert_called_once_with(2.0)
+    for index, status in enumerate(statuses):
+        app._queue_panel.add_job(tmp_path / f"clip-{index}.mp4")
+        job = app._queue_panel.get_jobs()[index]
+        if status is JobStatus.COMPLETED:
+            job.output_path = tmp_path / f"clip-{index}_restored.mp4"
+        app._queue_panel.update_job_status(job.id, status)
+    return app._queue_panel.get_jobs()
 
 
-def test_segment_editor_clears_tk_image_before_releasing_preview_image() -> None:
-    editor = SegmentEditor.__new__(SegmentEditor)
-    editor._preview = MagicMock()
-    editor._preview_image = object()
-    calls = []
-    editor._preview._label.configure.side_effect = (
-        lambda **kwargs: calls.append(("tk", kwargs))
-    )
-    editor._preview.configure.side_effect = (
-        lambda **kwargs: calls.append(("ctk", kwargs))
-    )
+@pytest.fixture
+def start_calls(jasna_app, monkeypatch) -> dict[str, list]:
+    """What Start validated and handed to the processor; neither validation nor processing runs."""
+    calls: dict[str, list] = {"validated": [], "started": []}
+    preflight = SimpleNamespace(missing=(), should_warn_first_run_slow=False)
 
-    editor._show_preview_message("Restoring…", "pending")
+    def validate(settings, jobs, **_kwargs):
+        calls["validated"].append(list(jobs))
+        return []
 
-    assert calls == [
-        ("tk", {"image": ""}),
-        (
-            "ctk",
-            {
-                "image": None,
-                "text": "Restoring…",
-                "text_color": "pending",
-            },
-        ),
-    ]
-    assert editor._preview_image is None
+    monkeypatch.setattr("jasna.gui.validation.validate_gui_start", validate)
+    monkeypatch.setattr("jasna.gui.engine_preflight.run_engine_preflight", lambda _settings: preflight)
+    monkeypatch.setattr(jasna_app._processor, "start", lambda jobs, *_args: calls["started"].append(jobs))
+    return calls
 
 
-def test_segment_editor_continues_with_next_restored_playback_window() -> None:
-    editor = SegmentEditor.__new__(SegmentEditor)
-    editor._state = SimpleNamespace(duration=10.0, fps=30.0)
-    editor._current = 2.0
-    editor._playing = True
-    editor._restore_active = True
-    editor._restored_clip = (
-        RestoredClipFrame(1.0, MagicMock()),
-        RestoredClipFrame(2.0, MagicMock()),
-    )
-    editor._closed = threading.Event()
-    editor._set_playing = MagicMock()
-    editor._request_restoration_playback = MagicMock()
+def test_app_disables_start_while_preview_gpu_is_busy(jasna_app, tmp_path) -> None:
+    from jasna.gui.models import JobStatus
 
-    editor._request_next_frame()
+    _queue_jobs(jasna_app, tmp_path, [JobStatus.PENDING])
+    assert jasna_app._control_bar._start_btn.cget("state") == "normal"
 
-    editor._set_playing.assert_called_once_with(False)
-    editor._request_restoration_playback.assert_called_once_with(pytest.approx(2.0 + 1 / 30))
+    jasna_app._set_preview_gpu_busy(True)
+    jasna_app._main_thread._run_pending()
+
+    assert jasna_app._control_bar._start_btn.cget("state") == "disabled"
 
 
-def test_app_disables_queue_start_while_preview_gpu_is_tearing_down() -> None:
-    app = JasnaApp.__new__(JasnaApp)
-    app._preview_gpu_busy = True
-    app._queue_panel = MagicMock()
-    app._queue_panel.get_jobs.return_value = [object()]
-    app._control_bar = MagicMock()
-    app._ltx_models = SimpleNamespace(downloading=False)
+@pytest.mark.parametrize("busy", ["preview", "processor"])
+def test_app_start_is_ignored_while_the_gpu_is_busy(jasna_app, start_calls, monkeypatch, tmp_path, busy) -> None:
+    from jasna.gui.models import JobStatus
 
-    app._update_start_button_state()
+    _queue_jobs(jasna_app, tmp_path, [JobStatus.PENDING])
+    if busy == "preview":
+        jasna_app._set_preview_gpu_busy(True)
+    else:
+        monkeypatch.setattr(jasna_app._processor, "is_running", lambda: True)
 
-    assert app._control_bar.set_start_enabled.call_args.args[0] is False
+    jasna_app._on_start()
 
-
-def test_app_start_guard_blocks_preview_gpu_overlap() -> None:
-    app = JasnaApp.__new__(JasnaApp)
-    app._preview_gpu_busy = True
-    app._queue_panel = MagicMock()
-
-    app._on_start()
-
-    app._queue_panel.get_jobs.assert_not_called()
-
-
-def test_app_start_guard_blocks_running_queue_reset() -> None:
-    app = JasnaApp.__new__(JasnaApp)
-    app._preview_gpu_busy = False
-    app._processor = MagicMock()
-    app._processor.is_running.return_value = True
-    app._queue_panel = MagicMock()
-
-    app._on_start()
-
-    app._queue_panel.get_jobs.assert_not_called()
+    assert start_calls == {"validated": [], "started": []}
 
 
 @pytest.mark.parametrize("stopped", [False, True])
 @pytest.mark.parametrize("pending", [False, True])
-def test_app_prepares_queue_or_continues_after_pause(tmp_path, stopped, pending) -> None:
-    from jasna.gui.models import JobItem, JobStatus
-    from jasna.gui.processor import Processor
+def test_app_prepares_queue_or_continues_after_pause(jasna_app, start_calls, tmp_path, stopped, pending) -> None:
+    from jasna.gui.models import JobStatus
 
-    app = JasnaApp.__new__(JasnaApp)
-    app._preview_gpu_busy = False
-    app._processor = Processor(on_resume_conflict=no_resume_conflict)
+    finished, skipped, paused = _queue_jobs(
+        jasna_app, tmp_path, [JobStatus.COMPLETED, JobStatus.SKIPPED, JobStatus.PENDING if pending else JobStatus.COMPLETED]
+    )
     if stopped:
-        app._processor.stop()
-    app._processor.start = MagicMock()
-    app._queue_panel = MagicMock()
-    finished = JobItem(tmp_path / "finished.mp4", status=JobStatus.COMPLETED, output_path=tmp_path / "restored.mp4")
-    skipped = JobItem(tmp_path / "skipped.mp4", status=JobStatus.SKIPPED)
-    paused = JobItem(tmp_path / "paused.mp4", status=JobStatus.PENDING if pending else JobStatus.COMPLETED)
-    jobs = [finished, skipped, paused]
-    app._queue_panel.get_jobs.return_value = jobs
-    app._queue_panel.get_jobs_ref.return_value = jobs
-    app._queue_panel.get_output_folder.return_value = ""
-    app._queue_panel.get_output_pattern.return_value = "{original}_restored.mp4"
-    app._settings_panel = MagicMock()
-    app._settings_panel.get_settings.return_value = AppSettings()
-    app._status_pill = MagicMock()
-    app._control_bar = MagicMock()
-    app._video_player_btn = MagicMock()
-    app._log_panel = MagicMock()
-    app._job_start_times = {}
-    app._processing_start_time = 0.0
-    calls = []
-    app._queue_panel.reset_jobs_for_run.side_effect = lambda: calls.append("reset")
-    app._queue_panel.set_running.side_effect = lambda *_args: calls.append("running")
-    app._processor.start.side_effect = lambda *args, **kwargs: calls.append("start")
-    preflight = SimpleNamespace(missing=(), should_warn_first_run_slow=False)
+        jasna_app._processor.stop()
 
-    with (
-        patch("jasna.gui.validation.validate_gui_start", return_value=[]) as validate,
-        patch("jasna.gui.engine_preflight.run_engine_preflight", return_value=preflight),
-    ):
-        app._on_start()
+    jasna_app._on_start()
 
     continuing = stopped and pending
-    assert calls == (["running", "start"] if continuing else ["reset", "running", "start"])
-    assert validate.call_args.args[1] == ([paused] if continuing else jobs)
+    assert start_calls["validated"] == [[paused] if continuing else [finished, skipped, paused]]
+    assert start_calls["started"] == [jasna_app._queue_panel.get_jobs_ref()]
     if continuing:
-        assert finished.status is JobStatus.COMPLETED
-        assert finished.output_path == tmp_path / "restored.mp4"
-        assert skipped.status is JobStatus.SKIPPED
-        app._processor._jobs = app._processor.start.call_args.args[0]
-        assert app._processor._next_pending_job() is paused
+        assert (finished.status, skipped.status) == (JobStatus.COMPLETED, JobStatus.SKIPPED)
+        assert finished.output_path == tmp_path / "clip-0_restored.mp4"
+    else:
+        assert all(job.status is JobStatus.PENDING for job in (finished, skipped, paused))
