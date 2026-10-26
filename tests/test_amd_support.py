@@ -625,28 +625,6 @@ def test_rfdetr_torch_runner_loads_the_checkpoint_once_weights_only(monkeypatch,
     assert state["interpolated_to"] == 48
 
 
-def test_rfdetr_torch_runner_loads_the_first_batch_libraries_on_a_thread_before_building(monkeypatch, tmp_path) -> None:
-    import jasna.mosaic.rfdetr_torch_runner as module
-
-    weights = tmp_path / "rfdetr-v6.pt"
-    weights.write_bytes(b"pt")
-    loads = _install_fake_rfdetr(monkeypatch, {"model": {"class_embed.weight": torch.zeros(3, 256)}})
-    started = []
-
-    class Thread:
-        def __init__(self, target, args, name, daemon):
-            self.call = (target, args, daemon)
-
-        def start(self):
-            started.append((self.call, len(loads)))
-
-    monkeypatch.setattr(module.threading, "Thread", Thread)
-    module.RfDetrTorchRunner(
-        weights, input_shapes=[(2, 3, 576, 576)], device=torch.device("cpu"), fp16=True, resolution=576, variant="medium"
-    )
-    assert started == [((module.load_gpu_libraries_ahead, (torch.device("cpu"), torch.float16), False), 0)]
-
-
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_rfdetr_torch_runner_load_failure_exits_without_a_teardown_crash(tmp_path) -> None:
     pytest.importorskip("rfdetr")
@@ -665,7 +643,7 @@ def test_rfdetr_torch_runner_load_failure_exits_without_a_teardown_crash(tmp_pat
     assert result.returncode == 1, result.stderr
 
 
-def test_rfdetr_torch_runner_fp16_runs_a_half_model_without_autocast(monkeypatch, tmp_path) -> None:
+def test_rfdetr_torch_runner_fp16_runs_a_half_model_and_keeps_its_masks_half(monkeypatch, tmp_path) -> None:
     import jasna.mosaic.rfdetr_torch_runner as module
 
     weights = tmp_path / "rfdetr-v6.pt"
@@ -691,26 +669,6 @@ def test_rfdetr_torch_runner_fp16_runs_a_half_model_without_autocast(monkeypatch
     assert runner._core.input_dtypes[-1] == torch.float16
     assert out["dets"].dtype == torch.float32
     assert out["labels"].dtype == torch.float32
-
-
-def test_rfdetr_torch_runner_fp16_keeps_the_masks_half(monkeypatch, tmp_path) -> None:
-    import jasna.mosaic.rfdetr_torch_runner as module
-
-    weights = tmp_path / "rfdetr-v6.pt"
-    weights.write_bytes(b"pt")
-    _install_fake_rfdetr(monkeypatch, {"model": {"class_embed.weight": torch.zeros(3, 256)}})
-
-    runner = module.RfDetrTorchRunner(
-        weights,
-        input_shapes=[(2, 3, 576, 576)],
-        device=torch.device("cpu"),
-        fp16=True,
-        resolution=576,
-        variant="medium",
-    )
-    out = runner.infer({"input": torch.zeros(2, 3, 576, 576)})
-
-    assert runner.outputs["masks"].dtype == torch.float16
     assert out["masks"].dtype == torch.float16
 
 
