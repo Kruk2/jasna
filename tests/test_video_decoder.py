@@ -86,6 +86,9 @@ def test_backend_dispatch_releases_outer_first_group_reference():
     reader = VideoReader.__new__(VideoReader)
     reader._vali_source = None
     reader.vendor = AcceleratorVendor.NVIDIA
+    reader.video_stream = SimpleNamespace(start_time=0)
+    reader.metadata = SimpleNamespace(start_pts=0)
+    reader.frame_stride = 1
     reader._decoded_frames = lambda seek_ts: iter(())
     calls = 0
 

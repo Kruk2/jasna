@@ -135,6 +135,13 @@ def test_plan_of_a_mid_gop_cut_starts_at_the_stream_start_and_copies_only_from_k
     ]
 
 
+@pytest.mark.parametrize(
+    ("points", "first_copyable"), [((0, 60, 120), 0), ((-30, 30, 90), 30), ((-60, -30), 180)]
+)
+def test_stream_copy_starts_at_the_first_keyframe_past_a_hidden_lead_in(points, first_copyable) -> None:
+    assert KeyframeIndex(points, Fraction(1, 30), 0, 180).first_copyable_pts == first_copyable
+
+
 def test_keyframe_seconds_put_a_mid_gop_cuts_lead_in_keyframe_at_the_stream_start() -> None:
     index = KeyframeIndex((870, 930, 990), Fraction(1, 30), 900, 1080)
     assert index.keyframe_seconds() == (0.0, 1.0, 3.0)

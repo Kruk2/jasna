@@ -343,3 +343,19 @@ def test_fast_ltx_refuses_unsupported_hardware_before_loading_kernels(monkeypatc
     config = session_config(restoration_model_name="ltx", ltx_fast=True, ltx_trial=True)
     with pytest.raises(ValueError, match="Blackwell"):
         _ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
+
+
+@pytest.mark.parametrize(("lut_path", "sharpen_strength"), [(None, 0.0), ("look.cube", 0.0), (None, 0.3)])
+def test_a_lut_or_sharpening_encodes_the_parts_between_ranges_again(lut_path, sharpen_strength) -> None:
+    from fractions import Fraction
+
+    from jasna.media.splice import KeyframeIndex
+    from jasna.session_factory import SpliceSource, plan_segment_job
+
+    spliced = SpliceSource(
+        MagicMock(duration=6.0), "hevc", KeyframeIndex((0, 60, 120), Fraction(1, 30), 0, 180)
+    )
+    config = session_config(lut_path=lut_path, sharpen_strength=sharpen_strength, codec="hevc")
+    job = plan_segment_job(config, Path("in.mp4"), spliced, (SegmentRange(2.5, 3.0),))
+    unrestored = "copy" if lut_path is None and sharpen_strength == 0 else "reencode"
+    assert [span.kind for span in job.splice_plan.spans] == [unrestored, "render", unrestored]

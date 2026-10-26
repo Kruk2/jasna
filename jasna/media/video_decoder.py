@@ -3,7 +3,7 @@ import os
 import threading
 from fractions import Fraction
 from queue import Full, Queue
-from typing import Iterator
+from typing import Callable, Iterator, TypeVar
 
 import av
 import torch
@@ -103,6 +103,25 @@ def _empty_batch_on(
 
 
 _PREFETCH_DONE = object()
+
+
+T = TypeVar("T")
+
+
+def _shown_frames(
+    decoded: Iterator[T], pts_of: Callable[[T], int | None], start_pts: int, frame_stride: int
+) -> Iterator[T]:
+    """Every ``frame_stride``th shown frame. Frames before the stream start are the hidden
+    lead-in of an MP4 cut mid-GOP: the demuxer marks them discard, but VALI and the AMF
+    decoders still return them."""
+    index = 0
+    for frame in decoded:
+        pts = pts_of(frame)
+        if pts is not None and pts < start_pts:
+            continue
+        if index % frame_stride == 0:
+            yield frame
+        index += 1
 
 
 class _BatchPrefetcher:
@@ -268,30 +287,18 @@ class _ValiFrameSource:
                 self.metadata.start_pts * self.metadata.time_base
             )
             seek_ctx = self._vali.SeekContext(seek_ts=seek_ts + start_seconds)
-        pending_pts = self._first_pts if seek_ctx is None else None
-        exhausted = seek_ctx is None and self._first_pts is None
-        self._first_pts = None
-        frame_index = 0
+        shown = _shown_frames(
+            self._decoded_pts(seek_ctx), lambda pts: pts, self.metadata.start_pts, self.frame_stride
+        )
+        exhausted = False
         while not exhausted:
             batch = _empty_batch(self.batch_size, self.height, self.width, self.device, self.stream)
             pts: list[int] = []
             while len(pts) < self.batch_size:
-                if pending_pts is not None:
-                    frame_pts = pending_pts
-                    pending_pts = None
-                else:
-                    frame_pts = self._decode_next(seek_ctx)
-                    seek_ctx = None
-                    if frame_pts is None:
-                        exhausted = True
-                        break
-                # The hidden lead-in of an MP4 cut mid-GOP, which PyAV's decoders drop.
-                if frame_pts < self.metadata.start_pts:
-                    continue
-                selected = frame_index % self.frame_stride == 0
-                frame_index += 1
-                if not selected:
-                    continue
+                frame_pts = next(shown, None)
+                if frame_pts is None:
+                    exhausted = True
+                    break
                 converter.convert_surface_into(
                     self._y_ptr,
                     self._uv_ptr,
@@ -303,6 +310,19 @@ class _ValiFrameSource:
             if pts:
                 self.stream.synchronize()
                 yield batch[: len(pts)], pts
+
+    def _decoded_pts(self, seek_ctx) -> Iterator[int]:
+        """The pts of each decoded frame, while that frame is in ``self.surface``."""
+        if seek_ctx is None:
+            if self._first_pts is None:
+                return
+            first_pts, self._first_pts = self._first_pts, None
+            yield first_pts
+        else:
+            self._first_pts = None
+        while (frame_pts := self._decode_next(seek_ctx)) is not None:
+            seek_ctx = None
+            yield frame_pts
 
     def close(self) -> None:
         self.decoder = None
@@ -549,18 +569,11 @@ class VideoReader:
                 self._decoder_ctx.flush_buffers()
 
         consecutive_errors = 0
-        discarded_pts: set[int] = set()
         for packet in demux_video(self.container, self.video_stream):
-            if packet.is_discard:
-                discarded_pts.add(packet.pts)
             frames, consecutive_errors = self._decode_packet(packet, consecutive_errors)
             for frame in frames:
                 # VC-1 NVDEC returns an empty frame for a stream starting on a P frame.
                 if not frame.planes:
-                    continue
-                # AMF decoders also return the frames of packets the demuxer marks
-                # discard (the hidden lead-in of an MP4 cut mid-GOP); FFmpeg's own decoders drop them.
-                if frame.pts in discarded_pts:
                     continue
                 if target_pts is not None and frame.pts is not None and frame.pts < target_pts:
                     continue
@@ -575,14 +588,6 @@ class VideoReader:
                 break
             group.append(frame)
         return group
-
-    def _selected_frames(self, decoded):
-        if self.frame_stride == 1:
-            yield from decoded
-            return
-        for frame_index, frame in enumerate(decoded):
-            if frame_index % self.frame_stride == 0:
-                yield frame
 
     def _close_prefetcher(self) -> None:
         if self._prefetcher is not None:
@@ -617,7 +622,9 @@ class VideoReader:
         # can advertise a CUDA config and still fall back to software when
         # hardware initialization rejects a profile or pixel format. Dispatch
         # once here so neither per-frame loop carries a backend branch.
-        decoded = self._selected_frames(self._decoded_frames(seek_ts))
+        decoded = _shown_frames(
+            self._decoded_frames(seek_ts), lambda frame: frame.pts, self.start_pts, self.frame_stride
+        )
         group = self._read_group(decoded)
         if not group:
             return

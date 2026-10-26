@@ -165,32 +165,17 @@ def test_pyav_reader_skips_frames_without_planes(monkeypatch) -> None:
     reader = _reader(monkeypatch, AcceleratorVendor.NVIDIA)
     reader.container = None
     reader.video_stream = None
-    packet = SimpleNamespace(pts=33, is_discard=False)
+    packet = SimpleNamespace(pts=33)
     monkeypatch.setattr(module, "demux_video", lambda _container, _stream: [packet])
     monkeypatch.setattr(reader, "_decode_packet", lambda _packet, errors: ([empty, picture], errors))
     assert list(reader._decoded_frames(None)) == [picture]
 
 
-def test_pyav_reader_drops_frames_of_discarded_packets(monkeypatch) -> None:
-    # An MP4 cut mid-GOP keeps the GOP's lead-in as packets the demuxer marks
-    # discard. AMF decoders still return their frames, one packet late here.
-    packets = [
-        SimpleNamespace(pts=-1024, is_discard=True),
-        SimpleNamespace(pts=-512, is_discard=True),
-        SimpleNamespace(pts=0, is_discard=False),
-        SimpleNamespace(pts=512, is_discard=False),
-    ]
-    frames = [SimpleNamespace(pts=packet.pts, planes=("y", "uv")) for packet in packets]
-    reader = _reader(monkeypatch, AcceleratorVendor.AMD)
-    reader.container = None
-    reader.video_stream = None
-    monkeypatch.setattr(module, "demux_video", lambda _container, _stream: packets)
-    monkeypatch.setattr(
-        reader,
-        "_decode_packet",
-        lambda packet, errors: (frames[: packets.index(packet)][-1:], errors),
-    )
-    assert [frame.pts for frame in reader._decoded_frames(None)] == [0]
+def test_frames_before_the_stream_start_are_dropped_before_the_stride() -> None:
+    # An MP4 cut mid-GOP keeps the GOP's lead-in before the stream start; VALI and the
+    # AMF decoders still return those frames.
+    shown = module._shown_frames(iter([-1024, -512, 0, 512, 1024]), lambda pts: pts, 0, 2)
+    assert list(shown) == [0, 1024]
 
 
 def test_unknown_backend_raises(monkeypatch) -> None:
