@@ -872,20 +872,19 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     Without a terminal to ask in, fail with what to download instead of waiting."""
     from jasna.ltx.model_files import LTX_TRIAL_NOTICE, download_files, download_size_text, missing_downloads
 
-    uses_ltx = config.restoration_model_name == "ltx" or any(
-        segment.restoration is not None and segment.restoration.model == "ltx" for segment in segments or ()
-    )
-    if not uses_ltx:
+    from jasna.segments import job_models
+
+    if "ltx" not in job_models(config.restoration_model_name, segments):
         return
     from jasna.accelerator import supports_nvfp4
-    from jasna.session_factory import LTX_FAST_NEEDS_BLACKWELL
+    from jasna.session_factory import LTX_FAST_NEEDS_BLACKWELL, restoration_model_path_for
 
     if config.ltx_fast and not supports_nvfp4(config.device):
         sys.exit(f"Error: {LTX_FAST_NEEDS_BLACKWELL}")
     if config.ltx_trial:
         print(LTX_TRIAL_NOTICE)
         return
-    directory = config.restoration_model_path if config.restoration_model_name == "ltx" else default_restoration_model_path("ltx")
+    directory = restoration_model_path_for(config, "ltx")
     missing = missing_downloads(directory, config.ltx_model, fast=config.ltx_fast)
     if not missing:
         return

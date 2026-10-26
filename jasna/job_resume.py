@@ -13,7 +13,14 @@ from dataclasses import asdict
 from pathlib import Path
 
 from jasna import __version__
-from jasna.segments import SegmentRange, SegmentRestoration, job_restoration, normalize_segments, resolve_restorations
+from jasna.segments import (
+    SegmentRange,
+    SegmentRestoration,
+    job_models,
+    job_restoration,
+    normalize_segments,
+    resolve_restorations,
+)
 from jasna.session_config import SessionConfig
 
 log = logging.getLogger(__name__)
@@ -121,7 +128,7 @@ def job_fingerprints(config: SessionConfig, source: Path, output: Path, metadata
     ranges = resolve_restorations(
         normalize_segments(tuple(segments or ())), job_restoration(config.restoration_model_name, config.ltx_seed)
     )
-    models = {segment.restoration.model for segment in ranges} if ranges else {config.restoration_model_name}
+    models = job_models(config.restoration_model_name, ranges)
     latent_models = {"detection": _model_identity(config.detection_model_path)}
     if "ltx" in models and not config.ltx_trial:
         latent_models["ltx"] = [

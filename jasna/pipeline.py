@@ -47,7 +47,7 @@ from jasna.media.splice import (
 from jasna.pipeline_threads import run_restoration_pass
 from jasna.progressbar import JobProgress, ProgressCallback, Progressbar
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
-from jasna.segments import SegmentRange, job_restoration, resolve_restorations
+from jasna.segments import SegmentRange, job_models, job_restoration, resolve_restorations
 from jasna.session_config import SessionConfig
 from jasna.vr180 import (
     SbsDetectionAdapter,
@@ -686,11 +686,7 @@ class Pipeline:
         self.validate_metadata(metadata)
         require_encodable_size(vendor_for_device(self.device), self.codec, metadata.video_width, metadata.video_height)
         self.configure_vr(metadata)
-        uses_ltx = (
-            any(segment.restoration.model == "ltx" for segment in resolve_restorations(
-                self.segments, job_restoration(self.restoration_model_name, self.ltx_seed)
-            )) if self.segments else self.restoration_model_name == "ltx"
-        )
+        uses_ltx = "ltx" in job_models(self.restoration_model_name, self.segments)
         if uses_ltx:
             require_ltx_input(self.vr_resolution)
         auto_split = self.restoration_model_name == "ltx" and self.config.ltx_auto_split_percent is not None

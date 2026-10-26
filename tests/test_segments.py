@@ -11,6 +11,7 @@ from jasna.segments import (
     SegmentRestoration,
     format_segments,
     format_timestamp,
+    job_models,
     job_restoration,
     normalize_segments,
     parse_segments,
@@ -137,3 +138,10 @@ def test_normalize_handles_a_long_scan_quickly() -> None:
     started = time.perf_counter()
     assert normalize_segments(hits) == (SegmentRange(0.0, 5000.5),)
     assert time.perf_counter() - started < 1.0
+
+
+def test_job_models_are_the_ranges_models_or_the_jobs_model():
+    basicvsrpp = SegmentRestoration("basicvsrpp", None)
+    assert job_models("ltx", None) == {"ltx"}
+    assert job_models("ltx", (SegmentRange(0, 1, basicvsrpp),)) == {"basicvsrpp"}
+    assert job_models("ltx", (SegmentRange(0, 1, basicvsrpp), SegmentRange(2, 3))) == {"basicvsrpp", "ltx"}

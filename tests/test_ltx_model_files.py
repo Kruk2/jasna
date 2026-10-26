@@ -311,3 +311,21 @@ def test_licensed_amd_reaches_the_normal_model_preflight(tmp_path, monkeypatch):
         main._ensure_ltx_model(config, None)
     with pytest.raises(RuntimeError, match="normal kernel preflight"):
         session_factory._ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
+
+
+def test_cli_does_not_offer_ltx_when_every_range_uses_basicvsrpp(tmp_path, monkeypatch, nvidia_vendor):
+    import sys
+
+    from factories import session_config
+    from jasna import main
+    from jasna.segments import SegmentRange, SegmentRestoration
+
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or "n")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("jasna.license_api.require_protection", lambda: None)
+    ltx = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
+
+    main._ensure_ltx_model(ltx, (SegmentRange(0, 1, SegmentRestoration("basicvsrpp", None)),))
+
+    assert asked == []
