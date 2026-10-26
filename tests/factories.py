@@ -267,3 +267,8 @@ def offload_bundle_targets(path: Path) -> set[str]:
         targets.add(data[offset:offset + id_length].decode())
         offset += id_length
     return targets
+
+
+def weight_stub(dtype, device: str = "cuda:0") -> SimpleNamespace:
+    """A model weight's dtype and device, for kernel checks that look at nothing else."""
+    return SimpleNamespace(dtype=dtype, device=torch.device(device))

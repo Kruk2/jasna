@@ -3,6 +3,7 @@ import gc
 import sys
 import time
 from importlib.util import find_spec
+from types import SimpleNamespace
 
 import pytest
 
@@ -99,3 +100,18 @@ def nvidia_vendor(monkeypatch):
 def no_gpu_cleanup(monkeypatch):
     """Skip the per-job torch cleanup: it initializes CUDA, which can outlast thread joins in a busy run."""
     monkeypatch.setattr("jasna.gui.processor._cleanup_torch", lambda torch_mod: None)
+
+
+@pytest.fixture
+def amd_gpu(monkeypatch):
+    """Report a ROCm build of torch whose GPU is the given gfx architecture."""
+    import torch
+
+    def use(architecture: str = "gfx1201") -> None:
+        monkeypatch.setattr(torch.version, "hip", "7.15.26333")
+        monkeypatch.setattr(
+            torch.cuda, "get_device_properties",
+            lambda _device: SimpleNamespace(gcnArchName=f"{architecture}:sramecc-:xnack-"),
+        )
+
+    return use

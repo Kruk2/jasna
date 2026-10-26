@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from factories import weight_stub
 import jasna.media.cuda_kernel as cuda_kernel
 from jasna.accelerator import TRITON_HIP_ARCHITECTURES
 from jasna.mosaic.rfdetr_fused_head import FusedSegmentationHead, fuse_segmentation_head, has_fused_head_kernels
@@ -13,39 +14,26 @@ C = 256
 SIZE = 144
 
 
-def _use_rocm(monkeypatch, architecture: str) -> None:
-    monkeypatch.setattr(torch.version, "hip", "7.15.26333")
-    monkeypatch.setattr(
-        torch.cuda,
-        "get_device_properties",
-        lambda _device: SimpleNamespace(gcnArchName=f"{architecture}:sramecc-:xnack-"),
-    )
-
-
-def _weight(dtype: torch.dtype, device: str = "cuda:0") -> SimpleNamespace:
-    return SimpleNamespace(dtype=dtype, device=torch.device(device))
-
-
 @pytest.mark.parametrize("architecture", TRITON_HIP_ARCHITECTURES)
 @pytest.mark.parametrize("feature_size", [144, 192])
-def test_rdna3_and_rdna4_run_the_fused_head_in_fp16(monkeypatch, architecture, feature_size):
-    _use_rocm(monkeypatch, architecture)
+def test_rdna3_and_rdna4_run_the_fused_head_in_fp16(amd_gpu, architecture, feature_size):
+    amd_gpu(architecture)
 
-    assert has_fused_head_kernels(_weight(torch.float16), feature_size)
-    assert not has_fused_head_kernels(_weight(torch.float32), feature_size)
+    assert has_fused_head_kernels(weight_stub(torch.float16), feature_size)
+    assert not has_fused_head_kernels(weight_stub(torch.float32), feature_size)
 
 
-def test_other_gpus_and_feature_sizes_keep_the_torch_head(monkeypatch):
-    _use_rocm(monkeypatch, "gfx1201")
-    assert not has_fused_head_kernels(_weight(torch.float16), 160)
-    assert not has_fused_head_kernels(_weight(torch.float16, "cpu"), 144)
+def test_other_gpus_and_feature_sizes_keep_the_torch_head(amd_gpu, monkeypatch):
+    amd_gpu("gfx1201")
+    assert not has_fused_head_kernels(weight_stub(torch.float16), 160)
+    assert not has_fused_head_kernels(weight_stub(torch.float16, "cpu"), 144)
 
-    _use_rocm(monkeypatch, "gfx1030")
-    assert not has_fused_head_kernels(_weight(torch.float16), 144)
+    amd_gpu("gfx1030")
+    assert not has_fused_head_kernels(weight_stub(torch.float16), 144)
 
     monkeypatch.setattr(torch.version, "hip", None)
     monkeypatch.setattr(torch.version, "cuda", "13.0")
-    assert not has_fused_head_kernels(_weight(torch.float16), 144)
+    assert not has_fused_head_kernels(weight_stub(torch.float16), 144)
 
 
 class _Block(nn.Module):
@@ -90,8 +78,8 @@ def _reference_block_launch(self, grid, stream, x, dw_w, dw_b, ln_w, ln_b, pw_w,
     out.copy_(F.gelu(F.linear(y, pw_w, pw_b)).permute(0, 3, 1, 2) + x)
 
 
-def test_fused_head_feeds_the_kernel_each_block_and_folds_the_projection(monkeypatch):
-    _use_rocm(monkeypatch, "gfx1201")
+def test_fused_head_feeds_the_kernel_each_block_and_folds_the_projection(amd_gpu, monkeypatch):
+    amd_gpu("gfx1201")
     monkeypatch.setattr(torch.cuda, "current_stream", lambda device: SimpleNamespace(cuda_stream=0))
     monkeypatch.setattr(cuda_kernel.TritonKernel, "launch", _reference_block_launch)
     head = _Head().eval()
@@ -106,8 +94,8 @@ def test_fused_head_feeds_the_kernel_each_block_and_folds_the_projection(monkeyp
     torch.testing.assert_close(actual, expected, atol=2e-4, rtol=2e-4)
 
 
-def test_fused_head_rejects_a_layout_it_was_not_built_for(monkeypatch):
-    _use_rocm(monkeypatch, "gfx1201")
+def test_fused_head_rejects_a_layout_it_was_not_built_for(amd_gpu):
+    amd_gpu("gfx1201")
     head = _Head()
     head.blocks[0].gamma = nn.Parameter(torch.ones(C))
 

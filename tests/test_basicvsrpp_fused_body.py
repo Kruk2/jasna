@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as F
 import torchvision
 
+from factories import weight_stub
 import jasna.media.cuda_kernel as cuda_kernel
 from jasna.accelerator import TRITON_HIP_ARCHITECTURES
 import jasna.restorer.basicvsrpp_fused_body as fused_body
@@ -15,19 +16,6 @@ from jasna.restorer.basicvsrpp_fused_body import FusedPropagateBody, has_fused_b
 from jasna.restorer.basicvsrpp_sub_engines import _PropagateBodyWrapper
 
 FS = 64
-
-
-def _use_rocm(monkeypatch, architecture: str) -> None:
-    monkeypatch.setattr(torch.version, "hip", "7.15.26333")
-    monkeypatch.setattr(
-        torch.cuda,
-        "get_device_properties",
-        lambda _device: SimpleNamespace(gcnArchName=f"{architecture}:sramecc-:xnack-"),
-    )
-
-
-def _weight(dtype: torch.dtype, device: str = "cuda:0") -> SimpleNamespace:
-    return SimpleNamespace(dtype=dtype, device=torch.device(device))
 
 
 def _net(mid_channels: int = 64) -> BasicVSRPlusPlusNet:
@@ -46,25 +34,25 @@ def _body_inputs(device: str, dtype: torch.dtype, seed: int = 1) -> list[torch.T
 
 
 @pytest.mark.parametrize("architecture", TRITON_HIP_ARCHITECTURES)
-def test_rdna3_and_rdna4_run_the_fused_kernels_in_fp16(monkeypatch, architecture):
-    _use_rocm(monkeypatch, architecture)
+def test_rdna3_and_rdna4_run_the_fused_kernels_in_fp16(amd_gpu, architecture):
+    amd_gpu(architecture)
 
-    assert has_fused_body_kernels(_weight(torch.float16))
-    assert not has_fused_body_kernels(_weight(torch.float32))
+    assert has_fused_body_kernels(weight_stub(torch.float16))
+    assert not has_fused_body_kernels(weight_stub(torch.float32))
 
 
-def test_other_gpus_keep_the_eager_body(monkeypatch):
-    _use_rocm(monkeypatch, "gfx1030")
-    assert not has_fused_body_kernels(_weight(torch.float16))
-    assert not has_fused_body_kernels(_weight(torch.float16, "cpu"))
+def test_other_gpus_keep_the_eager_body(amd_gpu, monkeypatch):
+    amd_gpu("gfx1030")
+    assert not has_fused_body_kernels(weight_stub(torch.float16))
+    assert not has_fused_body_kernels(weight_stub(torch.float16, "cpu"))
 
     monkeypatch.setattr(torch.version, "hip", None)
     monkeypatch.setattr(torch.version, "cuda", "13.0")
-    assert not has_fused_body_kernels(_weight(torch.float16))
+    assert not has_fused_body_kernels(weight_stub(torch.float16))
 
 
-def test_eager_split_uses_the_fused_body_when_the_kernels_match(monkeypatch):
-    _use_rocm(monkeypatch, "gfx1201")
+def test_eager_split_uses_the_fused_body_when_the_kernels_match(amd_gpu, monkeypatch):
+    amd_gpu("gfx1201")
     monkeypatch.setattr(sub_engines, "has_fused_body_kernels", lambda weight: True)
 
     split = sub_engines.create_eager_split_forward(MagicMock(generator_ema=_net()))
@@ -72,8 +60,8 @@ def test_eager_split_uses_the_fused_body_when_the_kernels_match(monkeypatch):
     assert all(isinstance(body, FusedPropagateBody) for body in split._loop_body_engines.values())
 
 
-def test_fused_body_rejects_a_layout_it_was_not_built_for(monkeypatch):
-    _use_rocm(monkeypatch, "gfx1201")
+def test_fused_body_rejects_a_layout_it_was_not_built_for(amd_gpu):
+    amd_gpu("gfx1201")
     net = _net(mid_channels=16)
 
     with pytest.raises(ValueError, match="layout"):
@@ -103,8 +91,8 @@ def _reference_launch(self, grid, stream, *tensors):
     out.copy_(F.relu(conv) if self.module_name == "basicvsrpp_conv3x3_relu" else residual + conv)
 
 
-def test_fused_body_feeds_each_kernel_the_tensors_of_the_eager_body(monkeypatch):
-    _use_rocm(monkeypatch, "gfx1201")
+def test_fused_body_feeds_each_kernel_the_tensors_of_the_eager_body(amd_gpu, monkeypatch):
+    amd_gpu("gfx1201")
     monkeypatch.setattr(torch.cuda, "current_stream", lambda device: SimpleNamespace(cuda_stream=0))
     monkeypatch.setattr(cuda_kernel.TritonKernel, "launch", _reference_launch)
     net = _net()
