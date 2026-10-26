@@ -5,12 +5,10 @@ from unittest.mock import MagicMock
 
 import customtkinter as ctk
 import pytest
-from tkinter import TclError
 
 from jasna.gui import app as app_module
 from jasna.gui import components, job_list_item
-from jasna.gui.app import JasnaApp
-from jasna.gui.components import StatusPill
+from jasna.gui.components import StatusPill, grab_modal
 from jasna.gui.job_list_item import JobListItem
 from jasna.gui.control_bar import ControlBar, status_text
 from jasna.gui.locales import t
@@ -18,14 +16,11 @@ from jasna.gui.locales.th import TH
 from jasna.progressbar import StageProgress
 
 
-@pytest.fixture
-def tk_root():
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
-    yield root
-    root.destroy()
+def _open_tooltips(widget) -> list[ctk.CTkToplevel]:
+    found = [widget] if isinstance(widget, ctk.CTkToplevel) and widget.wm_overrideredirect() else []
+    for child in widget.winfo_children():
+        found += _open_tooltips(child)
+    return found
 
 
 def _job_item(root, **callbacks) -> JobListItem:
@@ -73,15 +68,14 @@ def recording_menu(monkeypatch):
 
 
 def test_segment_tooltips_hide_before_editor_opens(tk_root) -> None:
-    on_edit_segments = MagicMock()
-    item = _job_item(tk_root, on_edit_segments=on_edit_segments)
-    item._segment_tooltips = [MagicMock(), MagicMock()]
+    opened_with_tooltips: list[int] = []
+    item = _job_item(tk_root, on_edit_segments=lambda: opened_with_tooltips.append(len(_open_tooltips(tk_root))))
+    item._segment_tooltips[0]._show()
+    assert len(_open_tooltips(tk_root)) == 1
 
     item._handle_edit_segments()
 
-    for tooltip in item._segment_tooltips:
-        tooltip.hide.assert_called_once_with()
-    on_edit_segments.assert_called_once_with()
+    assert opened_with_tooltips == [0]
 
 
 def test_queue_overflow_menu_uses_button_and_right_click_coordinates(tk_root, recording_menu) -> None:
@@ -128,72 +122,49 @@ def test_conflict_dot_toggles(tk_root) -> None:
     assert item._conflict_dot.winfo_manager() == ""
 
 
-def test_enabling_start_button_hides_disabled_tooltip() -> None:
-    control_bar = object.__new__(ControlBar)
-    tooltip = MagicMock()
-    control_bar._start_disabled_tooltip = tooltip
-    control_bar._start_btn = MagicMock()
-    control_bar._start_btn_normal_fg = "normal"
-    control_bar._start_btn_normal_hover = "hover"
+def test_start_button_drops_its_disabled_tooltip_when_state_changes(tk_root) -> None:
+    control_bar = ControlBar(tk_root)
 
-    ControlBar.set_start_enabled(control_bar, True)
+    control_bar.set_start_enabled(False, "Add files first")
+    control_bar._start_disabled_tooltip._show()
+    control_bar.set_start_enabled(False, "Restoring")
+    assert _open_tooltips(tk_root) == []
 
-    tooltip.hide.assert_called_once_with()
-    control_bar._start_btn.configure.assert_called_once_with(
-        state="normal",
-        fg_color="normal",
-        hover_color="hover",
-    )
-
-
-def test_updating_disabled_start_button_hides_previous_tooltip() -> None:
-    control_bar = object.__new__(ControlBar)
-    tooltip = MagicMock()
-    control_bar._start_disabled_tooltip = tooltip
-    control_bar._start_btn = MagicMock()
-
-    ControlBar.set_start_enabled(control_bar, False)
-
-    tooltip.hide.assert_called_once_with()
+    control_bar._start_disabled_tooltip._show()
+    control_bar.set_start_enabled(True)
+    assert _open_tooltips(tk_root) == []
+    assert control_bar._start_btn.cget("state") == "normal"
 
 
 @pytest.mark.parametrize("confirmed", [True, False])
 def test_stop_button_stops_only_after_confirmation(tk_root, monkeypatch, confirmed) -> None:
+    stopped: list[bool] = []
     control_bar = ControlBar(tk_root)
-    control_bar._on_stop = MagicMock()
+    control_bar.set_callbacks(on_stop=lambda: stopped.append(True))
     monkeypatch.setattr("jasna.gui.control_bar.messagebox.askyesno", lambda *a, **k: confirmed)
 
-    ControlBar._handle_stop(control_bar)
+    control_bar._handle_stop()
 
-    assert control_bar._on_stop.called is confirmed
+    assert stopped == ([True] if confirmed else [])
 
 
-def test_stop_confirmed_after_queue_finished_keeps_completed_state(tk_root, monkeypatch) -> None:
-    processor = MagicMock()
-    processor.is_running.return_value = True
-    app = SimpleNamespace(
-        _processor=processor,
-        _log_panel=MagicMock(),
-        _status_pill=MagicMock(),
-        _control_bar=MagicMock(),
-        _settings_panel=MagicMock(),
-        _queue_panel=MagicMock(),
-    )
-    control_bar = ControlBar(tk_root)
-    control_bar._on_stop = lambda: JasnaApp._on_stop(app)
+def test_stop_confirmed_after_queue_finished_keeps_completed_state(jasna_app, monkeypatch) -> None:
+    running = [True]
+    stops: list[bool] = []
+    monkeypatch.setattr(jasna_app._processor, "is_running", lambda: running[0])
+    monkeypatch.setattr(jasna_app._processor, "stop", lambda: stops.append(True))
 
     def queue_finishes_while_dialog_is_open(*_args, **_kwargs):
-        processor.is_running.return_value = False
+        running[0] = False
         return True
 
     monkeypatch.setattr("jasna.gui.control_bar.messagebox.askyesno", queue_finishes_while_dialog_is_open)
+    logged = len(jasna_app._log_panel._entries)
 
-    ControlBar._handle_stop(control_bar)
+    jasna_app._control_bar._handle_stop()
 
-    processor.stop.assert_not_called()
-    app._log_panel.info.assert_not_called()
-    app._control_bar.reset.assert_not_called()
-    app._control_bar.set_start_enabled.assert_not_called()
+    assert stops == []
+    assert len(jasna_app._log_panel._entries) == logged
 
 
 def test_completed_job_combines_status_and_elapsed_time(tk_root) -> None:
@@ -207,7 +178,7 @@ def test_completed_job_combines_status_and_elapsed_time(tk_root) -> None:
     assert item._eta_label.cget("text") == ""
 
 
-def test_status_pill_sizes_to_localized_content(monkeypatch) -> None:
+def test_status_pill_sizes_to_localized_content(tk_root, monkeypatch) -> None:
     translations = {
         "status_idle": "พร้อม",
         "status_processing": "กำลังประมวลผล",
@@ -216,81 +187,41 @@ def test_status_pill_sizes_to_localized_content(monkeypatch) -> None:
         "status_error": "ข้อผิดพลาด",
     }
     monkeypatch.setattr(components, "t", translations.__getitem__)
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
+    pill = StatusPill(tk_root)
+    pill.pack()
+    widths = []
+    for status in ("IDLE", "PROCESSING"):
+        pill.set_status(status, "#ffffff")
+        tk_root.update_idletasks()
+        widths.append(pill.winfo_reqwidth())
 
-    try:
-        pill = StatusPill(root)
-        pill.pack()
-        widths = []
-        for status in ("IDLE", "PROCESSING"):
-            pill.set_status(status, "#ffffff")
-            root.update_idletasks()
-            widths.append(pill.winfo_reqwidth())
-
-        assert max(widths) < 180
-        assert pill._label.cget("text") == translations["status_processing"].upper()
-    finally:
-        root.destroy()
+    assert max(widths) < 180
+    assert pill._label.cget("text") == translations["status_processing"].upper()
 
 
-def test_header_keeps_about_button_visible_at_default_width(monkeypatch) -> None:
+@pytest.fixture
+def thai_header(monkeypatch):
     monkeypatch.setattr(app_module, "t", TH.__getitem__)
     monkeypatch.setattr(components, "t", TH.__getitem__)
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
-
-    for name in (
-        "_open_video_player",
-        "_show_system_check",
-        "_show_help",
-        "_show_about",
-        "_open_license_dialog",
-        "_refresh_license_chip",
-        "_on_language_changed",
-    ):
-        setattr(root, name, lambda *_args: None)
-
-    try:
-        root.geometry("1320x100")
-        JasnaApp._build_header(root)
-        root._status_pill.set_status("PROCESSING", "#ffffff")
-        root.update()
-
-        window_right = root.winfo_rootx() + root.winfo_width()
-        about_right = root._about_btn.winfo_rootx() + root._about_btn.winfo_width()
-        status_right = (
-            root._status_pill.winfo_rootx() + root._status_pill.winfo_width()
-        )
-        header_right_left = root._lang_dropdown.master.winfo_rootx()
-        assert root._about_btn.winfo_width() > 1
-        assert about_right <= window_right
-        assert status_right < header_right_left
-    finally:
-        root.destroy()
 
 
-def test_grab_modal_waits_for_visibility_before_grabbing() -> None:
-    from jasna.gui.components import grab_modal
+def test_header_keeps_about_button_visible_at_default_width(thai_header, jasna_app, show_window) -> None:
+    jasna_app._status_pill.set_status("PROCESSING", "#ffffff")
+    show_window(jasna_app)
 
-    dialog = MagicMock()
-    dialog.winfo_viewable.return_value = False
-    grab_modal(dialog)
+    window_right = jasna_app.winfo_rootx() + jasna_app.winfo_width()
+    about_right = jasna_app._about_btn.winfo_rootx() + jasna_app._about_btn.winfo_width()
+    status_right = jasna_app._status_pill.winfo_rootx() + jasna_app._status_pill.winfo_width()
+    assert jasna_app._about_btn.winfo_width() > 1
+    assert about_right <= window_right
+    assert status_right < jasna_app._lang_dropdown.master.winfo_rootx()
 
-    grabbing = [call[0] for call in dialog.method_calls if call[0] in ("wait_visibility", "grab_set", "lift", "focus_force")]
-    assert grabbing == ["wait_visibility", "grab_set", "lift", "focus_force"]
 
-
-def test_grab_modal_restores_minimized_dialog_on_focus(tk_root) -> None:
-    from jasna.gui.components import grab_modal
-
+def test_grab_modal_grabs_a_new_dialog_and_restores_it_on_focus(tk_root) -> None:
     dialog = ctk.CTkToplevel(tk_root)
     dialog.transient(tk_root)
     grab_modal(dialog)
+    assert dialog.grab_current() is dialog
     focus_bindings = dialog.bind("<FocusIn>")
     grab_modal(dialog)
     assert dialog.bind("<FocusIn>") == focus_bindings
@@ -341,17 +272,15 @@ def test_job_item_shows_the_ltx_step_in_place_of_fps(tk_root) -> None:
 
 
 @pytest.mark.parametrize("running", [True, False])
-def test_window_close_asks_only_while_processing(monkeypatch, running) -> None:
-    app = object.__new__(JasnaApp)
-    app._processor = MagicMock(is_running=MagicMock(return_value=running))
-    app._on_close = MagicMock()
-    dialog = MagicMock()
-    monkeypatch.setattr(app_module, "CloseWhileProcessingDialog", dialog)
+def test_window_close_asks_only_while_processing(jasna_app, monkeypatch, running) -> None:
+    monkeypatch.setattr(jasna_app._processor, "is_running", lambda: running)
 
-    JasnaApp._on_close_requested(app)
+    jasna_app._on_close_requested()
 
-    assert dialog.called is running
-    assert app._on_close.called is not running
+    if running:
+        assert any(isinstance(w, components.CloseWhileProcessingDialog) for w in jasna_app.winfo_children())
+    else:
+        assert not jasna_app.children
 
 
 @pytest.mark.parametrize("button", ["minimize_button", "quit_button"])
