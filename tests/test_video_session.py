@@ -17,28 +17,22 @@ from jasna.gui.video_session import (
 pytestmark = pytest.mark.usefixtures("nvidia_vendor")
 
 
-def test_video_session_key_stable_for_identical_settings() -> None:
-    assert video_session_key(AppSettings()) == video_session_key(AppSettings())
-
-
-def test_video_session_key_changes_on_session_fields() -> None:
-    base = video_session_key(AppSettings())
-    assert video_session_key(replace(AppSettings(), detection_model="lada-yolo-v2")) != base
-    assert video_session_key(replace(AppSettings(), secondary_restoration="unet-4x")) != base
-    assert video_session_key(replace(AppSettings(), max_clip_size=60)) != base
-    assert video_session_key(replace(AppSettings(), fp16_mode=False)) != base
-
-
-def test_video_session_key_ignores_encoder_fields() -> None:
-    base = video_session_key(AppSettings())
-    assert video_session_key(replace(AppSettings(), encoder_cq=30, codec="h264")) == base
-
-
-def test_video_session_key_ignores_vr_routing() -> None:
-    base = video_session_key(AppSettings())
-    assert video_session_key(replace(AppSettings(), vr_mode="off")) == base
-    assert video_session_key(replace(AppSettings(), vr_mode="sbs-fisheye")) == base
-    assert video_session_key(replace(AppSettings(), vr_projection="fisheye")) == base
+@pytest.mark.parametrize(
+    ("changes", "same_session"),
+    [
+        ({}, True),
+        ({"detection_model": "lada-yolo-v2"}, False),
+        ({"secondary_restoration": "unet-4x"}, False),
+        ({"max_clip_size": 60}, False),
+        ({"fp16_mode": False}, False),
+        ({"encoder_cq": 30, "codec": "h264"}, True),
+        ({"vr_mode": "off"}, True),
+        ({"vr_mode": "sbs-fisheye"}, True),
+        ({"vr_projection": "fisheye"}, True),
+    ],
+)
+def test_video_session_key_tracks_only_session_fields(changes, same_session) -> None:
+    assert (video_session_key(replace(AppSettings(), **changes)) == video_session_key(AppSettings())) is same_session
 
 
 def test_video_session_config_forwards_vr_projection() -> None:
