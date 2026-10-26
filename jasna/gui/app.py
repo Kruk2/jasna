@@ -621,12 +621,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._update_video_player_button_state()
 
     def _update_video_player_button_state(self) -> None:
-        video_player_btn = self.__dict__.get("_video_player_btn")
-        if video_player_btn is None:
-            return
         processing = self._processor is not None and self._processor.is_running()
         disabled = self._preview_gpu_busy or processing
-        video_player_btn.configure(
+        self._video_player_btn.configure(
             state="disabled" if disabled else "normal",
             fg_color=Colors.BG_CARD if disabled else Colors.PLAYER,
             border_color=Colors.BORDER_LIGHT if disabled else Colors.PLAYER_BORDER,
