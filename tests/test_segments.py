@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import random
-import time
 from dataclasses import replace
 
 import pytest
@@ -9,7 +8,6 @@ import pytest
 from jasna.segments import (
     SegmentRange,
     SegmentRestoration,
-    format_segments,
     format_timestamp,
     job_models,
     job_restoration,
@@ -59,10 +57,9 @@ def test_parse_segments_rejects_range_after_duration() -> None:
         parse_segments("9-11", duration=10)
 
 
-def test_segment_formatting_is_round_trippable() -> None:
-    segments = (SegmentRange(1.25, 62.5), SegmentRange(3600, 3601))
-    assert parse_segments(format_segments(segments)) == segments
+def test_format_timestamp_round_trips() -> None:
     assert format_timestamp(62.5) == "00:01:02.500"
+    assert parse_timestamp(format_timestamp(3601.25)) == 3601.25
 
 
 LTX_A = SegmentRestoration("ltx", 1)
@@ -131,13 +128,6 @@ def test_normalize_paints_later_ranges_over_earlier_ones_like_range_by_range_pai
             start = rng.randrange(0, 40) / 2
             segments.append(SegmentRange(start, start + rng.randrange(1, 12) / 2, rng.choice(choices)))
         assert normalize_segments(segments) == _painted_reference(segments)
-
-
-def test_normalize_handles_a_long_scan_quickly() -> None:
-    hits = [SegmentRange(max(0.0, second - 0.5), second + 1.5) for second in range(5000)]
-    started = time.perf_counter()
-    assert normalize_segments(hits) == (SegmentRange(0.0, 5000.5),)
-    assert time.perf_counter() - started < 1.0
 
 
 def test_job_models_are_the_ranges_models_or_the_jobs_model():

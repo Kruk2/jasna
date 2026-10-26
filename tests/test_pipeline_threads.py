@@ -1037,7 +1037,6 @@ class TestStreamingLoop:
         mock_server.initial_start_segment = 0
         mock_server.video_change = threading.Event()
         mock_server.segment_start_time.return_value = 0.0
-        mock_server.segment_start_frame.return_value = 0
         mock_server.consume_seek.return_value = None
         mock_enc = MagicMock()
         mock_pipeline = MagicMock()
@@ -1094,7 +1093,6 @@ class TestStreamingLoop:
             return None
 
         server.segment_start_time.return_value = 20.0
-        server.segment_start_frame.return_value = 600
 
         with patch("jasna.streaming_pipeline._run_streaming_pass", side_effect=_fake_pass):
             _streaming_loop(

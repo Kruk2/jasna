@@ -101,15 +101,6 @@ class TestHlsStreamingServer:
         assert server.segment_count == 5
         server._cleanup_segments()
 
-    def test_segment_start_frame(self):
-        meta = _make_metadata(duration=20.0, fps=30.0)
-        server = HlsStreamingServer(segment_duration=4.0, port=0)
-        server.load_video(meta)
-        assert server.segment_start_frame(0) == 0
-        assert server.segment_start_frame(1) == 120
-        assert server.segment_start_frame(2) == 240
-        server._cleanup_segments()
-
     def test_playlist_being_replaced_reads_as_not_ready(self, tmp_path, monkeypatch):
         server = HlsStreamingServer(segment_duration=2.0, port=0)
         server.segments_dir = tmp_path
