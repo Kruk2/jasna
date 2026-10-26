@@ -1,6 +1,6 @@
 """Triton source of the decoder's fused diffusion-block kernels, which ``scripts/build_ltx_vae_hipfbs.py``
-builds ahead of time for AMD (``diffusion_hip`` launches them); NVIDIA keeps the compiled torch code they
-replace, which stays the reference.
+builds ahead of time for AMD (``diffusion_hip`` launches them); NVIDIA JIT-compiles the slab Q/K/V
+(``slab_qkv``) and keeps the compiled torch MLP. The torch code they replace stays the reference.
 
 - ``_residual_swiglu_kernel``: ``transformer.modulated_swiglu`` plus the residual add. Each program keeps
   its rows' ``y`` and output accumulator in registers and walks the hidden width a few columns at a time,
@@ -11,6 +11,7 @@ replace, which stays the reference.
 Projection outputs are rounded to the input dtype as the torch GEMMs store them.
 """
 
+import torch
 import triton
 import triton.language as tl
 from triton.language.extra import libdevice
@@ -108,3 +109,52 @@ def _slab_qkv_kernel(
                     tl.store(q_ptr + q_row[:, None] * DIM + out_col[None, :], rotated.to(dtype), mask=q_mask[:, None])
                 else:
                     tl.store(k_ptr + row[:, None] * DIM + out_col[None, :], rotated.to(dtype), mask=row_mask[:, None])
+
+
+def nvidia_qkv_launch(dim: int) -> tuple[int, int]:
+    """Slab Q/K/V (rows per program, warps) on NVIDIA. Fastest of 16-128 rows x 2-8 warps on the real decode
+    calls on an RTX 5090, 4090 and 3090: 64 rows halve the 512-wide stages on the 3090; at width 256, 128 rows
+    win 6 % on the 5090 only and lose 24 % on the 3090."""
+    return (64 if dim >= 512 else 32), 4
+
+
+@torch.library.custom_op("jasna::slab_qkv", mutates_args=())
+def slab_qkv(
+    x: torch.Tensor,
+    left_halo: torch.Tensor,
+    columns: torch.Tensor,
+    modulation: list[torch.Tensor],
+    weights: list[torch.Tensor],
+    inv_freqs: torch.Tensor,
+    w_pos: torch.Tensor,
+    rope_pairs: list[int],
+    core_len: int,
+    halo: int,
+    q_scale: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """``diffusion_hip.slab_qkv`` through the Triton JIT, any width and head dim."""
+    batch, t, h, w, dim = x.shape
+    ext = halo + columns.numel()
+    head_dim = weights[6].shape[0]
+    q = x.new_empty(batch, t, h, core_len, dim // head_dim, head_dim)
+    k = x.new_empty(batch, t, h, ext, dim // head_dim, head_dim)
+    v = torch.empty_like(k)
+    rows = batch * t * h * ext
+    norm, scale, shift = modulation or (x, x, x)
+    block_rows, warps = nvidia_qkv_launch(dim)
+    _slab_qkv_kernel[(triton.cdiv(rows, block_rows),)](
+        x.contiguous(), left_halo.contiguous(), columns.contiguous(), norm, scale, shift,
+        *weights, inv_freqs.float().contiguous(), w_pos.float().contiguous(), q, k, v,
+        rows, h, w, ext, halo, core_len, q_scale,
+        DIM=dim, HEAD_DIM=head_dim, PAIRS_T=rope_pairs[0], PAIRS_H=rope_pairs[1], BLOCK_ROWS=block_rows,
+        MODULATE=bool(modulation), num_warps=warps, num_stages=1,
+    )
+    return q, k, v
+
+
+@slab_qkv.register_fake
+def _slab_qkv_fake(x, left_halo, columns, modulation, weights, inv_freqs, w_pos, rope_pairs, core_len, halo, q_scale):
+    batch, t, h, _w, dim = x.shape
+    head_dim = weights[6].shape[0]
+    k = x.new_empty(batch, t, h, halo + columns.shape[0], dim // head_dim, head_dim)
+    return x.new_empty(batch, t, h, core_len, dim // head_dim, head_dim), k, torch.empty_like(k)
