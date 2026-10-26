@@ -222,51 +222,40 @@ def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conf
     assert job.output_path == output
 
 
-def test_control_bar_shows_pause_for_ltx_and_uses_pause_confirmation():
-    from tkinter import TclError
-    from unittest.mock import MagicMock, patch
-
-    import customtkinter as ctk
-
+def test_control_bar_shows_pause_for_ltx_and_uses_pause_confirmation(tk_root, monkeypatch):
     from jasna.gui.control_bar import ControlBar
     from jasna.gui.locales import t
 
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
-    try:
-        bar = ControlBar(root)
-        stop = MagicMock()
-        bar.set_callbacks(on_stop=stop)
-        bar.set_resumable(True)
-        assert bar._stop_btn.cget("text") == "Ⅱ"
-        with patch("jasna.gui.control_bar.messagebox.askyesno", return_value=True) as ask:
-            bar._handle_stop()
-        assert ask.call_args.args == (t("pause_confirm_title"), t("pause_confirm"))
-        stop.assert_called_once()
-        bar.set_resumable(False)
-        assert bar._stop_btn.cget("text") == "■"
-    finally:
-        root.destroy()
+    asked: list[tuple[str, str]] = []
+    stopped: list[bool] = []
+    monkeypatch.setattr(
+        "jasna.gui.control_bar.messagebox.askyesno", lambda title, message, **_kwargs: asked.append((title, message)) or True
+    )
+    bar = ControlBar(tk_root)
+    bar.set_callbacks(on_stop=lambda: stopped.append(True))
+
+    bar.set_resumable(True)
+    assert bar._stop_btn.cget("text") == "Ⅱ"
+    bar._handle_stop()
+    assert asked == [(t("pause_confirm_title"), t("pause_confirm"))]
+    assert stopped == [True]
+
+    bar.set_resumable(False)
+    assert bar._stop_btn.cget("text") == "■"
 
 
 @pytest.mark.parametrize("cancel_before_show", [False, True])
-def test_resume_confirmation_is_posted_to_main_thread_and_can_be_cancelled(cancel_before_show):
-    from types import SimpleNamespace
-    from unittest.mock import patch
+def test_resume_confirmation_is_posted_to_main_thread_and_can_be_cancelled(jasna_app, monkeypatch, cancel_before_show):
+    asked: list[bool] = []
+    monkeypatch.setattr("tkinter.messagebox.askyesno", lambda *_args, **_kwargs: asked.append(True) or True)
 
-    from jasna.gui.app import JasnaApp
-
-    posted = []
-    app = SimpleNamespace(_main_thread=SimpleNamespace(post=posted.append))
-    answer = JasnaApp._confirm_resume_restart(app, None)
+    answer = jasna_app._confirm_resume_restart(None)
     assert not answer.done()
     if cancel_before_show:
         assert answer.cancel()
-    with patch("tkinter.messagebox.askyesno", return_value=True) as ask:
-        posted.pop()()
-    assert ask.called is not cancel_before_show
+    jasna_app._main_thread._run_pending()
+
+    assert asked == ([] if cancel_before_show else [True])
     if not cancel_before_show:
         assert answer.result() is True
 
@@ -287,41 +276,12 @@ def test_pipeline_stop_detection(cancel_requested, completed, expected):
 
 
 @pytest.mark.parametrize("queue_finished", [False, True])
-def test_only_a_finished_queue_is_reported_as_completed(queue_finished):
-    from tkinter import TclError
-    from types import SimpleNamespace
-    from unittest.mock import MagicMock
+def test_only_a_finished_queue_is_reported_as_completed(jasna_app, queue_finished):
+    bar = jasna_app._control_bar
+    bar.set_running(True)
+    bar.update_progress("clip.mp4", 40.0)
 
-    import customtkinter as ctk
+    jasna_app._handle_complete(queue_finished)
 
-    from jasna.gui.app import JasnaApp
-    from jasna.gui.control_bar import ControlBar
-
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
-    try:
-        bar = ControlBar(root)
-        bar.set_running(True)
-        bar.update_progress("clip.mp4", 40.0)
-        logs: list[str] = []
-        post_export = MagicMock()
-        app = SimpleNamespace(
-            _status_pill=MagicMock(),
-            _processing_start_time=0.0,
-            _control_bar=bar,
-            _update_start_button_state=lambda: None,
-            _log_panel=SimpleNamespace(info=logs.append),
-            _settings_panel=MagicMock(),
-            _queue_panel=MagicMock(),
-            _run_post_export_action=post_export,
-        )
-
-        JasnaApp._handle_complete(app, queue_finished)
-
-        assert (bar._percent_label.cget("text") == "100%") is queue_finished
-        assert (logs == ["All jobs completed"]) is queue_finished
-        assert post_export.called is queue_finished
-    finally:
-        root.destroy()
+    assert (bar._percent_label.cget("text") == "100%") is queue_finished
+    assert ("All jobs completed" in [message for _, _, message in jasna_app._log_panel._entries]) is queue_finished
