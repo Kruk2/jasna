@@ -1,80 +1,30 @@
 import sys
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from contextlib import nullcontext
+from unittest.mock import patch
 
-import pytest
+import torch
+
+from factories import cli_args, cli_environment
 
 
-def test_cli_creates_stream_on_chosen_device(tmp_path: Path) -> None:
-    input_path = tmp_path / "in.mp4"
-    input_path.touch()
-    output_path = tmp_path / "out.mkv"
-    model_weights = tmp_path / "model_weights"
-    model_weights.mkdir()
-    restoration_path = model_weights / "lada_mosaic_restoration_model_generic_v1.2.pth"
-    restoration_path.touch()
-    detection_path = model_weights / "rfdetr-v3.onnx"
-    detection_path.touch()
+def test_cli_runs_the_job_on_the_chosen_device(tmp_path) -> None:
+    from jasna.main import main
 
-    device_capture: list = []
-    fake_stream = MagicMock()
-
-    class NoOpDeviceContext:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
+    devices = []
 
     def record_device(device):
-        device_capture.append(device)
-        return NoOpDeviceContext()
-
-    pipeline_capture: dict = {}
-
-    def capture_pipeline(**kwargs):
-        pipeline_capture.update(kwargs)
-        mock = MagicMock()
-        return mock
+        devices.append(device)
+        return nullcontext()
 
     with (
-        patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
-        patch(
-            "jasna.main.check_supported_gpu",
-            return_value=(True, "Fake GPU"),
-        ) as check_gpu,
-        patch("jasna.main.check_gpu_driver_version", return_value=(True, "610.18")),
-        patch("jasna.main.check_required_executables"),        patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
-        patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
-        patch("jasna.pipeline.Pipeline", side_effect=capture_pipeline),
-        patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
+        cli_environment() as pipeline_cls,
+        patch("jasna.main.check_supported_gpu", return_value=(True, "Fake GPU")) as check_gpu,
+        patch("torch.cuda.device", side_effect=record_device),
+        patch("torch.cuda.Stream"),
+        patch.object(sys, "argv", ["jasna", *cli_args(tmp_path, "--device", "cuda:1")]),
     ):
-        import torch
+        main()
 
-        with patch("torch.cuda.device", side_effect=record_device), patch(
-            "torch.cuda.Stream", return_value=fake_stream
-        ):
-            with patch.object(
-                sys,
-                "argv",
-                [
-                    "jasna",
-                    "--input",
-                    str(input_path),
-                    "--output",
-                    str(output_path),
-                    "--device",
-                    "cuda:1",
-                    "--restoration-model-path",
-                    str(restoration_path),
-                    "--detection-model-path",
-                    str(detection_path),
-                ],
-            ):
-                from jasna.main import main
-
-                main()
-
-    assert any(d == torch.device("cuda:1") for d in device_capture)
+    assert torch.device("cuda:1") in devices
     check_gpu.assert_called_once_with("cuda:1")
-    assert pipeline_capture["session"].device == torch.device("cuda:1")
+    assert pipeline_cls.call_args.kwargs["session"].device == torch.device("cuda:1")

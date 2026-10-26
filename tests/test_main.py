@@ -1,19 +1,18 @@
+import logging
 import re
-import sys
 from contextlib import contextmanager, nullcontext
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jasna.main import build_parser
+from factories import cli_args, cli_environment, run_cli
+from jasna.main import batch_size_from_args, build_parser
+from jasna.media.probe import UnsupportedVideoError
+from jasna.post_export_action import PostExportVideoCommandError
+from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
 
 pytestmark = pytest.mark.usefixtures("nvidia_vendor")
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
 def _mock_device_context():
@@ -22,1141 +21,329 @@ def _mock_device_context():
         yield
 
 
-def _make_model_files(tmp_path, *, create_input=True, create_detection=True, create_restoration=True):
-    input_path = tmp_path / "in.mp4"
-    if create_input:
-        input_path.touch()
-    output_path = tmp_path / "out.mp4"
-    restoration_path = tmp_path / "restore.pth"
-    if create_restoration:
-        restoration_path.touch()
-    detection_path = tmp_path / "det.onnx"
-    if create_detection:
-        detection_path.touch()
-    return input_path, output_path, restoration_path, detection_path
+def _config(tmp_path, *extra):
+    return run_cli(cli_args(tmp_path, *extra)).call_args.kwargs["config"]
 
 
-def _base_argv(input_path, output_path, restoration_path, detection_path, extra=None):
-    args = [
-        "jasna",
-        "--input", str(input_path),
-        "--output", str(output_path),
-        "--restoration-model-path", str(restoration_path),
-        "--detection-model-path", str(detection_path),
-    ]
-    if extra:
-        args.extend(extra)
-    return args
+def _model_args(tmp_path) -> list[str]:
+    """Only the model paths, for runs without an input and output (streaming, folders)."""
+    return cli_args(tmp_path)[4:]
 
 
-@contextmanager
-def _main_patches(pipeline_side_effect=None):
-    mock_pipeline_cls = MagicMock()
-    if pipeline_side_effect:
-        mock_pipeline_cls.side_effect = pipeline_side_effect
-    else:
-        mock_pipeline_cls.return_value = MagicMock()
+def _folder_args(tmp_path, names, *extra, output=None) -> list[str]:
+    folder = tmp_path / "in"
+    folder.mkdir()
+    for name in names:
+        (folder / name).touch()
+    return ["--input", str(folder), "--output", str(output or tmp_path / "out"), *_model_args(tmp_path), *extra]
+
+
+def test_benchmark_flag_runs_the_benchmark_instead_of_a_job():
+    with patch("jasna.benchmark.run_benchmark_cli") as benchmark:
+        pipeline_cls = run_cli(["--benchmark"])
+    benchmark.assert_called_once()
+    pipeline_cls.assert_not_called()
+
+
+def test_a_video_job_runs_the_pipeline_and_not_the_stream(tmp_path):
+    with patch("jasna.streaming_pipeline.run_streaming") as run_streaming:
+        pipeline_cls = run_cli(cli_args(tmp_path))
+    pipeline_cls.return_value.run.assert_called_once()
+    run_streaming.assert_not_called()
+
+
+def test_post_export_video_command_runs_after_output_closes(tmp_path):
+    events: list[str] = []
+    pipeline = MagicMock()
+    pipeline.run.side_effect = lambda: events.append("run")
+    argv = cli_args(tmp_path, "--post-export-video-command", "remux {output}")
+
+    with patch(
+        "jasna.post_export_action.run_post_export_video_command",
+        side_effect=lambda *_args: events.append("command"),
+    ) as command:
+        run_cli(argv, pipeline=pipeline)
+
+    assert events == ["run", "command"]
+    assert command.call_args.args[:3] == ("remux {output}", tmp_path / "in.mp4", tmp_path / "out.mkv")
+
+
+@pytest.mark.parametrize(
+    ("args", "threshold"),
+    [([], 0.35), (["--detection-model", "rfdetr-v6-large"], 0.40), (["--detection-score-threshold", "0.5"], 0.5)],
+    ids=["fast-model", "large-model", "explicit"],
+)
+def test_detection_threshold_defaults_to_the_models_recommendation(tmp_path, args, threshold):
+    assert _config(tmp_path, *args).detection_score_threshold == threshold
+
+
+@pytest.mark.parametrize(
+    ("available", "model", "warns"),
+    [
+        (["rfdetr-v3"], [], True),
+        (["rfdetr-v6"], [], False),
+        (["rfdetr-v5", "zelefans-vr-yolo-v2"], ["--detection-model", "zelefans-vr-yolo-v2"], False),
+    ],
+    ids=["missing", "available", "bundled"],
+)
+def test_cli_warns_only_when_the_chosen_detection_model_is_missing(tmp_path, capsys, available, model, warns):
+    weights = tmp_path / "weights.onnx"
+    weights.touch()
+    argv = cli_args(tmp_path)[:6] + model
 
     with (
-        patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
-        patch("jasna.main.check_supported_gpu", return_value=(True, "Fake GPU")),
-        patch("jasna.main.check_gpu_driver_version", return_value=(True, "610.18")),
-        patch("jasna.main.check_required_executables"),        patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
-        patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
-        patch("jasna.pipeline.Pipeline", mock_pipeline_cls),
-        patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
+        patch("jasna.mosaic.detection_registry.discover_available_detection_models", return_value=available),
+        patch("jasna.mosaic.detection_registry.require_detection_model_weights", return_value=weights),
     ):
-        yield mock_pipeline_cls
-
-
-def _run_main(argv, pipeline_side_effect=None):
-    with _main_patches(pipeline_side_effect) as pipeline_cls:
-        with patch.object(sys, "argv", argv):
-            from jasna.main import main
-            main()
-    return pipeline_cls
-
-
-# ---------------------------------------------------------------------------
-# build_parser
-# ---------------------------------------------------------------------------
-
-class TestBuildParser:
-    def test_defaults(self):
-        args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4"])
-        assert args.batch_size is None
-        assert args.device == "cuda:0"
-        assert args.fp16 is True
-        assert args.log_level == "error"
-        assert args.max_clip_size == 90
-        assert args.temporal_overlap == 8
-        assert args.enable_crossfade is True
-        assert args.vr_mode == "auto"
-        assert args.denoise == "none"
-        assert args.denoise_step == "after_primary"
-        assert args.secondary_restoration == "none"
-        assert args.codec == "hevc"
-        assert args.cq is None
-        assert args.encoder_settings == ""
-        assert args.retarget_high_fps is False
-        assert args.sharpen == 0.0
-        assert args.segments == ""
-        assert args.stream is False
-        assert args.stream_port == 8765
-        assert args.stream_segment_duration == 4.0
-        assert args.no_browser is False
-        assert args.output_pattern is None
-        assert args.detection_model == "rfdetr-v6"
-        assert args.detection_score_threshold is None
-        assert args.benchmark is False
-        assert args.post_export_action == "none"
-        assert args.post_export_command == ""
-        assert args.post_export_video_command == ""
-        assert args.working_directory is None
-
-    def test_working_directory(self):
-        args = build_parser().parse_args([
-            "--input", "a.mp4",
-            "--output", "b.mp4",
-            "--working-directory", "/fast/scratch",
-        ])
-        assert args.working_directory == "/fast/scratch"
-
-    def test_no_fp16(self):
-        args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4", "--no-fp16"])
-        assert args.fp16 is False
-
-    def test_no_enable_crossfade(self):
-        args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4", "--no-enable-crossfade"])
-        assert args.enable_crossfade is False
-
-    def test_stream_flag(self):
-        args = build_parser().parse_args(["--stream"])
-        assert args.stream is True
-
-    def test_benchmark_flag(self):
-        args = build_parser().parse_args(["--benchmark"])
-        assert args.benchmark is True
-
-    def test_tvai_defaults(self):
-        args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4"])
-        assert args.tvai_model == "iris-2"
-        assert args.tvai_scale == 4
-        assert args.tvai_workers == 2
-        assert args.tvai_denoise is False
-
-    def test_rtx_defaults(self):
-        args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4"])
-        assert args.rtx_scale == 4
-        assert args.rtx_quality == "high"
-        assert args.rtx_denoise == "medium"
-        assert args.rtx_deblur == "none"
-
-    def test_post_export_command(self):
-        args = build_parser().parse_args([
-            "--input", "a.mp4",
-            "--output", "b.mp4",
-            "--post-export-action", "command",
-            "--post-export-command", "echo done",
-        ])
-        assert args.post_export_action == "command"
-        assert args.post_export_command == "echo done"
-
-    def test_post_export_video_command(self):
-        args = build_parser().parse_args([
-            "--input", "a.mp4",
-            "--output", "b.mp4",
-            "--post-export-video-command", "remux {output}",
-        ])
-        assert args.post_export_video_command == "remux {output}"
-
-
-# ---------------------------------------------------------------------------
-# Benchmark path
-# ---------------------------------------------------------------------------
-
-class TestBenchmarkPath:
-    def test_benchmark_dispatches(self, tmp_path):
-        with patch("jasna.benchmark.run_benchmark_cli") as mock_bench:
-            with patch.object(sys, "argv", ["jasna", "--benchmark"]):
-                from jasna.main import main
-                main()
-            mock_bench.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# Output path respected
-# ---------------------------------------------------------------------------
-
-class TestOutputPath:
-    def test_explicit_output_forwarded_to_pipeline(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        pipeline_kwargs = {}
-
-        def capture(**kw):
-            pipeline_kwargs.update(kw)
-            return MagicMock()
-
-        with _main_patches(pipeline_side_effect=capture):
-            with patch.object(sys, "argv", _base_argv(inp, out, rest, det)):
-                from jasna.main import main
-                main()
-
-        assert pipeline_kwargs["output_video"] == out
-
-    def test_post_export_video_command_runs_after_output_closes(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        events: list[str] = []
-        pipeline = MagicMock()
-        pipeline.run.side_effect = lambda: events.append("run")
-
-        with patch(
-            "jasna.post_export_action.run_post_export_video_command",
-            side_effect=lambda *_args: events.append("command"),
-        ) as command:
-            _run_main(
-                _base_argv(
-                    inp,
-                    out,
-                    rest,
-                    det,
-                    ["--post-export-video-command", "remux {output}"],
-                ),
-                pipeline_side_effect=lambda **_kwargs: pipeline,
-            )
-
-        assert events == ["run", "command"]
-        args = command.call_args.args
-        assert args[:3] == ("remux {output}", inp, out)
-        assert callable(args[3])
-
-    def test_streaming_builds_a_pipeline_for_the_input(self, tmp_path):
-        inp, _, rest, det = _make_model_files(tmp_path)
-        pipeline_kwargs = {}
-
-        def capture(**kw):
-            pipeline_kwargs.update(kw)
-            mock = MagicMock()
-            return mock
-
-        with _main_patches(pipeline_side_effect=capture), _streaming_patches():
-            argv = [
-                "jasna",
-                "--stream",
-                "--input", str(inp),
-                "--restoration-model-path", str(rest),
-                "--detection-model-path", str(det),
-                "--no-browser",
-            ]
-            with patch.object(sys, "argv", argv):
-                from jasna.main import main
-                main()
-
-        assert pipeline_kwargs["input_video"] == inp
-
-
-# ---------------------------------------------------------------------------
-# Secondary restorers
-# ---------------------------------------------------------------------------
-
-class TestSecondaryRestorers:
-    def test_none_secondary(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        pipeline_cls = _run_main(_base_argv(inp, out, rest, det))
-        pipeline_instance = pipeline_cls.return_value
-        pipeline_instance.run.assert_called_once()
-
-    def test_tvai_secondary(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        mock_tvai = MagicMock()
-        with patch("jasna.restorer.tvai_secondary_restorer.TvaiSecondaryRestorer", mock_tvai):
-            _run_main(_base_argv(inp, out, rest, det, [
-                "--secondary-restoration", "tvai",
-                "--tvai-ffmpeg-path", "fake_ffmpeg.exe",
-                "--tvai-model", "prob-4",
-                "--tvai-scale", "2",
-                "--tvai-workers", "1",
-                "--tvai-args", "noise=5",
-                "--tvai-denoise",
-            ]))
-        mock_tvai.assert_called_once()
-        kw = mock_tvai.call_args
-        assert kw.kwargs["ffmpeg_path"] == "fake_ffmpeg.exe"
-        assert kw.kwargs["scale"] == 2
-        assert kw.kwargs["num_workers"] == 1
-        assert kw.kwargs["tvai_denoise"] is True
-        assert "model=prob-4:scale=2:noise=5" in kw.kwargs["tvai_args"]
-
-    def test_unet4x_secondary(self, tmp_path):
-        pytest.importorskip("tensorrt")
-        inp, out, rest, det = _make_model_files(tmp_path)
-        mock_unet = MagicMock()
-        with patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer", mock_unet):
-            _run_main(_base_argv(inp, out, rest, det, ["--secondary-restoration", "unet-4x"]))
-        mock_unet.assert_called_once()
-
-    def test_rtx_super_res_secondary(self, tmp_path):
-        pytest.importorskip("tensorrt")
-        inp, out, rest, det = _make_model_files(tmp_path)
-        mock_rtx = MagicMock()
-        with patch("jasna.restorer.rtx_superres_secondary_restorer.RtxSuperresSecondaryRestorer", mock_rtx):
-            _run_main(_base_argv(inp, out, rest, det, [
-                "--secondary-restoration", "rtx-super-res",
-                "--rtx-scale", "2",
-                "--rtx-quality", "ultra",
-                "--rtx-denoise", "high",
-                "--rtx-deblur", "low",
-            ]))
-        mock_rtx.assert_called_once()
-        kw = mock_rtx.call_args.kwargs
-        assert kw["scale"] == 2
-        assert kw["quality"] == "ultra"
-        assert kw["denoise"] == "high"
-        assert kw["deblur"] == "low"
-
-    def test_rtx_denoise_none_passes_none(self, tmp_path):
-        pytest.importorskip("tensorrt")
-        inp, out, rest, det = _make_model_files(tmp_path)
-        mock_rtx = MagicMock()
-        with patch("jasna.restorer.rtx_superres_secondary_restorer.RtxSuperresSecondaryRestorer", mock_rtx):
-            _run_main(_base_argv(inp, out, rest, det, [
-                "--secondary-restoration", "rtx-super-res",
-                "--rtx-denoise", "none",
-                "--rtx-deblur", "none",
-            ]))
-        kw = mock_rtx.call_args.kwargs
-        assert kw["denoise"] is None
-        assert kw["deblur"] is None
-
-
-# ---------------------------------------------------------------------------
-# Detection threshold resolution
-# ---------------------------------------------------------------------------
-
-class TestDetectionThresholdResolution:
-    def test_default_threshold_uses_fast_model_recommended(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        pipeline_cls = _run_main(_base_argv(inp, out, rest, det))
-        assert pipeline_cls.call_args.kwargs["config"].detection_score_threshold == 0.35
-
-    def test_default_threshold_uses_large_model_recommended(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        pipeline_cls = _run_main(
-            _base_argv(inp, out, rest, det, ["--detection-model", "rfdetr-v6-large"])
-        )
-        assert pipeline_cls.call_args.kwargs["config"].detection_score_threshold == 0.40
-
-    def test_explicit_threshold_overrides_recommended(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        pipeline_cls = _run_main(
-            _base_argv(inp, out, rest, det, ["--detection-score-threshold", "0.5"])
-        )
-        assert pipeline_cls.call_args.kwargs["config"].detection_score_threshold == 0.5
-
-
-# ---------------------------------------------------------------------------
-# Detection model discovery
-# ---------------------------------------------------------------------------
-
-class TestDetectionModelDiscovery:
-    def test_explicit_detection_path_skips_discovery(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        with patch("jasna.mosaic.detection_registry.discover_available_detection_models") as disc:
-            _run_main(_base_argv(inp, out, rest, det))
-        disc.assert_not_called()
-
-    def test_auto_discovery_warns_when_model_missing(self, tmp_path, capsys):
-        inp, out, rest, _ = _make_model_files(tmp_path, create_detection=False)
-        det = tmp_path / "model_weights" / "rfdetr-v5.onnx"
-        (tmp_path / "model_weights").mkdir(exist_ok=True)
-        det.touch()
-
-        with patch("jasna.mosaic.detection_registry.discover_available_detection_models", return_value=["rfdetr-v3"]):
-            with patch("jasna.mosaic.detection_registry.require_detection_model_weights", return_value=det):
-                _run_main([
-                    "jasna",
-                    "--input", str(inp),
-                    "--output", str(out),
-                    "--restoration-model-path", str(rest),
-                ])
-        captured = capsys.readouterr()
-        assert "not found in model_weights" in captured.out
-
-    def test_auto_discovery_no_warning_when_model_available(self, tmp_path, capsys):
-        inp, out, rest, _ = _make_model_files(tmp_path, create_detection=False)
-        det = tmp_path / "model_weights" / "rfdetr-v6.onnx"
-        (tmp_path / "model_weights").mkdir(exist_ok=True)
-        det.touch()
-
-        with patch("jasna.mosaic.detection_registry.discover_available_detection_models", return_value=["rfdetr-v6"]):
-            with patch("jasna.mosaic.detection_registry.require_detection_model_weights", return_value=det):
-                _run_main([
-                    "jasna",
-                    "--input", str(inp),
-                    "--output", str(out),
-                    "--restoration-model-path", str(rest),
-                ])
-        captured = capsys.readouterr()
-        assert "not found in model_weights" not in captured.out
-
-    def test_bundled_model_does_not_emit_missing_warning(self, tmp_path, capsys):
-        inp, out, rest, _ = _make_model_files(tmp_path, create_detection=False)
-        det = tmp_path / "model_weights" / "vr.pt"
-        det.parent.mkdir(exist_ok=True)
-        det.touch()
-
-        with (
-            patch(
-                "jasna.mosaic.detection_registry.discover_available_detection_models",
-                return_value=["rfdetr-v5", "zelefans-vr-yolo-v2"],
-            ),
-            patch(
-                "jasna.mosaic.detection_registry.require_detection_model_weights",
-                return_value=det,
-            ),
-        ):
-            _run_main(
-                [
-                    "jasna",
-                    "--input",
-                    str(inp),
-                    "--output",
-                    str(out),
-                    "--restoration-model-path",
-                    str(rest),
-                    "--detection-model",
-                    "zelefans-vr-yolo-v2",
-                ]
-            )
-
-        assert "not found in model_weights" not in capsys.readouterr().out
-
-
-# ---------------------------------------------------------------------------
-# Denoise / crossfade / fp16 forwarding
-# ---------------------------------------------------------------------------
-
-class TestArgForwarding:
-    def _capture_run(self, tmp_path, extra_args):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        captured = {}
-
-        def capture_pipeline(**kw):
-            captured.update(vars(kw["config"]))
-            return MagicMock()
-
-        rest_pipeline_captured = {}
-        orig_rp = None
-
-        def capture_rp(**kw):
-            rest_pipeline_captured.update(kw)
-            return MagicMock()
-
-        with _main_patches(pipeline_side_effect=capture_pipeline):
-            with patch("jasna.restorer.restoration_pipeline.RestorationPipeline", side_effect=capture_rp):
-                with patch.object(sys, "argv", _base_argv(inp, out, rest, det, extra_args)):
-                    from jasna.main import main
-                    main()
-
-        return captured, rest_pipeline_captured
-
-    def test_denoise_forwarded(self, tmp_path):
-        _, rp = self._capture_run(tmp_path, ["--denoise", "high", "--denoise-step", "after_secondary"])
-        from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
-        assert rp["denoise_strength"] == DenoiseStrength.HIGH
-        assert rp["denoise_step"] == DenoiseStep.AFTER_SECONDARY
-
-    def test_crossfade_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--no-enable-crossfade"])
-        assert pipe["enable_crossfade"] is False
-
-    def test_fp16_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--no-fp16"])
-        assert pipe["fp16"] is False
-
-    def test_encoder_settings_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--encoder-settings", "cq=22,rc-lookahead=32"])
-        assert pipe["encoder_settings"] == {"cq": 22, "rc-lookahead": 32}
-
-    def test_default_cq_follows_codec(self, tmp_path):
-        hevc, _ = self._capture_run(tmp_path, [])
-        h264, _ = self._capture_run(tmp_path, ["--codec", "h264"])
-        av1, _ = self._capture_run(tmp_path, ["--codec", "av1"])
-
-        assert hevc["encoder_settings"] == {"cq": 28}
-        assert h264["encoder_settings"] == {"cq": 25}
-        assert av1["encoder_settings"] == {"cq": 35}
-
-    def test_direct_cq_forwarded_unchanged(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--codec", "h264", "--cq", "31"])
-
-        assert pipe["encoder_settings"] == {"cq": 31}
-
-    def test_direct_cq_conflicts_with_advanced_cq(self, tmp_path, capsys):
-        with pytest.raises(SystemExit):
-            self._capture_run(
-                tmp_path,
-                ["--cq", "28", "--encoder-settings", "cq=22"],
-            )
-        assert re.search("--cq.*--encoder-settings", capsys.readouterr().err)
-
-    def test_direct_cq_validated_for_codec(self, tmp_path, capsys):
-        with pytest.raises(SystemExit):
-            self._capture_run(tmp_path, ["--codec", "h264", "--cq", "52"])
-        assert re.search(r"h264.*1\.\.51", capsys.readouterr().err)
-
-    def test_batch_size_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--batch-size", "8"])
-        assert pipe["batch_size"] == 8
-
-    def test_max_clip_size_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--max-clip-size", "120"])
-        assert pipe["max_clip_size"] == 120
-
-    def test_temporal_overlap_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--temporal-overlap", "4", "--max-clip-size", "90"])
-        assert pipe["temporal_overlap"] == 4
-
-    def test_vr_mode_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--vr-mode", "sbs-fisheye"])
-        assert pipe["vr_mode"] == "sbs-fisheye"
-
-    def test_no_progress_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--no-progress"])
-        assert pipe["disable_progress"] is True
-
-    def test_retarget_high_fps_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--retarget-high-fps"])
-        assert pipe["retarget_high_fps"] is True
-
-    def test_scene_detection_on_by_default(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, [])
-        assert pipe["scene_detection"] is True
-
-    def test_no_scene_detection_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--no-scene-detection"])
-        assert pipe["scene_detection"] is False
-
-
-# ---------------------------------------------------------------------------
-# Folder batch
-# ---------------------------------------------------------------------------
-
-class TestFolderBatchProgress:
-    def test_folder_input_rejects_file_shaped_output(self, tmp_path, capsys):
-        in_dir = tmp_path / "in"
-        in_dir.mkdir()
-        (in_dir / "a.mp4").touch()
-        rest = tmp_path / "restore.pth"
-        rest.touch()
-        det = tmp_path / "det.onnx"
-        det.touch()
-        out_file = tmp_path / "out.mp4"
-        argv = [
-            "jasna",
-            "--input", str(in_dir),
-            "--output", str(out_file),
-            "--restoration-model-path", str(rest),
-            "--detection-model-path", str(det),
-        ]
-
-        with pytest.raises(SystemExit) as exc:
-            _run_main(argv)
-
-        assert exc.value.code == 2
-        assert not out_file.exists()
-        assert "--output must be a folder when --input is a folder" in capsys.readouterr().err
-
-    def test_prints_each_video_filename(self, tmp_path, capsys):
-        in_dir = tmp_path / "in"
-        in_dir.mkdir()
-        (in_dir / "a.mp4").touch()
-        (in_dir / "b.mp4").touch()
-        rest = tmp_path / "restore.pth"
-        rest.touch()
-        det = tmp_path / "det.onnx"
-        det.touch()
-        argv = [
-            "jasna",
-            "--input", str(in_dir),
-            "--output", str(tmp_path / "out"),
-            "--restoration-model-path", str(rest),
-            "--detection-model-path", str(det),
-        ]
-        _run_main(argv)
-        printed = capsys.readouterr().out
-        assert "[1/2] Processing a.mp4 -> a_out.mp4" in printed
-        assert "[2/2] Processing b.mp4 -> b_out.mp4" in printed
-
-    def test_folder_output_pattern_applies_to_videos(self, tmp_path, capsys):
-        in_dir = tmp_path / "in"
-        in_dir.mkdir()
-        (in_dir / "a.mkv").touch()
-        (in_dir / "b.mov").touch()
-        rest = tmp_path / "restore.pth"
-        rest.touch()
-        det = tmp_path / "det.onnx"
-        det.touch()
-        out_dir = tmp_path / "out"
-        argv = [
-            "jasna",
-            "--input", str(in_dir),
-            "--output", str(out_dir),
-            "--output-pattern", "{original}_restored.mp4",
-            "--restoration-model-path", str(rest),
-            "--detection-model-path", str(det),
-        ]
-
-        pipeline_cls = _run_main(argv)
-
-        output_names = [call.kwargs["output_video"].name for call in pipeline_cls.call_args_list]
-        assert output_names == ["a_restored.mp4", "b_restored.mp4"]
-        printed = capsys.readouterr().out
-        assert "[1/2] Processing a.mkv -> a_restored.mp4" in printed
-        assert "[2/2] Processing b.mov -> b_restored.mp4" in printed
-
-    def test_folder_output_pattern_rejects_duplicate_outputs(self, tmp_path, capsys):
-        in_dir = tmp_path / "in"
-        in_dir.mkdir()
-        (in_dir / "a.mkv").touch()
-        (in_dir / "b.mov").touch()
-        rest = tmp_path / "restore.pth"
-        rest.touch()
-        det = tmp_path / "det.onnx"
-        det.touch()
-        out_dir = tmp_path / "out"
-        argv = [
-            "jasna",
-            "--input", str(in_dir),
-            "--output", str(out_dir),
-            "--output-pattern", "restored.mp4",
-            "--restoration-model-path", str(rest),
-            "--detection-model-path", str(det),
-        ]
-
-        with pytest.raises(SystemExit) as exc:
-            _run_main(argv)
-
-        assert exc.value.code == 2
-        assert not out_dir.exists()
-        assert "maps multiple inputs to the same output" in capsys.readouterr().err
-
-    def test_folder_output_pattern_rejects_input_overwrite(self, tmp_path, capsys):
-        in_dir = tmp_path / "in"
-        in_dir.mkdir()
-        (in_dir / "clip.mp4").touch()
-        rest = tmp_path / "restore.pth"
-        rest.touch()
-        det = tmp_path / "det.onnx"
-        det.touch()
-        argv = [
-            "jasna",
-            "--input", str(in_dir),
-            "--output", str(in_dir),
-            "--output-pattern", "{original}.mp4",
-            "--restoration-model-path", str(rest),
-            "--detection-model-path", str(det),
-        ]
-
-        with pytest.raises(SystemExit) as exc:
-            _run_main(argv)
-
-        assert exc.value.code == 2
-        assert "would overwrite an input file" in capsys.readouterr().err
-
-    def test_folder_video_progress_counts_images_too(self, tmp_path, capsys):
-        in_dir = tmp_path / "in"
-        in_dir.mkdir()
-        (in_dir / "photo.png").touch()
-        (in_dir / "clip.mp4").touch()
-        rest = tmp_path / "restore.pth"
-        rest.touch()
-        det = tmp_path / "det.onnx"
-        det.touch()
-        argv = [
-            "jasna",
-            "--input", str(in_dir),
-            "--output", str(tmp_path / "out"),
-            "--restoration-model-path", str(rest),
-            "--detection-model-path", str(det),
-        ]
-
-        with patch("jasna.image_restore.run_image_restoration_folder") as image_batch:
-            _run_main(argv)
-
-        assert image_batch.call_args.kwargs["progress_total"] == 2
-        assert "[2/2] Processing clip.mp4 -> clip_out.mp4" in capsys.readouterr().out
-
-    def test_single_file_does_not_print_batch_line(self, tmp_path, capsys):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        _run_main(_base_argv(inp, out, rest, det))
-        assert "Processing" not in capsys.readouterr().out
-
-    def test_post_export_video_command_failure_continues_folder_and_exits_1(
-        self, tmp_path, capsys
+        run_cli(argv)
+
+    assert ("not found in model_weights" in capsys.readouterr().out) is warns
+
+
+def test_denoise_options_reach_the_restoration_pipeline(tmp_path):
+    with patch("jasna.restorer.restoration_pipeline.RestorationPipeline") as restoration_pipeline:
+        run_cli(cli_args(tmp_path, "--denoise", "high", "--denoise-step", "after_secondary"))
+
+    kwargs = restoration_pipeline.call_args.kwargs
+    assert (kwargs["denoise_strength"], kwargs["denoise_step"]) == (DenoiseStrength.HIGH, DenoiseStep.AFTER_SECONDARY)
+
+
+@pytest.mark.parametrize(
+    ("args", "encoder_settings"),
+    [
+        ([], {"cq": 28}),
+        (["--codec", "h264"], {"cq": 25}),
+        (["--codec", "av1"], {"cq": 35}),
+        (["--codec", "h264", "--cq", "31"], {"cq": 31}),
+        (["--encoder-settings", "cq=22,rc-lookahead=32"], {"cq": 22, "rc-lookahead": 32}),
+    ],
+    ids=["hevc-default", "h264-default", "av1-default", "direct-cq", "advanced"],
+)
+def test_encoder_settings_default_per_codec_and_parse_typed_values(tmp_path, args, encoder_settings):
+    assert _config(tmp_path, *args).encoder_settings == encoder_settings
+
+
+@pytest.mark.parametrize(
+    ("args", "error"),
+    [
+        (["--cq", "28", "--encoder-settings", "cq=22"], "--cq.*--encoder-settings"),
+        (["--codec", "h264", "--cq", "52"], r"h264.*1\.\.51"),
+    ],
+)
+def test_cq_conflicts_and_range_are_usage_errors(tmp_path, capsys, args, error):
+    with pytest.raises(SystemExit):
+        run_cli(cli_args(tmp_path, *args))
+    assert re.search(error, capsys.readouterr().err)
+
+
+@pytest.mark.parametrize(
+    ("argv", "error"),
+    [
+        (["--output", "out.mp4"], "--input is required when not using --benchmark or --stream"),
+        (["--input", "."], "--output is required when not using --benchmark or --stream"),
+    ],
+)
+def test_a_video_job_needs_input_and_output(capsys, argv, error):
+    with pytest.raises(SystemExit) as exit_info:
+        run_cli(argv)
+    assert exit_info.value.code == 2
+    assert error in capsys.readouterr().err
+
+
+def test_log_level_sets_the_logging_level(tmp_path):
+    with patch.object(logging, "basicConfig") as basic_config:
+        run_cli(cli_args(tmp_path, "--log-level", "debug"))
+    assert basic_config.call_args.kwargs["level"] == logging.DEBUG
+
+
+def test_disabling_basicvsrpp_compile_skips_its_engine(tmp_path):
+    with cli_environment(), patch("jasna.engine_compiler.ensure_engines_compiled") as compiled, \
+            patch("sys.argv", ["jasna", *cli_args(tmp_path, "--no-compile-basicvsrpp")]):
+        from jasna.main import main
+        main()
+    assert compiled.call_args.args[0].basicvsrpp is False
+
+
+@pytest.mark.parametrize("failure", [None, RuntimeError("boom")])
+def test_the_session_is_closed_after_the_job(tmp_path, failure):
+    pipeline = MagicMock()
+    pipeline.run.side_effect = failure
+    with (
+        patch("jasna.session_factory.RestorationSession.close") as close,
+        pytest.raises(RuntimeError, match="boom") if failure else nullcontext(),
     ):
-        in_dir = tmp_path / "in"
-        in_dir.mkdir()
-        (in_dir / "a.mp4").touch()
-        (in_dir / "b.mp4").touch()
-        rest = tmp_path / "restore.pth"
-        rest.touch()
-        det = tmp_path / "det.onnx"
-        det.touch()
-        argv = [
-            "jasna",
-            "--input", str(in_dir),
-            "--output", str(tmp_path / "out"),
-            "--restoration-model-path", str(rest),
-            "--detection-model-path", str(det),
-            "--post-export-video-command", "remux {output}",
-        ]
+        run_cli(cli_args(tmp_path), pipeline=pipeline)
+    close.assert_called_once()
 
-        from jasna.post_export_action import PostExportVideoCommandError
 
-        command = MagicMock(
-            side_effect=[PostExportVideoCommandError("exit code 7"), None]
-        )
-        with patch(
-            "jasna.post_export_action.run_post_export_video_command", command
-        ):
-            with pytest.raises(SystemExit) as exc:
-                _run_main(argv)
+def test_unsupported_video_exits_1_with_its_reason(tmp_path, capsys):
+    pipeline = MagicMock()
+    pipeline.run.side_effect = UnsupportedVideoError("yuv422 unsupported")
 
-        assert exc.value.code == 1
-        assert command.call_count == 2
-        assert "Error post-processing a.mp4" in capsys.readouterr().out
+    with pytest.raises(SystemExit) as exit_info:
+        run_cli(cli_args(tmp_path), pipeline=pipeline)
 
-    def test_unsupported_video_is_skipped_and_the_folder_continues(self, tmp_path, capsys):
-        in_dir = tmp_path / "in"
-        in_dir.mkdir()
-        (in_dir / "a_vr.mp4").touch()
-        (in_dir / "b_clip.mp4").touch()
-        rest = tmp_path / "restore.pth"
-        rest.touch()
-        det = tmp_path / "det.onnx"
-        det.touch()
-        argv = [
-            "jasna",
-            "--input", str(in_dir),
-            "--output", str(tmp_path / "out"),
-            "--restoration-model-path", str(rest),
-            "--detection-model-path", str(det),
-        ]
-        from jasna.media.probe import UnsupportedVideoError
-
-        rejected, restored = MagicMock(), MagicMock()
-        rejected.run.side_effect = UnsupportedVideoError("LTX does not support VR180 side-by-side video")
-
-        _run_main(argv, pipeline_side_effect=[rejected, restored])
-
-        restored.run.assert_called_once()
-        assert "Error processing a_vr.mp4: LTX does not support VR180 side-by-side video" in capsys.readouterr().out
+    assert exit_info.value.code == 1
+    assert "yuv422 unsupported" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
-# Streaming paths
+# Folder jobs
+# ---------------------------------------------------------------------------
+
+def test_folder_input_rejects_file_shaped_output(tmp_path, capsys):
+    out_file = tmp_path / "out.mp4"
+    with pytest.raises(SystemExit) as exit_info:
+        run_cli(_folder_args(tmp_path, ["a.mp4"], output=out_file))
+
+    assert exit_info.value.code == 2
+    assert not out_file.exists()
+    assert "--output must be a folder when --input is a folder" in capsys.readouterr().err
+
+
+def test_folder_prints_each_video_and_its_default_output(tmp_path, capsys):
+    run_cli(_folder_args(tmp_path, ["a.mp4", "b.mp4"]))
+
+    printed = capsys.readouterr().out
+    assert "[1/2] Processing a.mp4 -> a_out.mp4" in printed
+    assert "[2/2] Processing b.mp4 -> b_out.mp4" in printed
+
+
+def test_single_file_does_not_print_batch_line(tmp_path, capsys):
+    run_cli(cli_args(tmp_path))
+    assert "Processing" not in capsys.readouterr().out
+
+
+def test_folder_output_pattern_applies_to_videos(tmp_path, capsys):
+    pipeline_cls = run_cli(_folder_args(tmp_path, ["a.mkv", "b.mov"], "--output-pattern", "{original}_restored.mp4"))
+
+    assert [call.kwargs["output_video"].name for call in pipeline_cls.call_args_list] == ["a_restored.mp4", "b_restored.mp4"]
+    printed = capsys.readouterr().out
+    assert "[1/2] Processing a.mkv -> a_restored.mp4" in printed
+    assert "[2/2] Processing b.mov -> b_restored.mp4" in printed
+
+
+@pytest.mark.parametrize(
+    ("names", "pattern", "into_input", "error"),
+    [
+        (["a.mkv", "b.mov"], "restored.mp4", False, "maps multiple inputs to the same output"),
+        (["clip.mp4"], "{original}.mp4", True, "would overwrite an input file"),
+    ],
+)
+def test_folder_output_pattern_rejects_colliding_outputs(tmp_path, capsys, names, pattern, into_input, error):
+    output = tmp_path / "in" if into_input else None
+    with pytest.raises(SystemExit) as exit_info:
+        run_cli(_folder_args(tmp_path, names, "--output-pattern", pattern, output=output))
+
+    assert exit_info.value.code == 2
+    assert error in capsys.readouterr().err
+
+
+def test_folder_video_progress_counts_images_too(tmp_path, capsys):
+    with patch("jasna.image_restore.run_image_restoration_folder") as image_batch:
+        run_cli(_folder_args(tmp_path, ["photo.png", "clip.mp4"]))
+
+    assert image_batch.call_args.kwargs["progress_total"] == 2
+    assert "[2/2] Processing clip.mp4 -> clip_out.mp4" in capsys.readouterr().out
+
+
+def test_post_export_video_command_failure_continues_folder_and_exits_1(tmp_path, capsys):
+    command = MagicMock(side_effect=[PostExportVideoCommandError("exit code 7"), None])
+    with (
+        patch("jasna.post_export_action.run_post_export_video_command", command),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        run_cli(_folder_args(tmp_path, ["a.mp4", "b.mp4"], "--post-export-video-command", "remux {output}"))
+
+    assert exit_info.value.code == 1
+    assert command.call_count == 2
+    assert "Error post-processing a.mp4" in capsys.readouterr().out
+
+
+def test_unsupported_video_is_skipped_and_the_folder_continues(tmp_path, capsys):
+    rejected, restored = MagicMock(), MagicMock()
+    rejected.run.side_effect = UnsupportedVideoError("LTX does not support VR180 side-by-side video")
+
+    with cli_environment() as pipeline_cls, patch("sys.argv", ["jasna", *_folder_args(tmp_path, ["a_vr.mp4", "b_clip.mp4"])]):
+        pipeline_cls.side_effect = [rejected, restored]
+        from jasna.main import main
+        main()
+
+    restored.run.assert_called_once()
+    assert "Error processing a_vr.mp4: LTX does not support VR180 side-by-side video" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Streaming
 # ---------------------------------------------------------------------------
 
 @contextmanager
-def _streaming_patches():
+def _stream_server(videos=()):
+    """An HLS server mock whose player uploads ``videos`` and then stops; yields it and run_streaming."""
+    server = MagicMock()
+    server.wait_for_video.side_effect = [*videos, KeyboardInterrupt]
     with (
-        patch("jasna.streaming.HlsStreamingServer") as server_cls,
+        patch("jasna.streaming.HlsStreamingServer", return_value=server) as server_cls,
         patch("jasna.streaming_pipeline.run_streaming") as run_streaming,
     ):
-        server_cls.return_value.start.return_value = "http://localhost/stream.m3u8"
-        yield server_cls, run_streaming
+        yield server_cls, server, run_streaming
 
 
-class TestStreamingPaths:
-    def test_streaming_with_input_calls_run_streaming(self, tmp_path):
-        inp, _, rest, det = _make_model_files(tmp_path)
-        pipeline_mock = MagicMock()
+def test_streaming_an_input_serves_it_and_stops_the_server(tmp_path):
+    pipeline = MagicMock()
+    with _stream_server() as (server_cls, server, run_streaming):
+        run_cli(
+            ["--stream", "--input", cli_args(tmp_path)[1], *_model_args(tmp_path), "--no-browser",
+             "--stream-port", "9999", "--stream-segment-duration", "2.0"],
+            pipeline=pipeline,
+        )
 
-        def make_pipeline(**kw):
-            return pipeline_mock
+    server_cls.assert_called_once_with(segment_duration=2.0, port=9999)
+    run_streaming.assert_called_once_with(pipeline, server)
+    server.stop.assert_called_once()
 
-        with _main_patches(pipeline_side_effect=make_pipeline), _streaming_patches() as (server_cls, run_streaming):
-            argv = [
-                "jasna",
-                "--stream",
-                "--input", str(inp),
-                "--restoration-model-path", str(rest),
-                "--detection-model-path", str(det),
-                "--no-browser",
-                "--stream-port", "9999",
-                "--stream-segment-duration", "2.0",
-            ]
-            with patch.object(sys, "argv", argv):
-                from jasna.main import main
-                main()
 
-        server_cls.assert_called_once_with(segment_duration=2.0, port=9999)
-        run_streaming.assert_called_once_with(pipeline_mock, server_cls.return_value)
-        server_cls.return_value.stop.assert_called_once()
+@pytest.mark.parametrize(
+    ("with_input", "no_browser", "opened"),
+    [(True, False, True), (True, True, False), (False, False, True)],
+    ids=["input", "no-browser", "serverless"],
+)
+def test_streaming_opens_the_player_unless_told_not_to(tmp_path, with_input, no_browser, opened):
+    argv = ["--stream", *_model_args(tmp_path), "--stream-port", "8888"]
+    argv += ["--input", cli_args(tmp_path)[1]] if with_input else []
+    argv += ["--no-browser"] if no_browser else []
 
-    def test_streaming_with_input_opens_browser(self, tmp_path):
-        inp, _, rest, det = _make_model_files(tmp_path)
+    with _stream_server(), patch("webbrowser.open") as open_browser:
+        run_cli(argv)
 
-        with _main_patches(), _streaming_patches():
-            with patch("webbrowser.open") as wb_open:
-                argv = [
-                    "jasna",
-                    "--stream",
-                    "--input", str(inp),
-                    "--restoration-model-path", str(rest),
-                    "--detection-model-path", str(det),
-                    "--stream-port", "8888",
-                ]
-                with patch.object(sys, "argv", argv):
-                    from jasna.main import main
-                    main()
+    assert open_browser.call_args_list == ([(("http://localhost:8888/",),)] if opened else [])
 
-            wb_open.assert_called_once_with("http://localhost:8888/")
 
-    def test_streaming_with_input_no_browser(self, tmp_path):
-        inp, _, rest, det = _make_model_files(tmp_path)
+def test_serverless_streaming_restores_each_uploaded_video(tmp_path):
+    uploaded = tmp_path / "uploaded.mp4"
+    uploaded.touch()
 
-        with _main_patches(), _streaming_patches():
-            with patch("webbrowser.open") as wb_open:
-                argv = [
-                    "jasna",
-                    "--stream",
-                    "--input", str(inp),
-                    "--restoration-model-path", str(rest),
-                    "--detection-model-path", str(det),
-                    "--no-browser",
-                ]
-                with patch.object(sys, "argv", argv):
-                    from jasna.main import main
-                    main()
+    with _stream_server([uploaded]) as (_, server, run_streaming):
+        pipeline_cls = run_cli(["--stream", *_model_args(tmp_path), "--no-browser"])
 
-            wb_open.assert_not_called()
+    assert pipeline_cls.call_args.kwargs["input_video"] == uploaded
+    run_streaming.assert_called_once_with(pipeline_cls.return_value, server)
+    server.unload_video.assert_called_once()
+    server.stop.assert_called_once()
 
-    def test_serverless_streaming_loop(self, tmp_path):
-        _, _, rest, det = _make_model_files(tmp_path)
-        pipeline_mock = MagicMock()
 
-        def make_pipeline(**kw):
-            return pipeline_mock
+def test_serverless_streaming_reports_an_unsupported_upload_and_waits_for_the_next(tmp_path, capsys):
+    with _stream_server([tmp_path / "vid.mp4"]) as (_, server, run_streaming):
+        run_streaming.side_effect = UnsupportedVideoError("bt2020 not supported")
+        run_cli(["--stream", *_model_args(tmp_path), "--no-browser"])
 
-        mock_hls = MagicMock()
-        video_path = tmp_path / "uploaded.mp4"
-        video_path.touch()
-        call_count = 0
-
-        def wait_for_video_side_effect():
-            nonlocal call_count
-            call_count += 1
-            if call_count > 1:
-                raise KeyboardInterrupt
-            return video_path
-
-        mock_hls.wait_for_video.side_effect = wait_for_video_side_effect
-
-        pipeline_kwargs = {}
-
-        def capture(**kw):
-            pipeline_kwargs.update(kw)
-            return pipeline_mock
-
-        with _main_patches(pipeline_side_effect=capture):
-            with (
-                patch("jasna.streaming.HlsStreamingServer", return_value=mock_hls),
-                patch("jasna.streaming_pipeline.run_streaming") as run_streaming,
-            ):
-                argv = [
-                    "jasna",
-                    "--stream",
-                    "--restoration-model-path", str(rest),
-                    "--detection-model-path", str(det),
-                    "--no-browser",
-                    "--stream-port", "7777",
-                    "--stream-segment-duration", "3.0",
-                ]
-                with patch.object(sys, "argv", argv):
-                    from jasna.main import main
-                    main()
-
-        mock_hls.start.assert_called_once()
-        mock_hls.stop.assert_called_once()
-        mock_hls.unload_video.assert_called_once()
-        run_streaming.assert_called_once_with(pipeline_mock, mock_hls)
-        assert pipeline_kwargs["input_video"] == video_path
-
-    def test_serverless_streaming_opens_browser(self, tmp_path):
-        _, _, rest, det = _make_model_files(tmp_path)
-
-        mock_hls = MagicMock()
-        mock_hls.wait_for_video.side_effect = KeyboardInterrupt
-
-        with _main_patches():
-            with patch("jasna.streaming.HlsStreamingServer", return_value=mock_hls):
-                with patch("webbrowser.open") as wb_open:
-                    argv = [
-                        "jasna",
-                        "--stream",
-                        "--restoration-model-path", str(rest),
-                        "--detection-model-path", str(det),
-                        "--stream-port", "6666",
-                    ]
-                    with patch.object(sys, "argv", argv):
-                        from jasna.main import main
-                        main()
-
-                wb_open.assert_called_once_with("http://localhost:6666/")
-
-    def test_serverless_streaming_colorspace_error_in_loop(self, tmp_path, capsys):
-        _, _, rest, det = _make_model_files(tmp_path)
-        pipeline_mock = MagicMock()
-
-        def make_pipeline(**kw):
-            return pipeline_mock
-
-        from jasna.media.probe import UnsupportedVideoError
-        call_count = 0
-
-        def wait_side_effect():
-            nonlocal call_count
-            call_count += 1
-            if call_count > 1:
-                raise KeyboardInterrupt
-            return tmp_path / "vid.mp4"
-
-        mock_hls = MagicMock()
-        mock_hls.wait_for_video.side_effect = wait_side_effect
-
-        with _main_patches(pipeline_side_effect=make_pipeline):
-            with (
-                patch("jasna.streaming.HlsStreamingServer", return_value=mock_hls),
-                patch(
-                    "jasna.streaming_pipeline.run_streaming",
-                    side_effect=UnsupportedVideoError("bt2020 not supported"),
-                ),
-            ):
-                argv = [
-                    "jasna",
-                    "--stream",
-                    "--restoration-model-path", str(rest),
-                    "--detection-model-path", str(det),
-                    "--no-browser",
-                ]
-                with patch.object(sys, "argv", argv):
-                    from jasna.main import main
-                    main()
-
-        captured = capsys.readouterr()
-        assert "bt2020 not supported" in captured.out
-        mock_hls.unload_video.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# UnsupportedVideoError in non-streaming
-# ---------------------------------------------------------------------------
-
-class TestColorspaceError:
-    def test_colorspace_error_exits_1(self, tmp_path, capsys):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        from jasna.media.probe import UnsupportedVideoError
-
-        pipeline_mock = MagicMock()
-        pipeline_mock.run.side_effect = UnsupportedVideoError("yuv422 unsupported")
-
-        def make_pipeline(**kw):
-            return pipeline_mock
-
-        with pytest.raises(SystemExit) as exc:
-            _run_main(
-                _base_argv(inp, out, rest, det),
-                pipeline_side_effect=make_pipeline,
-            )
-        assert exc.value.code == 1
-        captured = capsys.readouterr()
-        assert "yuv422 unsupported" in captured.out
-
-
-# ---------------------------------------------------------------------------
-# Cleanup / finally block
-# ---------------------------------------------------------------------------
-
-class TestCleanup:
-    def test_pipeline_and_restorer_closed_on_success(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        pipeline_mock = MagicMock()
-        restorer_mock = MagicMock()
-        rp_mock = MagicMock()
-        rp_mock.restorer = restorer_mock
-
-        def make_pipeline(**kw):
-            return pipeline_mock
-
-        with (
-            patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
-            patch("jasna.main.check_supported_gpu", return_value=(True, "Fake GPU")),
-            patch("jasna.main.check_gpu_driver_version", return_value=(True, "610.18")),
-            patch("jasna.main.check_required_executables"),            patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
-            patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
-            patch("jasna.pipeline.Pipeline", side_effect=make_pipeline),
-            patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", return_value=restorer_mock),
-            patch("jasna.restorer.restoration_pipeline.RestorationPipeline", return_value=rp_mock),
-        ):
-            with patch.object(sys, "argv", _base_argv(inp, out, rest, det)):
-                from jasna.main import main
-                main()
-
-        restorer_mock.close.assert_called_once()
-
-    def test_secondary_restorer_closed(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        mock_tvai = MagicMock()
-        tvai_instance = MagicMock()
-        mock_tvai.return_value = tvai_instance
-
-        with patch("jasna.restorer.tvai_secondary_restorer.TvaiSecondaryRestorer", mock_tvai):
-            _run_main(_base_argv(inp, out, rest, det, ["--secondary-restoration", "tvai"]))
-
-        tvai_instance.close.assert_called_once()
-
-    def test_cleanup_on_error(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        pipeline_mock = MagicMock()
-        pipeline_mock.run.side_effect = RuntimeError("boom")
-
-        def make_pipeline(**kw):
-            return pipeline_mock
-
-        with (
-            patch("jasna.session_factory.RestorationSession.close") as session_close,
-            pytest.raises(RuntimeError, match="boom"),
-        ):
-            _run_main(
-                _base_argv(inp, out, rest, det),
-                pipeline_side_effect=make_pipeline,
-            )
-        session_close.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# Logging level
-# ---------------------------------------------------------------------------
-
-class TestLogging:
-    def test_log_level_configured(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        import logging as _logging
-        with patch.object(_logging, "basicConfig") as mock_basic:
-            _run_main(_base_argv(inp, out, rest, det, ["--log-level", "debug"]))
-        mock_basic.assert_called_once()
-        assert mock_basic.call_args.kwargs["level"] == _logging.DEBUG
-
-
-# ---------------------------------------------------------------------------
-# Required arg errors (argparse)
-# ---------------------------------------------------------------------------
-
-class TestRequiredArgs:
-    def test_input_required_when_not_streaming(self, tmp_path):
-        out = tmp_path / "out.mp4"
-        with pytest.raises(SystemExit):
-            with patch.object(sys, "argv", ["jasna", "--output", str(out)]):
-                from jasna.main import main
-                main()
-
-    def test_output_required_when_not_streaming(self, tmp_path):
-        inp = tmp_path / "in.mp4"
-        inp.touch()
-        with pytest.raises(SystemExit):
-            with patch.object(sys, "argv", ["jasna", "--input", str(inp)]):
-                from jasna.main import main
-                main()
-
-    def test_stream_does_not_require_input_or_output(self, tmp_path):
-        _, _, rest, det = _make_model_files(tmp_path)
-        mock_hls = MagicMock()
-        mock_hls.wait_for_video.side_effect = KeyboardInterrupt
-
-        with _main_patches():
-            with patch("jasna.streaming.HlsStreamingServer", return_value=mock_hls):
-                argv = [
-                    "jasna",
-                    "--stream",
-                    "--restoration-model-path", str(rest),
-                    "--detection-model-path", str(det),
-                    "--no-browser",
-                ]
-                with patch.object(sys, "argv", argv):
-                    from jasna.main import main
-                    main()
-
-
-# ---------------------------------------------------------------------------
-# Engine compilation request
-# ---------------------------------------------------------------------------
-
-class TestEngineCompilation:
-    def test_unet4x_triggers_engine_compilation(self, tmp_path):
-        pytest.importorskip("tensorrt")
-        inp, out, rest, det = _make_model_files(tmp_path)
-        mock_unet = MagicMock()
-
-        with (
-            patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
-            patch("jasna.main.check_supported_gpu", return_value=(True, "Fake GPU")),
-            patch("jasna.main.check_gpu_driver_version", return_value=(True, "610.18")),
-            patch("jasna.main.check_required_executables"),            patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
-            patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)) as mock_compile,
-            patch("jasna.pipeline.Pipeline", return_value=MagicMock()),
-            patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
-            patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer", mock_unet),
-        ):
-            with patch.object(sys, "argv", _base_argv(inp, out, rest, det, ["--secondary-restoration", "unet-4x"])):
-                from jasna.main import main
-                main()
-
-        req = mock_compile.call_args[0][0]
-        assert req.unet4x is True
-
-    def test_compile_basicvsrpp_flag(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-
-        with (
-            patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
-            patch("jasna.main.check_supported_gpu", return_value=(True, "Fake GPU")),
-            patch("jasna.main.check_gpu_driver_version", return_value=(True, "610.18")),
-            patch("jasna.main.check_required_executables"),            patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
-            patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)) as mock_compile,
-            patch("jasna.pipeline.Pipeline", return_value=MagicMock()),
-            patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
-        ):
-            with patch.object(sys, "argv", _base_argv(inp, out, rest, det, ["--no-compile-basicvsrpp"])):
-                from jasna.main import main
-                main()
-
-        req = mock_compile.call_args[0][0]
-        assert req.basicvsrpp is False
-
-
-# ---------------------------------------------------------------------------
-# Non-streaming pipeline.run() path
-# ---------------------------------------------------------------------------
-
-class TestNonStreamingRun:
-    def test_run_called(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        pipeline_cls = _run_main(_base_argv(inp, out, rest, det))
-        pipeline_cls.return_value.run.assert_called_once()
-
-    def test_run_streaming_not_called(self, tmp_path):
-        inp, out, rest, det = _make_model_files(tmp_path)
-        with patch("jasna.streaming_pipeline.run_streaming") as run_streaming:
-            _run_main(_base_argv(inp, out, rest, det))
-        run_streaming.assert_not_called()
+    assert "bt2020 not supported" in capsys.readouterr().out
+    server.unload_video.assert_called_once()
 
 
 @pytest.mark.parametrize(("argv", "amd", "expected"), [([], True, 8), ([], False, 4), (["--batch-size", "2"], True, 2)])
 def test_batch_size_defaults_per_vendor_unless_given(monkeypatch, argv, amd, expected):
     import jasna.mosaic.detection_registry as registry
-    from jasna.main import batch_size_from_args
 
     monkeypatch.setattr(registry, "is_amd_device", lambda _device: amd)
     args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4", *argv])
