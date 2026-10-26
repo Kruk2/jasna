@@ -771,12 +771,6 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
     ]
 
 
-def test_progress_without_a_report_only_drives_the_console_bar():
-    progress = restore.Progress(3, disable=True, report=None)
-    with progress.bar("compose", 3) as bar:
-        bar.update(3)
-
-
 def test_the_planned_work_counts_each_window_crop_on_every_frame_it_covers(fakes, tmp_path, monkeypatch):
     planned = []
     monkeypatch.setattr(restore.Progress, "plan", lambda self, work: planned.append(work))

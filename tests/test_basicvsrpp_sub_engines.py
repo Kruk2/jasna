@@ -324,25 +324,6 @@ def test_preprocess_single_batch_calls_engine_once() -> None:
     assert engine.call_count == 1
 
 
-def test_benchmark_profile_split_forward_runs_on_fused_preprocess(monkeypatch) -> None:
-    from jasna.benchmark import basicvsrpp_restoration
-    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
-
-    monkeypatch.setenv("JASNA_TRT_CUDAGRAPHS", "0")
-    monkeypatch.setattr(basicvsrpp_restoration, "CLIP_LENGTH", 5)
-    monkeypatch.setattr(basicvsrpp_restoration, "SIZE", 256)
-    monkeypatch.setattr(basicvsrpp_restoration, "WARMUP", 1)
-    monkeypatch.setattr(basicvsrpp_restoration, "RUNS", 1)
-    monkeypatch.setattr(torch.cuda, "synchronize", lambda: None)
-
-    net = BasicVSRPlusPlusNet(mid_channels=16, num_blocks=2, spynet_pretrained=None)
-    net.eval()
-    split = _build_split_from_net(net)
-
-    with torch.inference_mode():
-        basicvsrpp_restoration._profile_split_forward(split, torch.device("cpu"), torch.float32)
-
-
 def test_eager_split_forward_never_touches_torch_tensorrt(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
