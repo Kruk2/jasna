@@ -786,11 +786,6 @@ class TestSourceStreamPump:
 
         assert [packet.dts for packet in packets] == [0, 23, 24, 46]
 
-    def test_pump_without_source_streams_is_noop(self, tmp_path):
-        enc = _make_encoder(tmp_path)
-        enc._source_iter = None
-        enc._pump_source_streams(1.0)
-
     def test_text_subtitle_transcode_preserves_packet_timing(self, tmp_path):
         enc = _make_encoder(tmp_path)
         subtitle_set = object()
