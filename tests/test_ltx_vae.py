@@ -63,6 +63,11 @@ def _meta_ltx25_decoder() -> DiffusionVideoDecoder:
     return decoder.to(torch.bfloat16)
 
 
+def test_the_decoder_runs_stage5_at_the_shipped_window_whatever_the_checkpoint_says():
+    assert LTX25_DECODER_CONFIG["stage5_kernel"] == [11, 11, 11]
+    assert _meta_ltx25_decoder().stage5_kernel == loader.STAGE5_KERNEL == (9, 9, 9)
+
+
 def test_decoder_state_dict_renames_splits_and_drops():
     qkv_weight = torch.arange(12.0).reshape(6, 2)
     qkv_bias = torch.arange(6.0)
@@ -423,10 +428,10 @@ def test_decoder_load_success_preserves_cpu_weights_and_clears_overlay_sources(t
 def test_ltx25_tiling_needs_minimum_budget():
     decoder = _meta_ltx25_decoder()
     with pytest.raises(ValueError, match="Cannot fit"):
-        decoder.recommended_tiling_config(height=512, width=512, num_frames=121, free_bytes=2_800_000_000)
+        decoder.recommended_tiling_config(height=512, width=512, num_frames=121, free_bytes=2_000_000_000)
     config = decoder.recommended_tiling_config(height=512, width=512, num_frames=121, free_bytes=4_200_000_000)
-    assert config.frames == DimensionSizeConfig(tile_size=80, overlap=40)
-    assert config.height.overlap == config.width.overlap == 160
+    assert config.frames == DimensionSizeConfig(tile_size=80, overlap=32)
+    assert config.height.overlap == config.width.overlap == 128
     assert config.height.tile_size < 512 and config.width.tile_size < 512
     roomy = decoder.recommended_tiling_config(height=512, width=512, num_frames=121, free_bytes=24 << 30)
     assert (roomy.frames.tile_size, roomy.height.tile_size, roomy.width.tile_size) == (128, 512, 512)
@@ -438,7 +443,7 @@ def test_ltx25_tiling_fits_when_free_bytes_already_excludes_the_resident_decoder
     config = decoder.recommended_tiling_config(
         height=512, width=512, num_frames=121, free_bytes=rtx_3070_ti_free_after_decoder_load
     )
-    assert (config.frames.tile_size, config.height.tile_size, config.width.tile_size) == (88, 352, 352)
+    assert (config.frames.tile_size, config.height.tile_size, config.width.tile_size) == (64, 256, 256)
 
 
 def test_ltx25_tile_schedule_masks_partition_unity():
