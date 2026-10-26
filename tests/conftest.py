@@ -35,6 +35,42 @@ def pytest_configure(config):
 
 
 @pytest.fixture
+def tk_root():
+    """A CTk root window, destroyed after the test; skips when there is no display."""
+    from tkinter import TclError
+
+    import customtkinter as ctk
+
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    yield root
+    root.destroy()
+
+
+@pytest.fixture
+def jasna_app(monkeypatch, tmp_path):
+    """The real main window with settings under ``tmp_path`` and no GPU warm-up."""
+    from tkinter import TclError
+
+    from jasna.accelerator import AcceleratorVendor
+    from jasna.gui import app as app_module
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr(app_module, "_warm_up_cuda", lambda: (AcceleratorVendor.CPU, False))
+    try:
+        app = app_module.JasnaApp(skip_wizard=True)
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    yield app
+    if app.children:  # empty once the test has closed the window
+        app._stop_system_stats_poller()
+        app._main_thread.close()
+        app.destroy()
+
+
+@pytest.fixture
 def show_window():
     """Process Tk events until a window is viewable, so its widgets have real sizes.
 
