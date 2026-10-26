@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import struct
 import subprocess
+from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import av
 import torch
+from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
+from jasna.media.probe import VideoMetadata
 from jasna.pipeline import Pipeline
 from jasna.pipeline_items import PrimaryRestoreResult
 from jasna.os_utils import resolve_executable
@@ -66,6 +69,28 @@ def session_config(**overrides) -> SessionConfig:
     )
     base.update(overrides)
     return SessionConfig(**base)
+
+
+def video_metadata(*, fps: int = 24, num_frames: int = 2, **overrides) -> VideoMetadata:
+    """Probe result of an 8x8 8-bit BT.709 video of ``num_frames`` frames at ``fps``."""
+    values = dict(
+        video_file="input.mkv",
+        video_height=8,
+        video_width=8,
+        video_fps=float(fps),
+        average_fps=float(fps),
+        video_fps_exact=Fraction(fps),
+        codec_name="hevc",
+        duration=num_frames / fps,
+        time_base=Fraction(1, fps),
+        start_pts=0,
+        color_range=AvColorRange.MPEG,
+        color_space=AvColorspace.ITU709,
+        num_frames=num_frames,
+        is_10bit=False,
+    )
+    values.update(overrides)
+    return VideoMetadata(**values)
 
 
 def primary_result(
