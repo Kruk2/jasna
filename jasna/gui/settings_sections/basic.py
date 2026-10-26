@@ -20,17 +20,6 @@ MAX_CLIP_SIZE = 720
 CLIP_SIZE_STEP = 10
 
 
-def build_max_clip_size_slider(slider_class, parent, on_change, **kwargs):
-    return slider_class(
-        parent,
-        from_=MIN_CLIP_SIZE,
-        to=MAX_CLIP_SIZE,
-        number_of_steps=(MAX_CLIP_SIZE - MIN_CLIP_SIZE) // CLIP_SIZE_STEP,
-        command=on_change,
-        **kwargs,
-    )
-
-
 class BasicSection:
     def __init__(self, parent, widgets: dict, on_modified, on_max_clip_size_change):
         self._widgets = widgets
@@ -54,8 +43,12 @@ class BasicSection:
             row1, "90", 4, Colors.BG_PANEL
         )
         self._widgets["max_clip_size_val"].pack(side="right")
-        self._widgets["max_clip_size"] = build_max_clip_size_slider(
-            ctk.CTkSlider, row1, self._on_max_clip_size_slider,
+        self._widgets["max_clip_size"] = ctk.CTkSlider(
+            row1,
+            from_=MIN_CLIP_SIZE,
+            to=MAX_CLIP_SIZE,
+            number_of_steps=(MAX_CLIP_SIZE - MIN_CLIP_SIZE) // CLIP_SIZE_STEP,
+            command=self._on_max_clip_size_slider,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY,
             button_color=Colors.PRIMARY, width=200,
         )

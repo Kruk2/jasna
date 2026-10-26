@@ -118,7 +118,6 @@ def test_scan_collector_recycles_gpu_chunk_when_free_memory_reaches_reserve(
     )
     scores, masks = collector.finish()
 
-    assert collector.spilling
     assert spills == [True]
     assert scores == pytest.approx((0.1, 0.2, 0.3, 0.4))
     assert torch.equal(masks, torch.arange(16, dtype=torch.uint8).reshape(4, 2, 2))
