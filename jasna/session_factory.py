@@ -152,9 +152,11 @@ def build_restoration_session(
 ) -> RestorationSession:
     import torch
 
-    from jasna.accelerator import is_amd_device
+    from jasna.accelerator import is_amd_device, log_amd_backend
 
     device = torch.device(config.device)
+    if is_amd_device(device):
+        log_amd_backend(device)
     if config.tvai_denoise and config.secondary_restoration != "tvai":
         raise ValueError("TVAI Denoise requires secondary restoration 'tvai'")
     if is_amd_device(device) and config.secondary_restoration != "none":

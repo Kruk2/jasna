@@ -64,7 +64,6 @@ def configure_rocm_process_env() -> None:
     # Windows ROCm ships the AOTriton kernel images in a separate device wheel;
     # without them the first flash/mem-efficient SDPA launch dies with a HIP error.
     if not has_aotriton_flash_images(Path(torch.__file__).parent / "lib"):
-        log.warning("PyTorch has no AOTriton attention kernels installed; attention runs slower without them")
         torch.backends.cuda.enable_flash_sdp(False)
         torch.backends.cuda.enable_mem_efficient_sdp(False)
 
@@ -144,6 +143,30 @@ def load_gpu_libraries_ahead(device: torch.device, dtype: torch.dtype) -> None:
         from triton.runtime.cache import triton_key
 
         triton_key()
+
+
+_AMD_TUNING_ENV = ("MIOPEN_FIND_MODE", "MIOPEN_DEBUG_CONV_GEMM", "PYTORCH_MIOPEN_SUGGEST_NHWC")
+
+
+@functools.cache
+def log_amd_backend(device: torch.device) -> None:
+    """Log once per process what decides AMD speed; a missing attention or video runtime warns."""
+    from jasna.os_utils import check_amd_amf_runtime
+
+    aotriton = has_aotriton_flash_images(Path(torch.__file__).parent / "lib")
+    amf, _ = check_amd_amf_runtime()
+    log.log(
+        logging.INFO if aotriton and amf else logging.WARNING,
+        "AMD backend: %s (%s), torch %s, HIP %s, %s kernels, AOTriton attention %s, AMF video %s, %s",
+        torch.cuda.get_device_name(device),
+        amd_gpu_architecture(device),
+        torch.__version__,
+        torch.version.hip,
+        "Triton" if has_triton() else "prebuilt",
+        "yes" if aotriton else "missing (attention runs slower)",
+        "yes" if amf else "missing",
+        " ".join(f"{name}={os.environ.get(name, '-')}" for name in _AMD_TUNING_ENV),
+    )
 
 
 def supports_nvfp4(device: torch.device | str) -> bool:

@@ -116,3 +116,35 @@ def test_process_env_is_left_alone_off_rocm_including_the_channels_last_convs(mo
     monkeypatch.delenv("PYTORCH_MIOPEN_SUGGEST_NHWC", raising=False)
     configure_rocm_process_env()
     assert "PYTORCH_MIOPEN_SUGGEST_NHWC" not in os.environ
+
+
+@pytest.mark.parametrize(
+    ("image_files", "amf", "level"),
+    [
+        (("amd-gfx120x/flash/attn_fwd.zip",), True, "INFO"),
+        ((), True, "WARNING"),
+        (("amd-gfx120x/flash/attn_fwd.zip",), False, "WARNING"),
+    ],
+)
+def test_amd_backend_line_warns_when_a_runtime_is_missing(monkeypatch, tmp_path, caplog, image_files, amf, level):
+    from jasna import os_utils
+
+    _torch_lib(tmp_path, *image_files)
+    monkeypatch.setattr(accelerator.torch, "__file__", str(tmp_path / "__init__.py"))
+    monkeypatch.setattr(os_utils, "check_amd_amf_runtime", lambda: (amf, ""))
+    monkeypatch.setattr(accelerator, "has_triton", lambda: False)
+    monkeypatch.setattr(accelerator, "amd_gpu_architecture", lambda device: "gfx1201")
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: "AMD Radeon AI PRO R9700")
+    monkeypatch.setattr(torch.version, "hip", "7.2")
+    monkeypatch.setenv("MIOPEN_FIND_MODE", "HYBRID")
+    accelerator.log_amd_backend.cache_clear()
+
+    with caplog.at_level("INFO", logger="jasna.accelerator"):
+        accelerator.log_amd_backend(torch.device("cuda:0"))
+        accelerator.log_amd_backend(torch.device("cuda:0"))
+
+    [record] = caplog.records
+    assert record.levelname == level
+    assert "R9700 (gfx1201)" in record.message
+    assert "prebuilt kernels" in record.message
+    assert "MIOPEN_FIND_MODE=HYBRID" in record.message
