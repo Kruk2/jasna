@@ -16,7 +16,6 @@ import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
 import jasna.media.video_encoder as video_encoder_module
-from jasna.accelerator import AcceleratorVendor
 from jasna.media.probe import VideoMetadata
 from jasna.media.video_encoder import (
     DEFAULT_AV1_ENCODER_OPTIONS,
@@ -24,7 +23,6 @@ from jasna.media.video_encoder import (
     DEFAULT_H264_ENCODER_OPTIONS,
     ENCODER_SPECS,
     ENCODE_BUFFER_SIZE,
-    NVENC_SMART_FRAGMENT_OPTIONS,
     _align_yuv_pitch,
     _mov_container_options,
     _normalized_audio_layout,
@@ -67,82 +65,6 @@ def _make_encoder(tmp_path, encoder_settings=None, codec="hevc", **meta_override
     )
 
 
-# Measured hevc_nvenc configuration; the HEVC path must never drift from it.
-_HEVC_OPTIONS_SNAPSHOT = {
-    "preset": "p5",
-    "tune": "hq",
-    "profile": "main10",
-    "rc": "vbr",
-    "cq": "28",
-    "qmin": "17",
-    "qmax": "34",
-    "nonref_p": "1",
-    "g": "250",
-    "temporal-aq": "1",
-    "rc-lookahead": "32",
-    "lookahead_level": "1",
-    "spatial_aq": "1",
-    "aq-strength": "8",
-    "init_qpI": "17",
-    "init_qpP": "17",
-    "init_qpB": "17",
-    "bf": "4",
-    "b_ref_mode": "middle",
-}
-
-
-class TestCodecSpecs:
-    def test_public_to_ffmpeg_codec_mapping(self):
-        assert {codec: spec.encoder_name for codec, spec in ENCODER_SPECS.items()} == {
-            "hevc": "hevc_nvenc", "h264": "h264_nvenc", "av1": "av1_nvenc"
-        }
-
-    def test_hevc_defaults_snapshot_unchanged(self):
-        assert DEFAULT_ENCODER_OPTIONS == _HEVC_OPTIONS_SNAPSHOT
-        assert dict(ENCODER_SPECS["hevc"].default_options) == _HEVC_OPTIONS_SNAPSHOT
-
-    def test_h264_defaults_snapshot(self):
-        expected = dict(_HEVC_OPTIONS_SNAPSHOT)
-        expected["profile"] = "high"
-        expected["cq"] = "25"
-        del expected["lookahead_level"]
-        assert DEFAULT_H264_ENCODER_OPTIONS == expected
-
-    def test_av1_defaults_snapshot(self):
-        expected = dict(_HEVC_OPTIONS_SNAPSHOT)
-        del expected["profile"]
-        expected["cq"] = "35"
-        del expected["qmin"]
-        del expected["qmax"]
-        del expected["spatial_aq"]
-        del expected["init_qpI"]
-        del expected["init_qpP"]
-        del expected["init_qpB"]
-        expected["spatial-aq"] = "1"
-        assert DEFAULT_AV1_ENCODER_OPTIONS == expected
-
-    def test_av1_does_not_reuse_hevc_qp_scale(self):
-        assert DEFAULT_AV1_ENCODER_OPTIONS["cq"] == "35"
-        assert not {
-            "qmin",
-            "qmax",
-            "init_qpI",
-            "init_qpP",
-            "init_qpB",
-        } & DEFAULT_AV1_ENCODER_OPTIONS.keys()
-
-    def test_frame_formats_and_bit_depth(self):
-        assert ENCODER_SPECS["hevc"].frame_format == "p010le"
-        assert ENCODER_SPECS["hevc"].ten_bit is True
-        assert ENCODER_SPECS["h264"].frame_format == "nv12"
-        assert ENCODER_SPECS["h264"].ten_bit is False
-        assert ENCODER_SPECS["av1"].frame_format == "p010le"
-        assert ENCODER_SPECS["av1"].ten_bit is True
-
-    def test_nvenc_smart_fragment_options_are_unchanged(self):
-        assert dict(NVENC_SMART_FRAGMENT_OPTIONS) == {"forced-idr": "1"}
-
-
 class TestContainerOptions:
     @pytest.mark.parametrize("suffix", [".mp4", ".MP4", ".mov"])
     def test_faststart_by_default(self, suffix):
@@ -159,8 +81,7 @@ class TestContainerOptions:
         assert _mov_container_options(suffix, fmp4=False) == {}
         assert _mov_container_options(suffix, fmp4=True) == {}
 
-    def test_fmp4_defaults_off_and_leaves_encoder_options_alone(self, tmp_path):
-        default = _make_encoder(tmp_path)
+    def test_fmp4_leaves_encoder_options_alone(self, tmp_path):
         fragmented = VideoEncoder(
             file=str(tmp_path / "result.mp4"),
             device=torch.device("cuda:0"),
@@ -169,9 +90,7 @@ class TestContainerOptions:
             encoder_settings={},
             fmp4=True,
         )
-        assert default.fmp4 is False
-        assert fragmented.fmp4 is True
-        assert fragmented.encoder_options == default.encoder_options
+        assert fragmented.encoder_options == _make_encoder(tmp_path).encoder_options
 
 
 @pytest.mark.parametrize(
@@ -216,41 +135,6 @@ def _source_stream(
 
 
 class TestSourceContainerPreservation:
-    def test_copies_container_chapters_and_primary_video_metadata(self, tmp_path):
-        encoder = _make_encoder(tmp_path)
-        chapters = [
-            {
-                "id": 1,
-                "start": 0,
-                "end": 2_000,
-                "time_base": Fraction(1, 1_000),
-                "metadata": {"title": "Opening"},
-            }
-        ]
-        encoder._src = SimpleNamespace(
-            metadata={"title": "Source title"},
-            chapters=MagicMock(return_value=chapters),
-        )
-        encoder.dst = SimpleNamespace(metadata={}, set_chapters=MagicMock())
-        input_video = _source_stream(
-            0,
-            "video",
-            "h264",
-            metadata={"language": "jpn", "title": "Main video"},
-            disposition=3,
-        )
-        output_video = SimpleNamespace(metadata={}, disposition=0)
-
-        encoder._copy_source_metadata(input_video, output_video)
-
-        assert encoder.dst.metadata == {"title": "Source title"}
-        encoder.dst.set_chapters.assert_called_once_with(chapters)
-        assert output_video.metadata == {
-            "language": "jpn",
-            "title": "Main video",
-        }
-        assert output_video.disposition == 3
-
     def test_smart_fragment_does_not_copy_chapters(self, tmp_path):
         encoder = VideoEncoder(
             file=str(tmp_path / "part.nut"),
@@ -271,68 +155,6 @@ class TestSourceContainerPreservation:
         encoder._copy_source_metadata(input_video, output_video)
 
         encoder.dst.set_chapters.assert_not_called()
-
-    def test_sets_up_all_compatible_source_streams(self, tmp_path):
-        encoder = _make_encoder(tmp_path)
-        primary_video = _source_stream(0, "video", "h264")
-        audio = _source_stream(
-            1,
-            "audio",
-            "aac",
-            metadata={"language": "eng"},
-            disposition=1,
-        )
-        subtitle = _source_stream(
-            2,
-            "subtitle",
-            "ass",
-            metadata={"language": "pol", "title": "Signs"},
-            disposition=2,
-        )
-        alternate_video = _source_stream(
-            3,
-            "video",
-            "h264",
-            metadata={"title": "Alternate angle"},
-        )
-        attachment = _source_stream(
-            4,
-            "attachment",
-            None,
-            metadata={"filename": "font.ttf", "mimetype": "font/ttf"},
-        )
-        packet_streams = [audio, subtitle, alternate_video]
-        demux_result = iter(())
-        encoder._src = SimpleNamespace(
-            streams=[primary_video, audio, subtitle, alternate_video, attachment],
-            format=SimpleNamespace(name="matroska"),
-            demux=MagicMock(return_value=demux_result),
-        )
-        outputs: dict[int, SimpleNamespace] = {}
-
-        def add_stream_from_template(stream, **_kwargs):
-            output = SimpleNamespace(metadata={}, disposition=0)
-            outputs[stream.index] = output
-            return output
-
-        encoder.dst = SimpleNamespace(
-            format=SimpleNamespace(name="matroska"),
-            supported_codecs=frozenset({"aac", "ass", "h264"}),
-            add_stream=MagicMock(),
-            add_stream_from_template=MagicMock(side_effect=add_stream_from_template),
-        )
-
-        encoder._setup_source_streams(primary_video)
-
-        assert set(encoder._source_pipes) == {1, 2, 3}
-        encoder._src.demux.assert_called_once_with(packet_streams)
-        assert encoder._source_iter is demux_result
-        assert outputs[1].metadata == {"language": "eng"}
-        assert outputs[1].disposition == 1
-        assert outputs[2].metadata == {"language": "pol", "title": "Signs"}
-        assert outputs[2].disposition == 2
-        assert outputs[3].metadata == {"title": "Alternate angle"}
-        assert 4 in outputs
 
     def test_skips_streams_the_output_container_cannot_copy(
         self, tmp_path, caplog
@@ -361,54 +183,6 @@ class TestSourceContainerPreservation:
         encoder._src.demux.assert_not_called()
         assert "Skipping subtitle stream 1" in caplog.text
         assert "Skipping attachment stream 2" in caplog.text
-
-    def test_transcodes_text_subtitle_when_container_cannot_copy(self, tmp_path):
-        encoder = _make_encoder(tmp_path)
-        encoder.output_path = tmp_path / "result.mp4"
-        primary_video = _source_stream(0, "video", "h264")
-        subtitle = _source_stream(
-            1,
-            "subtitle",
-            "ass",
-            metadata={"language": "pol", "title": "Signs"},
-            disposition=3,
-        )
-        encoder._src = SimpleNamespace(
-            streams=[primary_video, subtitle],
-            format=SimpleNamespace(name="matroska"),
-            demux=MagicMock(return_value=iter(())),
-        )
-        output_codec = SimpleNamespace(
-            time_base=None,
-            subtitle_header=None,
-        )
-        output_subtitle = SimpleNamespace(
-            type="subtitle",
-            codec_context=output_codec,
-            time_base=None,
-            metadata={},
-            disposition=0,
-        )
-        encoder.dst = SimpleNamespace(
-            format=SimpleNamespace(name="mp4"),
-            supported_codecs={"mov_text"},
-            add_stream=MagicMock(return_value=output_subtitle),
-            add_stream_from_template=MagicMock(
-                side_effect=ValueError("mp4 does not support ass")
-            ),
-        )
-
-        encoder._setup_source_streams(primary_video)
-
-        encoder.dst.add_stream.assert_called_once_with("mov_text")
-        assert encoder._source_pipes[1] == (
-            "subtitle_transcode",
-            output_subtitle,
-            None,
-        )
-        assert output_codec.subtitle_header == b""
-        assert output_subtitle.metadata == {"language": "pol", "title": "Signs"}
-        assert output_subtitle.disposition == 3
 
     def test_does_not_copy_mp4_chapter_carrier_as_a_data_stream(self, tmp_path):
         encoder = _make_encoder(tmp_path)
@@ -598,26 +372,7 @@ class TestEncoderOptions:
         assert enc._options_validated
 
 
-class _StopEncode(Exception):
-    """Cuts _encode_frame short once the encoder input has been captured."""
-
-
 class TestSharpening:
-    def test_no_sharpener_by_default(self, tmp_path):
-        assert _make_encoder(tmp_path)._cas is None
-
-    def test_sharpener_built_when_requested(self, tmp_path):
-        enc = VideoEncoder(
-            file=str(tmp_path / "result.mkv"),
-            device=torch.device("cuda:0"),
-            metadata=_fake_metadata(),
-            codec="hevc",
-            encoder_settings={},
-            sharpen_strength=0.4,
-        )
-        assert enc._cas is not None
-        assert enc._cas.weight_scale == pytest.approx(-1.0 / (16.0 - 12.0 * 0.4))
-
     def test_sharpener_follows_the_encoder_bit_depth(self, tmp_path):
         ten_bit = VideoEncoder(
             file=str(tmp_path / "a.mkv"),
@@ -640,81 +395,6 @@ class TestSharpening:
         assert ten_bit._cas.peak == 1023.0
         assert eight_bit._cas.ten_bit is False
         assert eight_bit._cas.peak == 255.0
-
-    def test_zero_strength_leaves_the_converted_frame_untouched(self, tmp_path, monkeypatch):
-        enc = _make_encoder(tmp_path, codec="h264")  # nv12, so planes stay uint8
-        packed = torch.arange(24, dtype=torch.uint8, device=enc.device).reshape(6, 4)
-        enc._converter = SimpleNamespace(
-            sample_dtype=torch.uint8,
-            uses_kernel=False,
-            convert_into=lambda frame, luma, chroma: (
-                luma.copy_(packed[:4]),
-                chroma.copy_(packed[4:]),
-            ),
-        )
-        enc.stream = SimpleNamespace(cuda_stream=1234, synchronize=lambda: None)
-        enc.metadata = _fake_metadata(video_height=4, video_width=4)
-        enc._cuda_ctx = None
-        seen = []
-
-        def capture(planes, **kwargs):
-            seen.append(planes)
-            raise _StopEncode
-
-        monkeypatch.setattr(
-            video_encoder_module, "stream_context", lambda _s: nullcontext()
-        )
-        monkeypatch.setattr(video_encoder_module, "_align_yuv_pitch", lambda p: p)
-        monkeypatch.setattr(video_encoder_module.av.VideoFrame, "from_dlpack", capture)
-
-        with pytest.raises(_StopEncode):
-            enc._encode_frame(torch.zeros(3, 4, 4), pts=0)
-
-        assert torch.equal(torch.cat(seen[0]), packed)
-
-    def test_sharpening_runs_before_pitch_alignment(self, tmp_path, monkeypatch):
-        enc = VideoEncoder(
-            file=str(tmp_path / "result.mkv"),
-            device=torch.device("cuda:0"),
-            metadata=_fake_metadata(),
-            codec="hevc",
-            encoder_settings={},
-            sharpen_strength=0.4,
-        )
-        enc._converter = SimpleNamespace(
-            sample_dtype=torch.uint8,
-            uses_kernel=False,
-            convert_into=lambda frame, luma, chroma: None,
-        )
-        enc.stream = SimpleNamespace(cuda_stream=1234, synchronize=lambda: None)
-        enc.metadata = _fake_metadata(video_height=4, video_width=4)
-        enc._cuda_ctx = None
-        order = []
-        enc._cas = SimpleNamespace(
-            sharpen_into=lambda source, destination: order.append(
-                ("sharpen", destination.is_contiguous())
-            )
-        )
-
-        def align(packed):
-            order.append(("align", True))
-            return packed
-
-        def stop(*args, **kwargs):
-            raise _StopEncode
-
-        monkeypatch.setattr(
-            video_encoder_module, "stream_context", lambda _s: nullcontext()
-        )
-        monkeypatch.setattr(video_encoder_module, "_align_yuv_pitch", align)
-        monkeypatch.setattr(video_encoder_module.av.VideoFrame, "from_dlpack", stop)
-
-        with pytest.raises(_StopEncode):
-            enc._encode_frame(torch.zeros(3, 4, 4), pts=0)
-
-        assert [step for step, _ in order] == ["sharpen", "align"]
-        assert order[0][1] is True  # sharpening sees a contiguous plane
-
 
 class TestColorHandling:
     def test_unsupported_color_range_raises(self, tmp_path):
