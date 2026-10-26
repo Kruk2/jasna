@@ -59,10 +59,9 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   one, the app offers **Trial mode** instead (see below); the CLI stops with
   an error.
 - **GPU**: NVIDIA RTX 30, 40 or 50-series. RTX 20-series should work, but
-  only the RTX 2080 Ti was tested. GTX 16-series is untested. Linux also supports
-  Radeon RX 7000/9000 and Radeon AI PRO R9700 cards. AMD integrated GPUs are
-  untested for LTX. Windows AMD LTX is in **beta**, tested on Radeon PRO V710;
-  testing on desktop Radeon cards is still in progress.
+  only the RTX 2080 Ti was tested. GTX 16-series is untested. AMD Radeon
+  RX 7000/9000 and Radeon AI PRO R9700 work on Linux; on Windows AMD is in
+  **beta**. AMD integrated GPUs are untested.
 - **VRAM**: 8 GB minimum. More VRAM is faster: on smaller cards parts of the
   model are kept in system RAM.
 - **System RAM**: 16 GB minimum (LTX uses about 10 GB).
@@ -79,10 +78,6 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   hf-mirror.com automatically. Download still fails? See
   [Downloading LTX yourself](#downloading-ltx-yourself).
 
-Jasna 0.12 needs updated LTX model files, including on NVIDIA. If you copy
-`model_weights` from 0.11.3, press ▶ and accept the model update; your existing
-License code and shared VAE files still work.
-
 LTX does not work with VR180 side-by-side videos or streaming. Secondary
 restoration and denoising are turned off with LTX.
 
@@ -92,26 +87,21 @@ exclusions. Add it again when you put a new Jasna version in a new folder.
 
 ### Pause and continue
 
-LTX saves progress automatically, including jobs with ranges or **LTX only for big mosaics**.
-Use **Ⅱ** to pause and **▶** to continue. After closing Jasna, add the same video again
-with the same output and settings. In the command line, run the same command again.
+LTX saves its progress as it goes. Press **Ⅱ** to pause and **▶** to continue.
+After closing Jasna, add the same video again with the same output and settings;
+in the command line, run the same command again.
 
-The current unfinished track may run again, and saving the output starts over; completed
-parts of a range job are kept. A long single shot can be one track. Jasna asks before
-replacing saved work if the input, the detection or LTX settings or the app version changed.
-Changing only output settings (codec, quality, color LUT, sharpening) keeps the saved LTX work.
-Work saved with sharper large mosaics (768 px) needs 12 GB of free GPU memory again to continue.
-BasicVSR++ whole-video jobs, previews and streaming do not resume.
+The last unfinished part may be restored again. If you changed the input,
+the detection or LTX settings, or updated Jasna, it asks before starting over.
+Changing only codec, quality, color LUT or sharpening keeps the saved work.
+BasicVSR++ jobs do not resume.
 
 ### Downloading LTX yourself
 
 If the download in Jasna keeps failing, get the files in your browser from
 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.0)
 (or [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.0)).
-These links are for Jasna 0.12. The initial AMD 0.12.0 beta archives still use
-[main/block-layout3](https://huggingface.co/Kruk2/ltx-restore/tree/main/block-layout3)
-(or [the mirror](https://hf-mirror.com/Kruk2/ltx-restore/tree/main/block-layout3)).
-For stable 0.11.3 or older, use the repository's `main` branch.
+For Jasna 0.11.3 or older, use the `main` branch instead.
 You need 3 files: one for the model you picked, plus the two VAE files.
 
 | You picked | Files |

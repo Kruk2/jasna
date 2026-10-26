@@ -79,25 +79,8 @@
 每个版本首次启动时，Jasna 会检查 FFprobe、GPU、驱动和安装路径。你可以从页眉
 再次运行它，例如在更新驱动后。
 
-Windows AMD 用户请安装[适用于 ROCm 10.1 的 AMD 驱动](https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-ROCM-10-01.html)
-（26.10.41.05；Windows 驱动版本 32.0.31041.5005），然后重启电脑。
-Jasna 已包含 ROCm 10.1，无需单独安装 ROCm。
-
-如果启动时出现 `invalid kernel file`，请先检查驱动。
-系统检查通过并不保证所有 GPU 操作都能正常运行。
-
-在 AMD 上，它还会检查 AMD 的 AMF 视频运行库，Jasna 读写视频需要它。Windows 上它随
-AMD 驱动一起安装。Linux 上请安装一次。我们测试过
-[AMF 26.20](https://repo.radeon.com/amf/26.20/)：
-
-```bash
-curl -fLO https://repo.radeon.com/amf/26.20/amf_installer_26.20.zip
-unzip amf_installer_26.20.zip
-sudo bash amf_installer_26.20.sh
-```
-
-按提示同意 AMD 的许可协议，然后重启 Jasna。如果使用 Distrobox，请在运行 Jasna 的
-同一个容器内安装 AMF。使用 `--enable-amf` 编译 FFmpeg 不会安装这个运行库。
+在 AMD 上，它还会检查 AMD 的 AMF 视频运行库，Jasna 读写视频需要它。AMD 驱动和
+AMF 的安装方法见[快速开始](../../README.zh.md#快速开始)。
 
 ## 其他设置
 
@@ -111,8 +94,7 @@ sudo bash amf_installer_26.20.sh
 
 支持者模型（UNet 4x、SD 1.5、LTX）需要激活。在页眉中打开**激活 Jasna**。
 
-如果 Jasna 已激活，打开此窗口会联网查询并显示**已用设备名额**，例如 **2 / 3**。
-如果无法查询，请重新打开窗口重试。修复功能仍可离线使用。
+激活后，此窗口会显示**已用设备名额**，例如 **2 / 3**。显示名额需要联网，修复可离线使用。
 
 - **在线**（默认）：输入你的**许可证码**，点击**在线激活**。
 - **手动**，用于没有网络的电脑，或在线激活失败时：

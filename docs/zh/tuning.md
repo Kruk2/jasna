@@ -77,10 +77,8 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 
 ## AMD 实验性注意力
 
-AMD 版本在 Windows 和 Linux 上都默认开启实验性注意力。
-首个 Windows 0.12.0 测试版压缩包尚未包含此更改。
-要在该版本中开启，请将下方 Windows 命令中的 `0` 改为 `1`。
-遇到 GPU 错误时，先关闭 Jasna，再按以下方式关闭此功能并启动：
+在 AMD 上，Jasna 默认使用更快的实验性注意力，在 Windows 上检测快约 3 倍。
+遇到 GPU 错误时，按以下方式关闭它：
 
 Windows（在 Jasna 文件夹中打开 PowerShell）：
 
@@ -95,4 +93,4 @@ Linux：
 TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
 ```
 
-此设置只在当前终端会话中生效，可能会降低检测速度。
+此设置在关闭该终端前有效。

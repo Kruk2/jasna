@@ -532,7 +532,7 @@ EN = {
         "tip_ltx_auto_split": "Restores big mosaics with LTX and smaller ones with the faster BasicVSR++. A mosaic is big when its longest side is at least this share of the video height. Parts without mosaics are copied (encoded again with a Color LUT or Sharpening), so the output keeps the source codec. If another codec is chosen in Encoding, its CQ and custom settings are not used.\nRanges set in the Segment Editor are used as they are.",
         "tip_ltx_trial": "Runs LTX without the model files to test speed.\nOutput is not restored.",
         "tip_model_basicvsrpp": "Default model. Fast and works well on most videos.",
-        "tip_model_ltx": "High quality, but much slower.\nNeeds an NVIDIA RTX GPU or a supported AMD GPU on Linux. On Windows, AMD supports Trial mode only.",
+        "tip_model_ltx": "High quality, but much slower.\nNeeds an NVIDIA RTX or AMD Radeon RX 7000/9000 GPU. On Windows, AMD is in beta.",
         "tip_model_ltx_distilled": "High Quality LTX model: more detail, about 2.5x slower than Standard Quality.",
         "tip_model_ltx_undistilled": "Top Quality LTX model: slightly better than High Quality, about 5x slower than Standard Quality. Rarely worth it.",
         "tip_model_ltx_distilled2": "Recommended LTX model. The fastest one.",
