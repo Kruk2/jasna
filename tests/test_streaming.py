@@ -32,9 +32,10 @@ def _finalize_segments(segments_dir: Path, *numbers: int) -> None:
     names = [f"seg_{n:05d}.ts" for n in numbers]
     for name in names:
         (segments_dir / name).write_bytes(b"complete")
-    (segments_dir / "_hls_internal.m3u8").write_text(
-        "".join(f"#EXTINF:4.000,\n{name}\n" for name in names)
-    )
+    # Renamed into place like ffmpeg does, so a waiting request never reads a half-written playlist.
+    staged = segments_dir / "_hls_internal.m3u8.tmp"
+    staged.write_text("".join(f"#EXTINF:4.000,\n{name}\n" for name in names))
+    staged.replace(segments_dir / "_hls_internal.m3u8")
 
 
 def _server(tmp_path=None, segment_duration: float = 4.0, **kwargs) -> HlsStreamingServer:
