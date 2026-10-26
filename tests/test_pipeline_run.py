@@ -1,24 +1,25 @@
 import threading
+from contextlib import ExitStack
 from fractions import Fraction
-from pathlib import Path
-from unittest.mock import MagicMock, patch, call
-
-from jasna.crop_buffer import RawCrop
-from jasna.frame_queue import FrameQueue
+from unittest.mock import MagicMock, patch
 
 import numpy as np
-import torch
 import pytest
+import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
-from jasna.accelerator import AcceleratorVendor
-from jasna.media.probe import VideoMetadata
+from factories import make_pipeline, primary_result
 from jasna import pipeline_threads
-from factories import make_pipeline
+from jasna.accelerator import AcceleratorVendor
+from jasna.crop_buffer import RawCrop
+from jasna.frame_queue import FrameQueue
+from jasna.media.encoder_settings import AMF_MIN_SIZE
+from jasna.media.probe import UnsupportedVideoError, VideoMetadata
 from jasna.pipeline import Pipeline
-from jasna.pipeline_threads import earliest_blocking_seqs, run_async_secondary
-from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
-from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
+from jasna.pipeline_items import ClipRestoreItem, FrameMeta, _SENTINEL
+from jasna.pipeline_processing import BatchProcessResult
+from jasna.pipeline_threads import earliest_blocking_seqs, run_async_secondary, starvation_action
+from jasna.restorer import RestorationPipeline
 from jasna.segments import SegmentRange
 from jasna.tracking.clip_tracker import TrackedClip
 
@@ -33,29 +34,15 @@ def _mock_gpu_monitoring():
         yield
 
 
-def _mock_async_restorer(**kwargs) -> MagicMock:
-    m = MagicMock(spec=AsyncSecondaryRestorer, **kwargs)
-    def _real_to_tensors(frames_np):
-        if not frames_np:
-            return torch.empty(0)
-        if isinstance(frames_np[0], np.ndarray):
-            batch = np.stack(frames_np)
-            batch = np.ascontiguousarray(batch.transpose(0, 3, 1, 2))
-            return torch.from_numpy(batch)
-        return torch.stack(frames_np)
-    m._to_tensors.side_effect = _real_to_tensors
-    return m
-
-
 def _fake_metadata() -> VideoMetadata:
     return VideoMetadata(
         video_file="fake_input.mkv",
-        num_frames=4,
+        num_frames=2,
         video_fps=24.0,
         average_fps=24.0,
         video_fps_exact=Fraction(24, 1),
         codec_name="hevc",
-        duration=4.0 / 24.0,
+        duration=2.0 / 24.0,
         video_width=8,
         video_height=8,
         time_base=Fraction(1, 24),
@@ -66,1285 +53,391 @@ def _fake_metadata() -> VideoMetadata:
     )
 
 
-def _make_pipeline():
+class _WhitePrimary:
+    """Primary restorer that turns every crop white."""
+
+    device = torch.device("cpu")
+    input_dtype = torch.float32
+
+    def __init__(self, error: Exception | None = None):
+        self.error = error
+
+    def raw_process(self, crops):
+        if self.error:
+            raise self.error
+        return torch.ones((len(crops), 3, 256, 256))
+
+
+class _FailingSecondary:
+    name = "failing"
+    prefers_cpu_input = False
+    num_workers = 1
+
+    def restore(self, frames_256, *, keep_start, keep_end):
+        raise RuntimeError("secondary boom")
+
+
+class _BufferingAsyncRestorer:
+    """Async secondary restorer that, like TVAI, returns a clip only once it is flushed.
+
+    It answers a flush only for the clips it names. ``on_pop`` runs after each forwarded batch.
+    """
+
+    name = "buffering"
+    prefers_cpu_input = True
+    num_workers = 2
+
+    def __init__(self, *, push_error: Exception | None = None, on_pop=lambda restorer: None):
+        self.push_error = push_error
+        self.on_pop = on_pop
+        self.frames: dict[int, int] = {}
+        self.ready: list[int] = []
+        self.returned: list[int] = []
+        self.flushes: list[set[int]] = []
+
+    def push_clip(self, frames_256, *, keep_start, keep_end):
+        if self.push_error:
+            raise self.push_error
+        seq = len(self.frames)
+        self.frames[seq] = keep_end - keep_start
+        return seq
+
+    def pop_completed(self):
+        completed = [(seq, [np.full((256, 256, 3), 255, np.uint8)] * self.frames[seq]) for seq in self.ready]
+        self.returned += self.ready
+        self.ready = []
+        if completed:
+            self.on_pop(self)
+        return completed
+
+    @property
+    def has_pending(self) -> bool:
+        return len(self.returned) + len(self.ready) < len(self.frames)
+
+    def flush_pending(self, target_seqs=None) -> bool:
+        if target_seqs is None:
+            return False
+        self.flushes.append(target_seqs)
+        self.ready += sorted(target_seqs)
+        return True
+
+    def flush_all(self) -> None:
+        self.ready += [seq for seq in self.frames if seq not in self.returned and seq not in self.ready]
+
+    def close(self) -> None:
+        pass
+
+    @staticmethod
+    def _to_tensors(frames_np):
+        return torch.from_numpy(np.stack(frames_np)).permute(0, 3, 1, 2) if frames_np else torch.empty(0)
+
+
+def _pipeline(*, primary=None, secondary=None, **overrides) -> Pipeline:
+    return make_pipeline(
+        restoration_pipeline=RestorationPipeline(primary or _WhitePrimary(), secondary_restorer=secondary),
+        batch_size=2,
+        disable_progress=True,
+        **overrides,
+    )
+
+
+def _reader(frames=None, error: Exception | None = None) -> MagicMock:
+    reader = MagicMock()
+    reader.__enter__.return_value = reader
+    if error:
+        reader.frames.side_effect = error
+    else:
+        reader.frames.return_value = iter([] if frames is None else [(frames, list(range(len(frames))))])
+    return reader
+
+
+def _detect_one_clip(**kwargs):
+    """Detection that finds one mosaic covering the box (1, 1, 5, 5) on both frames."""
+    clip = TrackedClip(
+        track_id=42,
+        start_frame=0,
+        mask_resolution=(8, 8),
+        bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
+        masks=[torch.ones((8, 8), dtype=torch.bool)] * 2,
+    )
+    for frame_idx in range(2):
+        kwargs["blend_buffer"].register_frame(frame_idx, {42})
+        kwargs["metadata_queue"].put(FrameMeta(frame_idx=frame_idx, pts=frame_idx))
+    raw_crops = [
+        RawCrop(crop=frame[:, 1:5, 1:5].clone(), enlarged_bbox=(1, 1, 5, 5), crop_shape=(4, 4))
+        for frame in kwargs["frames"]
+    ]
+    kwargs["clip_queue"].put(
+        ClipRestoreItem(clip=clip, raw_crops=raw_crops, frame_shape=(8, 8), keep_start=0, keep_end=2, crossfade_weights=None)
+    )
+    return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
+
+
+def _run(pipeline, *, metadata=None, frames=None, decode_error=None):
+    """Run ``pipeline`` over ``frames`` with detection faked; returns the readers' and encoder's mocks."""
+    source = _reader(frames, decode_error)
+    blend = _reader(frames)
+    reader_cls = MagicMock(side_effect=[source, blend])
+    encoder = MagicMock()
+    with ExitStack() as stack:
+        stack.enter_context(patch("jasna.pipeline.get_video_meta_data", return_value=metadata or _fake_metadata()))
+        stack.enter_context(patch("jasna.pipeline_threads.VideoReader", reader_cls))
+        encoder_cls = stack.enter_context(patch("jasna.pipeline.VideoEncoder", return_value=encoder))
+        stack.enter_context(patch("jasna.pipeline_threads.process_frame_batch", side_effect=_detect_one_clip))
+        stack.enter_context(patch("jasna.pipeline_threads.finalize_processing"))
+        stack.enter_context(patch("jasna.pipeline_threads.torch.cuda.set_device"))
+        pipeline.run()
+    return reader_cls, encoder_cls, encoder
+
+
+@pytest.mark.parametrize("secondary", [None, _BufferingAsyncRestorer()], ids=["sync", "async"])
+def test_run_blends_restored_mosaic_into_the_encoded_frames(secondary):
+    progress = MagicMock()
+    pipeline = _pipeline(secondary=secondary, progress_callback=progress)
+
+    _, _, encoder = _run(pipeline, frames=torch.zeros((2, 3, 8, 8), dtype=torch.uint8))
+
+    encoded = [call.args for call in encoder.encode.call_args_list]
+    assert [pts for _, pts in encoded] == [0, 1]
+    for frame, _ in encoded:
+        assert frame[:, 1:5, 1:5].min() > 0
+        assert frame[:, 0].max() == 0 and frame[:, :, 0].max() == 0
+    assert pipeline.completed
+    assert progress.call_args.args[0] == 100.0
+
+
+def test_run_encodes_nothing_for_an_empty_video():
+    _, _, encoder = _run(_pipeline())
+    encoder.encode.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("pipeline_kwargs", "decode_error", "message"),
+    [
+        ({}, RuntimeError("decode boom"), "decode boom"),
+        ({"primary": _WhitePrimary(RuntimeError("primary boom"))}, None, "primary boom"),
+        ({"secondary": _FailingSecondary()}, None, "secondary boom"),
+        ({"secondary": _BufferingAsyncRestorer(push_error=RuntimeError("push boom"))}, None, "push boom"),
+    ],
+    ids=["decode", "primary", "secondary", "async-secondary"],
+)
+def test_run_raises_a_worker_thread_error(pipeline_kwargs, decode_error, message):
+    with pytest.raises(RuntimeError, match=message):
+        _run(_pipeline(**pipeline_kwargs), frames=torch.zeros((2, 3, 8, 8), dtype=torch.uint8), decode_error=decode_error)
+
+
+def test_run_fails_promptly_when_blend_encode_dies_while_secondary_is_blocked():
+    p = make_pipeline(batch_size=2, disable_progress=True)
+
+    frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
+    r1 = _reader(frames_t)
+    r2 = MagicMock()
+    r2.__enter__.return_value = r2
+    blend_reader_failed = threading.Event()
+
+    def _failing_frames(seek_ts):
+        blend_reader_failed.set()
+        raise RuntimeError("AMF decode failed")
+
+    r2.frames.side_effect = _failing_frames
+    reader_cls = MagicMock(side_effect=[r1, r2])
+
+    clip_frames = 40
+    clip = TrackedClip(
+        track_id=1, start_frame=0, mask_resolution=(2, 2),
+        bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
+        masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
+    )
+
+    def fake_process_batch(**kwargs):
+        kwargs["metadata_queue"].put(FrameMeta(frame_idx=0, pts=0))
+        for _ in range(2):
+            kwargs["clip_queue"].put(
+                ClipRestoreItem(clip=clip, raw_crops=[], frame_shape=(8, 8), keep_start=0, keep_end=clip_frames, crossfade_weights=None),
+                frame_count=clip_frames,
+            )
+        return BatchProcessResult(next_frame_idx=2, clips_emitted=2)
+
+    def _primary_after_blend_failed(*args):
+        assert blend_reader_failed.wait(timeout=5)
+        return MagicMock(keep_start=0, keep_end=clip_frames)
+
+    p.restoration_pipeline.prepare_and_run_primary.side_effect = _primary_after_blend_failed
+    p.restoration_pipeline.build_secondary_result.return_value = MagicMock(keep_end=clip_frames, frame_count=clip_frames)
+
+    raised: list[BaseException] = []
+
+    def _run_pipeline():
+        try:
+            p.run()
+        except BaseException as exc:
+            raised.append(exc)
+
     with (
-        patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel"),
-        patch("jasna.mosaic.yolo.YoloMosaicDetectionModel"),
+        patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
+        patch("jasna.pipeline_threads.VideoReader", reader_cls),
+        patch("jasna.pipeline.VideoEncoder"),
+        patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
+        patch("jasna.pipeline_threads.finalize_processing"),
+        patch("jasna.pipeline_threads.torch.cuda.set_device"),
     ):
-        rest_pipeline = MagicMock()
-        rest_pipeline.secondary_restorer = None
-        rest_pipeline.secondary_num_workers = 1
-        rest_pipeline.secondary_prefers_cpu_input = False
-        p = make_pipeline(
-            input_video=Path("in.mp4"),
-            output_video=Path("out.mkv"),
-            detection_score_threshold=0.25,
-            restoration_pipeline=rest_pipeline,
-            codec="hevc",
-            encoder_settings={},
-            batch_size=2,
-            device=torch.device("cpu"),
-            max_clip_size=60,
-            temporal_overlap=8,
-            max_detection_gap=0,
-            min_detection_duration=0,
-            fp16=True,
-            disable_progress=True,
-        )
-    return p
-
-
-def _make_two_readers(frames_batches: list[tuple[torch.Tensor, list[int]]]):
-    def _make_reader(batches):
-        r = MagicMock()
-        r.__enter__ = MagicMock(return_value=r)
-        r.__exit__ = MagicMock(return_value=False)
-        r.frames.return_value = iter(batches)
-        return r
-
-    flat_frames = []
-    for batch, pts in frames_batches:
-        for i in range(len(pts)):
-            flat_frames.append(batch[i])
-
-    reader1 = _make_reader(list(frames_batches))
-    reader2 = _make_reader([(torch.stack(flat_frames), list(range(len(flat_frames))))] if flat_frames else [])
-    readers = iter([reader1, reader2])
-    return MagicMock(side_effect=lambda *a, **kw: next(readers)), reader1, reader2
-
-
-class TestPipelineColorspaceCheck:
-    def test_run_accepts_bt601_colorspace(self):
-        meta = _fake_metadata()
-        meta.color_space = AvColorspace.ITU601
-        p = _make_pipeline()
-
-        reader_cls, _, _ = _make_two_readers([])
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=meta),
-            patch("jasna.pipeline_threads.VideoReader", reader_cls),
-            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-        ):
-            p.run()
-
-        mock_encoder.encode.assert_not_called()
-
-    @patch("jasna.pipeline.get_video_meta_data")
-    def test_run_raises_on_smpte240m_colorspace(self, mock_meta):
-        meta = _fake_metadata()
-        meta.color_space = AvColorspace.SMPTE240M
-        mock_meta.return_value = meta
-        p = _make_pipeline()
-
-        from jasna.media.probe import UnsupportedVideoError
-        with pytest.raises(
-            UnsupportedVideoError,
-            match="Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported",
-        ):
-            p.run()
-
-    @patch("jasna.pipeline.get_video_meta_data")
-    def test_ltx_run_skips_vr_side_by_side_as_unsupported_video(self, mock_meta):
-        meta = _fake_metadata()
-        meta.video_width = 16
-        mock_meta.return_value = meta
-        p = make_pipeline(restoration_model_name="ltx", vr_mode="sbs", vr_projection="raw")
-
-        from jasna.media.probe import UnsupportedVideoError
-        with pytest.raises(UnsupportedVideoError, match="VR180 side-by-side"):
-            p.run()
-
-
-class TestPipelineRun:
-    def test_retarget_high_fps_propagates_to_both_readers_encoder_and_progress(self):
-        p = _make_pipeline()
-        p.retarget_high_fps = True
-        metadata = _fake_metadata()
-        metadata.video_fps = 60.0
-        metadata.average_fps = 60.0
-        metadata.video_fps_exact = Fraction(60, 1)
-        metadata.num_frames = 5
-
-        reader_cls, _, _ = _make_two_readers([])
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=metadata),
-            patch("jasna.pipeline_threads.VideoReader", reader_cls),
-            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder) as encoder_cls,
-            patch("jasna.pipeline.Progressbar") as progress_cls,
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch(
-                "jasna.pipeline_threads.torch.inference_mode",
-                return_value=MagicMock(
-                    __enter__=MagicMock(),
-                    __exit__=MagicMock(return_value=False),
-                ),
-            ),
-        ):
-            p.run()
-
-        assert [call.kwargs["frame_stride"] for call in reader_cls.call_args_list] == [2, 2]
-        assert encoder_cls.call_args.kwargs["output_fps"] == Fraction(30, 1)
-        assert progress_cls.call_args.kwargs["total_frames"] == 3
-        assert progress_cls.call_args.kwargs["video_fps"] == 30.0
-
-    def test_fmp4_reaches_the_encoder(self):
-        p = _make_pipeline()
-        p.fmp4 = True
-
-        reader_cls, _, _ = _make_two_readers([])
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline_threads.VideoReader", reader_cls),
-            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder) as encoder_cls,
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-        ):
-            p.run()
-
-        assert encoder_cls.call_args.kwargs["fmp4"] is True
-
-    def test_fmp4_is_dropped_for_segment_processing(self):
-        p = _make_pipeline()
-        p.fmp4 = True
-        p.segments = (SegmentRange(0.0, 1.0),)
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch.object(type(p), "_run_smart", MagicMock()) as run_smart,
-        ):
-            p.run()
-
-        run_smart.assert_called_once()
-        assert p.fmp4 is False
-
-    def test_run_no_frames(self):
-        p = _make_pipeline()
-
-        reader_cls, _, _ = _make_two_readers([])
-
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline_threads.VideoReader", reader_cls),
-            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-        ):
-            p.run()
-
-        mock_encoder.encode.assert_not_called()
-
-    def test_run_full_thread_flow(self):
-        """Exercise all four thread bodies: decode->primary->secondary->encode."""
-        p = _make_pipeline()
-
-        frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
-        batches = [(frames_t, [0, 1])]
-        reader_cls, _, _ = _make_two_readers(batches)
-
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        clip = TrackedClip(
-            track_id=42,
-            start_frame=0,
-            mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-
-        from jasna.pipeline_processing import BatchProcessResult
-
-        def fake_process_batch(**kwargs):
-            bb = kwargs["blend_buffer"]
-            mq = kwargs["metadata_queue"]
-            cq = kwargs["clip_queue"]
-            frames = kwargs["frames"]
-            bb.register_frame(0, {42})
-            bb.register_frame(1, {42})
-            mq.put(FrameMeta(frame_idx=0, pts=0))
-            mq.put(FrameMeta(frame_idx=1, pts=1))
-            raw_crops = [
-                RawCrop(crop=frames[i][:, 1:5, 1:5].clone(), enlarged_bbox=(1, 1, 5, 5), crop_shape=(4, 4))
-                for i in range(2)
-            ]
-            cq.put(ClipRestoreItem(
-                clip=clip,
-                raw_crops=raw_crops,
-                frame_shape=(8, 8),
-                keep_start=0,
-                keep_end=2,
-                crossfade_weights=None,
-            ))
-            return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
-
-        pr_result = PrimaryRestoreResult(
-            track_id=clip.track_id,
-            start_frame=clip.start_frame,
-            frame_count=2,
-            frame_shape=(8, 8),
-            frame_device=frames_t[0].device,
-            masks=clip.masks,
-            primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0,
-            keep_end=2,
-            crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2,
-            crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2,
-            resize_shapes=[(4, 4)] * 2,
-        )
-        p.restoration_pipeline.prepare_and_run_primary.return_value = pr_result
-
-        sr_result = SecondaryRestoreResult(
-            track_id=clip.track_id,
-            start_frame=clip.start_frame,
-            frame_count=2,
-            frame_shape=(8, 8),
-            frame_device=frames_t[0].device,
-            masks=clip.masks,
-            restored_frames=[torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2,
-            keep_start=0,
-            keep_end=2,
-            crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2,
-            crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2,
-            resize_shapes=[(4, 4)] * 2,
-        )
-        restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
-        restorer = _mock_async_restorer()
-        restorer.push_clip.return_value = 0
-        _pop_done = set()
-        def _pop_full():
-            if restorer.push_clip.called and 0 not in _pop_done:
-                _pop_done.add(0)
-                return [(0, restored)]
-            return []
-        restorer.pop_completed.side_effect = _pop_full
-        restorer.flush_all.return_value = None
-        p.restoration_pipeline.secondary_restorer = restorer
-        p.restoration_pipeline.build_secondary_result.return_value = sr_result
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline_threads.VideoReader", reader_cls),
-            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline_threads.finalize_processing"),
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-        ):
-            p.run()
-
-        p.restoration_pipeline.prepare_and_run_primary.assert_called_once()
-        p.restoration_pipeline.build_secondary_result.assert_called_once()
-        assert mock_encoder.encode.call_count == 2
-
-    def test_run_processes_frames(self):
-        p = _make_pipeline()
-
-        frames = torch.zeros((2, 3, 8, 8), dtype=torch.uint8)
-        batches = [(frames, [0, 1])]
-        reader_cls, _, _ = _make_two_readers(batches)
-
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        from jasna.pipeline_processing import BatchProcessResult
-
-        def fake_process_batch(**kwargs):
-            bb = kwargs["blend_buffer"]
-            mq = kwargs["metadata_queue"]
-            pts_list = kwargs["pts_list"]
-            start_idx = kwargs["start_frame_idx"]
-            for i, pts in enumerate(pts_list):
-                bb.register_frame(start_idx + i, set())
-                mq.put(FrameMeta(frame_idx=start_idx + i, pts=int(pts)))
-            return BatchProcessResult(next_frame_idx=start_idx + len(pts_list), clips_emitted=0)
-
-        restorer = _mock_async_restorer()
-        restorer.push_clip.return_value = 0
-        restorer.pop_completed.return_value = []
-        restorer.flush_all.return_value = None
-        p.restoration_pipeline.secondary_restorer = restorer
-        p.restoration_pipeline.build_secondary_result.return_value = MagicMock(spec=SecondaryRestoreResult)
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline_threads.VideoReader", reader_cls),
-            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline_threads.finalize_processing"),
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-        ):
-            p.run()
-
-    def test_run_propagates_decode_error(self):
-        p = _make_pipeline()
-
-        def _make_reader_with_error():
-            r1 = MagicMock()
-            r1.__enter__ = MagicMock(return_value=r1)
-            r1.__exit__ = MagicMock(return_value=False)
-            r1.frames.side_effect = RuntimeError("decode boom")
-            r2 = MagicMock()
-            r2.__enter__ = MagicMock(return_value=r2)
-            r2.__exit__ = MagicMock(return_value=False)
-            r2.frames.return_value = iter([])
-            readers = iter([r1, r2])
-            return MagicMock(side_effect=lambda *a, **kw: next(readers))
-
-        reader_cls = _make_reader_with_error()
-
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline_threads.VideoReader", reader_cls),
-            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-        ):
-            with pytest.raises(RuntimeError, match="decode boom"):
-                p.run()
-
-    def test_run_primary_error_propagates(self):
-        """Cover lines 175-176: error in primary_restore_thread."""
-        p = _make_pipeline()
-
-        frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
-        batches = [(frames_t, [0, 1])]
-        reader_cls, _, _ = _make_two_readers(batches)
-
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-
-        from jasna.pipeline_processing import BatchProcessResult
-
-        def fake_process_batch(**kwargs):
-            bb = kwargs["blend_buffer"]
-            mq = kwargs["metadata_queue"]
-            cq = kwargs["clip_queue"]
-            frames = kwargs["frames"]
-            bb.register_frame(0, {1})
-            bb.register_frame(1, {1})
-            mq.put(FrameMeta(frame_idx=0, pts=0))
-            mq.put(FrameMeta(frame_idx=1, pts=1))
-            raw_crops = [
-                RawCrop(crop=frames[i][:, 1:5, 1:5].clone(), enlarged_bbox=(1, 1, 5, 5), crop_shape=(4, 4))
-                for i in range(2)
-            ]
-            cq.put(ClipRestoreItem(clip=clip, raw_crops=raw_crops, frame_shape=(8, 8), keep_start=0, keep_end=2, crossfade_weights=None))
-            return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
-
-        p.restoration_pipeline.prepare_and_run_primary.side_effect = RuntimeError("primary boom")
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline_threads.VideoReader", reader_cls),
-            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline_threads.finalize_processing"),
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-        ):
-            with pytest.raises(RuntimeError, match="primary boom"):
-                p.run()
-
-    def test_run_secondary_error_propagates(self):
-        """Cover lines 195-196: error in secondary_restore_thread."""
-        p = _make_pipeline()
-
-        frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
-        batches = [(frames_t, [0, 1])]
-        reader_cls, _, _ = _make_two_readers(batches)
-
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-
-        from jasna.pipeline_processing import BatchProcessResult
-
-        def fake_process_batch(**kwargs):
-            bb = kwargs["blend_buffer"]
-            mq = kwargs["metadata_queue"]
-            cq = kwargs["clip_queue"]
-            frames = kwargs["frames"]
-            bb.register_frame(0, {1})
-            bb.register_frame(1, {1})
-            mq.put(FrameMeta(frame_idx=0, pts=0))
-            mq.put(FrameMeta(frame_idx=1, pts=1))
-            raw_crops = [
-                RawCrop(crop=frames[i][:, 1:5, 1:5].clone(), enlarged_bbox=(1, 1, 5, 5), crop_shape=(4, 4))
-                for i in range(2)
-            ]
-            cq.put(ClipRestoreItem(clip=clip, raw_crops=raw_crops, frame_shape=(8, 8), keep_start=0, keep_end=2, crossfade_weights=None))
-            return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
-
-        pr_result = PrimaryRestoreResult(
-            track_id=clip.track_id, start_frame=clip.start_frame, frame_count=2, frame_shape=(8, 8), frame_device=frames_t[0].device,
-            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
-        )
-        p.restoration_pipeline.prepare_and_run_primary.return_value = pr_result
-        restorer = _mock_async_restorer()
-        restorer.push_clip.return_value = 0
-        _pop_done_err = set()
-        def _pop_err():
-            if restorer.push_clip.called and 0 not in _pop_done_err:
-                _pop_done_err.add(0)
-                return [(0, [])]
-            return []
-        restorer.pop_completed.side_effect = _pop_err
-        restorer.flush_all.return_value = None
-        p.restoration_pipeline.secondary_restorer = restorer
-        p.restoration_pipeline.build_secondary_result.side_effect = RuntimeError("secondary boom")
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline_threads.VideoReader", reader_cls),
-            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline_threads.finalize_processing"),
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-        ):
-            with pytest.raises(RuntimeError, match="secondary boom"):
-                p.run()
-
-    def test_run_fails_promptly_when_blend_encode_dies_while_secondary_is_blocked(self):
-        p = _make_pipeline()
-
-        frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
-        r1 = MagicMock()
-        r1.__enter__ = MagicMock(return_value=r1)
-        r1.__exit__ = MagicMock(return_value=False)
-        r1.frames.return_value = iter([(frames_t, [0, 1])])
-        r2 = MagicMock()
-        r2.__enter__ = MagicMock(return_value=r2)
-        r2.__exit__ = MagicMock(return_value=False)
-        blend_reader_failed = threading.Event()
-
-        def _failing_frames(seek_ts):
-            blend_reader_failed.set()
-            raise RuntimeError("AMF decode failed")
-
-        r2.frames.side_effect = _failing_frames
-        readers = iter([r1, r2])
-        reader_cls = MagicMock(side_effect=lambda *a, **kw: next(readers))
-
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        clip_frames = 40
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-
-        from jasna.pipeline_processing import BatchProcessResult
-
-        def fake_process_batch(**kwargs):
-            kwargs["metadata_queue"].put(FrameMeta(frame_idx=0, pts=0))
-            for _ in range(2):
-                kwargs["clip_queue"].put(
-                    ClipRestoreItem(clip=clip, raw_crops=[], frame_shape=(8, 8), keep_start=0, keep_end=clip_frames, crossfade_weights=None),
-                    frame_count=clip_frames,
-                )
-            return BatchProcessResult(next_frame_idx=2, clips_emitted=2)
-
-        def _primary_after_blend_failed(*args):
-            assert blend_reader_failed.wait(timeout=5)
-            return MagicMock(keep_start=0, keep_end=clip_frames)
-
-        p.restoration_pipeline.prepare_and_run_primary.side_effect = _primary_after_blend_failed
-        p.restoration_pipeline.build_secondary_result.return_value = MagicMock(keep_end=clip_frames, frame_count=clip_frames)
-
-        raised: list[BaseException] = []
-
-        def _run():
-            try:
-                p.run()
-            except BaseException as exc:
-                raised.append(exc)
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline_threads.VideoReader", reader_cls),
-            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline_threads.finalize_processing"),
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-        ):
-            runner = threading.Thread(target=_run, daemon=True)
-            runner.start()
-            runner.join(timeout=10)
-
-        assert not runner.is_alive(), "restoration pass hung after a thread error"
-        assert len(raised) == 1 and "AMF decode failed" in str(raised[0])
-
-    def test_run_secondary_loop(self, monkeypatch):
-        """Cover _run_secondary_loop: push_clip → flush → pop_completed → build_secondary_result."""
-        p = _make_pipeline()
-
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-        pr = PrimaryRestoreResult(
-            track_id=clip.track_id, start_frame=clip.start_frame,
-            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
-        )
-
-        restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
-        sr_result = SecondaryRestoreResult(
-            track_id=pr.track_id, start_frame=pr.start_frame,
-            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            masks=pr.masks, restored_frames=restored,
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
-            pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
-        )
-
-        restorer = _mock_async_restorer()
-        restorer.num_workers = 2
-        restorer.push_clip.return_value = 0
-        _pop_done = set()
-        def _pop():
-            if restorer.push_clip.called and 0 not in _pop_done:
-                _pop_done.add(0)
-                return [(0, restored)]
-            return []
-        restorer.pop_completed.side_effect = _pop
-        restorer.flush_all.return_value = None
-        p.restoration_pipeline.secondary_restorer = restorer
-        p.restoration_pipeline.build_secondary_result.return_value = sr_result
-
-        secondary_queue= FrameQueue(max_frames=9999)
-        encode_queue= FrameQueue(max_frames=9999)
-        secondary_queue.put(pr)
-        secondary_queue.put(_SENTINEL)
-
-        monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.001)
-        run_async_secondary(restoration_pipeline=p.restoration_pipeline, secondary_queue=secondary_queue, encode_queue=encode_queue, clip_queue=FrameQueue(max_frames=1), primary_idle_event=threading.Event(), cancel_event=threading.Event(), debug_memory=MagicMock())
-
-        restorer.push_clip.assert_called_once()
-        assert not encode_queue.empty()
-        result = encode_queue.get()
-        assert result is sr_result
-
-    def test_run_secondary_loop_no_flush_when_primary_busy(self, monkeypatch):
-        """No flush_pending when secondary_queue is empty but primary is busy (not idle)."""
-        import threading
-        p = _make_pipeline()
-        monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.01)
-        monkeypatch.setattr(pipeline_threads, "_FLUSH_DELAY", 0.05)
-
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-        pr = PrimaryRestoreResult(
-            track_id=clip.track_id, start_frame=clip.start_frame,
-            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
-        )
-
-        restorer = _mock_async_restorer()
-        restorer.num_workers = 2
-        restorer.push_clip.return_value = 0
-        restorer.pop_completed.return_value = []
-        restorer.has_pending = True
-        restorer.flush_all.return_value = None
-        p.restoration_pipeline.secondary_restorer = restorer
-
-        secondary_queue= FrameQueue(max_frames=9999)
-        encode_queue= FrameQueue(max_frames=9999)
-        cq= FrameQueue(max_frames=9999)
-        primary_idle = threading.Event()
-        secondary_queue.put(pr)
-
-        def put_sentinel_later():
-            import time
-            time.sleep(0.15)
-            secondary_queue.put(_SENTINEL)
-
-        t = threading.Thread(target=put_sentinel_later, daemon=True)
-        t.start()
-
-        run_async_secondary(restoration_pipeline=p.restoration_pipeline, secondary_queue=secondary_queue, encode_queue=encode_queue, clip_queue=cq, primary_idle_event=primary_idle, cancel_event=threading.Event(), debug_memory=MagicMock())
-        t.join(timeout=3)
-
-        restorer.flush_pending.assert_not_called()
-        restorer.flush_all.assert_called_once()
-
-    def test_run_secondary_loop_no_flush_short_gap(self, monkeypatch):
-        """No flush_pending when gap is shorter than FLUSH_DELAY."""
-        import threading
-        p = _make_pipeline()
-        monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.01)
-
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-        pr = PrimaryRestoreResult(
-            track_id=clip.track_id, start_frame=clip.start_frame,
-            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
-        )
-
-        restorer = _mock_async_restorer()
-        restorer.num_workers = 2
-        restorer.push_clip.return_value = 0
-        restorer.pop_completed.return_value = []
-        restorer.has_pending = True
-        restorer.flush_all.return_value = None
-        p.restoration_pipeline.secondary_restorer = restorer
-
-        secondary_queue= FrameQueue(max_frames=9999)
-        encode_queue= FrameQueue(max_frames=9999)
-        cq= FrameQueue(max_frames=9999)
-        primary_idle = threading.Event()
-        primary_idle.set()
-        secondary_queue.put(pr)
-
-        def put_sentinel_later():
-            import time
-            time.sleep(0.15)
-            secondary_queue.put(_SENTINEL)
-
-        t = threading.Thread(target=put_sentinel_later, daemon=True)
-        t.start()
-
-        run_async_secondary(restoration_pipeline=p.restoration_pipeline, secondary_queue=secondary_queue, encode_queue=encode_queue, clip_queue=cq, primary_idle_event=primary_idle, cancel_event=threading.Event(), debug_memory=MagicMock())
-        t.join(timeout=3)
-
-        restorer.flush_pending.assert_not_called()
-        restorer.flush_all.assert_called_once()
-
-    def test_run_secondary_loop_no_gap_flush_when_items_arrive(self, monkeypatch):
-        """No flush_pending when clips arrive without gaps."""
-        p = _make_pipeline()
-
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-        pr = PrimaryRestoreResult(
-            track_id=clip.track_id, start_frame=clip.start_frame,
-            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
-        )
-
-        restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
-        sr_result = SecondaryRestoreResult(
-            track_id=pr.track_id, start_frame=pr.start_frame,
-            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            masks=pr.masks, restored_frames=restored,
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
-            pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
-        )
-
-        restorer = _mock_async_restorer()
-        restorer.num_workers = 2
-        restorer.push_clip.return_value = 0
-        _pop_done = set()
-        def _pop():
-            if restorer.push_clip.called and 0 not in _pop_done:
-                _pop_done.add(0)
-                return [(0, restored)]
-            return []
-        restorer.pop_completed.side_effect = _pop
-        restorer.flush_all.return_value = None
-        restorer.has_pending = True
-        p.restoration_pipeline.secondary_restorer = restorer
-        p.restoration_pipeline.build_secondary_result.return_value = sr_result
-
-        secondary_queue= FrameQueue(max_frames=9999)
-        encode_queue= FrameQueue(max_frames=9999)
-        secondary_queue.put(pr)
-        secondary_queue.put(_SENTINEL)
-
-        monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.001)
-        run_async_secondary(restoration_pipeline=p.restoration_pipeline, secondary_queue=secondary_queue, encode_queue=encode_queue, clip_queue=FrameQueue(max_frames=1), primary_idle_event=threading.Event(), cancel_event=threading.Event(), debug_memory=MagicMock())
-
-        restorer.flush_pending.assert_not_called()
-        restorer.flush_all.assert_called_once()
-        assert not encode_queue.empty()
-        result = encode_queue.get()
-        assert result is sr_result
-
-    def test_run_secondary_loop_flush_called_once_per_starvation(self, monkeypatch):
-        """flush_pending called only once while starved, even if has_pending stays true."""
-        import threading
-        p = _make_pipeline()
-        monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.01)
-        monkeypatch.setattr(pipeline_threads, "_FLUSH_DELAY", 0.05)
-        monkeypatch.setattr(pipeline_threads, "_FLUSH_RETRY_TIMEOUT", 999)
-
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-        pr = PrimaryRestoreResult(
-            track_id=clip.track_id, start_frame=clip.start_frame,
-            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
-        )
-
-        restorer = _mock_async_restorer()
-        restorer.num_workers = 2
-        restorer.push_clip.return_value = 0
-        restorer.pop_completed.return_value = []
-        restorer.has_pending = True
-        restorer.flush_all.return_value = None
-        restorer.flush_pending.return_value = True
-        p.restoration_pipeline.secondary_restorer = restorer
-
-        secondary_queue= FrameQueue(max_frames=9999)
-        encode_queue= FrameQueue(max_frames=9999)
-        cq= FrameQueue(max_frames=9999)
-        primary_idle = threading.Event()
-        primary_idle.set()
-        secondary_queue.put(pr)
-
-        def put_sentinel_later():
-            import time
-            time.sleep(0.2)
-            secondary_queue.put(_SENTINEL)
-
-        t = threading.Thread(target=put_sentinel_later, daemon=True)
-        t.start()
-
-        run_async_secondary(restoration_pipeline=p.restoration_pipeline, secondary_queue=secondary_queue, encode_queue=encode_queue, clip_queue=cq, primary_idle_event=primary_idle, cancel_event=threading.Event(), debug_memory=MagicMock())
-        t.join(timeout=3)
-
-        restorer.flush_pending.assert_called_once_with(target_seqs={0})
-
-    def test_run_secondary_loop_flush_retry_after_timeout(self, monkeypatch):
-        """flush_pending retried after _FLUSH_RETRY_TIMEOUT if first flush didn't unstick."""
-        import threading
-        p = _make_pipeline()
-        monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.01)
-        monkeypatch.setattr(pipeline_threads, "_FLUSH_DELAY", 0.02)
-        monkeypatch.setattr(pipeline_threads, "_FLUSH_RETRY_TIMEOUT", 0.08)
-
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-        pr = PrimaryRestoreResult(
-            track_id=clip.track_id, start_frame=clip.start_frame,
-            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
-        )
-
-        restorer = _mock_async_restorer()
-        restorer.num_workers = 2
-        restorer.push_clip.return_value = 0
-        restorer.pop_completed.return_value = []
-        restorer.has_pending = True
-        restorer.flush_all.return_value = None
-        restorer.flush_pending.return_value = True
-        p.restoration_pipeline.secondary_restorer = restorer
-
-        secondary_queue = FrameQueue(max_frames=9999)
-        encode_queue = FrameQueue(max_frames=9999)
-        cq = FrameQueue(max_frames=9999)
-        primary_idle = threading.Event()
-        primary_idle.set()
-        secondary_queue.put(pr)
-
-        def put_sentinel_later():
-            import time
-            time.sleep(0.4)
-            secondary_queue.put(_SENTINEL)
-
-        t = threading.Thread(target=put_sentinel_later, daemon=True)
-        t.start()
-
-        run_async_secondary(restoration_pipeline=p.restoration_pipeline, secondary_queue=secondary_queue, encode_queue=encode_queue, clip_queue=cq, primary_idle_event=primary_idle, cancel_event=threading.Event(), debug_memory=MagicMock())
-        t.join(timeout=3)
-
-        assert restorer.flush_pending.call_count >= 2, (
-            f"Expected flush retry but flush_pending called {restorer.flush_pending.call_count} time(s)"
-        )
-
-    def test_run_secondary_loop_pipeline_starved_triggers_flush(self, monkeypatch):
-        """flush_pending when primary idle, clip_queue empty, and FLUSH_DELAY elapsed."""
-        import threading
-        p = _make_pipeline()
-        monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.01)
-        monkeypatch.setattr(pipeline_threads, "_FLUSH_DELAY", 0.05)
-
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-        pr = PrimaryRestoreResult(
-            track_id=clip.track_id, start_frame=clip.start_frame,
-            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
-        )
-
-        restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
-        sr_result = SecondaryRestoreResult(
-            track_id=pr.track_id, start_frame=pr.start_frame,
-            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            masks=pr.masks, restored_frames=restored,
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
-            pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
-        )
-
-        flush_pending_called = False
-        result_returned = False
-
-        def mock_pop():
-            nonlocal flush_pending_called, result_returned
-            if flush_pending_called and not result_returned:
-                result_returned = True
-                return [(0, restored)]
-            return []
-
-        restorer = _mock_async_restorer()
-        restorer.num_workers = 2
-        restorer.push_clip.return_value = 0
-        restorer.pop_completed.side_effect = mock_pop
-        restorer.has_pending = True
-        restorer.flush_all.return_value = None
-
-        def on_flush_pending(target_seqs=None):
-            nonlocal flush_pending_called
-            flush_pending_called = True
-            restorer.has_pending = False
-            return True
-
-        restorer.flush_pending.side_effect = on_flush_pending
-        p.restoration_pipeline.secondary_restorer = restorer
-        p.restoration_pipeline.build_secondary_result.return_value = sr_result
-
-        secondary_queue= FrameQueue(max_frames=9999)
-        encode_queue= FrameQueue(max_frames=9999)
-        cq= FrameQueue(max_frames=9999)
-        primary_idle = threading.Event()
-        primary_idle.set()
-        secondary_queue.put(pr)
-
-        def put_sentinel_later():
-            import time
-            time.sleep(0.3)
-            secondary_queue.put(_SENTINEL)
-
-        t = threading.Thread(target=put_sentinel_later, daemon=True)
-        t.start()
-
-        run_async_secondary(restoration_pipeline=p.restoration_pipeline, secondary_queue=secondary_queue, encode_queue=encode_queue, clip_queue=cq, primary_idle_event=primary_idle, cancel_event=threading.Event(), debug_memory=MagicMock())
-        t.join(timeout=3)
-
-        restorer.flush_pending.assert_called_with(target_seqs={0})
-        restorer.flush_all.assert_called_once()
-        assert not encode_queue.empty()
-
-    def test_run_secondary_loop_self_priming_prevents_deadlock(self, monkeypatch):
-        """3 clips on 2 workers: clip 2 primes clip 0's buffered tail, preventing deadlock."""
-        p = _make_pipeline()
-        monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.001)
-
-        def _make_pr(track_id, n_frames):
-            masks = [torch.zeros((2, 2), dtype=torch.bool)] * n_frames
-            return PrimaryRestoreResult(
-                track_id=track_id, start_frame=0,
-                frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-                masks=masks, primary_raw=torch.zeros((n_frames, 3, 256, 256)),
-                keep_start=0, keep_end=n_frames, crossfade_weights=None,
-                enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
-                pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,
-            )
-
-        pr0 = _make_pr(1, 50)
-        pr1 = _make_pr(2, 60)
-        pr2 = _make_pr(3, 40)
-
-        push_count = 0
-        completed_seqs: set[int] = set()
-
-        def mock_push_clip(frames, keep_start, keep_end):
-            nonlocal push_count
-            seq = push_count
-            push_count += 1
-            return seq
-
-        def mock_pop_completed():
-            if push_count >= 3 and 0 not in completed_seqs:
-                completed_seqs.add(0)
-                return [(0, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 50)]
-            return []
-
-        restorer = _mock_async_restorer()
-        restorer.num_workers = 2
-        restorer.push_clip.side_effect = mock_push_clip
-        restorer.pop_completed.side_effect = mock_pop_completed
-        restorer.flush_all.return_value = None
-        p.restoration_pipeline.secondary_restorer = restorer
-        p.restoration_pipeline.build_secondary_result.side_effect = lambda pr, frames: SecondaryRestoreResult(
-            track_id=pr.track_id, start_frame=pr.start_frame,
-            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            masks=pr.masks, restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
-            crossfade_weights=None, enlarged_bboxes=pr.enlarged_bboxes,
-            crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
-        )
-
-        secondary_queue= FrameQueue(max_frames=9999)
-        encode_queue= FrameQueue(max_frames=9999)
-        secondary_queue.put(pr0)
-        secondary_queue.put(pr1)
-        secondary_queue.put(pr2)
-        secondary_queue.put(_SENTINEL)
-
-        run_async_secondary(restoration_pipeline=p.restoration_pipeline, secondary_queue=secondary_queue, encode_queue=encode_queue, clip_queue=FrameQueue(max_frames=1), primary_idle_event=threading.Event(), cancel_event=threading.Event(), debug_memory=MagicMock())
-
-        assert restorer.push_clip.call_count == 3
-        assert not encode_queue.empty()
-        restorer.flush_all.assert_called_once()
-
-    def test_run_secondary_loop_tiny_and_large_clip_no_deadlock(self, monkeypatch):
-        """Reproduces original deadlock: 1-frame + 170-frame clips on 2 workers.
-
-        With pusher thread, all 3 clips are pushed without blocking.
-        The 3rd clip primes worker 0, releasing the tiny clip's buffered tail.
-        """
-        p = _make_pipeline()
-        monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.001)
-
-        def _make_pr(track_id, n_frames):
-            masks = [torch.zeros((2, 2), dtype=torch.bool)] * n_frames
-            return PrimaryRestoreResult(
-                track_id=track_id, start_frame=0,
-                frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-                masks=masks, primary_raw=torch.zeros((n_frames, 3, 256, 256)),
-                keep_start=0, keep_end=n_frames, crossfade_weights=None,
-                enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
-                pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,
-            )
-
-        pr_tiny = _make_pr(1, 1)
-        pr_large = _make_pr(2, 170)
-        pr_next = _make_pr(3, 80)
-
-        push_count = 0
-        completed_seqs: set[int] = set()
-
-        def mock_push_clip(frames, keep_start, keep_end):
-            nonlocal push_count
-            seq = push_count
-            push_count += 1
-            return seq
-
-        def mock_pop_completed():
-            if push_count >= 3 and 0 not in completed_seqs:
-                completed_seqs.add(0)
-                return [(0, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 1)]
-            return []
-
-        restorer = _mock_async_restorer()
-        restorer.num_workers = 2
-        restorer.push_clip.side_effect = mock_push_clip
-        restorer.pop_completed.side_effect = mock_pop_completed
-        restorer.flush_all.return_value = None
-        p.restoration_pipeline.secondary_restorer = restorer
-        p.restoration_pipeline.build_secondary_result.side_effect = lambda pr, frames: SecondaryRestoreResult(
-            track_id=pr.track_id, start_frame=pr.start_frame,
-            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            masks=pr.masks, restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
-            crossfade_weights=None, enlarged_bboxes=pr.enlarged_bboxes,
-            crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
-        )
-
-        secondary_queue= FrameQueue(max_frames=9999)
-        encode_queue= FrameQueue(max_frames=9999)
-        secondary_queue.put(pr_tiny)
-        secondary_queue.put(pr_large)
-        secondary_queue.put(pr_next)
-        secondary_queue.put(_SENTINEL)
-
-        run_async_secondary(restoration_pipeline=p.restoration_pipeline, secondary_queue=secondary_queue, encode_queue=encode_queue, clip_queue=FrameQueue(max_frames=1), primary_idle_event=threading.Event(), cancel_event=threading.Event(), debug_memory=MagicMock())
-
-        assert restorer.push_clip.call_count == 3
-        assert not encode_queue.empty()
-        first_result = encode_queue.get()
-        assert first_result.frame_count == 1
-        restorer.flush_all.assert_called_once()
-
-    def test_run_with_progress_callback(self):
-        cb = MagicMock()
-        with (
-            patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel"),
-            patch("jasna.mosaic.yolo.YoloMosaicDetectionModel"),
-        ):
-            rest_pipeline = MagicMock()
-            rest_pipeline.secondary_num_workers = 1
-            rest_pipeline.secondary_prefers_cpu_input = False
-            rest_pipeline.secondary_restorer.num_workers = 2
-            p = make_pipeline(
-                input_video=Path("in.mp4"),
-                output_video=Path("out.mkv"),
-                detection_score_threshold=0.25,
-                restoration_pipeline=rest_pipeline,
-                codec="hevc",
-                encoder_settings={},
-                batch_size=2,
-                device=torch.device("cpu"),
-                max_clip_size=60,
-                temporal_overlap=8,
-                max_detection_gap=0,
-                min_detection_duration=0,
-                fp16=True,
-                disable_progress=True,
-                progress_callback=cb,
-            )
-
-        reader_cls, _, _ = _make_two_readers([])
-
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline_threads.VideoReader", reader_cls),
-            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-        ):
-            p.run()
-
-
-    def test_run_secondary_loop_reflush_after_forwarding(self, monkeypatch):
-        """After flushing worker 0 and forwarding its results, flush fires again for worker 1."""
-        import threading
-        p = _make_pipeline()
-        monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.01)
-        monkeypatch.setattr(pipeline_threads, "_FLUSH_DELAY", 0.05)
-
-        def _make_pr(track_id, start_frame, n_frames):
-            masks = [torch.zeros((2, 2), dtype=torch.bool)] * n_frames
-            return PrimaryRestoreResult(
-                track_id=track_id, start_frame=start_frame,
-                frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-                masks=masks, primary_raw=torch.zeros((n_frames, 3, 256, 256)),
-                keep_start=0, keep_end=n_frames, crossfade_weights=None,
-                enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
-                pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,
-            )
-
-        pr0 = _make_pr(track_id=0, start_frame=0, n_frames=180)
-        pr1 = _make_pr(track_id=1, start_frame=180, n_frames=180)
-
-        push_count = 0
-        flush_calls: list[set[int] | None] = []
-        returned_seqs: set[int] = set()
-
-        def mock_push(frames, keep_start, keep_end):
-            nonlocal push_count
-            seq = push_count
-            push_count += 1
-            return seq
-
-        def mock_flush(target_seqs=None):
-            flush_calls.append(target_seqs)
-            return True
-
-        def mock_pop():
-            if len(flush_calls) >= 1 and 0 not in returned_seqs:
-                returned_seqs.add(0)
-                return [(0, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 180)]
-            if len(flush_calls) >= 2 and 1 not in returned_seqs:
-                returned_seqs.add(1)
-                return [(1, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 180)]
-            return []
-
-        restorer = _mock_async_restorer()
-        restorer.num_workers = 2
-        restorer.push_clip.side_effect = mock_push
-        restorer.pop_completed.side_effect = mock_pop
-        restorer.flush_pending.side_effect = mock_flush
-        restorer.flush_all.return_value = None
-
-        @property
-        def _has_pending(self):
-            return len(returned_seqs) < push_count
-
-        type(restorer).has_pending = property(lambda self: len(returned_seqs) < push_count)
-
-        p.restoration_pipeline.secondary_restorer = restorer
-        p.restoration_pipeline.build_secondary_result.side_effect = lambda pr, frames: SecondaryRestoreResult(
-            track_id=pr.track_id, start_frame=pr.start_frame,
-            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            masks=pr.masks, restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
-            crossfade_weights=None, enlarged_bboxes=pr.enlarged_bboxes,
-            crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
-        )
-
-        secondary_queue= FrameQueue(max_frames=9999)
-        encode_queue= FrameQueue(max_frames=9999)
-        cq= FrameQueue(max_frames=9999)
-        primary_idle = threading.Event()
-        primary_idle.set()
-
-        secondary_queue.put(pr0)
-        secondary_queue.put(pr1)
-
-        def put_sentinel_later():
-            import time
-            time.sleep(0.5)
-            secondary_queue.put(_SENTINEL)
-
-        t = threading.Thread(target=put_sentinel_later, daemon=True)
-        t.start()
-
-        run_async_secondary(restoration_pipeline=p.restoration_pipeline, secondary_queue=secondary_queue, encode_queue=encode_queue, clip_queue=cq, primary_idle_event=primary_idle, cancel_event=threading.Event(), debug_memory=MagicMock())
-        t.join(timeout=3)
-
-        assert len(flush_calls) == 2, f"Expected 2 flush calls, got {len(flush_calls)}: {flush_calls}"
-        assert flush_calls[0] == {0}
-        assert flush_calls[1] == {1}
-        assert encode_queue.qsize() == 2
-
-
-class TestEarliestBlockingSeqs:
-    def _make_pr(self, start_frame, n_frames, keep_start=0, keep_end=None):
-        if keep_end is None:
-            keep_end = n_frames
-        masks = [torch.zeros((2, 2), dtype=torch.bool)] * n_frames
-        return PrimaryRestoreResult(
-            track_id=start_frame, start_frame=start_frame,
-            frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            masks=masks, primary_raw=torch.zeros((n_frames, 3, 256, 256)),
-            keep_start=keep_start, keep_end=keep_end, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
-            pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,
-        )
-
-    def test_empty_returns_none(self):
-        assert earliest_blocking_seqs({}) is None
-
-    def test_single_clip(self):
-        pr = self._make_pr(start_frame=100, n_frames=180)
-        result = earliest_blocking_seqs({0: pr})
-        assert result == {0}
-
-    def test_two_clips_same_start_frame(self):
-        pr0 = self._make_pr(start_frame=100, n_frames=180)
-        pr1 = self._make_pr(start_frame=100, n_frames=180)
-        result = earliest_blocking_seqs({0: pr0, 1: pr1})
-        assert result == {0, 1}
-
-    def test_non_overlapping_clips_returns_earliest_only(self):
-        pr0 = self._make_pr(start_frame=0, n_frames=180)
-        pr1 = self._make_pr(start_frame=200, n_frames=180)
-        result = earliest_blocking_seqs({0: pr0, 1: pr1})
-        assert result == {0}
-
-    def test_overlapping_clips_different_starts(self):
-        pr0 = self._make_pr(start_frame=0, n_frames=180)
-        pr1 = self._make_pr(start_frame=50, n_frames=180)
-        result = earliest_blocking_seqs({0: pr0, 1: pr1})
-        assert result == {0}
-
-    def test_keep_start_shifts_earliest_frame(self):
-        pr0 = self._make_pr(start_frame=0, n_frames=180, keep_start=20, keep_end=180)
-        pr1 = self._make_pr(start_frame=10, n_frames=180, keep_start=0, keep_end=180)
-        result = earliest_blocking_seqs({0: pr0, 1: pr1})
-        assert result == {1}
-
-
-@patch("jasna.pipeline.get_video_meta_data")
-def test_run_rejects_a_video_too_small_for_the_amd_encoder_before_processing(mock_meta):
-    from jasna.media.encoder_settings import AMF_MIN_SIZE
-    from jasna.media.probe import UnsupportedVideoError
-
+        runner = threading.Thread(target=_run_pipeline, daemon=True)
+        runner.start()
+        runner.join(timeout=10)
+
+    assert not runner.is_alive(), "restoration pass hung after a thread error"
+    assert len(raised) == 1 and "AMF decode failed" in str(raised[0])
+
+
+def test_retarget_high_fps_halves_the_rate_for_readers_encoder_and_progress():
+    metadata = _fake_metadata()
+    metadata.video_fps = metadata.average_fps = 60.0
+    metadata.video_fps_exact = Fraction(60, 1)
+    metadata.num_frames = 5
+
+    with patch("jasna.pipeline.Progressbar") as progress_cls:
+        reader_cls, encoder_cls, _ = _run(_pipeline(retarget_high_fps=True), metadata=metadata)
+
+    assert [call.kwargs["frame_stride"] for call in reader_cls.call_args_list] == [2, 2]
+    assert encoder_cls.call_args.kwargs["output_fps"] == Fraction(30, 1)
+    assert progress_cls.call_args.kwargs["total_frames"] == 3
+    assert progress_cls.call_args.kwargs["video_fps"] == 30.0
+
+
+def test_fmp4_is_dropped_for_segment_processing():
+    p = _pipeline(fmp4=True, segments=(SegmentRange(0.0, 1.0),))
+
+    with (
+        patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
+        patch.object(Pipeline, "_run_smart") as run_smart,
+    ):
+        p.run()
+
+    run_smart.assert_called_once()
+    assert p.fmp4 is False
+
+
+@pytest.mark.parametrize(
+    ("color_space", "supported"),
+    [
+        (AvColorspace.ITU709, True),
+        (AvColorspace.ITU601, True),
+        (AvColorspace.BT2020, True),
+        (AvColorspace.SMPTE240M, False),
+    ],
+)
+def test_validate_metadata_accepts_only_supported_color_spaces(color_space, supported):
+    metadata = _fake_metadata()
+    metadata.color_space = color_space
+    if supported:
+        make_pipeline().validate_metadata(metadata)
+    else:
+        with pytest.raises(UnsupportedVideoError, match="Only BT.709, BT.601, and BT.2020"):
+            make_pipeline().validate_metadata(metadata)
+
+
+def test_ltx_run_skips_vr_side_by_side_as_unsupported_video():
+    meta = _fake_metadata()
+    meta.video_width = 16
+    p = make_pipeline(restoration_model_name="ltx", vr_mode="sbs", vr_projection="raw")
+
+    with (
+        patch("jasna.pipeline.get_video_meta_data", return_value=meta),
+        pytest.raises(UnsupportedVideoError, match="VR180 side-by-side"),
+    ):
+        p.run()
+
+
+def test_run_rejects_a_video_too_small_for_the_amd_encoder_before_processing():
     meta = _fake_metadata()
     meta.video_width, meta.video_height = AMF_MIN_SIZE["hevc"][0] - 2, 240
-    mock_meta.return_value = meta
-    p = _make_pipeline()
-    p._run_full = MagicMock()
 
     with (
+        patch("jasna.pipeline.get_video_meta_data", return_value=meta),
         patch("jasna.pipeline.vendor_for_device", return_value=AcceleratorVendor.AMD),
         pytest.raises(UnsupportedVideoError, match="AMD video encoder"),
     ):
-        p.run()
-    p._run_full.assert_not_called()
+        _pipeline().run()
+
+
+def _run_async_secondary(restorer, results, *, primary_idle: bool):
+    secondary_queue = FrameQueue(max_frames=9999)
+    encode_queue = FrameQueue(max_frames=9999)
+    for result in results:
+        secondary_queue.put(result)
+    if not primary_idle:
+        secondary_queue.put(_SENTINEL)
+    idle = threading.Event()
+    if primary_idle:
+        idle.set()
+        restorer.on_pop = lambda r: secondary_queue.put(_SENTINEL) if len(r.returned) == len(results) else None
+    stats = run_async_secondary(
+        restoration_pipeline=RestorationPipeline(_WhitePrimary(), secondary_restorer=restorer),
+        secondary_queue=secondary_queue,
+        encode_queue=encode_queue,
+        clip_queue=FrameQueue(max_frames=9999),
+        primary_idle_event=idle,
+        cancel_event=threading.Event(),
+        debug_memory=MagicMock(),
+    )
+    forwarded = []
+    while not encode_queue.empty():
+        forwarded.append(encode_queue.get())
+    return stats, forwarded
+
+
+def test_async_secondary_forwards_every_clip_in_order_once_flushed_at_the_end(monkeypatch):
+    monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.001)
+    restorer = _BufferingAsyncRestorer()
+    results = [primary_result(track_id=1, frames=1), primary_result(track_id=2, frames=170), primary_result(track_id=3, frames=80)]
+
+    stats, forwarded = _run_async_secondary(restorer, results, primary_idle=False)
+
+    assert [(sr.track_id, len(sr.restored_frames)) for sr in forwarded] == [(1, 1), (2, 170), (3, 80)]
+    assert restorer.flushes == []
+    assert (stats.clips_pushed, stats.clips_popped, stats.starvation_flushes) == (3, 3, 0)
+
+
+def test_async_secondary_flushes_the_earliest_blocking_clip_when_starved(monkeypatch):
+    monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.001)
+    monkeypatch.setattr(pipeline_threads, "_FLUSH_DELAY", 0.0)
+    restorer = _BufferingAsyncRestorer()
+    results = [primary_result(track_id=0, start_frame=0, frames=180), primary_result(track_id=1, start_frame=180, frames=180)]
+
+    stats, forwarded = _run_async_secondary(restorer, results, primary_idle=True)
+
+    assert restorer.flushes == [{0}, {1}]
+    assert [sr.track_id for sr in forwarded] == [0, 1]
+
+
+@pytest.mark.parametrize(
+    ("starved", "flushed", "since_push", "since_flush", "action"),
+    [
+        (False, False, 99.0, 99.0, None),
+        (True, False, 1.0, 99.0, None),
+        (True, False, 3.0, 99.0, "flush"),
+        (True, True, 99.0, 1.0, None),
+        (True, True, 99.0, 6.0, "retry"),
+    ],
+    ids=["clips-incoming", "short-gap", "starved", "already-flushed", "flush-stuck"],
+)
+def test_starvation_action(starved, flushed, since_push, since_flush, action):
+    assert starvation_action(
+        starved=starved, flushed_since_last_push=flushed, since_push=since_push, since_flush=since_flush
+    ) == action
+
+
+@pytest.mark.parametrize(
+    ("clips", "expected"),
+    [
+        ({}, None),
+        ({0: dict(start_frame=100, frames=180)}, {0}),
+        ({0: dict(start_frame=100, frames=180), 1: dict(start_frame=100, frames=180)}, {0, 1}),
+        ({0: dict(start_frame=0, frames=180), 1: dict(start_frame=200, frames=180)}, {0}),
+        ({0: dict(start_frame=0, frames=180), 1: dict(start_frame=50, frames=180)}, {0}),
+        ({0: dict(start_frame=0, frames=180, keep_start=20), 1: dict(start_frame=10, frames=180)}, {1}),
+    ],
+    ids=["empty", "single", "same-start", "disjoint", "overlapping", "keep-start-shifts"],
+)
+def test_earliest_blocking_seqs(clips, expected):
+    assert earliest_blocking_seqs({seq: primary_result(**clip) for seq, clip in clips.items()}) == expected
