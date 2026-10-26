@@ -51,14 +51,17 @@ def tk_root():
 
 @pytest.fixture
 def jasna_app(monkeypatch, tmp_path):
-    """The real main window with settings under ``tmp_path`` and no GPU warm-up."""
+    """The real main window with no GPU warm-up, settings under ``tmp_path / "config"``
+    and restoration models (LTX included) under ``tmp_path / "models"``."""
     from tkinter import TclError
 
+    from jasna import engine_paths
     from jasna.accelerator import AcceleratorVendor
     from jasna.gui import app as app_module
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(app_module, "_warm_up_cuda", lambda: (AcceleratorVendor.CPU, False))
+    monkeypatch.setattr(engine_paths, "default_restoration_model_path", lambda name: tmp_path / "models" / name)
     try:
         app = app_module.JasnaApp(skip_wizard=True)
     except TclError as exc:
