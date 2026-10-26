@@ -443,6 +443,18 @@ def earliest_blocking_seqs(pending_prs: dict[int, PrimaryRestoreResult]) -> set[
     }
 
 
+def starvation_action(
+    *, starved: bool, flushed_since_last_push: bool, since_push: float, since_flush: float
+) -> str | None:
+    """``"flush"`` once buffered clips have waited ``_FLUSH_DELAY`` with no clip arriving,
+    ``"retry"`` when a flush forwarded nothing for ``_FLUSH_RETRY_TIMEOUT``, else ``None``."""
+    if not starved:
+        return None
+    if not flushed_since_last_push:
+        return "flush" if since_push > _FLUSH_DELAY else None
+    return "retry" if since_flush > _FLUSH_RETRY_TIMEOUT else None
+
+
 def run_async_secondary(
     *,
     restoration_pipeline: RestorationPipeline,
@@ -539,12 +551,13 @@ def run_async_secondary(
             continue
 
         now = time.monotonic()
-        if (
-            restorer.has_pending
-            and _no_clips_incoming()
-            and not flushed_since_last_push
-            and now - last_push_time > _FLUSH_DELAY
-        ):
+        action = starvation_action(
+            starved=restorer.has_pending and _no_clips_incoming(),
+            flushed_since_last_push=flushed_since_last_push,
+            since_push=now - last_push_time,
+            since_flush=now - last_flush_time,
+        )
+        if action == "flush":
             if starvation_start is None:
                 starvation_start = now
             target_seqs = earliest_blocking_seqs(dict(pending_prs))
@@ -553,12 +566,7 @@ def run_async_secondary(
                 flushed_since_last_push = True
                 last_flush_time = now
             starvation_count += 1
-        elif (
-            flushed_since_last_push
-            and restorer.has_pending
-            and _no_clips_incoming()
-            and now - last_flush_time > _FLUSH_RETRY_TIMEOUT
-        ):
+        elif action == "retry":
             log.warning(
                 "[secondary] flush retry: no clips forwarded for %.0fs after flush, pending=%d",
                 now - last_flush_time, len(pending_prs),
