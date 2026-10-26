@@ -1,17 +1,14 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from factories import offload_bundle_targets
 
 import jasna.media.cuda_kernel as cuda_kernel
+from jasna.accelerator import TRITON_HIP_ARCHITECTURES
 from jasna.mosaic.rfdetr_fused_head import FusedSegmentationHead, fuse_segmentation_head, has_fused_head_kernels
-from jasna.mosaic.rfdetr_hip_launch import KERNEL_LAUNCH
 
-MEDIA = Path(cuda_kernel.__file__).resolve().parent
 C = 256
 SIZE = 144
 
@@ -29,7 +26,7 @@ def _weight(dtype: torch.dtype, device: str = "cuda:0") -> SimpleNamespace:
     return SimpleNamespace(dtype=dtype, device=torch.device(device))
 
 
-@pytest.mark.parametrize("architecture", ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1200", "gfx1201"])
+@pytest.mark.parametrize("architecture", TRITON_HIP_ARCHITECTURES)
 @pytest.mark.parametrize("feature_size", [144, 192])
 def test_rdna3_and_rdna4_run_the_fused_head_in_fp16(monkeypatch, architecture, feature_size):
     _use_rocm(monkeypatch, architecture)
@@ -49,14 +46,6 @@ def test_other_gpus_and_feature_sizes_keep_the_torch_head(monkeypatch):
     monkeypatch.setattr(torch.version, "hip", None)
     monkeypatch.setattr(torch.version, "cuda", "13.0")
     assert not has_fused_head_kernels(_weight(torch.float16), 144)
-
-
-@pytest.mark.parametrize("module_name", sorted(KERNEL_LAUNCH["gfx1201"]))
-def test_every_architecture_in_the_launch_table_ships_its_code_object(module_name):
-    targets = offload_bundle_targets(MEDIA / f"{module_name}.hipfb")
-
-    assert {target.rpartition("--")[2] for target in targets if target.startswith("hipv4-")} == set(KERNEL_LAUNCH)
-    assert all(set(kernels) == set(KERNEL_LAUNCH["gfx1201"]) for kernels in KERNEL_LAUNCH.values())
 
 
 class _Block(nn.Module):

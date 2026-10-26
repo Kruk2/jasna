@@ -1,13 +1,10 @@
 """The diffusion blocks' fused kernels (``diffusion_triton``) built ahead of time for AMD
 (``scripts/build_ltx_vae_hipfbs.py``), for GPUs without Triton: Windows ROCm ships none."""
 
-import ctypes
-import functools
-
 import torch
 
-from jasna.accelerator import amd_gpu_architecture
-from jasna.media.cuda_kernel import _TRITON_SCRATCH_ARGS, Kernel
+from jasna.media.cuda_kernel import aot_kernel
+from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
 
 # Launch configs, fastest on a Radeon AI PRO R9700 (gfx1201). Residual SwiGLU: rows per program,
 # hidden columns per step, warps (swept 64/128 rows, 32/64 columns, 4/8 warps, 1/2 stages). Slab
@@ -34,8 +31,6 @@ def qkv_module(dim: int) -> str:
 
 _SWIGLU_POINTERS = ("x_ptr", "norm_ptr", "scale_ptr", "shift_ptr", "gate_ptr", "up_ptr", "down_ptr")
 SWIGLU_ARGUMENTS = {**{name: "*bf16" for name in _SWIGLU_POINTERS}, "rows": "i32"}
-_SWIGLU_TYPES = (ctypes.c_void_p,) * len(_SWIGLU_POINTERS) + (ctypes.c_int32,)
-_QKV_SLAB = ("x_ptr", "halo_ptr")
 _QKV_BF16 = ("norm_ptr", "scale_ptr", "shift_ptr", "wq_ptr", "bq_ptr", "wk_ptr", "bk_ptr", "wv_ptr", "bv_ptr", "qn_ptr", "kn_ptr")
 _QKV_FP32 = ("inv_ptr", "wpos_ptr")
 _QKV_OUT = ("q_ptr", "k_ptr", "v_ptr")
@@ -45,26 +40,11 @@ QKV_ARGUMENTS = {
     **{name: "*fp32" for name in _QKV_FP32}, **{name: "*bf16" for name in _QKV_OUT},
     **{name: "i32" for name in _QKV_INTS}, "q_scale": "fp32",
 }
-_QKV_TYPES = (ctypes.c_void_p,) * (len(_QKV_SLAB) + 1 + len(_QKV_BF16) + len(_QKV_FP32) + len(_QKV_OUT)) + (
-    ctypes.c_int32,) * len(_QKV_INTS) + (ctypes.c_float,)
 
 
-@functools.cache
-def _kernel(architecture: str, module: str, arg_types: tuple) -> tuple[Kernel, int]:
-    from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
-
-    kernels = KERNEL_LAUNCH.get(architecture, {})
-    if module not in kernels:
-        raise RuntimeError(f"no ahead-of-time kernel {module} on {architecture}")
-    function, _grid, threads, shared = kernels[module]
-    return Kernel(module, function, (*arg_types, *(ctypes.c_void_p,) * _TRITON_SCRATCH_ARGS), shared), threads
-
-
-def _launch(module: str, arg_types: tuple, rows_per_program: int, rows: int, device: torch.device, args) -> None:
-    kernel, threads = _kernel(amd_gpu_architecture(device), module, arg_types)
-    kernel.launch(
-        (-(-rows // rows_per_program), 1, 1), (threads, 1, 1), (*args, *(0,) * _TRITON_SCRATCH_ARGS),
-        torch.cuda.current_stream(device).cuda_stream,
+def _launch(module: str, arguments: dict[str, str], rows_per_program: int, rows: int, device: torch.device, args) -> None:
+    aot_kernel(KERNEL_LAUNCH, module, device, arguments).launch(
+        (-(-rows // rows_per_program), 1, 1), torch.cuda.current_stream(device).cuda_stream, *args,
     )
 
 
@@ -87,7 +67,7 @@ def residual_swiglu_(
     tensors = (x, norm_weight, scale, shift, w_gate, w_up, w_down)
     _require_bf16(tensors, x.shape[1] == DIM and w_gate.shape == (HIDDEN, DIM))
     rows = x.shape[0]
-    _launch(SWIGLU_MODULE, _SWIGLU_TYPES, SWIGLU_BLOCK_ROWS, rows, x.device, (*(t.data_ptr() for t in tensors), rows))
+    _launch(SWIGLU_MODULE, SWIGLU_ARGUMENTS, SWIGLU_BLOCK_ROWS, rows, x.device, (*tensors, rows))
 
 
 def slab_qkv(
@@ -116,6 +96,6 @@ def slab_qkv(
     norm, scale, shift = modulation or (x, x, x)
     pointers = (x, left_halo, columns, norm, scale, shift, *weights, inv_freqs.float().contiguous(),
                 w_pos.float().contiguous(), q, k, v)
-    _launch(qkv_module(dim), _QKV_TYPES, QKV_BLOCK_ROWS, rows, x.device,
-            (*(p.data_ptr() for p in pointers), rows, h, w, ext, halo, core_len, q_scale))
+    _launch(qkv_module(dim), QKV_ARGUMENTS, QKV_BLOCK_ROWS, rows, x.device,
+            (*pointers, rows, h, w, ext, halo, core_len, q_scale))
     return q, k, v

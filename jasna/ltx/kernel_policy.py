@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import torch
 
-from jasna.accelerator import amd_gpu_architecture
+from jasna.accelerator import TRITON_HIP_ARCHITECTURES, amd_gpu_architecture
 
 ROTATE_QUANTIZE_WARPS = 8
 GROUP_M = 8
@@ -43,8 +43,7 @@ INT8_MM_TILES = {
 # The same per AMD architecture, keyed by name: ROCm reports gfx1201 as capability 12.0. Swept on
 # a Radeon AI PRO R9700 (gfx1201); waves_per_eu, stages 1-3 and 4 vs 8 warps moved the
 # plateau tiles by under 2 %. gfx1200, RDNA3 (gfx110x) and RDNA3.5 (gfx115x) take the same tiles, unmeasured.
-AMD_INT8_MM_TILES = dict.fromkeys(("gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1200", "gfx1201"),
-                                  ((128, 256, 128, 2, 8), (128, 128, 128, 1, 8)))
+AMD_INT8_MM_TILES = dict.fromkeys(TRITON_HIP_ARCHITECTURES, ((128, 256, 128, 2, 8), (128, 128, 128, 1, 8)))
 # GPUs on which Triton runs dots as scalar FMA (it has no tensor-core dot below SM 8.0): the
 # int8 GEMM runs on cuBLAS (``torch._int_mm``) and only its epilogue in Triton.
 CUBLAS_INT8_MM = {(7, 5)}  # RTX 20 series

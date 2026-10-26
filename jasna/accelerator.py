@@ -15,6 +15,12 @@ import torch
 
 log = logging.getLogger(__name__)
 
+TRITON_HIP_ARCHITECTURES = ("gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1200", "gfx1201")
+"""RDNA3, RDNA3.5 and RDNA4: the AMD GPUs every Triton kernel is built ahead of time (and the LTX
+GEMM tiles are tuned) for."""
+HIP_KERNEL_ARCHITECTURES = frozenset({"gfx1030", *TRITON_HIP_ARCHITECTURES, "gfx908", "gfx90a", "gfx942", "gfx950"})
+"""The targets of the ``jasna/media/*.cu`` bundles: the Triton set plus RDNA2 and Instinct."""
+
 # BasicVSR++ meets a new convolution batch for every clip length. FAST never
 # writes the user FindDb, and the Windows ROCm wheels ship no system FindDb
 # (ROCm/TheRock#7958), so every miss falls back to slow heuristic kernels forever.

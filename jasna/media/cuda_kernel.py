@@ -9,22 +9,14 @@ import ctypes
 import os
 import sys
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
 import torch
 
 from jasna._frozen import is_frozen
-from jasna.accelerator import amd_gpu_architecture, is_amd_device, is_nvidia_device
-
-HIP_KERNEL_ARCHITECTURES = frozenset({
-    "gfx1030",
-    "gfx1100", "gfx1101", "gfx1102", "gfx1103",
-    "gfx1150", "gfx1151",
-    "gfx1200", "gfx1201",
-    "gfx908", "gfx90a", "gfx942", "gfx950",
-})
+from jasna.accelerator import HIP_KERNEL_ARCHITECTURES, amd_gpu_architecture, is_amd_device, is_nvidia_device
 
 _driver: ctypes.CDLL | None = None
 _hip: ctypes.CDLL | None = None
@@ -318,22 +310,59 @@ class Kernel:
 
 
 _TRITON_SCRATCH_ARGS = 2
+_TRITON_SCRATCH = (0,) * _TRITON_SCRATCH_ARGS
+TritonLaunch = tuple[str, tuple[int, int, int], int, int]
+"""A launch-table entry: (function, grid, threads per block, dynamic shared memory bytes)."""
+
+
+def _triton_ctype(kind: str) -> type:
+    if kind.startswith("*"):
+        return ctypes.c_void_p
+    return {"i32": ctypes.c_int32, "fp32": ctypes.c_float}[kind.split(":")[0]]
 
 
 class TritonKernel:
     """A Triton kernel built ahead of time by ``scripts/triton_hipfb.py``, with its launch-table entry.
 
-    ``launch`` is ``(function, grid, threads per block, dynamic shared memory bytes)``.
-    The kernel takes the tensors' pointers, then Triton's scratch pointers, which
-    the build guarantees are unused.
+    ``arguments`` maps each runtime argument, in order, to the Triton type it was built for (the
+    build's own signature). ``launch`` takes tensors for the pointers and ints/floats for the rest,
+    then passes Triton's scratch pointers, which the build guarantees are unused.
     """
 
-    def __init__(self, module_name: str, launch: tuple[str, tuple[int, int, int], int, int], pointer_count: int):
+    def __init__(self, module_name: str, launch: TritonLaunch, arguments: Mapping[str, str]):
         function, self.grid, threads, shared = launch
         self.module_name = module_name
         self.block = (threads, 1, 1)
-        self._scratch = (0,) * _TRITON_SCRATCH_ARGS
-        self._kernel = Kernel(module_name, function, (ctypes.c_void_p,) * (pointer_count + _TRITON_SCRATCH_ARGS), shared)
+        arg_types = (*map(_triton_ctype, arguments.values()), *(ctypes.c_void_p,) * _TRITON_SCRATCH_ARGS)
+        self._kernel = Kernel(module_name, function, arg_types, shared)
 
-    def launch(self, grid: tuple[int, int, int], stream: int, *tensors: torch.Tensor) -> None:
-        self._kernel.launch(grid, self.block, (*(t.data_ptr() for t in tensors), *self._scratch), stream)
+    def launch(self, grid: tuple[int, int, int], stream: int, *args: torch.Tensor | int | float) -> None:
+        values = (arg.data_ptr() if isinstance(arg, torch.Tensor) else arg for arg in args)
+        self._kernel.launch(grid, self.block, (*values, *_TRITON_SCRATCH), stream)
+
+
+_aot_kernels: dict[tuple[str, str], TritonKernel] = {}
+
+
+def has_aot_kernel(launch_table: Mapping[str, Mapping[str, TritonLaunch]], module_name: str, device: torch.device) -> bool:
+    """Whether ``device`` is an AMD GPU that ``launch_table`` (a generated ``KERNEL_LAUNCH``) has ``module_name`` for."""
+    return is_amd_device(device) and module_name in launch_table.get(amd_gpu_architecture(device), {})
+
+
+def aot_kernel(
+    launch_table: Mapping[str, Mapping[str, TritonLaunch]],
+    module_name: str,
+    device: torch.device,
+    arguments: Mapping[str, str],
+) -> TritonKernel:
+    """The ``module_name`` Triton kernel built ahead of time for ``device``'s AMD architecture, one per
+    process and architecture."""
+    architecture = amd_gpu_architecture(device)
+    key = (module_name, architecture)
+    kernel = _aot_kernels.get(key)
+    if kernel is None:
+        launch = launch_table.get(architecture, {}).get(module_name)
+        if launch is None:
+            raise RuntimeError(f"no ahead-of-time kernel {module_name} on {architecture}")
+        kernel = _aot_kernels.setdefault(key, TritonKernel(module_name, launch, arguments))
+    return kernel

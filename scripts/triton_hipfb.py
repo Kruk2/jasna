@@ -11,39 +11,12 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import triton
-from triton.backends.compiler import GPUTarget
-from triton.compiler import ASTSource
+from jasna.accelerator import TRITON_HIP_ARCHITECTURES
+from jasna.media.triton_hip import WARP_SIZE, compile_hip
 
 REPO = Path(__file__).resolve().parents[1]
 MEDIA = REPO / "jasna" / "media"
 BUNDLER = Path(os.environ.get("ROCM_PATH", "/opt/rocm")) / "llvm" / "bin" / "clang-offload-bundler"
-
-ARCHITECTURES = ("gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1200", "gfx1201")
-WARP_SIZE = 32
-
-
-def compile_code_object(kernel, arguments, constants, options, architecture):
-    """``arguments`` maps each runtime argument to its Triton type; ``"i32:16"`` is an int the caller
-    guarantees divisible by 16, ``"*bf16:wide"`` a tensor that may exceed 2 GB."""
-    signature = {name: kind.split(":")[0] for name, kind in arguments.items()}
-    signature.update({name: "constexpr" for name in constants})
-    # Tensors are 16-byte aligned and, unless wide, inside the 2 GB range of AMD buffer loads.
-    attrs = {}
-    for index, kind in enumerate(arguments.values()):
-        if kind.startswith("*"):
-            attrs[(index,)] = [["tt.divisibility", 16]] + ([] if kind.endswith(":wide") else [["tt.pointer_range", 32]])
-        elif kind.endswith(":16"):
-            attrs[(index,)] = [["tt.divisibility", 16]]
-    compiled = triton.compile(
-        ASTSource(kernel, signature, constants, attrs),
-        target=GPUTarget("hip", architecture, WARP_SIZE),
-        options=options,
-    )
-    metadata = compiled.metadata
-    if metadata.global_scratch_size or metadata.profile_scratch_size:
-        raise RuntimeError(f"{metadata.name} on {architecture} needs scratch memory, which the loader does not pass")
-    return compiled.asm["hsaco"], metadata.name, metadata.shared
 
 
 def bundle(code_objects: dict[str, bytes], output: Path) -> None:
@@ -63,19 +36,21 @@ def bundle(code_objects: dict[str, bytes], output: Path) -> None:
 
 
 def build(kernel_specs: dict[str, tuple], launch_table: Path, title: str, script: str) -> None:
-    """Compile and bundle every ``stem -> (kernel, fp16 pointer args, constexprs, num_warps, grid)``."""
-    launch: dict[str, dict[str, tuple]] = {architecture: {} for architecture in ARCHITECTURES}
-    for stem, (kernel, pointer_args, constants, num_warps, grid) in kernel_specs.items():
+    """Compile every ``stem -> (kernel, arguments, constexprs, num_warps, num_stages, grid)`` for every
+    ``TRITON_HIP_ARCHITECTURES`` entry into ``jasna/media/<stem>.hipfb`` and write the launch table.
+    ``arguments`` maps each runtime argument to its Triton type (``compile_hip``); ``grid`` is the
+    launch-table grid (zeros where the launcher computes it)."""
+    launch: dict[str, dict[str, tuple]] = {architecture: {} for architecture in TRITON_HIP_ARCHITECTURES}
+    for stem, (kernel, arguments, constants, num_warps, num_stages, grid) in kernel_specs.items():
         code_objects = {}
-        arguments = {name: "*fp16" for name in pointer_args}
-        options = {"num_warps": num_warps, "num_stages": 1}
-        for architecture in ARCHITECTURES:
-            code, name, shared = compile_code_object(kernel, arguments, constants, options, architecture)
-            code_objects[architecture] = code
-            launch[architecture][stem] = (name, grid, num_warps * WARP_SIZE, shared)
+        options = {"num_warps": num_warps, "num_stages": num_stages}
+        for architecture in TRITON_HIP_ARCHITECTURES:
+            compiled = compile_hip(kernel, arguments, constants, options, architecture)
+            code_objects[architecture] = compiled.asm["hsaco"]
+            launch[architecture][stem] = (compiled.metadata.name, grid, num_warps * WARP_SIZE, compiled.metadata.shared)
         output = MEDIA / f"{stem}.hipfb"
         bundle(code_objects, output)
-        print(f"{output.name:34s} {output.stat().st_size:8d} bytes  {' '.join(ARCHITECTURES)}")
+        print(f"{output.name:34s} {output.stat().st_size:8d} bytes  {' '.join(TRITON_HIP_ARCHITECTURES)}")
     _write_launch_table(launch, launch_table, title, script)
 
 
