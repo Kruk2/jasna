@@ -95,6 +95,24 @@ def gui_language(monkeypatch, tmp_path):
 
 
 @pytest.fixture
+def settle_activation(monkeypatch):
+    """Return ``settle(window)``: finish every activation worker thread, then run what the
+    workers posted to ``window``'s main-thread queue, until no worker is left."""
+    from jasna.gui import activation_worker
+
+    threads = []
+    start = activation_worker._start
+    monkeypatch.setattr(activation_worker, "_start", lambda *args: threads.append(start(*args)) or threads[-1])
+
+    def settle(window) -> None:
+        while threads:
+            threads.pop(0).join()
+            window._main_thread._run_pending()
+
+    return settle
+
+
+@pytest.fixture
 def show_window():
     """Process Tk events until a window is viewable, so its widgets have real sizes.
 
