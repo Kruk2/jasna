@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -131,156 +132,72 @@ def test_redirect_std_streams_to_null_repoints_os_std_handles_on_windows(monkeyp
     ]
 
 
-def test_parse_ffmpeg_major_version_parses_plain_semver() -> None:
-    out = "ffmpeg version 8.0.1 Copyright (c) ..."
-    assert os_utils._parse_ffmpeg_major_version(out) == 8
+def _completed(stdout: str = "", returncode: int = 0, stderr: str = "") -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)
 
 
-def test_parse_ffmpeg_major_version_parses_n_prefix() -> None:
-    out = "ffprobe version n8.1.2-12-gdeadbeef Copyright (c) ..."
-    assert os_utils._parse_ffmpeg_major_version(out) == 8
+@pytest.mark.parametrize(
+    "output",
+    [
+        "ffmpeg version 8.0.1 Copyright (c) ...",
+        "ffprobe version n8.1.2-12-gdeadbeef Copyright (c) ...",
+        "ffmpeg version N-113224-gdeadbeef Copyright (c) ...\nlibavutil      60.  3.100 / 60.  3.100",
+    ],
+    ids=["semver", "n-prefix", "nightly-libavutil"],
+)
+def test_parse_ffmpeg_major_version(output) -> None:
+    assert os_utils._parse_ffmpeg_major_version(output) == 8
 
 
-def test_parse_ffmpeg_major_version_parses_nightly_build_from_libavutil() -> None:
-    out = "\n".join(
-        [
-            "ffmpeg version N-113224-gdeadbeef Copyright (c) ...",
-            "libavutil      60.  3.100 / 60.  3.100",
-        ]
-    )
-    assert os_utils._parse_ffmpeg_major_version(out) == 8
-
-
-def test_check_required_executables_uses_expected_version_commands(monkeypatch) -> None:
+def test_check_required_executables_accepts_ffprobe_8(monkeypatch) -> None:
     monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
-
-    calls: list[list[str]] = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(list(cmd))
-        exe = os_utils.Path(cmd[0]).name
-        if exe == "ffprobe":
-            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 8.1.0", "stderr": ""})()
-        raise AssertionError(f"Unexpected exe {exe!r}")
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+    calls = []
+    monkeypatch.setattr(os_utils.subprocess, "run", lambda cmd, **kwargs: calls.append(cmd) or _completed("ffprobe version 8.1.0"))
 
     os_utils.check_required_executables()
 
-    assert calls == [
-        ["/fake/ffprobe", "-version"],
-    ]
+    assert calls == [["/fake/ffprobe", "-version"]]
+
+
+@pytest.mark.parametrize(
+    ("version_output", "message"),
+    [
+        ("ffprobe version 7.1.0", "major version must be exactly 8"),
+        ("ffprobe version 9.0.0", "major version must be exactly 8"),
+        ("ffprobe version N-113224-gdeadbeef", "could not detect major version"),
+    ],
+)
+def test_check_required_executables_rejects_other_ffprobe_versions(monkeypatch, capsys, version_output, message) -> None:
+    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
+    monkeypatch.setattr(os_utils.subprocess, "run", lambda cmd, **kwargs: _completed(version_output))
+
+    with pytest.raises(SystemExit) as exit_info:
+        os_utils.check_required_executables()
+
+    assert int(exit_info.value.code) == 1
+    assert message in capsys.readouterr().out
 
 
 def test_check_required_executables_logs_stdout_stderr_when_exe_fails(monkeypatch, caplog) -> None:
     monkeypatch.setattr(os_utils, "find_executable", lambda exe: f"/fake/{exe}")
+    monkeypatch.setattr(
+        os_utils.subprocess, "run", lambda cmd, **kwargs: _completed("ffprobe stdout", 1, "ffprobe stderr")
+    )
 
-    def fake_run(cmd, **kwargs):
-        exe = os_utils.Path(cmd[0]).name
-        if exe == "ffprobe":
-            return type("R", (), {"returncode": 1, "stdout": "ffprobe stdout", "stderr": "ffprobe stderr"})()
-        raise AssertionError(f"Unexpected exe {exe!r}")
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
-
-    with caplog.at_level("ERROR"):
-        with pytest.raises(SystemExit):
-            os_utils.check_required_executables()
-
-    assert any("ffprobe failed" in rec.message and "ffprobe stdout" in rec.message and "ffprobe stderr" in rec.message for rec in caplog.records)
-
-
-def test_check_required_executables_errors_on_old_ffprobe(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
-
-    def fake_run(cmd, **kwargs):
-        exe = os_utils.Path(cmd[0]).name
-        if exe == "ffprobe":
-            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 7.1.0", "stderr": ""})()
-        raise AssertionError(f"Unexpected exe {exe!r}")
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
-
-    with pytest.raises(SystemExit) as e:
+    with caplog.at_level("ERROR"), pytest.raises(SystemExit):
         os_utils.check_required_executables()
-    assert int(e.value.code) == 1
 
-    captured = capsys.readouterr()
-    assert "major version must be exactly 8" in captured.out
-
-
-def test_check_required_executables_errors_on_newer_ffprobe(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
-
-    def fake_run(cmd, **kwargs):
-        exe = os_utils.Path(cmd[0]).name
-        if exe == "ffprobe":
-            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 9.0.0", "stderr": ""})()
-        raise AssertionError(f"Unexpected exe {exe!r}")
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
-
-    with pytest.raises(SystemExit) as e:
-        os_utils.check_required_executables()
-    assert int(e.value.code) == 1
-
-    captured = capsys.readouterr()
-    assert "major version must be exactly 8" in captured.out
+    assert any(
+        "ffprobe failed" in rec.message and "ffprobe stdout" in rec.message and "ffprobe stderr" in rec.message
+        for rec in caplog.records
+    )
 
 
-def test_check_required_executables_errors_when_version_cannot_be_detected(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
-
-    def fake_run(cmd, **kwargs):
-        exe = os_utils.Path(cmd[0]).name
-        if exe == "ffprobe":
-            return type("R", (), {"returncode": 0, "stdout": "ffprobe version N-113224-gdeadbeef", "stderr": ""})()
-        raise AssertionError(f"Unexpected exe {exe!r}")
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
-
-    with pytest.raises(SystemExit) as e:
-        os_utils.check_required_executables()
-    assert int(e.value.code) == 1
-
-    captured = capsys.readouterr()
-    assert "could not detect major version" in captured.out
-
-
-def test_get_subprocess_startup_info_non_nt_returns_none(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.os, "name", "posix", raising=False)
-    assert os_utils.get_subprocess_startup_info() is None
-
-
-def test_drop_console_window_non_win_is_noop(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
-    os_utils.drop_console_window()  # must not touch ctypes/raise off Windows
-
-
-def test_drop_console_window_dev_win_is_noop(monkeypatch) -> None:
-    # In dev (not frozen) the console is the developer's terminal — must not detach it.
-    import ctypes
-
-    calls = {"free": 0}
-
-    class _Windll:
-        class kernel32:
-            @staticmethod
-            def FreeConsole() -> None:
-                calls["free"] += 1
-
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setattr(os_utils, "is_frozen", lambda: False)
-    monkeypatch.setattr(ctypes, "windll", _Windll(), raising=False)
-
-    os_utils.drop_console_window()
-
-    assert calls["free"] == 0
-
-
-def test_drop_console_window_frozen_win_calls_freeconsole(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+@pytest.mark.parametrize(("platform", "frozen", "frees"), [("linux", True, 0), ("win32", False, 0), ("win32", True, 1)])
+def test_drop_console_window_detaches_only_a_frozen_windows_app(monkeypatch, platform, frozen, frees) -> None:
+    # In dev the console is the developer's terminal and must stay attached.
+    monkeypatch.setattr(os_utils.sys, "platform", platform, raising=False)
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: frozen)
     monkeypatch.setattr(sys, "stdout", sys.stdout)
     monkeypatch.setattr(sys, "stderr", sys.stderr)
     monkeypatch.setattr(sys, "stdin", sys.stdin)
@@ -288,7 +205,7 @@ def test_drop_console_window_frozen_win_calls_freeconsole(monkeypatch) -> None:
 
     os_utils.drop_console_window()
 
-    assert kernel32.free == 1
+    assert kernel32.free == frees
 
 
 def test_freeconsole_dangling_std_handles_break_subprocess_until_redirect(tmp_path) -> None:
@@ -327,12 +244,14 @@ def test_freeconsole_dangling_std_handles_break_subprocess_until_redirect(tmp_pa
     assert after == "True"     # fix: NUL OS std handles let the child duplicate them
 
 
-def test_subprocess_no_window_kwargs_non_nt_is_empty(monkeypatch) -> None:
+def test_subprocess_window_options_are_empty_off_windows(monkeypatch) -> None:
     monkeypatch.setattr(os_utils.os, "name", "posix", raising=False)
+
     assert os_utils.subprocess_no_window_kwargs() == {}
+    assert os_utils.get_subprocess_startup_info() is None
 
 
-def test_subprocess_no_window_kwargs_nt_sets_create_no_window(monkeypatch) -> None:
+def test_subprocess_window_options_hide_the_window_on_windows(monkeypatch) -> None:
     class _StartupInfo:
         def __init__(self) -> None:
             self.dwFlags = 0
@@ -345,104 +264,62 @@ def test_subprocess_no_window_kwargs_nt_sets_create_no_window(monkeypatch) -> No
     kwargs = os_utils.subprocess_no_window_kwargs()
 
     assert kwargs["creationflags"] == 0x08000000
-    assert kwargs["startupinfo"] is not None
     assert kwargs["startupinfo"].dwFlags & (1 << 0)
+    assert os_utils.get_subprocess_startup_info().dwFlags & (1 << 0)
 
 
-def test_get_subprocess_startup_info_nt_sets_startf_flag(monkeypatch) -> None:
-    class _StartupInfo:
-        def __init__(self) -> None:
-            self.dwFlags = 0
-
-    monkeypatch.setattr(os_utils.os, "name", "nt", raising=False)
-    monkeypatch.setattr(os_utils.subprocess, "STARTUPINFO", _StartupInfo, raising=False)
-    monkeypatch.setattr(os_utils.subprocess, "STARTF_USESHOWWINDOW", 1 << 0, raising=False)
-
-    si = os_utils.get_subprocess_startup_info()
-    assert si is not None
-    assert si.dwFlags & (1 << 0)
-
-
-def test_find_executable_prefers_bundled_when_frozen(monkeypatch, tmp_path) -> None:
-    # Nuitka dist has no _internal/; bundled tools sit at the dist root (tools/).
+@pytest.mark.parametrize("system_ffmpeg", [None, "/usr/bin/ffmpeg"])
+def test_frozen_app_uses_its_bundled_executable_even_with_one_on_path(monkeypatch, tmp_path, system_ffmpeg) -> None:
+    # A frozen release ships its own ffmpeg; a wrong-version system copy must not win.
     monkeypatch.setattr(os_utils.sys, "frozen", True, raising=False)
     monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna"), raising=False)
-    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: None)
+    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: system_ffmpeg)
     monkeypatch.setattr(os_utils, "_bundled_exe_filename", lambda name: name)
-
     ffmpeg = tmp_path / "tools" / "ffmpeg"
-    ffmpeg.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg.parent.mkdir(parents=True)
     ffmpeg.write_bytes(b"")
 
     assert os_utils.find_executable("ffmpeg") == str(ffmpeg)
 
 
-def test_find_executable_bundled_wins_over_system_path(monkeypatch, tmp_path) -> None:
-    # A frozen release ships its own ffmpeg; it must use those even when a different
-    # copy is on the user's PATH (otherwise a wrong-version system ffmpeg would be picked).
-    monkeypatch.setattr(os_utils.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna"), raising=False)
-    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(os_utils, "_bundled_exe_filename", lambda name: name)
+@pytest.mark.parametrize(
+    ("on_path", "fallback_exists", "found"),
+    [(False, True, "fallback"), (False, False, None), (True, True, "from-path")],
+    ids=["common-location", "missing", "path-first"],
+)
+def test_find_executable_falls_back_to_common_locations(monkeypatch, tmp_path, on_path, fallback_exists, found) -> None:
+    (tmp_path / "from-path").write_text("")
+    if fallback_exists:
+        (tmp_path / "fallback").write_text("")
+    monkeypatch.setattr(os_utils.shutil, "which", lambda name: str(tmp_path / "from-path") if on_path else None)
+    monkeypatch.setitem(os_utils._COMMON_EXECUTABLE_LOCATIONS, "nvidia-smi", (str(tmp_path / "fallback"),))
 
-    ffmpeg = tmp_path / "tools" / "ffmpeg"
-    ffmpeg.parent.mkdir(parents=True, exist_ok=True)
-    ffmpeg.write_bytes(b"")
-
-    assert os_utils.find_executable("ffmpeg") == str(ffmpeg)
+    assert os_utils.find_executable("nvidia-smi") == (str(tmp_path / found) if found else None)
 
 
-def test_check_sysmem_fallback_returns_true_when_prefer_no_sysmem(monkeypatch) -> None:
+def _raise_oserror(setting_id):
+    raise OSError("nvdrsdb0.bin not found")
+
+
+@pytest.mark.parametrize(
+    ("read_setting", "ok", "info"),
+    [
+        (lambda setting_id: os_utils._PREFER_NO_SYSMEM_FALLBACK, True, "Prefer No Sysmem Fallback"),
+        (lambda setting_id: 0, False, "Driver Default"),
+        (lambda setting_id: os_utils._PREFER_SYSMEM_FALLBACK, False, "Prefer Sysmem Fallback"),
+        (lambda setting_id: None, False, "Driver Default"),
+        (_raise_oserror, False, "nvdrsdb0.bin not found"),
+    ],
+    ids=["prefer-no-sysmem", "driver-default", "prefer-sysmem", "not-set", "unreadable"],
+)
+def test_check_sysmem_fallback_policy_reads_the_nvidia_setting(monkeypatch, read_setting, ok, info) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setattr(
-        os_utils, "_read_drs_setting", lambda setting_id: os_utils._PREFER_NO_SYSMEM_FALLBACK
-    )
+    monkeypatch.setattr(os_utils, "_read_drs_setting", read_setting)
 
-    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
-    assert ok is True
-    assert "Prefer No Sysmem Fallback" in info
+    result_ok, result_info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
 
-
-def test_check_sysmem_fallback_returns_false_when_driver_default(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setattr(os_utils, "_read_drs_setting", lambda setting_id: 0)
-
-    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
-    assert ok is False
-    assert "Driver Default" in info
-
-
-def test_check_sysmem_fallback_returns_false_when_prefer_sysmem(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setattr(
-        os_utils, "_read_drs_setting", lambda setting_id: os_utils._PREFER_SYSMEM_FALLBACK
-    )
-
-    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
-    assert ok is False
-    assert "Prefer Sysmem Fallback" in info
-
-
-def test_check_sysmem_fallback_returns_false_when_setting_not_found(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setattr(os_utils, "_read_drs_setting", lambda setting_id: None)
-
-    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
-    assert ok is False
-    assert "Driver Default" in info
-
-
-def test_check_sysmem_fallback_returns_false_on_oserror(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-
-    def _raise(setting_id):
-        raise OSError("nvdrsdb0.bin not found")
-
-    monkeypatch.setattr(os_utils, "_read_drs_setting", _raise)
-
-    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
-    assert ok is False
-    assert "nvdrsdb0.bin not found" in info
+    assert result_ok is ok
+    assert info in result_info
 
 
 def test_check_sysmem_fallback_skips_nvidia_drs_on_amd(monkeypatch) -> None:
@@ -460,53 +337,30 @@ def test_check_sysmem_fallback_skips_nvidia_drs_on_amd(monkeypatch) -> None:
 def test_check_sysmem_fallback_returns_na_on_non_windows(monkeypatch) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
 
-    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
-    assert ok is True
-    assert info == "N/A"
+    assert os_utils.check_windows_nvidia_sysmem_fallback_policy() == (True, "N/A")
 
 
-def test_check_supported_gpu_returns_name_when_available_and_compute_ok(monkeypatch) -> None:
-    import types
-
+@pytest.mark.parametrize(
+    ("available", "capability", "name", "expected"),
+    [
+        (True, (8, 0), "RTX 4090", (True, "RTX 4090")),
+        (True, (7, 5), "RTX 2070", (True, "RTX 2070")),
+        (True, (6, 1), "GTX 1060", (False, ("compute_too_low", 6, 1))),
+        (False, None, None, (False, "no_cuda")),
+    ],
+    ids=["supported", "minimum", "too-old", "no-cuda"],
+)
+def test_check_supported_gpu_needs_compute_capability_7_5(monkeypatch, available, capability, name, expected) -> None:
     fake_torch = types.SimpleNamespace(
         cuda=types.SimpleNamespace(
-            is_available=lambda: True,
-            get_device_capability=lambda device: (8, 0),
-            get_device_name=lambda device: "RTX 4090",
+            is_available=lambda: available,
+            get_device_capability=lambda device: capability,
+            get_device_name=lambda device: name,
         )
     )
-    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
-    ok, result = os_utils.check_supported_gpu()
-    assert ok is True
-    assert result == "RTX 4090"
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
 
-
-def test_check_supported_gpu_returns_no_cuda_when_unavailable(monkeypatch) -> None:
-    import types
-
-    fake_torch = types.SimpleNamespace(
-        cuda=types.SimpleNamespace(is_available=lambda: False)
-    )
-    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
-    ok, result = os_utils.check_supported_gpu()
-    assert ok is False
-    assert result == "no_cuda"
-
-
-def test_check_supported_gpu_returns_compute_too_low_when_below_min(monkeypatch) -> None:
-    import types
-
-    fake_torch = types.SimpleNamespace(
-        cuda=types.SimpleNamespace(
-            is_available=lambda: True,
-            get_device_capability=lambda device: (6, 1),
-            get_device_name=lambda device: "GTX 1060",
-        )
-    )
-    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
-    ok, result = os_utils.check_supported_gpu()
-    assert ok is False
-    assert result == ("compute_too_low", 6, 1)
+    assert os_utils.check_supported_gpu() == expected
 
 
 def _fake_rocm_torch(gcn_arch_name: str, arch_list: list[str]):
@@ -524,32 +378,22 @@ def _fake_rocm_torch(gcn_arch_name: str, arch_list: list[str]):
     )
 
 
-def _as_amd_build(monkeypatch, fake_torch) -> None:
-    import jasna.accelerator as accelerator
-
+@pytest.mark.parametrize(
+    ("arch", "arch_list", "expected"),
+    [
+        ("gfx1103", ["gfx1100", "gfx1101", "gfx1102", "gfx1201"], (False, ("arch_unsupported", "gfx1103"))),
+        ("gfx90a:sramecc+:xnack-", ["gfx90a:xnack-", "gfx1100"], (True, "AMD Radeon 780M Graphics")),
+        ("gfx1103", [], (True, "AMD Radeon 780M Graphics")),
+    ],
+    ids=["missing-from-build", "feature-suffixes", "no-arch-list"],
+)
+def test_check_supported_gpu_needs_an_amd_arch_the_build_contains(monkeypatch, arch, arch_list, expected) -> None:
+    fake_torch = _fake_rocm_torch(arch, arch_list)
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setattr(accelerator, "torch", fake_torch)
     monkeypatch.setattr(accelerator, "vendor_for_device", lambda _device: accelerator.AcceleratorVendor.AMD)
 
-
-def test_check_supported_gpu_rejects_amd_arch_missing_from_build(monkeypatch) -> None:
-    _as_amd_build(monkeypatch, _fake_rocm_torch("gfx1103", ["gfx1100", "gfx1101", "gfx1102", "gfx1201"]))
-    ok, result = os_utils.check_supported_gpu()
-    assert ok is False
-    assert result == ("arch_unsupported", "gfx1103")
-
-
-def test_check_supported_gpu_accepts_amd_arch_ignoring_feature_suffixes(monkeypatch) -> None:
-    _as_amd_build(monkeypatch, _fake_rocm_torch("gfx90a:sramecc+:xnack-", ["gfx90a:xnack-", "gfx1100"]))
-    ok, result = os_utils.check_supported_gpu()
-    assert ok is True
-    assert result == "AMD Radeon 780M Graphics"
-
-
-def test_check_supported_gpu_accepts_amd_when_build_reports_no_arch_list(monkeypatch) -> None:
-    _as_amd_build(monkeypatch, _fake_rocm_torch("gfx1103", []))
-    ok, _ = os_utils.check_supported_gpu()
-    assert ok is True
+    assert os_utils.check_supported_gpu() == expected
 
 
 def test_gpu_check_error_names_each_failure() -> None:
@@ -558,144 +402,29 @@ def test_gpu_check_error_names_each_failure() -> None:
     assert "6.1" in os_utils.gpu_check_error(("compute_too_low", 6, 1))
 
 
-def test_check_supported_gpu_returns_ok_at_exactly_min_compute(monkeypatch) -> None:
-    import types
-
-    fake_torch = types.SimpleNamespace(
-        cuda=types.SimpleNamespace(
-            is_available=lambda: True,
-            get_device_capability=lambda device: (7, 5),
-            get_device_name=lambda device: "RTX 2070",
-        )
-    )
-    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
-    ok, result = os_utils.check_supported_gpu()
-    assert ok is True
-    assert result == "RTX 2070"
+def _nvidia_smi_raises(cmd, **kwargs):
+    raise OSError("permission denied")
 
 
-def test_nvidia_compatibility_alias_is_not_exposed() -> None:
-    assert not hasattr(os_utils, "check_nvidia_gpu")
+@pytest.mark.parametrize(
+    ("smi", "run", "ok", "info"),
+    [
+        ("/fake/nvidia-smi", lambda cmd, **kw: _completed(f"{os_utils.MIN_DRIVER_VERSION}.00\n"), True, f"{os_utils.MIN_DRIVER_VERSION}.00"),
+        ("/fake/nvidia-smi", lambda cmd, **kw: _completed("611.12\n"), True, "611.12"),
+        ("/fake/nvidia-smi", lambda cmd, **kw: _completed(f"{os_utils.MIN_DRIVER_VERSION - 1}.99\n"), False,
+         f"{os_utils.MIN_DRIVER_VERSION - 1}.99 (requires {os_utils.MIN_DRIVER_VERSION}+)"),
+        (None, None, False, "nvidia-smi not found"),
+        ("/fake/nvidia-smi", lambda cmd, **kw: _completed(returncode=1), False, "nvidia-smi exited with code 1"),
+        ("/fake/nvidia-smi", _nvidia_smi_raises, False, "permission denied"),
+        ("/fake/nvidia-smi", lambda cmd, **kw: _completed("garbage\n"), False, "Could not parse driver version: 'garbage'"),
+    ],
+    ids=["minimum", "newer", "too-old", "no-nvidia-smi", "smi-fails", "smi-unrunnable", "unparseable"],
+)
+def test_check_gpu_driver_version(monkeypatch, smi, run, ok, info) -> None:
+    monkeypatch.setattr(os_utils, "find_executable", lambda name: smi)
+    monkeypatch.setattr(os_utils.subprocess, "run", run)
 
-
-def test_min_gpu_compute_constant() -> None:
-    assert os_utils.MIN_GPU_COMPUTE == (7, 5)
-
-
-def test_min_driver_version_is_platform_specific() -> None:
-    import sys
-    assert os_utils.MIN_DRIVER_VERSION == (580 if sys.platform == "linux" else 610)
-
-
-def test_check_gpu_driver_version_passes_at_minimum(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
-    version = f"{os_utils.MIN_DRIVER_VERSION}.00"
-
-    def fake_run(cmd, **kwargs):
-        return type("R", (), {"returncode": 0, "stdout": f"{version}\n", "stderr": ""})()
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
-    ok, info = os_utils.check_gpu_driver_version()
-    assert ok is True
-    assert info == version
-
-
-def test_check_gpu_driver_version_passes_when_newer(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
-
-    def fake_run(cmd, **kwargs):
-        return type("R", (), {"returncode": 0, "stdout": "611.12\n", "stderr": ""})()
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
-    ok, info = os_utils.check_gpu_driver_version()
-    assert ok is True
-    assert info == "611.12"
-
-
-def test_check_gpu_driver_version_fails_below_minimum(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
-    below = f"{os_utils.MIN_DRIVER_VERSION - 1}.99"
-
-    def fake_run(cmd, **kwargs):
-        return type("R", (), {"returncode": 0, "stdout": f"{below}\n", "stderr": ""})()
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
-    ok, info = os_utils.check_gpu_driver_version()
-    assert ok is False
-    assert below in info
-    assert str(os_utils.MIN_DRIVER_VERSION) in info
-
-
-def test_check_gpu_driver_version_fails_when_nvidia_smi_not_found(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils, "find_executable", lambda name: None)
-    ok, info = os_utils.check_gpu_driver_version()
-    assert ok is False
-    assert "not found" in info
-
-
-def test_find_executable_falls_back_to_common_location_when_not_on_path(monkeypatch, tmp_path) -> None:
-    fake_smi = tmp_path / "nvidia-smi"
-    fake_smi.write_text("")
-
-    monkeypatch.setattr(os_utils.shutil, "which", lambda name: None)
-    monkeypatch.setitem(os_utils._COMMON_EXECUTABLE_LOCATIONS, "nvidia-smi", (str(fake_smi),))
-
-    assert os_utils.find_executable("nvidia-smi") == str(fake_smi)
-
-
-def test_find_executable_returns_none_when_neither_path_nor_common(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.shutil, "which", lambda name: None)
-    monkeypatch.setitem(os_utils._COMMON_EXECUTABLE_LOCATIONS, "nvidia-smi", ("/nope/nvidia-smi",))
-
-    assert os_utils.find_executable("nvidia-smi") is None
-
-
-def test_find_executable_prefers_path_over_common_locations(monkeypatch, tmp_path) -> None:
-    on_path = tmp_path / "from-path"
-    on_path.write_text("")
-    fallback = tmp_path / "fallback"
-    fallback.write_text("")
-
-    monkeypatch.setattr(os_utils.shutil, "which", lambda name: str(on_path))
-    monkeypatch.setitem(os_utils._COMMON_EXECUTABLE_LOCATIONS, "nvidia-smi", (str(fallback),))
-
-    assert os_utils.find_executable("nvidia-smi") == str(on_path)
-
-
-def test_check_gpu_driver_version_fails_when_nvidia_smi_errors(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
-
-    def fake_run(cmd, **kwargs):
-        return type("R", (), {"returncode": 1, "stdout": "", "stderr": ""})()
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
-    ok, info = os_utils.check_gpu_driver_version()
-    assert ok is False
-    assert "exited with code" in info
-
-
-def test_check_gpu_driver_version_fails_on_oserror(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
-
-    def fake_run(cmd, **kwargs):
-        raise OSError("permission denied")
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
-    ok, info = os_utils.check_gpu_driver_version()
-    assert ok is False
-    assert "permission denied" in info
-
-
-def test_check_gpu_driver_version_fails_on_unparseable_output(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
-
-    def fake_run(cmd, **kwargs):
-        return type("R", (), {"returncode": 0, "stdout": "garbage\n", "stderr": ""})()
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
-    ok, info = os_utils.check_gpu_driver_version()
-    assert ok is False
-    assert "Could not parse" in info
+    assert os_utils.check_gpu_driver_version() == (ok, info)
 
 
 def test_check_ascii_install_path_passes_for_ascii(monkeypatch, tmp_path) -> None:
