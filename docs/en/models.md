@@ -61,7 +61,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **GPU**: NVIDIA RTX 30, 40 or 50-series. RTX 20-series should work, but
   only the RTX 2080 Ti was tested. GTX 16-series is untested. Linux also supports
   Radeon RX 7000/9000 and Radeon AI PRO R9700 cards. AMD integrated GPUs are
-  untested for LTX. Windows AMD LTX is in **beta** and still needs GPU testing.
+  untested for LTX. Windows AMD LTX is in **beta**, tested on Radeon PRO V710;
+  testing on desktop Radeon cards is still in progress.
 - **VRAM**: 8 GB minimum. More VRAM is faster: on smaller cards parts of the
   model are kept in system RAM.
 - **System RAM**: 16 GB minimum (LTX uses about 10 GB).
@@ -107,8 +108,10 @@ BasicVSR++ whole-video jobs, previews and streaming do not resume.
 If the download in Jasna keeps failing, get the files in your browser from
 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.0)
 (or [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.0)).
-These links are for Jasna 0.12 and the protected AMD beta. For stable 0.11.3 or older,
-use the repository's `main` branch.
+These links are for Jasna 0.12. The initial AMD 0.12.0 beta archives still use
+[main/block-layout3](https://huggingface.co/Kruk2/ltx-restore/tree/main/block-layout3)
+(or [the mirror](https://hf-mirror.com/Kruk2/ltx-restore/tree/main/block-layout3)).
+For stable 0.11.3 or older, use the repository's `main` branch.
 You need 3 files: one for the model you picked, plus the two VAE files.
 
 | You picked | Files |

@@ -74,8 +74,11 @@ python3 -m pip install --break-system-packages uv
 uv pip install --system --break-system-packages -e ".[amd,dev]"
 ```
 
-Windows (Python 3.12, Adrenalin 26.8.1 or newer): install the matching
-PyTorch builds and GPU kernel packs from AMD's index:
+Windows: use Python 3.12 and [AMD's driver for ROCm 10.1](https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-ROCM-10-01.html)
+(26.10.41.05; Windows driver version 32.0.31041.5005), then reboot.
+Release users only install the driver: Jasna bundles ROCm 10.1.
+For source development, install the matching PyTorch builds and GPU kernel
+packs from AMD's index:
 
 ```powershell
 $I = "https://stable.repo.amd.com/rocm/whl-next/"

@@ -56,9 +56,10 @@ and a command line, and runs on your GPU.
 - NVIDIA: your GPU needs compute capability 7.5 or higher in NVIDIA's
   [GPU table](https://developer.nvidia.com/cuda/gpus).
 - AMD: a GPU supported by ROCm (Radeon RX 7000/9000, Radeon 780M/760M/740M,
-  Ryzen AI). On Windows, AMD Adrenalin driver 26.8.1 or newer. Secondary
-  restoration is NVIDIA only. LTX supports Radeon RX 7000/9000 and Radeon AI PRO
-  R9700 on Linux. Windows AMD LTX is in beta and still needs GPU testing.
+  Ryzen AI). Use the Windows driver linked below. Secondary restoration is
+  NVIDIA only. LTX supports Radeon RX 7000/9000 and Radeon AI PRO R9700 on Linux.
+  Windows AMD LTX is in beta, tested on Radeon PRO V710; testing on desktop
+  Radeon cards is still in progress.
 - Disk format: NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux. Network disks
   are not supported. Use an SSD; on a hard disk (HDD) Jasna starts and loads
   models slowly.
@@ -73,7 +74,10 @@ and a command line, and runs on your GPU.
 2. Unpack it into a folder with no Chinese, Japanese, accented or other
    non-English characters in the path.
 3. Start the app:
-   - Windows: double-click `jasna.exe`.
+   - Windows: double-click `jasna.exe`. On AMD, first install
+     [AMD's driver for ROCm 10.1](https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-ROCM-10-01.html)
+     (**26.10.41.05**, [download .exe](https://drivers.amd.com/drivers/amd-software-adrenalin-edition-26.10.41.05-win11-b-204865.exe))
+     and reboot. Jasna already includes ROCm 10.1; no separate ROCm installation is needed.
    - Linux NVIDIA: run the `jasna` file.
    - Linux AMD: first install AMD's AMF video runtime once. We tested
      [AMF 26.20](https://repo.radeon.com/amf/26.20/):
@@ -88,8 +92,8 @@ and a command line, and runs on your GPU.
      If using Distrobox, install AMF inside the same container as Jasna.
 4. Add a video, choose settings and click the **▶** button at the bottom.
 
-AMD enables experimental attention by default. If you get GPU errors,
-[turn it off](docs/en/tuning.md#amd-experimental-attention).
+AMD experimental attention can improve speed. See
+[how to enable or disable it](docs/en/tuning.md#amd-experimental-attention).
 
 **Your first job is slow.** On NVIDIA, Jasna first prepares the models for
 your exact GPU. This takes about **15–60 minutes**, only once. Close other
@@ -101,6 +105,7 @@ including on NVIDIA. Press **▶** and accept the model update. Your existing
 License code and shared VAE files still work.
 For [manual model downloads](docs/en/models.md#downloading-ltx-yourself), use
 branch `0.12.0` for Jasna 0.12, or `main` for 0.11.3 and older.
+The initial AMD 0.12.0 beta archives still use `main/block-layout3`.
 
 Every setting has a tooltip: move the mouse over the ⓘ icon. Out of GPU
 memory (VRAM)? Lower **Max Clip Size**, for example from `90` to `60`. See

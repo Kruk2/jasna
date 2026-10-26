@@ -54,7 +54,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   **试用模式（速度测试）**（见下文）；CLI 会报错停止。
 - **GPU**：NVIDIA RTX 30、40 或 50 系列。RTX 20 系列应该可以用，但只测试过
   RTX 2080 Ti。GTX 16 系列未测试。Linux 还支持 Radeon RX 7000/9000 和
-  Radeon AI PRO R9700。AMD 核显的 LTX 尚未测试。Windows AMD LTX 为**测试版**，尚待 GPU 测试。
+  Radeon AI PRO R9700。AMD 核显的 LTX 尚未测试。Windows AMD LTX 为**测试版**，
+  已在 Radeon PRO V710 上验证，桌面 Radeon 显卡的测试仍在进行中。
 - **显存**：至少 8 GB。显存越大越快：显存较小的显卡会把模型的一部分放在系统
   内存中。
 - **系统内存**：至少 16 GB（LTX 约占用 10 GB）。
@@ -95,7 +96,10 @@ BasicVSR++ 整段视频任务、预览和流式播放不支持续跑。
 [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.0)
 （或 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.0)）
 下载。需要 3 个文件：你所选模型的文件 1 个，加上 2 个 VAE 文件。
-以上链接适用于 Jasna 0.12 和受保护的 AMD 测试版。稳定版 0.11.3 或更早版本请使用仓库的 `main` 分支。
+以上链接适用于 Jasna 0.12。首个 AMD 0.12.0 测试版压缩包仍使用
+[main/block-layout3](https://hf-mirror.com/Kruk2/ltx-restore/tree/main/block-layout3)
+（或 [Hugging Face](https://huggingface.co/Kruk2/ltx-restore/tree/main/block-layout3)）。
+稳定版 0.11.3 或更早版本请使用仓库的 `main` 分支。
 
 | 你选的模型 | 文件 |
 | --- | --- |

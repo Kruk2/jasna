@@ -89,6 +89,8 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 ## AMD の実験的アテンション
 
 AMD 版では、Windows と Linux の両方で実験的なアテンションが既定で有効です。
+最初の Windows 0.12.0 ベータ版の配布ファイルには、この変更は含まれていません。
+その版で有効にするには、下の Windows コマンドの `0` を `1` に変えてください。
 GPU エラーが出る場合は Jasna を閉じ、次のように無効にして起動します。
 
 Windows（Jasna フォルダーで PowerShell を開く）:

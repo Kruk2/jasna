@@ -97,6 +97,13 @@ SSD を使ってください。ハードディスク（HDD）では起動とモ�
 各バージョンの初回起動時に、Jasna は FFprobe、GPU、ドライバー、インストール
 パスを確認します。ドライバーを更新した後などに、ヘッダーから再実行できます。
 
+Windows の AMD では、[ROCm 10.1 用の AMD ドライバー](https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-ROCM-10-01.html)
+（26.10.41.05、Windows ドライバーバージョン 32.0.31041.5005）をインストールし、PC を再起動します。
+ROCm 10.1 は Jasna に含まれているため、別途インストールする必要はありません。
+
+起動時に `invalid kernel file` と表示されたら、まずドライバーを確認してください。
+システムチェックに合格しても、GPU のすべての処理が動くとは限りません。
+
 AMD では、動画の読み書きに必要な AMD の AMF 動画ランタイムも確認します。Windows
 では AMD ドライバーに含まれています。Linux では一度だけインストールしてください。
 [AMF 26.20](https://repo.radeon.com/amf/26.20/) で動作確認しています:

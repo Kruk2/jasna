@@ -51,9 +51,10 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
 - NVIDIA: NVIDIA の [GPU 一覧](https://developer.nvidia.com/cuda/gpus)で
   コンピュート能力が 7.5 以上である必要があります。
 - AMD: ROCm 対応 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、
-  Ryzen AI）。Windows では AMD Adrenalin ドライバー 26.8.1 以降。二次復元は
-  NVIDIA のみです。LTX は Linux の Radeon RX 7000/9000 と Radeon AI PRO R9700 に
-  対応します。Windows の AMD LTX はベータ版で、GPU での検証はこれからです。
+  Ryzen AI）。Windows では下記のドライバーを使ってください。二次復元は NVIDIA
+  のみです。LTX は Linux の Radeon RX 7000/9000 と Radeon AI PRO R9700 に対応します。
+  Windows の AMD LTX はベータ版で、Radeon PRO V710 で動作確認済みです。
+  デスクトップ向け Radeon での検証は継続中です。
 - ディスク形式: Windows では NTFS、Linux では ext4、Btrfs、XFS、ZFS。ネットワーク
   ディスクは非対応です。SSD を使ってください。ハードディスク（HDD）では起動と
   モデルの読み込みが遅くなります。
@@ -68,7 +69,10 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
 2. パスに日本語、中国語、アクセント付きの文字など、英語以外の文字を含まない
    フォルダーへ展開します。
 3. アプリを起動します:
-   - Windows: `jasna.exe` をダブルクリックします。
+   - Windows: `jasna.exe` をダブルクリックします。AMD では先に
+     [ROCm 10.1 用の AMD ドライバー](https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-ROCM-10-01.html)
+     （**26.10.41.05**、[.exe をダウンロード](https://drivers.amd.com/drivers/amd-software-adrenalin-edition-26.10.41.05-win11-b-204865.exe)）
+     をインストールし、PC を再起動してください。ROCm 10.1 は Jasna に含まれているため、別途インストールする必要はありません。
    - Linux NVIDIA: `jasna` ファイルを実行します。
    - Linux AMD: 最初に一度だけ AMD の AMF 動画ランタイムをインストールします。
      [AMF 26.20](https://repo.radeon.com/amf/26.20/) で動作確認しています:
@@ -83,8 +87,8 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
      Distrobox を使う場合は、Jasna と同じコンテナー内に AMF をインストールしてください。
 4. 動画を追加し、設定を選んで、画面下の **▶** ボタンを押します。
 
-AMD では実験的なアテンションが既定で有効です。GPU エラーが出る場合は
-[無効にできます](docs/ja/tuning.md#amd-の実験的アテンション)。
+AMD の実験的なアテンションで速くなる場合があります。
+[有効・無効にする方法](docs/ja/tuning.md#amd-の実験的アテンション)をご覧ください。
 
 **最初のジョブは時間がかかります。** NVIDIA では、Jasna がまずお使いの GPU
 専用にモデルを準備します。約 **15～60 分**かかりますが、一度だけです。この間は
@@ -96,6 +100,7 @@ AMD では実験的なアテンションが既定で有効です。GPU エラー
 共通の VAE ファイルはそのまま使えます。
 [手動でダウンロードする](docs/ja/models.md#ltx-を手動でダウンロードする)場合は、
 Jasna 0.12 では `0.12.0`、0.11.3 以前では `main` ブランチを使ってください。
+最初の AMD 0.12.0 ベータ版の配布ファイルでは、引き続き `main/block-layout3` を使います。
 
 すべての設定にはツールチップがあります: ⓘ アイコンにマウスを合わせてください。
 GPU メモリ（VRAM）が足りない場合は、**最大クリップサイズ**を下げてください。例: `90` から `60`。

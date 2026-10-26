@@ -78,6 +78,8 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 ## AMD 实验性注意力
 
 AMD 版本在 Windows 和 Linux 上都默认开启实验性注意力。
+首个 Windows 0.12.0 测试版压缩包尚未包含此更改。
+要在该版本中开启，请将下方 Windows 命令中的 `0` 改为 `1`。
 遇到 GPU 错误时，先关闭 Jasna，再按以下方式关闭此功能并启动：
 
 Windows（在 Jasna 文件夹中打开 PowerShell）：
