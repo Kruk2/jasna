@@ -684,16 +684,16 @@ def test_b_frame_h264_encode_of_a_mid_gop_cut_keeps_only_the_shown_frames(tmp_pa
         assert sum(1 for _ in container.decode(video=0)) == len(shown_pts)
 
 
-def test_zero_frame_job_closes_cleanly(tmp_path):
+def test_zero_frame_job_closes_without_writing_an_output(tmp_path):
     src = _make_source(tmp_path, "src.mp4")
     metadata = get_video_meta_data(str(src))
     dst = tmp_path / "out.mp4"
 
     with VideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={}):
         pass
-
-    # constructing without entering must not leak containers or threads
     VideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={})
+
+    assert not dst.exists()
 
 
 def test_mkv_output_supported(tmp_path):

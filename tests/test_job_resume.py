@@ -425,13 +425,17 @@ def test_partial_files_are_not_saved_work(job):
     config, source, output, metadata = job
     checkpoint = ResumeJob(config, source, output, metadata, None)
     checkpoint.prepare()
-    for partial in (
+    partials = (
         checkpoint.directory / "ltx" / "000000.0-1-0.reference.pt.part",
         checkpoint.directory / "segments" / "0000-partial.nut",
-    ):
+    )
+    for partial in partials:
         partial.parent.mkdir(parents=True, exist_ok=True)
         partial.write_bytes(b"unfinished")
+
     ResumeJob(replace(config, ltx_seed=7), source, output, metadata, None).prepare()
+
+    assert not any(partial.exists() for partial in partials)
 
 
 def test_outputs_with_the_same_name_keep_separate_checkpoints_in_a_working_directory(job, tmp_path):
