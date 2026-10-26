@@ -1,59 +1,99 @@
-from functools import partial
 from queue import Queue
 
 import numpy as np
+import pytest
 import torch
 
+import jasna.crop_buffer as crop_buffer
 from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer, prepare_crops_for_restoration
 from jasna.frame_queue import FrameQueue
-
 from jasna.mosaic.detections import Detections
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, SecondaryRestoreResult, _SENTINEL
-from jasna.tracking.clip_tracker import ClipTracker, TrackedClip
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
+from jasna.restorer.restoration_pipeline import RestorationPipeline
+from jasna.tracking.clip_tracker import ClipTracker
 
 
-class _FakeRestorationPipeline:
-    def process_clip_item(self, ci: ClipRestoreItem, blend_buffer: BlendBuffer) -> None:
-        resized_crops, pad_offsets, resize_shapes = prepare_crops_for_restoration(ci.raw_crops, device=torch.device("cpu"), dtype=torch.float32)
-        enlarged_bboxes = [c.enlarged_bbox for c in ci.raw_crops]
-        crop_shapes = [c.crop_shape for c in ci.raw_crops]
+def _restore_to_200(ci: ClipRestoreItem, blend_buffer: BlendBuffer) -> None:
+    """Restore a clip to a flat 200 fill under a full-frame mask, skipping the models."""
+    resized_crops, pad_offsets, resize_shapes = prepare_crops_for_restoration(ci.raw_crops, device=torch.device("cpu"), dtype=torch.float32)
+    enlarged_bboxes = [c.enlarged_bbox for c in ci.raw_crops]
+    crop_shapes = [c.crop_shape for c in ci.raw_crops]
 
-        frame_h, frame_w = ci.frame_shape
-        n = len(ci.raw_crops)
-        restored_frames = [torch.full((3, rc.shape[1], rc.shape[2]), 200, dtype=torch.uint8) for rc in resized_crops]
-        masks = [torch.ones((frame_h, frame_w), dtype=torch.bool) for _ in range(n)]
+    frame_h, frame_w = ci.frame_shape
+    n = len(ci.raw_crops)
+    restored_frames = [torch.full((3, rc.shape[1], rc.shape[2]), 200, dtype=torch.uint8) for rc in resized_crops]
+    masks = [torch.ones((frame_h, frame_w), dtype=torch.bool) for _ in range(n)]
 
-        ks = max(0, ci.keep_start)
-        ke = min(n, ci.keep_end)
-        kept_count = ke - ks
+    ks = max(0, ci.keep_start)
+    ke = min(n, ci.keep_end)
 
-        sr = SecondaryRestoreResult(
-            track_id=ci.clip.track_id,
-            start_frame=ci.clip.start_frame,
-            frame_count=n,
-            frame_shape=ci.frame_shape,
-            frame_device=torch.device("cpu"),
-            masks=masks[ks:ke],
-            restored_frames=restored_frames[ks:ke],
-            keep_start=0,
-            keep_end=kept_count,
-            crossfade_weights=ci.crossfade_weights,
-            enlarged_bboxes=enlarged_bboxes[ks:ke],
-            crop_shapes=crop_shapes[ks:ke],
-            pad_offsets=pad_offsets[ks:ke],
-            resize_shapes=resize_shapes[ks:ke],
-            clip_keep_offset=ks,
-        )
-        blend_buffer.add_result(sr)
+    blend_buffer.add_result(SecondaryRestoreResult(
+        track_id=ci.clip.track_id,
+        start_frame=ci.clip.start_frame,
+        frame_count=n,
+        frame_shape=ci.frame_shape,
+        frame_device=torch.device("cpu"),
+        masks=masks[ks:ke],
+        restored_frames=restored_frames[ks:ke],
+        keep_start=0,
+        keep_end=ke - ks,
+        crossfade_weights=ci.crossfade_weights,
+        enlarged_bboxes=enlarged_bboxes[ks:ke],
+        crop_shapes=crop_shapes[ks:ke],
+        pad_offsets=pad_offsets[ks:ke],
+        resize_shapes=resize_shapes[ks:ke],
+        clip_keep_offset=ks,
+    ))
 
 
-def _process_clip_real(pipeline, ci: ClipRestoreItem, blend_buffer: BlendBuffer) -> None:
-    pr = pipeline.prepare_and_run_primary(ci.clip, ci.raw_crops, ci.frame_shape, ci.keep_start, ci.keep_end, ci.crossfade_weights)
-    restored = pipeline._run_secondary(pr.primary_raw, pr.keep_start, pr.keep_end)
-    sr = pipeline.build_secondary_result(pr, restored)
-    blend_buffer.add_result(sr)
+def _recording(captured: list[ClipRestoreItem], restore=_restore_to_200):
+    def process(ci: ClipRestoreItem, blend_buffer: BlendBuffer) -> None:
+        captured.append(ci)
+        restore(ci, blend_buffer)
+    return process
+
+
+class _ConstantRestorer:
+    """Primary restorer whose output is ``values[n % len(values)]`` for its n-th clip."""
+
+    input_dtype = torch.float32
+    device = torch.device("cpu")
+
+    def __init__(self, *values: float) -> None:
+        self.values = values
+        self.calls = 0
+
+    def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
+        value = self.values[self.calls % len(self.values)]
+        self.calls += 1
+        return torch.stack([torch.full(crop.shape, value, dtype=torch.float32) for crop in crops])
+
+
+def _restore_with(restorer):
+    pipeline = RestorationPipeline(restorer=restorer)
+
+    def process(ci: ClipRestoreItem, blend_buffer: BlendBuffer) -> None:
+        pr = pipeline.prepare_and_run_primary(ci.clip, ci.raw_crops, ci.frame_shape, ci.keep_start, ci.keep_end, ci.crossfade_weights)
+        restored = pipeline._run_secondary(pr.primary_raw, pr.keep_start, pr.keep_end)
+        blend_buffer.add_result(pipeline.build_secondary_result(pr, restored))
+
+    return process
+
+
+def _ones_blend_mask(mask_lr, bbox_xyxy, frame_shape) -> torch.Tensor:
+    x1, y1, x2, y2 = bbox_xyxy
+    return torch.ones((y2 - y1, x2 - x1), dtype=torch.float32)
+
+
+@pytest.fixture
+def exact_crops(monkeypatch):
+    """Crop exactly the detected box and blend all of it, so restored pixels are predictable."""
+    monkeypatch.setattr(crop_buffer, "BORDER_RATIO", 0.0)
+    monkeypatch.setattr(crop_buffer, "MIN_BORDER", 0)
+    monkeypatch.setattr(crop_buffer, "MAX_EXPANSION_FACTOR", 0.0)
+    return BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_ones_blend_mask)
 
 
 def _drain_queue(clip_queue: FrameQueue, blend_buffer: BlendBuffer, process_fn) -> None:
@@ -82,32 +122,35 @@ def _make_single_det_batch(*, effective_bs: int, batch_size: int, box=(2.0, 2.0,
     return Detections(boxes_xyxy=boxes_xyxy[:batch_size], masks=masks[:batch_size])
 
 
+def _one_box_per_frame(frames: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
+    return _make_single_det_batch(effective_bs=len(frames), batch_size=len(frames))
+
+
 def _run_batches(
     *,
     pts_lists: list[list[int]],
-    batch_size: int,
     max_clip_size: int,
     discard_margin: int,
     blend_frames: int = 0,
-    detections_fn,
-    process_fn,
+    process_fn=_restore_to_200,
+    detections_fn=_one_box_per_frame,
+    blend_buffer: BlendBuffer | None = None,
+    original_value: int = 0,
 ) -> list[tuple[int, torch.Tensor, int]]:
+    """Detect, track, restore and blend ``pts_lists`` batches of 8x8 frames; returns
+    ``(frame_idx, blended, pts)`` for every frame in output order."""
+    batch_size = max(len(pts_list) for pts_list in pts_lists)
     tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
-    blend_buffer = BlendBuffer(device=torch.device("cpu"))
+    blend_buffer = blend_buffer or BlendBuffer(device=torch.device("cpu"))
     crop_buffers: dict[int, CropBuffer] = {}
     clip_queue = FrameQueue(max_frames=9999)
     metadata_queue: Queue[FrameMeta | object] = Queue()
-    frames = torch.zeros((batch_size, 3, 8, 8), dtype=torch.uint8)
-    original_frames: dict[int, torch.Tensor] = {}
+    frames = torch.full((batch_size, 3, 8, 8), original_value, dtype=torch.uint8)
     frame_idx = 0
 
     for pts_list in pts_lists:
-        effective_bs = len(pts_list)
-        for i in range(effective_bs):
-            original_frames[frame_idx + i] = frames[min(i, batch_size - 1)].clone()
-
         res = process_frame_batch(
-            frames=frames, pts_list=list(pts_list), start_frame_idx=frame_idx,
+            frames=frames[:len(pts_list)], pts_list=list(pts_list), start_frame_idx=frame_idx,
             target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
             clip_queue=clip_queue, metadata_queue=metadata_queue,
@@ -124,519 +167,133 @@ def _run_batches(
     _drain_queue(clip_queue, blend_buffer, process_fn)
 
     ready = []
-    while not metadata_queue.empty():
-        item = metadata_queue.get()
-        if item is _SENTINEL:
-            break
-        meta: FrameMeta = item
-        original = original_frames.get(meta.frame_idx, torch.zeros(3, 8, 8, dtype=torch.uint8))
-        blended = blend_buffer.blend_frame(meta.frame_idx, original)
-        ready.append((meta.frame_idx, blended, meta.pts))
+    while not metadata_queue.empty() and (meta := metadata_queue.get()) is not _SENTINEL:
+        ready.append((meta.frame_idx, blend_buffer.blend_frame(meta.frame_idx, frames[0].clone()), meta.pts))
     return ready
 
 
-def test_process_batch_and_finalize_overlap_discard_delays_tail_until_continuation() -> None:
-    batch_size = 2
-    discard_margin = 1
-    rest = _FakeRestorationPipeline()
-
-    def detections_fn(_: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-        return _make_single_det_batch(effective_bs=batch_size, batch_size=batch_size)
-
+@pytest.mark.parametrize(
+    ("pts_lists", "max_clip_size", "discard_margin", "blend_frames"),
+    [
+        ([[0, 1], [2, 3], [4, 5]], 6, 1, 0),
+        ([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]], 6, 2, 1),
+        ([[0, 1], [2, 3]], 4, 0, 0),
+    ],
+    ids=["overlap-discard", "crossfade", "no-discard"],
+)
+def test_every_frame_is_output_once_in_order(pts_lists, max_clip_size, discard_margin, blend_frames) -> None:
     out = _run_batches(
-        pts_lists=[[0, 1], [2, 3], [4, 5]],
-        batch_size=batch_size, max_clip_size=6, discard_margin=discard_margin,
-        detections_fn=detections_fn, process_fn=rest.process_clip_item,
+        pts_lists=pts_lists, max_clip_size=max_clip_size, discard_margin=discard_margin, blend_frames=blend_frames,
     )
-    assert [x[0] for x in out] == [0, 1, 2, 3, 4, 5]
-
-
-def test_process_batch_with_crossfade_outputs_all_frames_in_order() -> None:
-    batch_size = 2
-    discard_margin = 2
-    blend_frames = 1
-    rest = _FakeRestorationPipeline()
-
-    def detections_fn(_: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-        return _make_single_det_batch(effective_bs=batch_size, batch_size=batch_size)
-
-    out = _run_batches(
-        pts_lists=[[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]],
-        batch_size=batch_size, max_clip_size=6, discard_margin=discard_margin,
-        blend_frames=blend_frames, detections_fn=detections_fn, process_fn=rest.process_clip_item,
-    )
-    out_indices = [x[0] for x in out]
-    assert out_indices == list(range(10)), f"expected frames 0-9, got {out_indices}"
-
-
-def test_process_batch_without_discard_encodes_all_frames() -> None:
-    batch_size = 2
-    discard_margin = 0
-    rest = _FakeRestorationPipeline()
-
-    def detections_fn(_: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-        return _make_single_det_batch(effective_bs=batch_size, batch_size=batch_size)
-
-    out = _run_batches(
-        pts_lists=[[0, 1], [2, 3]],
-        batch_size=batch_size, max_clip_size=4, discard_margin=discard_margin,
-        detections_fn=detections_fn, process_fn=rest.process_clip_item,
-    )
-    assert [x[0] for x in out] == [0, 1, 2, 3]
+    assert [idx for idx, _, _ in out] == [pts for pts_list in pts_lists for pts in pts_list]
 
 
 def test_zero_overlap_split_blends_all_frames_including_boundary() -> None:
     """With temporal_overlap=0 and a clip split, the split-boundary frame must be blended, not raw."""
-    batch_size = 1
-    discard_margin = 0
-    max_clip_size = 3
-    rest = _FakeRestorationPipeline()
+    out = _run_batches(pts_lists=[[pts] for pts in range(5)], max_clip_size=3, discard_margin=0)
 
-    def detections_fn(_: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-        return _make_single_det_batch(effective_bs=batch_size, batch_size=batch_size)
-
-    out = _run_batches(
-        pts_lists=[[pts] for pts in range(5)],
-        batch_size=batch_size, max_clip_size=max_clip_size, discard_margin=discard_margin,
-        detections_fn=detections_fn, process_fn=rest.process_clip_item,
-    )
-    out_indices = [x[0] for x in out]
-    assert out_indices == list(range(5)), f"expected frames 0-4, got {out_indices}"
-
+    assert [idx for idx, _, _ in out] == list(range(5))
     for idx, blended, _ in out:
-        region = blended[:, 2:6, 2:6]
-        assert torch.all(region == 200), f"frame {idx} mosaic region was not blended (has raw pixels)"
+        assert torch.all(blended[:, 2:6, 2:6] == 200), f"frame {idx} mosaic region was not blended (has raw pixels)"
 
 
-def _run_real_pipeline_batches(
-    monkeypatch,
-    *,
-    max_clip_size: int,
-    temporal_overlap: int,
-    blend_frames: int,
-    num_frames: int,
-    original_value: int,
-    restored_float: float,
-) -> list[tuple[int, torch.Tensor, int]]:
-    import jasna.crop_buffer as cb
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-    class _ConstantRestorer:
-        dtype = torch.float32
-        input_dtype = torch.float32
-        device = torch.device("cpu")
-        def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
-            stacked = []
-            for f in crops:
-                stacked.append(torch.full(f.shape, restored_float, dtype=torch.float32))
-            return torch.stack(stacked, dim=0)
-
-    def _ones_blend_mask(
-        mask_lr: torch.Tensor,
-        bbox_xyxy: tuple[int, int, int, int],
-        frame_shape: tuple[int, int],
-    ) -> torch.Tensor:
-        x1, y1, x2, y2 = bbox_xyxy
-        return torch.ones((y2 - y1, x2 - x1), dtype=torch.float32)
-
-    from jasna.restorer.restoration_pipeline import RestorationPipeline
-    pipeline = RestorationPipeline(restorer=_ConstantRestorer())  # type: ignore[arg-type]
-    blend_buffer = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_ones_blend_mask)
-    crop_buffers: dict[int, CropBuffer] = {}
-    tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=temporal_overlap, iou_threshold=0.0)
-    clip_queue = FrameQueue(max_frames=9999)
-    metadata_queue: Queue[FrameMeta | object] = Queue()
-
-    bbox = np.array([2.0, 2.0, 6.0, 6.0], dtype=np.float32)
-
-    def detections_fn(frames_in: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-        bs = frames_in.shape[0]
-        return Detections(
-            boxes_xyxy=[np.array([bbox], dtype=np.float32) for _ in range(bs)],
-            masks=[torch.ones((1, 8, 8), dtype=torch.bool) for _ in range(bs)],
-        )
-
-    original_frames: dict[int, torch.Tensor] = {}
-    frame_idx = 0
-
-    for pts in range(num_frames):
-        frame_batch = torch.full((1, 3, 8, 8), original_value, dtype=torch.uint8)
-        original_frames[frame_idx] = frame_batch[0].clone()
-        res = process_frame_batch(
-            frames=frame_batch, pts_list=[pts], start_frame_idx=frame_idx,
-            target_hw=(8, 8), detections_fn=detections_fn,
-            tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
-            clip_queue=clip_queue, metadata_queue=metadata_queue,
-            discard_margin=temporal_overlap, blend_frames=blend_frames,
-        )
-        _drain_queue(clip_queue, blend_buffer, partial(_process_clip_real, pipeline))
-        frame_idx = res.next_frame_idx
-
-    finalize_processing(
-        tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
-        clip_queue=clip_queue, frame_shape=(8, 8),
-        discard_margin=temporal_overlap, blend_frames=blend_frames,
+def _full_mask_box(frames: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
+    return Detections(
+        boxes_xyxy=[np.array([[2.0, 2.0, 6.0, 6.0]], dtype=np.float32) for _ in range(len(frames))],
+        masks=[torch.ones((1, 8, 8), dtype=torch.bool) for _ in range(len(frames))],
     )
-    _drain_queue(clip_queue, blend_buffer, partial(_process_clip_real, pipeline))
-
-    ready = []
-    while not metadata_queue.empty():
-        item = metadata_queue.get()
-        if item is _SENTINEL:
-            break
-        meta: FrameMeta = item
-        original = original_frames.get(meta.frame_idx, torch.zeros(3, 8, 8, dtype=torch.uint8))
-        blended = blend_buffer.blend_frame(meta.frame_idx, original)
-        ready.append((meta.frame_idx, blended, meta.pts))
-    return ready
 
 
-def test_overlapping_crossfade_no_black_pixels(monkeypatch) -> None:
-    """When 2*(temporal_overlap + blend_frames) > max_clip_size, the child and parent
-    crossfade weight regions overlap within a middle clip (both continuation and split).
-    The .update() in _process_ended_clips lets parent weights overwrite child weights,
-    making combined weights sum > 1.0 at some frames, which produces black pixels via
-    negative blending: original*(1 - sum) goes negative → clamped to 0."""
-    max_clip_size = 5
-    temporal_overlap = 2
-    blend_frames = 2
-    original_value = 200
-    restored_float = 0.2
-    restored_u8 = int(round(restored_float * 255))
-
-    all_output = _run_real_pipeline_batches(
-        monkeypatch, max_clip_size=max_clip_size, temporal_overlap=temporal_overlap,
-        blend_frames=blend_frames, num_frames=15, original_value=original_value,
-        restored_float=restored_float,
+@pytest.mark.parametrize(
+    ("max_clip_size", "temporal_overlap", "blend_frames", "num_frames", "original_value", "restored", "exact"),
+    [
+        # 2*(overlap + blend) > max_clip_size: child and parent crossfade regions overlap in a
+        # middle clip; weights summing past 1 would blend negative, clamped to black.
+        (5, 2, 2, 15, 200, 0.2, False),
+        (10, 2, 1, 25, 200, 0.5, True),
+        # 2*(overlap + blend) == max_clip_size: crossfade regions touch with no gap.
+        (8, 3, 1, 20, 200, 0.5, True),
+        (10, 2, 1, 50, 180, 0.6, True),
+        # Tight parameters where blend_frames is clamped at runtime.
+        (8, 3, 3, 20, 200, 0.3, False),
+    ],
+    ids=["overlapping-crossfade", "valid-crossfade", "exact-boundary", "long-split-chain", "clamped-blend"],
+)
+def test_restored_mosaic_survives_clip_splits_and_crossfades(
+    exact_crops, max_clip_size, temporal_overlap, blend_frames, num_frames, original_value, restored, exact
+) -> None:
+    out = _run_batches(
+        pts_lists=[[pts] for pts in range(num_frames)],
+        max_clip_size=max_clip_size, discard_margin=temporal_overlap, blend_frames=blend_frames,
+        process_fn=_restore_with(_ConstantRestorer(restored)), detections_fn=_full_mask_box,
+        blend_buffer=exact_crops, original_value=original_value,
     )
-    assert len(all_output) == 15
 
-    for idx, blended, _ in all_output:
-        region = blended[:, 2:6, 2:6]
-        assert region.min().item() > 0, (
-            f"frame {idx}: black pixel in mosaic region (min={region.min().item()}). "
-            f"Crossfade weight overlap causes negative blending with "
-            f"original={original_value}, restored={restored_u8}"
-        )
+    assert [idx for idx, _, _ in out] == list(range(num_frames))
+    for idx, blended, _ in out:
+        region = blended[:, 2:6, 2:6].float()
+        assert region.min().item() > 0, f"frame {idx}: black pixel in mosaic region"
+        if exact:
+            assert (region - round(restored * 255)).abs().max().item() <= 2, f"frame {idx}: mosaic pixel off"
 
 
 def test_merged_crossfade_weights_sum_to_one_across_clip_boundaries() -> None:
-    """Adjacent clips' crossfade weights must sum to 1.0 at each overlapping frame."""
-    import pytest
-
-    batch_size = 1
-    discard_margin = 2
-    blend_frames = 1
-    max_clip_size = 10
-    tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
-    blend_buffer = BlendBuffer(device=torch.device("cpu"))
-    crop_buffers: dict[int, CropBuffer] = {}
-    clip_queue = FrameQueue(max_frames=9999)
-    metadata_queue: Queue[FrameMeta | object] = Queue()
-
-    captured: list[tuple[int, int, dict[int, float] | None]] = []
-
-    class _CapturePipeline(_FakeRestorationPipeline):
-        def process_clip_item(self, ci: ClipRestoreItem, bb: BlendBuffer) -> None:
-            captured.append((ci.clip.start_frame, ci.clip.frame_count, ci.crossfade_weights))
-            super().process_clip_item(ci, bb)
-
-    rest = _CapturePipeline()
-
-    def detections_fn(_: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-        return _make_single_det_batch(effective_bs=batch_size, batch_size=batch_size)
-
-    frames = torch.zeros((batch_size, 3, 8, 8), dtype=torch.uint8)
-    frame_idx = 0
-    for pts in range(25):
-        res = process_frame_batch(
-            frames=frames, pts_list=[pts], start_frame_idx=frame_idx,
-            target_hw=(8, 8), detections_fn=detections_fn,
-            tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
-            clip_queue=clip_queue, metadata_queue=metadata_queue,
-            discard_margin=discard_margin, blend_frames=blend_frames,
-        )
-        _drain_queue(clip_queue, blend_buffer, rest.process_clip_item)
-        frame_idx = res.next_frame_idx
-
-    finalize_processing(
-        tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
-        clip_queue=clip_queue, frame_shape=(8, 8),
-        discard_margin=discard_margin, blend_frames=blend_frames,
+    captured: list[ClipRestoreItem] = []
+    _run_batches(
+        pts_lists=[[pts] for pts in range(25)], max_clip_size=10, discard_margin=2, blend_frames=1,
+        process_fn=_recording(captured),
     )
-    _drain_queue(clip_queue, blend_buffer, rest.process_clip_item)
 
     assert len(captured) >= 3
-
-    for i in range(len(captured) - 1):
-        start_a, fc_a, weights_a = captured[i]
-        start_b, fc_b, weights_b = captured[i + 1]
-        if weights_a is None or weights_b is None:
+    for a, b in zip(captured, captured[1:]):
+        if a.crossfade_weights is None or b.crossfade_weights is None:
             continue
-
-        for local_b, w_b in sorted(weights_b.items()):
-            abs_frame = start_b + local_b
-            local_a = abs_frame - start_a
-            w_a = weights_a.get(local_a)
+        for local_b, w_b in b.crossfade_weights.items():
+            w_a = a.crossfade_weights.get(b.clip.start_frame + local_b - a.clip.start_frame)
             if w_a is not None:
-                assert w_a + w_b == pytest.approx(1.0), (
-                    f"clips {i} and {i+1}: at absolute frame {abs_frame}, "
-                    f"weights {w_a:.3f} + {w_b:.3f} = {w_a + w_b:.3f} != 1.0"
-                )
+                assert w_a + w_b == pytest.approx(1.0)
 
 
-def test_crossfade_produces_correct_pixel_values(monkeypatch) -> None:
-    """With valid crossfade params, every mosaic pixel should be close to the restored value."""
-    restored_float = 0.5
-    restored_u8 = int(round(restored_float * 255))
-
-    all_output = _run_real_pipeline_batches(
-        monkeypatch, max_clip_size=10, temporal_overlap=2, blend_frames=1,
-        num_frames=25, original_value=200, restored_float=restored_float,
-    )
-
-    assert len(all_output) == 25
-    for idx, blended, _ in all_output:
-        region = blended[:, 2:6, 2:6].float()
-        assert (region - restored_u8).abs().max().item() <= 2, (
-            f"frame {idx}: mosaic pixel deviates from expected {restored_u8} "
-            f"(actual range [{region.min().item()}, {region.max().item()}])"
+def test_crossfade_weights_applied_in_blending(exact_crops) -> None:
+    def run(blend_frames: int) -> list[torch.Tensor]:
+        blend_buffer = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_ones_blend_mask)
+        out = _run_batches(
+            pts_lists=[[pts] for pts in range(15)], max_clip_size=10, discard_margin=2, blend_frames=blend_frames,
+            process_fn=_restore_with(_ConstantRestorer(0.3, 0.7)), detections_fn=_full_mask_box,
+            blend_buffer=blend_buffer, original_value=200,
         )
+        return [blended[:, 2:6, 2:6] for _, blended, _ in out]
 
-
-def test_crossfade_at_exact_boundary_params(monkeypatch) -> None:
-    """When 2*(d+bf) == max_clip_size exactly, crossfade regions are adjacent with no gap."""
-    restored_float = 0.5
-    restored_u8 = int(round(restored_float * 255))
-
-    all_output = _run_real_pipeline_batches(
-        monkeypatch, max_clip_size=8, temporal_overlap=3, blend_frames=1,
-        num_frames=20, original_value=200, restored_float=restored_float,
-    )
-
-    assert len(all_output) == 20
-    for idx, blended, _ in all_output:
-        region = blended[:, 2:6, 2:6].float()
-        assert (region - restored_u8).abs().max().item() <= 2, (
-            f"frame {idx}: mosaic pixel deviates from expected {restored_u8} "
-            f"(actual range [{region.min().item()}, {region.max().item()}])"
-        )
-
-
-def test_crossfade_weights_applied_in_blending(monkeypatch) -> None:
-    """Verify that crossfade_weights are actually applied during blending, not ignored."""
-    import jasna.crop_buffer as cb
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-    original_value = 200
-
-    class _AlternatingRestorer:
-        dtype = torch.float32
-        input_dtype = torch.float32
-        device = torch.device("cpu")
-        def __init__(self) -> None:
-            self._call_count = 0
-        def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
-            self._call_count += 1
-            val = 0.3 if self._call_count % 2 == 1 else 0.7
-            stacked = []
-            for f in crops:
-                stacked.append(torch.full(f.shape, val, dtype=torch.float32))
-            return torch.stack(stacked, dim=0)
-
-    def _ones_blend_mask(
-        mask_lr: torch.Tensor,
-        bbox_xyxy: tuple[int, int, int, int],
-        frame_shape: tuple[int, int],
-    ) -> torch.Tensor:
-        x1, y1, x2, y2 = bbox_xyxy
-        return torch.ones((y2 - y1, x2 - x1), dtype=torch.float32)
-
-    from jasna.restorer.restoration_pipeline import RestorationPipeline
-
-    bbox = np.array([2.0, 2.0, 6.0, 6.0], dtype=np.float32)
-
-    def detections_fn(frames_in: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-        bs = frames_in.shape[0]
-        return Detections(
-            boxes_xyxy=[np.array([bbox], dtype=np.float32) for _ in range(bs)],
-            masks=[torch.ones((1, 8, 8), dtype=torch.bool) for _ in range(bs)],
-        )
-
-    discard_margin = 2
-    max_clip_size = 10
-
-    def _run_with_blend(bf: int) -> dict[int, torch.Tensor]:
-        p = RestorationPipeline(restorer=_AlternatingRestorer())  # type: ignore[arg-type]
-        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_ones_blend_mask)
-        cbufs: dict[int, CropBuffer] = {}
-        t = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
-        q = FrameQueue(max_frames=9999)
-        mq: Queue[FrameMeta | object] = Queue()
-        originals: dict[int, torch.Tensor] = {}
-        fi = 0
-        for pts in range(15):
-            originals[fi] = torch.full((3, 8, 8), original_value, dtype=torch.uint8)
-            res = process_frame_batch(
-                frames=torch.full((1, 3, 8, 8), original_value, dtype=torch.uint8),
-                pts_list=[pts], start_frame_idx=fi, target_hw=(8, 8),
-                detections_fn=detections_fn, tracker=t, blend_buffer=bb,
-                crop_buffers=cbufs, clip_queue=q, metadata_queue=mq,
-                discard_margin=discard_margin, blend_frames=bf,
-            )
-            _drain_queue(q, bb, partial(_process_clip_real, p))
-            fi = res.next_frame_idx
-        finalize_processing(
-            tracker=t, blend_buffer=bb, crop_buffers=cbufs,
-            clip_queue=q, frame_shape=(8, 8),
-            discard_margin=discard_margin, blend_frames=bf,
-        )
-        _drain_queue(q, bb, partial(_process_clip_real, p))
-        result = {}
-        while not mq.empty():
-            item = mq.get()
-            if item is _SENTINEL:
-                break
-            meta: FrameMeta = item
-            orig = originals.get(meta.frame_idx, torch.zeros(3, 8, 8, dtype=torch.uint8))
-            result[meta.frame_idx] = bb.blend_frame(meta.frame_idx, orig)
-        return result
-
-    cf_by_idx = _run_with_blend(1)
-    no_by_idx = _run_with_blend(0)
-
-    differs = False
-    for idx in cf_by_idx:
-        if idx in no_by_idx:
-            cf_region = cf_by_idx[idx][:, 2:6, 2:6]
-            no_region = no_by_idx[idx][:, 2:6, 2:6]
-            if not torch.equal(cf_region, no_region):
-                differs = True
-                break
-
-    assert differs, (
-        "crossfade had no effect on any frame — crossfade_weights are not being applied"
-    )
-
-
-def test_long_chain_of_splits_all_frames_correct(monkeypatch) -> None:
-    """5+ consecutive clip splits must produce correct output for every frame."""
-    restored_float = 0.6
-    restored_u8 = int(round(restored_float * 255))
-
-    all_output = _run_real_pipeline_batches(
-        monkeypatch, max_clip_size=10, temporal_overlap=2, blend_frames=1,
-        num_frames=50, original_value=180, restored_float=restored_float,
-    )
-
-    assert len(all_output) == 50
-    out_indices = [idx for idx, _, _ in all_output]
-    assert out_indices == list(range(50))
-
-    for idx, blended, _ in all_output:
-        region = blended[:, 2:6, 2:6].float()
-        assert region.min().item() > 0, f"frame {idx}: black pixel in mosaic region"
-        assert (region - restored_u8).abs().max().item() <= 2, (
-            f"frame {idx}: mosaic pixel deviates from expected {restored_u8} "
-            f"(actual range [{region.min().item()}, {region.max().item()}])"
-        )
-
-
-def test_bf_clamping_tight_params_no_artifacts(monkeypatch) -> None:
-    """With params that trigger bf clamping (2*(d+bf) > max_clip_size), the runtime
-    clamp should produce no black pixels and all frames should be output."""
-    all_output = _run_real_pipeline_batches(
-        monkeypatch, max_clip_size=8, temporal_overlap=3, blend_frames=3,
-        num_frames=20, original_value=200, restored_float=0.3,
-    )
-
-    assert len(all_output) == 20
-    out_indices = [idx for idx, _, _ in all_output]
-    assert out_indices == list(range(20))
-
-    for idx, blended, _ in all_output:
-        region = blended[:, 2:6, 2:6]
-        assert region.min().item() > 0, (
-            f"frame {idx}: black pixel in mosaic region (min={region.min().item()})"
-        )
+    assert any(not torch.equal(faded, cut) for faded, cut in zip(run(1), run(0)))
 
 
 def test_crossfade_with_split_assigns_parent_weights() -> None:
-    """Verify that split clips get parent crossfade weights (not just continuations)."""
-    batch_size = 1
-    discard_margin = 2
-    blend_frames = 1
-    max_clip_size = 6
-    tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
-    blend_buffer = BlendBuffer(device=torch.device("cpu"))
-    crop_buffers: dict[int, CropBuffer] = {}
-    clip_queue = FrameQueue(max_frames=9999)
-    metadata_queue: Queue[FrameMeta | object] = Queue()
-
-    captured_weights: list[dict[int, float] | None] = []
-
-    class _CapturePipeline(_FakeRestorationPipeline):
-        def process_clip_item(self, ci: ClipRestoreItem, bb: BlendBuffer) -> None:
-            captured_weights.append(ci.crossfade_weights)
-            super().process_clip_item(ci, bb)
-
-    rest = _CapturePipeline()
-
-    def detections_fn(_: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-        return _make_single_det_batch(effective_bs=batch_size, batch_size=batch_size)
-
-    frames = torch.zeros((batch_size, 3, 8, 8), dtype=torch.uint8)
-    frame_idx = 0
-    for pts in range(10):
-        res = process_frame_batch(
-            frames=frames, pts_list=[pts], start_frame_idx=frame_idx,
-            target_hw=(8, 8), detections_fn=detections_fn,
-            tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
-            clip_queue=clip_queue, metadata_queue=metadata_queue,
-            discard_margin=discard_margin, blend_frames=blend_frames,
-        )
-        _drain_queue(clip_queue, blend_buffer, rest.process_clip_item)
-        frame_idx = res.next_frame_idx
-
-    finalize_processing(
-        tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
-        clip_queue=clip_queue, frame_shape=(8, 8),
-        discard_margin=discard_margin, blend_frames=blend_frames,
+    captured: list[ClipRestoreItem] = []
+    _run_batches(
+        pts_lists=[[pts] for pts in range(10)], max_clip_size=6, discard_margin=2, blend_frames=1,
+        process_fn=_recording(captured),
     )
-    _drain_queue(clip_queue, blend_buffer, rest.process_clip_item)
 
-    first_weights = captured_weights[0]
-    assert first_weights is not None, "split clip should have parent crossfade weights"
-    vals = [first_weights[k] for k in sorted(first_weights.keys())]
-    for i in range(1, len(vals)):
-        assert vals[i] < vals[i - 1], "parent crossfade weights should be descending"
-
-    second_weights = captured_weights[1]
-    assert second_weights is not None, "continuation clip should have child crossfade weights"
+    parent = captured[0].crossfade_weights
+    assert parent is not None, "split clip should have parent crossfade weights"
+    weights = [parent[k] for k in sorted(parent)]
+    assert weights == sorted(weights, reverse=True) and len(set(weights)) == len(weights)
+    assert captured[1].crossfade_weights is not None, "continuation clip should have child crossfade weights"
 
 
 def test_process_frame_batch_empty_pts_list_returns_immediately() -> None:
-    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.0)
-    blend_buffer = BlendBuffer(device=torch.device("cpu"))
-    crop_buffers: dict[int, CropBuffer] = {}
-    clip_queue = FrameQueue(max_frames=9999)
     metadata_queue: Queue[FrameMeta | object] = Queue()
-    frames = torch.zeros((1, 3, 8, 8), dtype=torch.uint8)
 
     res = process_frame_batch(
-        frames=frames, pts_list=[], start_frame_idx=5,
+        frames=torch.zeros((1, 3, 8, 8), dtype=torch.uint8), pts_list=[], start_frame_idx=5,
         target_hw=(8, 8),
         detections_fn=lambda *a, **kw: _make_empty_det_batch(batch_size=1),
-        tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
-        clip_queue=clip_queue, metadata_queue=metadata_queue,
+        tracker=ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.0),
+        blend_buffer=BlendBuffer(device=torch.device("cpu")), crop_buffers={},
+        clip_queue=FrameQueue(max_frames=9999), metadata_queue=metadata_queue,
         discard_margin=0, blend_frames=0,
     )
-    assert res.next_frame_idx == 5
-    assert res.clips_emitted == 0
+    assert (res.next_frame_idx, res.clips_emitted) == (5, 0)
     assert metadata_queue.empty()
 
 
@@ -675,58 +332,12 @@ def test_process_frame_batch_forwards_partial_batch_without_padding() -> None:
 
 
 def test_clip_split_child_crop_count_matches_frame_count() -> None:
-    """When a clip splits, the child CropBuffer must have exactly frame_count crops.
-    The overlap tail from split_overlap already contains the split-boundary frame,
-    so the overwrite of the child buffer is safe — no frames are lost or duplicated."""
-    batch_size = 1
-    max_clip_size = 3
-    discard_margin = 1
+    """When a clip splits, the child CropBuffer must have exactly frame_count crops."""
+    captured: list[ClipRestoreItem] = []
+    _run_batches(pts_lists=[[pts] for pts in range(6)], max_clip_size=3, discard_margin=1, process_fn=_recording(captured))
 
-    captured_items: list[ClipRestoreItem] = []
-
-    class _CapturePipeline(_FakeRestorationPipeline):
-        def process_clip_item(self, ci: ClipRestoreItem, bb: BlendBuffer) -> None:
-            captured_items.append(ci)
-            super().process_clip_item(ci, bb)
-
-    rest = _CapturePipeline()
-
-    def detections_fn(_: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-        return _make_single_det_batch(effective_bs=batch_size, batch_size=batch_size)
-
-    tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
-    blend_buffer = BlendBuffer(device=torch.device("cpu"))
-    crop_buffers: dict[int, CropBuffer] = {}
-    clip_queue = FrameQueue(max_frames=9999)
-    metadata_queue: Queue[FrameMeta | object] = Queue()
-    frames = torch.zeros((batch_size, 3, 8, 8), dtype=torch.uint8)
-
-    frame_idx = 0
-    for pts in range(6):
-        res = process_frame_batch(
-            frames=frames, pts_list=[pts], start_frame_idx=frame_idx,
-            target_hw=(8, 8), detections_fn=detections_fn,
-            tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
-            clip_queue=clip_queue, metadata_queue=metadata_queue,
-            discard_margin=discard_margin, blend_frames=0,
-        )
-        _drain_queue(clip_queue, blend_buffer, rest.process_clip_item)
-        frame_idx = res.next_frame_idx
-
-    finalize_processing(
-        tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
-        clip_queue=clip_queue, frame_shape=(8, 8),
-        discard_margin=discard_margin, blend_frames=0,
-    )
-    _drain_queue(clip_queue, blend_buffer, rest.process_clip_item)
-
-    assert len(captured_items) >= 2, f"expected at least 2 clips, got {len(captured_items)}"
-
-    for ci in captured_items:
-        assert len(ci.raw_crops) == ci.clip.frame_count, (
-            f"clip {ci.clip.track_id} (start={ci.clip.start_frame}) has "
-            f"{len(ci.raw_crops)} crops but frame_count={ci.clip.frame_count}"
-        )
+    assert len(captured) >= 2
+    assert [len(ci.raw_crops) for ci in captured] == [ci.clip.frame_count for ci in captured]
 
 
 def _scripted_detections_fn(script: list[bool]):
@@ -955,7 +566,7 @@ def test_vr_gnomonic_crop_and_blend_stays_within_one_eye() -> None:
         tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
         clip_queue=clip_queue, frame_shape=(height, frame_w), discard_margin=0,
     )
-    _drain_queue(clip_queue, blend_buffer, _FakeRestorationPipeline().process_clip_item)
+    _drain_queue(clip_queue, blend_buffer, _restore_to_200)
 
     blended = blend_buffer.blend_frame(0, frame[0])
 
