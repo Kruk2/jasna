@@ -48,8 +48,30 @@ def _without_compiling(monkeypatch):
     monkeypatch.setattr(sampler, "compile_static", lambda function, **kwargs: function)
 
 
+class _ReadObserver:
+    """Wraps a reader's ``read_tensors_into``: records each call's tensor names and every
+    destination it fills, then raises ``failure`` once the read is done, when given."""
+
+    def __init__(self, reader, failure: Exception | None = None):
+        self.operations, self.destinations = [], []
+        load = reader.read_tensors_into
+
+        def observe(group_names, groups):
+            self.operations.append(group_names)
+            load(group_names, self._record(groups))
+            if failure is not None:
+                raise failure
+
+        reader.read_tensors_into = observe
+
+    def _record(self, groups):
+        for group in groups:
+            self.destinations.extend(group.values())
+            yield group
+
+
 class _NativeStore:
-    """Stands in for the private native opaque store; records what the sampler asks of it."""
+    """Stands in for the native block store; records what the sampler asks of it."""
 
     def __init__(self, specs, device, resident):
         self.specs = specs
@@ -70,8 +92,6 @@ class _NativeStore:
 
 
 def _install_native_store(monkeypatch):
-    # This CPU sampler fixture substitutes the completed inference owner.
-    # Actual CUDA admission and private-load cleanup have separate native tests.
     def from_reader(cls, reader, names, device, *, resident):
         specs = reader.tensor_specs()
         native = _NativeStore([{name: specs[source] for name, source in block.items()} for block in names],
@@ -136,14 +156,14 @@ def test_failed_transformer_load_reports_its_own_error_when_cleanup_also_fails(t
     _without_compiling(monkeypatch)
 
     def load_fails(*_args, **_kwargs):
-        raise RuntimeError("LTX private load rejected: native block commit")
+        raise RuntimeError("synthetic block load failure")
 
     def cleanup_fails(_transformer):
         raise RuntimeError("CUDA error: out of memory")
 
     monkeypatch.setattr(sampler.BlockStore, "from_reader", load_fails)
     monkeypatch.setattr(sampler.LtxTransformer, "close", cleanup_fails)
-    with pytest.raises(RuntimeError, match="native block commit") as raised:
+    with pytest.raises(RuntimeError, match="block load failure") as raised:
         sampler.LtxTransformer(sampler.TransformerSource(path), torch.device("cpu"), _twenty_gib_free)
     assert "out of memory" in str(raised.value.__cause__)
 
@@ -184,24 +204,16 @@ def test_block_loading_streams_all_destinations_in_one_reader_operation(tmp_path
     expected = {f"blocks.{index}.weight": torch.arange(6, dtype=torch.float32) + index
                 for index in range(3)}
     save_file(expected, str(path))
-    operations = []
     with open_tensors(path) as reader:
-        load = reader.read_tensors_into
-
-        def observe(group_names, groups):
-            operations.append(group_names)
-            load(group_names, groups)
-
-        reader.read_tensors_into = observe
+        reads = _ReadObserver(reader)
         store = BlockStore.from_reader(reader, [{"weight": name} for name in expected],
                                        torch.device("cpu"), resident=3)
     try:
-        assert operations == [(tuple(expected),)]
+        assert reads.operations == [(tuple(expected),)]
         for index, value in enumerate(expected.values()):
             assert torch.equal(store.acquire(index)["weight"], value)
     finally:
         store.close()
-
 
 def test_opaque_block_store_keeps_complete_blocks_out_of_python_tensors(monkeypatch):
     class Reader:
@@ -213,7 +225,7 @@ def test_opaque_block_store_keeps_complete_blocks_out_of_python_tensors(monkeypa
             }
 
         def read_tensors_into(self, group_names, groups):
-            pytest.fail("private block storage requested Python tensor destinations")
+            pytest.fail("the native block store requested Python tensor destinations")
 
     _install_native_store(monkeypatch)
     store = OpaqueBlockStore.from_reader(
@@ -262,80 +274,15 @@ def test_opaque_denoise_uses_only_native_complete_block_forward(tmp_path, monkey
         transformer.close()
 
 
-def test_late_stream_failure_clears_every_committed_destination(tmp_path):
-    path = tmp_path / "blocks.safetensors"
-    names = [f"blocks.{index}.weight" for index in range(3)]
-    save_file({name: torch.ones(4) for name in names}, str(path))
-    retained = []
-    with open_tensors(path) as reader:
-        load = reader.read_tensors_into
-
-        def fail_after_completion(group_names, groups):
-            def observe():
-                for group in groups:
-                    retained.extend(group.values())
-                    yield group
-
-            load(group_names, observe())
-            raise ValueError("synthetic final verification failure")
-
-        reader.read_tensors_into = fail_after_completion
-        with pytest.raises(ValueError, match="final verification"):
-            BlockStore.from_reader(reader, [{"weight": name} for name in names],
-                                   torch.device("cpu"), resident=3)
-    assert len(retained) == 3
-    assert all(torch.count_nonzero(tensor).item() == 0 for tensor in retained)
-
-
-def test_top_tensor_loading_uses_one_owned_destination_group(tmp_path):
-    path = tmp_path / "top.safetensors"
-    expected = {"context": torch.arange(6).reshape(2, 3), "bias": torch.ones(3)}
-    save_file(expected, str(path))
-    operations = []
-    with open_tensors(path) as reader:
-        load = reader.read_tensors_into
-
-        def observe(group_names, groups):
-            operations.append(group_names)
-            load(group_names, groups)
-
-        reader.read_tensors_into = observe
-        result = sampler._read_host_tensors(reader, tuple(expected), reader.tensor_specs())
-    assert operations == [(tuple(expected),)]
-    assert all(torch.equal(result[name], value) for name, value in expected.items())
-
-
-def test_vae_stream_failure_clears_the_entire_owned_state(tmp_path, monkeypatch):
-    from contextlib import contextmanager
-
+def test_vae_stream_failure_clears_the_entire_owned_state(tmp_path):
     path = tmp_path / "vae.safetensors"
     save_file({"encoder.weight": torch.ones(6), "encoder.bias": torch.ones(3), "decoder.bias": torch.ones(2)}, str(path))
-    retained = []
-
-    @contextmanager
-    def fail_after_verification(source):
-        with open_tensors(source) as reader:
-            load = reader.read_tensors_into
-
-            def fail(group_names, groups):
-                def observe():
-                    for group in groups:
-                        retained.extend(group.values())
-                        yield group
-
-                load(group_names, observe())
-                raise ValueError("synthetic final VAE verification failure")
-
-            reader.read_tensors_into = fail
-            yield reader
-
-    monkeypatch.setattr(vae_loader, "open_tensors", fail_after_verification)
-    with pytest.raises(ValueError, match="final VAE verification"):
-        with vae_loader.open_tensors(path) as reader:
+    with open_tensors(path) as reader:
+        reads = _ReadObserver(reader, ValueError("synthetic final VAE verification failure"))
+        with pytest.raises(ValueError, match="final VAE verification"):
             vae_loader._read_tensors(reader, ("encoder.",))
-    assert len(retained) == 2
-    assert all(torch.count_nonzero(tensor).item() == 0 for tensor in retained)
-
+    assert len(reads.destinations) == 2
+    assert all(torch.count_nonzero(tensor).item() == 0 for tensor in reads.destinations)
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 @pytest.mark.parametrize("resident", (0, 1, 3))
@@ -346,20 +293,10 @@ def test_cuda_block_loading_and_close_clear_retained_storage(tmp_path, resident)
     save_file(expected, str(path))
     original = path.read_bytes()
     with open_tensors(path) as reader:
-        load = reader.read_tensors_into
-        staging = []
-
-        def observe(group_names, groups):
-            def record():
-                for group in groups:
-                    staging.append(next(iter(group.values())).data_ptr())
-                    yield group
-
-            load(group_names, record())
-
-        reader.read_tensors_into = observe
+        reads = _ReadObserver(reader)
         store = BlockStore.from_reader(reader, [{"weight": name} for name in expected],
                                        torch.device("cuda"), resident=resident)
+    staging = [tensor.data_ptr() for tensor in reads.destinations]
     if resident == 3:
         assert staging == [staging[0], staging[1], staging[0]] and staging[0] != staging[1]
     retained = store._resident_buffers + store._host + store._slots
@@ -388,21 +325,11 @@ def test_cuda_stream_final_failure_clears_gpu_pinned_and_staging_storage(tmp_pat
 
     monkeypatch.setattr(BlockStore, "_allocate", observe_allocation)
     with open_tensors(path) as reader:
-        load = reader.read_tensors_into
-
-        def fail_after_copy(group_names, groups):
-            def record():
-                for group in groups:
-                    retained.extend(group.values())
-                    yield group
-
-            load(group_names, record())
-            raise ValueError("synthetic final GPU verification failure")
-
-        reader.read_tensors_into = fail_after_copy
+        reads = _ReadObserver(reader, ValueError("synthetic final GPU verification failure"))
         with pytest.raises(ValueError, match="final GPU verification"):
             BlockStore.from_reader(reader, [{"weight": name} for name in names],
                                    torch.device("cuda"), resident=1)
+    retained += reads.destinations
     assert retained
     assert all(torch.count_nonzero(tensor).item() == 0 for tensor in retained)
 

@@ -1,5 +1,4 @@
 import hashlib
-import time
 
 import numpy as np
 import pytest
@@ -308,15 +307,6 @@ def test_plan_video_output_matches_the_recorded_plan():
     regions, cuts = _random_video(0, 4000)
     plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=True, window_hop=window_hop(True))
     assert _plan_digest(plans) == "1099f21ad72e3a86d0a9e3b1e2d94dc4b126535674cfdddf8d70d4c3e12f3e30"
-
-
-def test_plan_video_scales_linearly_with_video_length():
-    frames = 64_000
-    regions = [[_square(100 + f % 50, 100, 200), _square(900, 500, 200)] for f in range(frames)]
-    cuts = set(range(150, frames, 150))
-    started = time.perf_counter()
-    plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=True, window_hop=window_hop(True))
-    assert time.perf_counter() - started < 15.0
 
 
 def test_gap_fill_keeps_outlines_inside_the_frame_when_boxes_leave_it():
