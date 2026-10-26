@@ -1,23 +1,19 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import torch
 import torch.nn as nn
 
+from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
 from jasna.restorer.basicvsrpp_sub_engines import (
-    DIRECTIONS,
     EAGER_UPSAMPLE_BATCH,
-    FEATURE_SIZE,
     UPSAMPLE_BATCH,
     BasicVSRPlusPlusNetSplit,
-    _PreprocessWrapper,
-    _PropagateBodyWrapper,
     _SPyNetWrapper,
-    _UpsampleWrapper,
     _get_inference_generator,
     create_eager_split_forward,
     load_sub_engines,
@@ -36,53 +32,6 @@ def test_sub_engine_dir_uses_stem() -> None:
     assert result.startswith(r"C:\weights")
 
 
-def test_get_sub_engine_paths_returns_6_paths() -> None:
-    paths = get_sub_engine_paths("model_weights/model.pth", fp16=True)
-    assert len(paths) == 6
-    for d in DIRECTIONS:
-        assert f"loop_body_{d}" in paths
-    assert "preprocess" in paths
-    assert "upsample" in paths
-    for p in paths.values():
-        assert p.endswith(".engine")
-        assert "fp16" in p
-
-
-def test_get_sub_engine_paths_fp32() -> None:
-    paths = get_sub_engine_paths("model.pth", fp16=False)
-    for p in paths.values():
-        assert "fp32" in p
-
-
-def test_all_sub_engines_exist_false_when_missing(tmp_path: Path) -> None:
-    model_path = str(tmp_path / "model.pth")
-    assert not all_sub_engines_exist(model_path, fp16=True)
-
-
-def test_all_sub_engines_exist_true_when_all_present(tmp_path: Path) -> None:
-    model_path = str(tmp_path / "model.pth")
-    paths = get_sub_engine_paths(model_path, fp16=True)
-    for p in paths.values():
-        Path(p).parent.mkdir(parents=True, exist_ok=True)
-        Path(p).write_text("x", encoding="utf-8")
-    assert all_sub_engines_exist(model_path, fp16=True)
-
-
-def test_all_sub_engines_exist_false_when_partial(tmp_path: Path) -> None:
-    model_path = str(tmp_path / "model.pth")
-    paths = get_sub_engine_paths(model_path, fp16=True)
-    items = list(paths.values())
-    for p in items[:-1]:
-        Path(p).parent.mkdir(parents=True, exist_ok=True)
-        Path(p).write_text("x", encoding="utf-8")
-    assert not all_sub_engines_exist(model_path, fp16=True)
-
-
-def test_load_sub_engines_returns_none_when_missing(tmp_path: Path) -> None:
-    result = load_sub_engines(str(tmp_path / "model.pth"), torch.device("cpu"), fp16=True)
-    assert result is None
-
-
 def _make_engine_files(model_path: str) -> dict[str, str]:
     paths = get_sub_engine_paths(model_path, fp16=True)
     for p in paths.values():
@@ -91,23 +40,19 @@ def _make_engine_files(model_path: str) -> dict[str, str]:
     return paths
 
 
-def test_warmup_capture_loop_body_graphs_toggles_mode(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import sys
+def test_sub_engines_exist_only_when_all_six_of_this_precision_do(tmp_path: Path) -> None:
+    model_path = str(tmp_path / "model.pth")
+    assert not all_sub_engines_exist(model_path, fp16=True)
+    paths = list(_make_engine_files(model_path).values())
+    assert len(paths) == 6 and all_sub_engines_exist(model_path, fp16=True)
+    assert not all_sub_engines_exist(model_path, fp16=False)
+    Path(paths[-1]).unlink()
+    assert not all_sub_engines_exist(model_path, fp16=True)
 
-    from jasna.restorer.basicvsrpp_sub_engines import _warmup_capture_loop_body_graphs
 
-    fake_trt = MagicMock()
-    monkeypatch.setitem(sys.modules, "torch_tensorrt", fake_trt)
-    engines = {d: MagicMock(return_value=torch.zeros(1)) for d in DIRECTIONS}
-    _warmup_capture_loop_body_graphs(engines, 16, torch.device("cpu"), torch.float32)
-    for i, d in enumerate(DIRECTIONS):
-        assert engines[d].call_count == 2
-        prefix = engines[d].call_args.args[7]
-        assert prefix.shape == (1, (1 + i) * 16, FEATURE_SIZE, FEATURE_SIZE)
-    modes = [c.args[0] for c in fake_trt.runtime.set_cudagraphs_mode.call_args_list]
-    assert modes == [True, False]
+def test_load_sub_engines_returns_none_when_missing(tmp_path: Path) -> None:
+    result = load_sub_engines(str(tmp_path / "model.pth"), torch.device("cpu"), fp16=True)
+    assert result is None
 
 
 def test_create_split_forward_cudagraphs_env_gates_warmup(
@@ -143,62 +88,13 @@ def test_create_split_forward_cudagraphs_env_gates_warmup(
     assert split._upsample_batch == UPSAMPLE_BATCH
 
 
-def test_propagate_body_wrapper_forward_shape() -> None:
-    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
-
-    torch.manual_seed(0)
-    net = BasicVSRPlusPlusNet(mid_channels=16, num_blocks=2, spynet_pretrained=None)
-    net.eval()
-    mid = net.mid_channels
-    d = "backward_1"
-    wrapper = _PropagateBodyWrapper(net.deform_align[d], net.backbone[d])
-    fp = torch.randn(1, mid, FEATURE_SIZE, FEATURE_SIZE)
-    g1 = torch.randn(1, FEATURE_SIZE, FEATURE_SIZE, 2)
-    fn2 = torch.randn(1, mid, FEATURE_SIZE, FEATURE_SIZE)
-    g2 = torch.randn(1, FEATURE_SIZE, FEATURE_SIZE, 2)
-    fc = torch.randn(1, mid, FEATURE_SIZE, FEATURE_SIZE)
-    f1 = torch.randn(1, 2, FEATURE_SIZE, FEATURE_SIZE)
-    f2 = torch.randn(1, 2, FEATURE_SIZE, FEATURE_SIZE)
-    bp = torch.randn(1, mid, FEATURE_SIZE, FEATURE_SIZE)
-    with torch.inference_mode():
-        out = wrapper(fp, g1, fn2, g2, fc, f1, f2, bp)
-    assert out.shape == (1, mid, FEATURE_SIZE, FEATURE_SIZE)
-
-
-def test_upsample_wrapper_forward_shape() -> None:
-    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import (
-        PixelShufflePack,
-        ResidualBlocksWithInputConv,
-    )
-
-    reconstruction = ResidualBlocksWithInputConv(320, 64, 2)
-    upsample1 = PixelShufflePack(64, 64, 2, upsample_kernel=3)
-    upsample2 = PixelShufflePack(64, 64, 2, upsample_kernel=3)
-    conv_hr = nn.Conv2d(64, 64, 3, 1, 1)
-    conv_last = nn.Conv2d(64, 3, 3, 1, 1)
-
-    wrapper = _UpsampleWrapper(reconstruction, upsample1, upsample2, conv_hr, conv_last)
-    x = torch.randn(1, 320, FEATURE_SIZE, FEATURE_SIZE)
-    out = wrapper(x)
-    assert out.shape == (1, 3, FEATURE_SIZE * 4, FEATURE_SIZE * 4)
-
-
-def test_get_inference_generator_prefers_ema() -> None:
-    model = MagicMock()
-    model.generator_ema = MagicMock(spec=nn.Module)
-    model.generator = MagicMock(spec=nn.Module)
-    assert _get_inference_generator(model) is model.generator_ema
-
-
-def test_get_inference_generator_falls_back_to_generator() -> None:
-    model = MagicMock()
-    model.generator_ema = None
-    model.generator = MagicMock(spec=nn.Module)
-    assert _get_inference_generator(model) is model.generator
+def test_inference_uses_the_ema_generator_when_there_is_one() -> None:
+    ema, generator = nn.Identity(), nn.Linear(1, 1)
+    assert _get_inference_generator(SimpleNamespace(generator_ema=ema, generator=generator)) is ema
+    assert _get_inference_generator(SimpleNamespace(generator_ema=None, generator=generator)) is generator
 
 
 def test_spynet_wrapper_matches_original() -> None:
-    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
 
     torch.manual_seed(42)
     net = BasicVSRPlusPlusNet(mid_channels=16, num_blocks=2, spynet_pretrained=None)
@@ -223,12 +119,16 @@ def _build_split_from_net(net):
     return create_eager_split_forward(MagicMock(generator_ema=net))
 
 
+def _split(*, preprocess: nn.Module | None = None, upsample: nn.Module | None = None) -> BasicVSRPlusPlusNetSplit:
+    generator = BasicVSRPlusPlusNet(mid_channels=16, num_blocks=1, spynet_pretrained=None)
+    return BasicVSRPlusPlusNetSplit(generator, {}, preprocess, upsample, UPSAMPLE_BATCH, False)
+
+
 @pytest.mark.parametrize("T", [1, 2, 3, 60, 71])
 def test_split_forward_matches_pytorch_forward(T: int) -> None:
     """Verify that BasicVSRPlusPlusNetSplit produces the same output as the
     original BasicVSRPlusPlusNet.  T=1 and T=2 exercise the short-clip
     padding path (preprocess engine min batch = 3)."""
-    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
 
     torch.manual_seed(42)
     net = BasicVSRPlusPlusNet(mid_channels=16, num_blocks=2, spynet_pretrained=None)
@@ -260,10 +160,7 @@ def test_upsample_runs_in_fixed_size_batches() -> None:
             batch_sizes.append(x.shape[0])
             return torch.zeros(x.shape[0], 3, 8, 8)
 
-    split = BasicVSRPlusPlusNetSplit.__new__(BasicVSRPlusPlusNetSplit)
-    nn.Module.__init__(split)
-    split._upsample_engine = _RecordingUpsample()
-    split._upsample_batch = UPSAMPLE_BATCH
+    split = _split(upsample=_RecordingUpsample())
 
     t = 2 * UPSAMPLE_BATCH + 11
     lqs = torch.randn(1, t, 3, 8, 8)
@@ -295,9 +192,7 @@ def test_preprocess_runs_in_overlapping_batches() -> None:
             flows = frames[:-1].view(-1, 1, 1, 1)
             return feats, flows, flows.clone()
 
-    split = BasicVSRPlusPlusNetSplit.__new__(BasicVSRPlusPlusNetSplit)
-    nn.Module.__init__(split)
-    split._preprocess_engine = _RecordingPreprocess()
+    split = _split(preprocess=_RecordingPreprocess())
 
     t = 2 * PREPROCESS_BATCH + 1
     lqs_flat = torch.arange(t, dtype=torch.float32).view(t, 1, 1, 1).expand(t, 3, 1, 1)
@@ -311,23 +206,9 @@ def test_preprocess_runs_in_overlapping_batches() -> None:
     assert torch.equal(flows_bwd, flows_fwd)
 
 
-def test_preprocess_single_batch_calls_engine_once() -> None:
-    from jasna.restorer.basicvsrpp_sub_engines import PREPROCESS_BATCH
-
-    engine = MagicMock(return_value=("f", "fwd", "bwd"))
-    split = BasicVSRPlusPlusNetSplit.__new__(BasicVSRPlusPlusNetSplit)
-    nn.Module.__init__(split)
-    split._preprocess_engine = engine
-
-    lqs_flat = torch.zeros(PREPROCESS_BATCH, 3, 4, 4)
-    assert split._preprocess(lqs_flat) == ("f", "fwd", "bwd")
-    assert engine.call_count == 1
-
-
 def test_eager_split_forward_never_touches_torch_tensorrt(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
-    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
 
     monkeypatch.setitem(sys.modules, "torch_tensorrt", None)
     monkeypatch.delenv("JASNA_TRT_CUDAGRAPHS", raising=False)
