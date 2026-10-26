@@ -151,6 +151,7 @@ def test_changed_progress_requires_confirmation_and_declining_skips_only_that_jo
 def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conflict, ranges):
     """The processor's saved-work lookup derives the job exactly as running it does, also
     when ranges keep a source codec other than the chosen one."""
+    import importlib
     from fractions import Fraction
     from types import SimpleNamespace
     from unittest.mock import MagicMock
@@ -179,7 +180,8 @@ def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conf
         "jasna.pipeline.require_encodable_size": lambda *_a: None,
         "jasna.pipeline.require_ltx_input": lambda *_a: None,
     }.items():
-        monkeypatch.setattr(target, value)
+        module, name = target.rsplit(".", 1)
+        monkeypatch.setattr(importlib.import_module(module), name, value)
     resumed = []
 
     def restore(pipeline, _metadata):
