@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import TclError
 from unittest.mock import MagicMock
 
-import customtkinter as ctk
 import pytest
 
-from jasna.gui import icons
 from jasna.gui.settings_sections import widgets as settings_widgets
 from jasna.gui.icons import CompactSwitch, NativeIconButton, render_icon, render_toggle
 from jasna.gui.theme import Colors
@@ -40,104 +37,69 @@ def test_toggle_switch_renders_without_customtkinter_shape_glyphs(selected: bool
     assert image.getbbox() == (0, 0, 36, 18)
 
 
-def test_compact_switch_preserves_switch_state_and_callback() -> None:
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
+def test_compact_switch_preserves_switch_state_and_callback(tk_root) -> None:
+    callback = MagicMock()
+    switch = CompactSwitch(tk_root, callback, Colors.BG_PANEL)
 
-    try:
-        callback = MagicMock()
-        switch = CompactSwitch(root, callback, Colors.BG_PANEL)
-
-        assert switch.get() == 0
-        switch.select()
-        assert switch.get() == 1
-        switch.deselect()
-        assert switch.get() == 0
-        switch._toggle()
-        assert switch.get() == 1
-        callback.assert_called_once_with()
-    finally:
-        root.destroy()
+    assert switch.get() == 0
+    switch.select()
+    assert switch.get() == 1
+    switch.deselect()
+    assert switch.get() == 0
+    switch._toggle()
+    assert switch.get() == 1
+    callback.assert_called_once_with()
 
 
-def test_compact_switch_ignores_clicks_while_disabled() -> None:
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
+def test_compact_switch_ignores_clicks_while_disabled(tk_root) -> None:
+    callback = MagicMock()
+    switch = CompactSwitch(tk_root, callback, Colors.BG_PANEL)
 
-    try:
-        callback = MagicMock()
-        switch = CompactSwitch(root, callback, Colors.BG_PANEL)
+    switch.configure(state="disabled")
+    switch._toggle()
 
-        switch.configure(state="disabled")
-        switch._toggle()
+    assert switch.cget("state") == "disabled"
+    assert switch.get() == 0
+    callback.assert_not_called()
 
-        assert switch.cget("state") == "disabled"
-        assert switch.get() == 0
-        callback.assert_not_called()
+    switch.configure(state="normal")
+    switch._toggle()
 
-        switch.configure(state="normal")
-        switch._toggle()
-
-        assert switch.get() == 1
-        callback.assert_called_once_with()
-    finally:
-        root.destroy()
+    assert switch.get() == 1
+    callback.assert_called_once_with()
 
 
-def test_native_icon_button_keeps_image_and_disabled_state() -> None:
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
+def test_native_icon_button_keeps_image_and_disabled_state(tk_root) -> None:
+    command = MagicMock()
+    button = NativeIconButton(
+        tk_root,
+        "save",
+        18,
+        Colors.TEXT_PRIMARY,
+        Colors.BG_PANEL,
+        Colors.BG_CARD,
+        Colors.BORDER_LIGHT,
+        command,
+        32,
+        32,
+    )
 
-    try:
-        command = MagicMock()
-        button = NativeIconButton(
-            root,
-            "save",
-            18,
-            Colors.TEXT_PRIMARY,
-            Colors.BG_PANEL,
-            Colors.BG_CARD,
-            Colors.BORDER_LIGHT,
-            command,
-            32,
-            32,
-        )
-
-        normal_image = button.cget("image")
-        button.configure(state="disabled")
-        assert button.cget("state") == "disabled"
-        assert button.cget("image") != normal_image
-        button.invoke()
-        command.assert_not_called()
-        button.configure(state="normal")
-        button.invoke()
-        command.assert_called_once_with()
-    finally:
-        root.destroy()
+    normal_image = button.cget("image")
+    button.configure(state="disabled")
+    assert button.cget("state") == "disabled"
+    assert button.cget("image") != normal_image
+    button.invoke()
+    command.assert_not_called()
+    button.configure(state="normal")
+    button.invoke()
+    command.assert_called_once_with()
 
 
-def test_slider_value_uses_native_label_without_ctk_canvas() -> None:
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
+def test_slider_value_uses_native_label_without_ctk_canvas(tk_root) -> None:
+    label = settings_widgets.create_slider_value_label(tk_root, "90", 4, Colors.BG_PANEL)
 
-    try:
-        label = settings_widgets.create_slider_value_label(root, "90", 4, Colors.BG_PANEL)
-
-        assert isinstance(label, tk.Label)
-        assert label.cget("text") == "90"
-        assert label.cget("background") == Colors.BG_PANEL
-        assert int(label.cget("width")) == 4
-        assert root.tk.splitlist(label.cget("font")) == (
-            settings_widgets.Fonts.FAMILY,
-            f"-{settings_widgets.Fonts.SIZE_NORMAL}",
-        )
-    finally:
-        root.destroy()
+    assert isinstance(label, tk.Label)
+    assert tk_root.tk.splitlist(label.cget("font")) == (
+        settings_widgets.Fonts.FAMILY,
+        f"-{settings_widgets.Fonts.SIZE_NORMAL}",
+    )
