@@ -368,11 +368,12 @@ def test_a_sharpened_job_encodes_the_parts_between_ranges_again_so_sharpening_co
     spans = (SpliceSpan("copy", 0, 60), SpliceSpan("render", 60, 120, ((75, 90),)), SpliceSpan("copy", 120, 240))
     pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", segments, spans)
     pipeline.sharpen_strength = 0.4
+    pipeline.splice_plan = pipeline.splice_plan.reencoding_copies()
     pipeline._reencode_span = MagicMock()
 
     _run_smart_mocked(pipeline)
 
-    assert [reencode.args[2] for reencode in pipeline._reencode_span.call_args_list] == [spans[0], spans[2]]
+    assert [reencode.args[2].start_pts for reencode in pipeline._reencode_span.call_args_list] == [0, 120]
 
 
 def test_a_lut_job_encodes_the_parts_between_ranges_again_so_the_lut_covers_them(tmp_path) -> None:
@@ -386,6 +387,7 @@ def test_a_lut_job_encodes_the_parts_between_ranges_again_so_the_lut_covers_them
     )
     pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", segments, spans)
     pipeline.lut_path = "look.cube"
+    pipeline.splice_plan = pipeline.splice_plan.reencoding_copies()
     pipeline._reencode_span = MagicMock()
 
     with (
@@ -401,7 +403,7 @@ def test_a_lut_job_encodes_the_parts_between_ranges_again_so_the_lut_covers_them
         pipeline._run_smart(MagicMock(duration=8.0, video_fps=30.0, video_fps_exact=Fraction(30, 1)))
 
     copy_fragment.assert_not_called()
-    assert [reencode.args[2] for reencode in pipeline._reencode_span.call_args_list] == [spans[0], spans[2]]
+    assert [reencode.args[2].start_pts for reencode in pipeline._reencode_span.call_args_list] == [0, 120]
     assert {made.kwargs["lut_path"] for made in encoder.call_args_list} == {"look.cube"}
     assert progressbar.call_args.kwargs["total_frames"] == 180
     assert len(concatenate.call_args.args[0]) == 4

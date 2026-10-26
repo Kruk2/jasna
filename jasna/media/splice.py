@@ -4,10 +4,11 @@ import bisect
 import logging
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from io import BytesIO
 from pathlib import Path
+from typing import Literal
 
 import av
 
@@ -63,10 +64,22 @@ class KeyframeIndex:
         mid-GOP counts as the start, where its render span begins."""
         return tuple(max(0.0, self.seconds_for_pts(pts)) for pts in self.pts)
 
+    @property
+    def first_copyable_pts(self) -> int:
+        """Where stream copy may start. An MP4 cut mid-GOP shows video from before its
+        first keyframe at or after the stream start: that keyframe is hidden lead-in."""
+        if self.pts[0] >= self.start_pts:
+            return self.start_pts
+        position = bisect.bisect_left(self.pts, self.start_pts)
+        return self.pts[position] if position < len(self.pts) else self.end_pts
+
+
+SpanKind = Literal["copy", "render", "reencode"]
+
 
 @dataclass(frozen=True)
 class SpliceSpan:
-    kind: str  # "copy", "render", or "reencode" (encoded again unrestored: it cannot be copied)
+    kind: SpanKind  # "reencode": encoded again without restoring, since it cannot be copied as it is
     start_pts: int
     end_pts: int
     effect_ranges: tuple[tuple[int, int], ...] = ()
@@ -90,6 +103,13 @@ class SplicePlan:
         """Per render span, the segment behind each of its effect ranges."""
         remaining = iter(self.segments)
         return tuple(tuple(next(remaining) for _ in span.effect_ranges) for span in self.render_spans)
+
+    def reencoding_copies(self) -> SplicePlan:
+        """This plan with every copy span encoded again, so a color LUT or sharpening
+        covers it as well."""
+        return replace(
+            self, spans=tuple(replace(span, kind="reencode") if span.kind == "copy" else span for span in self.spans)
+        )
 
 
 def _models(segments: tuple[SegmentRange, ...] | list[SegmentRange]) -> set[str]:
@@ -444,15 +464,6 @@ def segment_render_span(segment: SegmentRange, index: KeyframeIndex) -> SpliceSp
     return SpliceSpan("render", render_start, render_end, ((effect_start, effect_end),))
 
 
-def _first_copyable_pts(index: KeyframeIndex) -> int:
-    """Where stream copy may start. An MP4 cut mid-GOP shows video from before its
-    first keyframe at or after the stream start: that keyframe is hidden lead-in."""
-    if index.pts[0] >= index.start_pts:
-        return index.start_pts
-    position = bisect.bisect_left(index.pts, index.start_pts)
-    return index.pts[position] if position < len(index.pts) else index.end_pts
-
-
 def build_splice_plan(
     segments: tuple[SegmentRange, ...] | list[SegmentRange],
     index: KeyframeIndex,
@@ -482,7 +493,7 @@ def build_splice_plan(
         require_one_model(tuple(owners))
 
     spans: list[SpliceSpan] = []
-    copy_from = _first_copyable_pts(index)
+    copy_from = index.first_copyable_pts
 
     def add_unrendered(start: int, end: int) -> None:
         if start < min(end, copy_from):

@@ -160,12 +160,16 @@ class TestSeekBehavior:
         )
         assert first_seconds < start_seconds + seek_ts + 0.5
 
-    def test_seek_to_the_start_of_a_mid_gop_cut_reads_every_shown_frame(self, tmp_path):
+    @pytest.mark.parametrize("backend", ["auto", "vali", "pyav-hw", "pyav-sw"])
+    @pytest.mark.parametrize("seek_ts", [None, 0.0])
+    def test_every_backend_reads_exactly_the_shown_frames_of_a_mid_gop_cut(self, tmp_path, monkeypatch, backend, seek_ts):
         import subprocess
 
         import av
+        from jasna.media.video_decoder import DECODE_BACKEND_ENV
         from jasna.os_utils import resolve_executable
 
+        monkeypatch.setenv(DECODE_BACKEND_ENV, backend)
         full = tmp_path / "full.mp4"
         cut = tmp_path / "cut.mp4"
         ffmpeg = [resolve_executable("ffmpeg"), "-y", "-loglevel", "error"]
@@ -178,5 +182,5 @@ class TestSeekBehavior:
         with av.open(str(cut)) as container:
             shown_pts = [frame.pts for frame in container.decode(video=0)]
         with VideoReader(str(cut), batch_size=8, device=torch.device("cuda:0"), metadata=get_video_meta_data(str(cut))) as reader:
-            pts = [int(p) for _, batch_pts in reader.frames(seek_ts=0.0) for p in batch_pts]
+            pts = [int(p) for _, batch_pts in reader.frames(seek_ts=seek_ts) for p in batch_pts]
         assert pts == shown_pts

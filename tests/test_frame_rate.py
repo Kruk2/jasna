@@ -7,7 +7,7 @@ import pytest
 import torch
 
 from jasna.media.frame_rate import resolve_frame_rate_retarget
-from jasna.media.video_decoder import VideoReader
+from jasna.media.video_decoder import VideoReader, _shown_frames
 
 
 @pytest.mark.parametrize(
@@ -115,16 +115,9 @@ def test_rate_mismatch_is_not_reported_for_rates_that_are_never_halved():
 
 
 def test_reader_selects_every_second_decoded_frame_before_batching():
-    reader = VideoReader(
-        "unused.mp4",
-        batch_size=4,
-        device=torch.device("cpu"),
-        metadata=SimpleNamespace(),
-        frame_stride=2,
-    )
     frames = [SimpleNamespace(pts=pts) for pts in range(7)]
 
-    selected = list(reader._selected_frames(iter(frames)))
+    selected = list(_shown_frames(iter(frames), lambda frame: frame.pts, 0, 2))
 
     assert [frame.pts for frame in selected] == [0, 2, 4, 6]
 
@@ -141,15 +134,8 @@ def test_reader_rejects_invalid_frame_stride():
 
 
 def test_strided_selection_reanchors_at_the_first_frame_after_seek():
-    reader = VideoReader(
-        "unused.mp4",
-        batch_size=4,
-        device=torch.device("cpu"),
-        metadata=SimpleNamespace(),
-        frame_stride=2,
-    )
     frames = [SimpleNamespace(pts=pts) for pts in range(31, 38)]
 
-    selected = list(reader._selected_frames(iter(frames)))
+    selected = list(_shown_frames(iter(frames), lambda frame: frame.pts, 0, 2))
 
     assert [frame.pts for frame in selected] == [31, 33, 35, 37]

@@ -51,6 +51,10 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _span_seconds(span: SpliceSpan, index: KeyframeIndex) -> float:
+    return float((span.end_pts - span.start_pts) * index.time_base)
+
+
 def _span_frames(span: SpliceSpan, index: KeyframeIndex, metadata) -> int:
     return round((span.end_pts - span.start_pts) * index.time_base * metadata.video_fps)
 
@@ -90,6 +94,31 @@ class _FragmentFrameWriter(_OfflineFrameWriter):
     def finish(self) -> None:
         self.close()
         self._commit()
+
+
+class _FragmentDir:
+    """The raw fragment of each splice span. In a checkpoint (``durable``) a fragment is
+    written as ``partial(i)`` and becomes ``final(i)`` only once complete and on disk, so a
+    restart skips exactly the finished ones."""
+
+    def __init__(self, directory: Path, *, durable: bool) -> None:
+        self.directory = directory
+        self.durable = durable
+
+    def final(self, span_index: int) -> Path:
+        return self.directory / f"{span_index:04d}-raw.nut"
+
+    def partial(self, span_index: int) -> Path:
+        return self.directory / f"{span_index:04d}-partial.nut" if self.durable else self.final(span_index)
+
+    def done(self, span_index: int) -> bool:
+        return self.final(span_index).is_file()
+
+    def commit(self, span_index: int) -> None:
+        if self.durable:
+            with self.partial(span_index).open("r+b") as stream:
+                os.fsync(stream.fileno())
+            commit_file(self.partial(span_index), self.final(span_index))
 
 
 class Pipeline:
@@ -318,7 +347,6 @@ class Pipeline:
         from jasna.ltx.restore import Cancelled, restore_video, video_frames
         from jasna.ltx.speed import profile_path
 
-        require_ltx_input(self.vr_resolution)
         frame_rate = self._resolve_frame_rate(metadata)
         writer = _OfflineFrameWriter(self._video_encoder(metadata, frame_rate), [time.monotonic()])
         try:
@@ -475,7 +503,6 @@ class Pipeline:
             writer.close()
 
     def _run_smart(self, metadata) -> None:
-        codec = self.codec
         plan = self.splice_plan
         index = plan.index
         default = job_restoration(self.restoration_model_name, self.ltx_seed)
@@ -492,7 +519,7 @@ class Pipeline:
         # re-encode instead of failing the job (NVIDIA NVENC has no such cap).
         if (
             vendor_for_device(self.device) is AcceleratorVendor.AMD
-            and codec == "h264"
+            and self.codec == "h264"
             and index.max_b_frames > 3
         ):
             log.warning(
@@ -511,23 +538,14 @@ class Pipeline:
             )
             return
         smart_encoder_settings = resolve_smart_encoder_settings(
-            codec,
+            self.codec,
             metadata,
             index,
             self.encoder_settings,
             vendor=vendor_for_device(self.device),
         )
-        reencode_copies = self.lut_path is not None or self.sharpen_strength > 0
-        if reencode_copies:
-            log.info(
-                "%s: a color LUT or sharpening is set, so the parts without ranges are encoded again",
-                self.input_video.name,
-            )
-        standard_frames = sum(
-            _span_frames(span, index, metadata)
-            for span in plan.spans
-            if span not in ltx_spans and (span.kind != "copy" or reencode_copies)
-        )
+        standard_spans = {span for span in plan.spans if span.kind != "copy" and span not in ltx_spans}
+        standard_frames = sum(_span_frames(span, index, metadata) for span in standard_spans)
         ltx_callback = standard_callback = self.progress_callback
         if self.progress_callback is not None and ltx_spans and standard_frames:
             ltx_frames = sum(_span_frames(span, index, metadata) for span in ltx_spans)
@@ -546,110 +564,85 @@ class Pipeline:
         work_root = self.working_dir or self.output_video.parent
         work_root.mkdir(parents=True, exist_ok=True)
 
-        try:
-            directory = (
-                nullcontext(self.resume.directory / "segments") if self.resume is not None
-                else TemporaryDirectory(dir=work_root, prefix=f".{self.output_video.stem}.segments-")
+        def fragment_encoder(fragments: _FragmentDir, span_index: int, span: SpliceSpan) -> VideoEncoder:
+            return VideoEncoder(
+                str(fragments.partial(span_index)),
+                device=self.device,
+                metadata=metadata,
+                codec=self.codec,
+                encoder_settings=smart_encoder_settings,
+                lut_path=self.lut_path,
+                sharpen_strength=self.sharpen_strength,
+                output_fps=metadata.video_fps_exact,
+                pts_origin=span.start_pts,
+                smart_fragment=True,
             )
-            with directory as temp_dir_name:
-                temp_dir = Path(temp_dir_name)
-                temp_dir.mkdir(parents=True, exist_ok=True)
-                fragments: list[tuple[Path, float]] = []
-                fragment_suffix = ".ts" if codec in {"h264", "hevc"} else ".mkv"
 
-                def raw_path(span_index: int) -> Path:
-                    return temp_dir / f"{span_index:04d}-raw.nut"
+        def fragment_writer(fragments: _FragmentDir, span_index: int, span: SpliceSpan):
+            return lambda: _FragmentFrameWriter(
+                fragment_encoder(fragments, span_index, span), lambda: fragments.commit(span_index)
+            )
 
-                def partial_path(span_index: int) -> Path:
-                    return temp_dir / f"{span_index:04d}-partial.nut" if self.resume is not None else raw_path(span_index)
-
-                def commit_fragment(span_index: int) -> None:
-                    if self.resume is not None:
-                        with partial_path(span_index).open("r+b") as stream:
-                            os.fsync(stream.fileno())
-                        commit_file(partial_path(span_index), raw_path(span_index))
-
-                def fragment_encoder(span_index: int, span: SpliceSpan) -> VideoEncoder:
-                    return VideoEncoder(
-                        str(partial_path(span_index)),
-                        device=self.device,
-                        metadata=metadata,
-                        codec=codec,
-                        encoder_settings=smart_encoder_settings,
-                        lut_path=self.lut_path,
-                        sharpen_strength=self.sharpen_strength,
-                        output_fps=metadata.video_fps_exact,
-                        pts_origin=span.start_pts,
-                        smart_fragment=True,
-                    )
-
-                def fragment_writer(span_index: int, span: SpliceSpan) -> Callable[[], _FragmentFrameWriter]:
-                    return lambda: _FragmentFrameWriter(
-                        fragment_encoder(span_index, span), lambda: commit_fragment(span_index)
-                    )
-
-                def duration(span: SpliceSpan) -> float:
-                    return float((span.end_pts - span.start_pts) * index.time_base)
-
+        directory = (
+            nullcontext(self.resume.directory / "segments") if self.resume is not None
+            else TemporaryDirectory(dir=work_root, prefix=f".{self.output_video.stem}.segments-")
+        )
+        try:
+            with directory as directory_name:
+                fragments = _FragmentDir(Path(directory_name), durable=self.resume is not None)
+                fragments.directory.mkdir(parents=True, exist_ok=True)
                 for span_index, span in enumerate(plan.spans):
                     if self._cancel_event.is_set():
                         return
-                    if raw_path(span_index).is_file():
-                        if span not in ltx_spans and (span.kind != "copy" or reencode_copies):
+                    if fragments.done(span_index):
+                        if span in standard_spans:
                             progress.update(_span_frames(span, index, metadata))
-                        continue
-                    if span.kind == "copy" and not reencode_copies:
-                        create_copy_fragment(self.input_video, span, index, partial_path(span_index), codec=codec)
-                        commit_fragment(span_index)
-                    elif not span.is_render:
-                        self._reencode_span(metadata, index, span, fragment_writer(span_index, span)(), progress)
+                    elif span.kind == "copy":
+                        create_copy_fragment(
+                            self.input_video, span, index, fragments.partial(span_index), codec=self.codec
+                        )
+                        fragments.commit(span_index)
+                    elif span.kind == "reencode":
+                        self._reencode_span(
+                            metadata, index, span, fragment_writer(fragments, span_index, span)(), progress
+                        )
                     elif span not in ltx_spans:
                         self._run_pass(
                             metadata=metadata,
-                            encoder_ctx=fragment_encoder(span_index, span),
+                            encoder_ctx=fragment_encoder(fragments, span_index, span),
                             progress=progress,
                             seek_ts=index.seconds_for_pts(span.start_pts),
                             end_pts=span.end_pts,
                             effect_ranges=span.effect_ranges,
-                            output_frame_count=max(1, round(duration(span) * metadata.video_fps)),
+                            output_frame_count=max(1, round(_span_seconds(span, index) * metadata.video_fps)),
                         )
                         if not self._cancel_event.is_set():
-                            commit_fragment(span_index)
+                            fragments.commit(span_index)
                 pending_ltx = [
-                    (span, segments_of[span], fragment_writer(span_index, span))
+                    (span, segments_of[span], fragment_writer(fragments, span_index, span))
                     for span_index, span in enumerate(plan.spans)
-                    if span in ltx_spans and not raw_path(span_index).is_file()
+                    if span in ltx_spans and not fragments.done(span_index)
                 ]
                 if pending_ltx:
-                    self._run_ltx_spans(
-                        metadata,
-                        index,
-                        pending_ltx,
-                        work_root,
-                        ltx_callback,
-                    )
+                    self._run_ltx_spans(metadata, index, pending_ltx, work_root, ltx_callback)
                 if self._cancel_event.is_set():
                     return
-                for span_index, span in enumerate(plan.spans):
-                    normalized = temp_dir / f"{span_index:04d}{fragment_suffix}"
-                    normalize_fragment(raw_path(span_index), normalized, codec=codec)
-                    fragments.append((normalized, duration(span)))
-
-                assembled = temp_dir / f"assembled{fragment_suffix}"
-                concatenate_fragments(
-                    fragments,
-                    manifest=temp_dir / "fragments.ffconcat",
-                    destination=assembled,
-                    codec=codec,
-                )
-                mux_final_output(
-                    assembled,
-                    self.input_video,
-                    self.output_video,
-                    codec=codec,
-                )
+                self._assemble(fragments, plan)
         finally:
             progress.close(ensure_completed_bar=True)
+
+    def _assemble(self, fragments: _FragmentDir, plan: SplicePlan) -> None:
+        suffix = ".ts" if self.codec in {"h264", "hevc"} else ".mkv"
+        normalized = []
+        for span_index, span in enumerate(plan.spans):
+            path = fragments.directory / f"{span_index:04d}{suffix}"
+            normalize_fragment(fragments.final(span_index), path, codec=self.codec)
+            normalized.append((path, _span_seconds(span, plan.index)))
+        assembled = fragments.directory / f"assembled{suffix}"
+        concatenate_fragments(
+            normalized, manifest=fragments.directory / "fragments.ffconcat", destination=assembled, codec=self.codec
+        )
+        mux_final_output(assembled, self.input_video, self.output_video, codec=self.codec)
 
     def run(self) -> None:
         metadata = get_video_meta_data(str(self.input_video))

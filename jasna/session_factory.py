@@ -317,10 +317,11 @@ def plan_segment_job(
 ) -> SegmentJob:
     from jasna.media.splice import build_splice_plan
 
-    return SegmentJob(
-        segment_job_config(config, spliced.codec, source),
-        build_splice_plan(segments, spliced.index, duration=spliced.metadata.duration),
-    )
+    plan = build_splice_plan(segments, spliced.index, duration=spliced.metadata.duration)
+    if config.lut_path is not None or config.sharpen_strength > 0:
+        logger.info("%s: a color LUT or sharpening is set, so the parts without ranges are encoded again", source.name)
+        plan = plan.reencoding_copies()
+    return SegmentJob(segment_job_config(config, spliced.codec, source), plan)
 
 
 def ltx_auto_split(
