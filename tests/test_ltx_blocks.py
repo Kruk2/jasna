@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from factories import ReadObserver
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 
 needs_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
@@ -73,17 +74,10 @@ def test_blocks_are_read_in_file_order(tmp_path):
     names = [{part: f"blocks.{index}.{part}" for part in ("a", "b")} for index in range(3)]
     with open_tensors(path) as reader:
         stored = reader.offset_keys()
-        load = reader.read_tensors_into
-        operations = []
-
-        def observe(group_names, groups):
-            operations.append(group_names)
-            load(group_names, groups)
-
-        reader.read_tensors_into = observe
+        reads = ReadObserver(reader)
         store = BlockStore.from_reader(reader, names, torch.device("cuda"), resident=3)
     try:
-        assert [name for group in operations[0] for name in group] == stored
+        assert [name for group in reads.operations[0] for name in group] == stored
         for index in range(3):
             assert all(torch.equal(tensor.cpu(), tensors[f"blocks.{index}.{part}"])
                        for part, tensor in store.acquire(index).items())

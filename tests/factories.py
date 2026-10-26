@@ -320,3 +320,25 @@ def offload_bundle_targets(path: Path) -> set[str]:
 def weight_stub(dtype, device: str = "cuda:0") -> SimpleNamespace:
     """A model weight's dtype and device, for kernel checks that look at nothing else."""
     return SimpleNamespace(dtype=dtype, device=torch.device(device))
+
+
+class ReadObserver:
+    """Wraps a reader's ``read_tensors_into``: records each call's tensor names and every
+    destination it fills, then raises ``failure`` once the read is done, when given."""
+
+    def __init__(self, reader, failure: Exception | None = None):
+        self.operations, self.destinations = [], []
+        load = reader.read_tensors_into
+
+        def observe(group_names, groups):
+            self.operations.append(group_names)
+            load(group_names, self._record(groups))
+            if failure is not None:
+                raise failure
+
+        reader.read_tensors_into = observe
+
+    def _record(self, groups):
+        for group in groups:
+            self.destinations.extend(group.values())
+            yield group
