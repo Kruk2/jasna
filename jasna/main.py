@@ -1027,10 +1027,10 @@ def main() -> None:
             model_option = f"--restoration-model-name {args.restoration_model_name}"
             if is_streaming:
                 parser.error(f"{model_option} does not support --stream")
-            if args.secondary_restoration != "none":
-                parser.error(f"{model_option} does not support --secondary-restoration")
-            if args.denoise != "none":
-                parser.error(f"{model_option} does not support --denoise")
+            if args.ltx_auto_split is None and args.secondary_restoration != "none":
+                parser.error(f"{model_option} supports --secondary-restoration only with --ltx-auto-split")
+            if args.ltx_auto_split is None and args.denoise != "none":
+                parser.error(f"{model_option} supports --denoise only with --ltx-auto-split")
         _reject_options_of_other_restoration_backend(parser, args, restoration_backend)
 
     _check_system(args)

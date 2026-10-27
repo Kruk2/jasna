@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -105,6 +106,16 @@ def test_session_selects_rtx_secondary_and_maps_none_levels() -> None:
     assert kwargs["quality"] == "high"
     assert kwargs["denoise"] is None
     assert kwargs["deblur"] == "low"
+
+
+def test_ltx_allows_secondary_restoration_only_with_auto_split() -> None:
+    ltx = session_config(restoration_model_name="ltx", ltx_trial=True, secondary_restoration="unet-4x")
+    with pytest.raises(ValueError, match="only with LTX auto split"):
+        _build_session(ltx)
+
+    session, *_ = _build_session(replace(ltx, ltx_auto_split_percent=12.0))
+
+    assert session.ltx_files is not None
 
 
 def test_amd_rejects_secondary_restoration() -> None:

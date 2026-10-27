@@ -156,6 +156,10 @@ def test_video_session_config_ignores_standard_only_extras_for_ltx() -> None:
     assert (config.secondary_restoration, config.tvai_denoise, config.denoise_strength) == ("none", False, "none")
     standard = _config(replace(settings, restoration_model="basicvsrpp"))
     assert (standard.secondary_restoration, standard.tvai_denoise, standard.denoise_strength) == ("tvai", True, "high")
+    auto_split = _config(replace(settings, ltx_auto_split=True))
+    assert (auto_split.secondary_restoration, auto_split.tvai_denoise, auto_split.denoise_strength) == (
+        "tvai", True, "none"
+    )
 
 
 def test_video_session_key_tracks_model_and_ltx_variant() -> None:

@@ -64,7 +64,8 @@ def video_session_config(
 
     det_name = coerce_detection_model_name(str(settings.detection_model))
     standard_model = settings.restoration_model == "basicvsrpp"
-    secondary_restoration = settings.secondary_restoration if standard_model else "none"
+    basicvsrpp_parts = standard_model or settings.ltx_auto_split
+    secondary_restoration = settings.secondary_restoration if basicvsrpp_parts else "none"
     return SessionConfig(
         device="cuda:0",
         fp16=bool(settings.fp16_mode),

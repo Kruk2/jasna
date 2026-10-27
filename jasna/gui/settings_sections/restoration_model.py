@@ -233,9 +233,13 @@ class RestorationModelSection:
         self._widgets["ltx_auto_split_val"].configure(text=f"{percent}%")
         self._widgets["ltx_auto_split_percent"].configure(state="normal" if enabled else "disabled")
 
+    def _auto_split(self) -> bool:
+        return self._widgets["ltx_auto_split"].get() == 1
+
     def _on_auto_split_toggled(self) -> None:
-        enabled = self._widgets["ltx_auto_split"].get() == 1
+        enabled = self._auto_split()
         self._widgets["ltx_auto_split_percent"].configure(state="normal" if enabled else "disabled")
+        self._on_model_changed(self._model.get(), enabled)
         self._on_modified()
 
     def _on_auto_split_percent(self, value: float) -> None:
@@ -268,7 +272,7 @@ class RestorationModelSection:
             self._ltx_options.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         else:
             self._ltx_options.pack_forget()
-        self._on_model_changed(value)
+        self._on_model_changed(value, self._auto_split())
         self._refresh_widgets()
 
     def _on_new_seed(self) -> None:

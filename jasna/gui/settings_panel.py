@@ -232,10 +232,11 @@ class SettingsPanel(ctk.CTkFrame):
         )
         advanced_section = AdvancedSection(self._scroll, self._widgets, self._mark_modified)
         self._secondary_section = SecondarySection(self._scroll, self._widgets)
-        self._model_aware_sections = [basic_section, advanced_section, self._secondary_section]
+        self._model_aware_sections = [basic_section, advanced_section]
         self._sections = [
             self._model_section,
             *self._model_aware_sections,
+            self._secondary_section,
             ImageRestorationSection(
                 self._scroll,
                 self._widgets,
@@ -247,9 +248,10 @@ class SettingsPanel(ctk.CTkFrame):
             PostExportSection(self._scroll, self._widgets, self._mark_modified),
         ]
 
-    def _on_restoration_model_changed(self, model: str):
+    def _on_restoration_model_changed(self, model: str, auto_split: bool):
         for section in self._model_aware_sections:
             section.set_model(model)
+        self._secondary_section.set_visible(model != "ltx" or auto_split)
 
     def ltx_unavailable_reason(self) -> str | None:
         """Locale key saying why the chosen LTX model cannot run now, or None when it can."""

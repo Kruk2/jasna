@@ -163,10 +163,15 @@ def build_restoration_session(
         raise ValueError(
             f"Secondary restoration '{config.secondary_restoration}' is not available in the AMD build yet"
         )
-    if config.restoration_model_name == "ltx" and (
-        config.secondary_restoration != "none" or config.denoise_strength != "none"
+    if (
+        config.restoration_model_name == "ltx"
+        and config.ltx_auto_split_percent is None
+        and (config.secondary_restoration != "none" or config.denoise_strength != "none")
     ):
-        raise ValueError("LTX restoration does not support secondary restoration or denoise")
+        raise ValueError(
+            "LTX restoration supports secondary restoration or denoise only with LTX auto split, "
+            "where they apply to the BasicVSR++ parts"
+        )
     session = RestorationSession(device=device, restoration_pipeline=None)
     provide_restoration_models(
         config, session, frozenset({config.restoration_model_name}), log_callback=log_callback
