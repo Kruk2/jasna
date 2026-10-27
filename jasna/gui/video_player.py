@@ -207,12 +207,13 @@ def player_dialog_size(
 
 
 def available_player_secondary_restorations() -> tuple[str, ...]:
-    from jasna.accelerator import is_nvidia_device
+    from jasna.accelerator import is_amd_device, is_nvidia_device
     from jasna.engine_paths import UNET4X_ONNX_ENC_PATH, UNET4X_ONNX_PATH
 
     values = ["none"]
     if is_nvidia_device():
         values.append("rtx-super-res")
+    if is_nvidia_device() or is_amd_device():
         if UNET4X_ONNX_PATH.exists() or UNET4X_ONNX_ENC_PATH.exists():
             values.append("unet-4x")
     return tuple(values)

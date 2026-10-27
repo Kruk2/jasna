@@ -58,6 +58,13 @@ def test_ensure_no_subprocess_when_not_requested() -> None:
     assert result.use_basicvsrpp_tensorrt is False
 
 
+def test_amd_unet_does_not_need_a_tensorrt_engine(monkeypatch) -> None:
+    monkeypatch.setattr("jasna.accelerator.is_nvidia_device", lambda _device: False)
+    monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda *_args, **_kwargs: pytest.fail("compiled TensorRT on AMD"))
+    result = ensure_engines_compiled(EngineCompilationRequest(device="cuda:0", fp16=True, unet4x=True))
+    assert result.use_basicvsrpp_tensorrt is False
+
+
 def test_ensure_all_exist_no_subprocess(monkeypatch) -> None:
     monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: True)
     monkeypatch.setattr("jasna.engine_compiler._detection_engine_exists", lambda *_a, **_kw: True)

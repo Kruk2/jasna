@@ -114,6 +114,7 @@ def test_gui_run_gui_patches_frozen_torch():
     "jasna.ltx.transformer", "jasna.ltx.kernels",
     "jasna.models.ltx_vae.transformer", "jasna.models.ltx_vae.na_triton",
     "jasna.models.ltx_vae.video_encoder", "jasna.models.ltx_vae.ops",
+    "jasna.models.unet4x",
 ))
 def test_frozen_ltx_sources_support_inspect_without_a_jasna_directory(monkeypatch, tmp_path, module):
     from jasna import _frozen
@@ -133,6 +134,36 @@ def test_frozen_ltx_sources_support_inspect_without_a_jasna_directory(monkeypatc
     namespace = {}
     exec(compile(source, filename, "exec"), namespace)
     assert inspect.getsource(namespace["probe"]) == source
+
+
+def test_disabled_frozen_compilation_does_not_import_triton():
+    code = """
+import os
+import sys
+from jasna import _frozen
+os.environ['TORCH_COMPILE_DISABLE'] = '1'
+_frozen.is_frozen = lambda: True
+_frozen.patch_frozen_torch()
+assert 'triton' not in sys.modules
+assert 'torch._inductor' not in sys.modules
+"""
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=30)
+
+
+def test_bundled_triton_import_needs_no_external_sdk_command():
+    pytest.importorskip("triton")
+    code = """
+import subprocess
+import sys
+from jasna._frozen import _import_bundled_triton
+def denied(*args, **kwargs):
+    raise AssertionError('external SDK command')
+subprocess.check_output = denied
+_import_bundled_triton()
+assert 'triton' in sys.modules
+assert subprocess.check_output is denied
+"""
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=30)
 
 
 def test_prebuilt_triton_helper_avoids_a_customer_c_compiler(monkeypatch, tmp_path):

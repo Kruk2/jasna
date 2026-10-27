@@ -21,6 +21,15 @@ from jasna.os_utils import resolve_executable
 from jasna.session_config import SessionConfig
 
 
+class TemporalUpscaler(torch.nn.Module):
+    """Small recurrent network for exercising secondary restoration on the CPU."""
+
+    def forward(self, previous, current, high_previous):
+        low = (current + previous) / 2
+        high = torch.nn.functional.interpolate(low.permute(0, 3, 1, 2), scale_factor=4, mode="nearest")
+        return (high.permute(0, 2, 3, 1) + high_previous) / 2
+
+
 def session_config(**overrides) -> SessionConfig:
     base = dict(
         device="cuda:0",

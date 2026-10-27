@@ -30,6 +30,16 @@ def test_the_cpu_has_no_gpu_kernels():
     assert kernel_backend(torch.device("cpu")) is KernelBackend.CPU
 
 
+def test_packaged_amd_keeps_prebuilt_kernels_when_triton_is_installed(monkeypatch, amd_gpu):
+    from jasna import tensor_utils
+
+    amd_gpu()
+    monkeypatch.setattr(accelerator, "has_triton", lambda: True)
+    monkeypatch.setattr(accelerator, "is_frozen", lambda: True)
+    assert kernel_backend(torch.device("cuda")) is KernelBackend.AMD_PREBUILT
+    assert not tensor_utils.compiles(torch.device("cuda"), torch.float16)
+
+
 def test_gpu_libraries_load_ahead_only_on_a_gpu(monkeypatch):
     monkeypatch.setattr(accelerator.F, "linear", lambda *_args: pytest.fail("no GPU library to load on the CPU"))
     load_gpu_libraries_ahead(torch.device("cpu"), torch.bfloat16)

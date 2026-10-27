@@ -30,7 +30,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
-from jasna.accelerator import amd_gpu_architecture, has_triton, is_amd_device
+from jasna.accelerator import KernelBackend, amd_gpu_architecture, has_triton, is_amd_device, kernel_backend
 from jasna.tensor_utils import half_dtype
 
 Weights = Mapping[str, torch.Tensor]
@@ -300,7 +300,7 @@ def enable_quant_kernels(device: torch.device) -> str | None:
     global _quant_kernels, _kitchen_int8_linear
     if _quant_kernels is None and _kitchen_int8_linear is None and device.type == "cuda":
         amd = is_amd_device(device)
-        if has_triton():
+        if has_triton() and kernel_backend(device) is not KernelBackend.AMD_PREBUILT:
             from jasna.ltx import kernel_policy, kernels
 
             if kernel_policy.supports(device):

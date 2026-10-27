@@ -187,7 +187,8 @@ Jasna restores each mosaic as a 256x256 picture. On big mosaics, close-ups and
 (512x512 or 1024x1024) before it goes back into the frame, so the result is
 sharper.
 
-NVIDIA only.
+UNet 4x works on NVIDIA and supported AMD GPUs. RTX Super Res and Topaz TVAI
+require NVIDIA.
 
 - **UNet 4x** (for supporters): quality close to TVAI `iris-2`, and faster than
   TVAI. See the

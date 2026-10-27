@@ -143,9 +143,6 @@ def ensure_engines_compiled(
     device = torch.device(req.device)
     nvidia = is_nvidia_device(device)
 
-    if req.unet4x and not nvidia:
-        raise RuntimeError("unet-4x currently requires the NVIDIA TensorRT build")
-
     missing = _missing_engines(req, nvidia=nvidia)
     if missing.unet4x:
         from jasna.engine_paths import unet4x_plaintext_available

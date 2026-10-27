@@ -157,9 +157,11 @@ def test_preflight_uses_yolo_engine_name_when_selected(monkeypatch, tmp_path: Pa
     assert yolo_req.paths == (Path("model_weights") / f"lada_mosaic_detection_model_v4_fast{suffix}",)
 
 
+@pytest.mark.parametrize("secondary", ["none", "unet-4x"])
 def test_amd_preflight_has_no_engine_requirements(
     monkeypatch,
     tmp_path: Path,
+    secondary,
 ) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
@@ -170,7 +172,7 @@ def test_amd_preflight_has_no_engine_requirements(
     # BasicVSR++ TensorRT, so nothing needs precompiling.
     monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
 
-    result = run_engine_preflight(AppSettings(compile_basicvsrpp=True))
+    result = run_engine_preflight(AppSettings(compile_basicvsrpp=True, secondary_restoration=secondary))
 
     assert result.requirements == ()
     assert result.missing == ()

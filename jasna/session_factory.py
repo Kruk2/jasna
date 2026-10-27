@@ -159,7 +159,7 @@ def build_restoration_session(
         log_amd_backend(device)
     if config.tvai_denoise and config.secondary_restoration != "tvai":
         raise ValueError("TVAI Denoise requires secondary restoration 'tvai'")
-    if is_amd_device(device) and config.secondary_restoration != "none":
+    if is_amd_device(device) and config.secondary_restoration not in ("none", "unet-4x"):
         raise ValueError(
             f"Secondary restoration '{config.secondary_restoration}' is not available in the AMD build yet"
         )

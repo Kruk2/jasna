@@ -21,7 +21,8 @@ _patched = False
 
 LTX_TRACED_MODULES = ("jasna.ltx.transformer", "jasna.ltx.kernels",
                       "jasna.models.ltx_vae.na_triton", "jasna.models.ltx_vae.transformer",
-                      "jasna.models.ltx_vae.video_encoder", "jasna.models.ltx_vae.ops")
+                      "jasna.models.ltx_vae.video_encoder", "jasna.models.ltx_vae.ops",
+                      "jasna.models.unet4x")
 
 
 def is_frozen() -> bool:
@@ -41,6 +42,8 @@ def patch_frozen_torch() -> None:
     _patched = True
     if is_frozen():
         ignore_triton_cuda_toolkit_lookup_warning()
+        if os.environ.get("TORCH_COMPILE_DISABLE") != "1":
+            _import_bundled_triton()
 
     import torch.jit
     _interface = torch.jit.interface
@@ -57,6 +60,8 @@ def patch_frozen_torch() -> None:
         match_bundled_distribution_names_like_pip()
         from torch.utils import _config_module
         _config_module.get_assignments_with_compile_ignored_comments = lambda module: set()
+        if os.environ.get("TORCH_COMPILE_DISABLE") == "1":
+            return
 
         import hashlib
         from pathlib import Path
@@ -74,6 +79,28 @@ def patch_frozen_torch() -> None:
             root = Path(get_application_executable()).parent
             register_ltx_sources(root)
             use_prebuilt_triton_modules(root / "triton_prebuilt")
+
+
+def _import_bundled_triton() -> None:
+    from importlib.util import find_spec
+    from pathlib import Path
+    import subprocess
+
+    if find_spec("triton") is None:
+        return
+    check_output = subprocess.check_output
+
+    def bundled_sdk(command, *args, **kwargs):
+        if command == ["rocm-sdk", "path", "--root"]:
+            return str(Path(sys.executable).parent / "_rocm_sdk_core").encode()
+        return check_output(command, *args, **kwargs)
+
+    # Triton's Windows HIP import probes a CLI; packaged apps already know their SDK.
+    subprocess.check_output = bundled_sdk
+    try:
+        __import__("triton")
+    finally:
+        subprocess.check_output = check_output
 
 
 class NormalizedDistributionNameFinder:

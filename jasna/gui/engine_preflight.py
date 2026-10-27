@@ -109,7 +109,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
             )
         )
 
-    if standard_model and settings.secondary_restoration == "unet-4x":
+    if standard_model and settings.secondary_restoration == "unet-4x" and not amd:
         unet_engine = expected_unet4x_engine_path(fp16=bool(settings.fp16_mode))
         unet_exists = unet_engine.is_file()
         reqs.append(

@@ -14,6 +14,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 
+from jasna._frozen import is_frozen
 from jasna.rocm_bootstrap import TRITON_HIP_ARCHITECTURES
 
 log = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ def configure_rocm_process_env() -> None:
     # and output: the compiled LTX VAE encoder 5 % faster and 0.5 GiB lighter on an R9700. Eager
     # encoders (no Triton: Windows ROCm, AMD releases) run 1.6x slower with it, and BasicVSR++ and
     # RF-DETR pass no channels-last conv inputs.
-    if has_triton():
+    if kernel_backend(torch.device("cuda")) is KernelBackend.AMD_TRITON:
         os.environ.setdefault("PYTORCH_MIOPEN_SUGGEST_NHWC", "1")
     # Windows ROCm ships the AOTriton kernel images in a separate device wheel;
     # without them the first flash/mem-efficient SDPA launch dies with a HIP error.
@@ -94,8 +95,7 @@ def is_amd_device(device: torch.device | str | None = None) -> bool:
 
 @functools.cache
 def has_triton() -> bool:
-    """Whether Triton imports here: NVIDIA installs and Linux ROCm source installs; Windows ROCm and
-    AMD releases ship none (no ``torch.compile`` there, only prebuilt kernels)."""
+    """Whether Triton is installed; shared by source runs and both vendors' releases."""
     from torch.utils._triton import has_triton_package
 
     return has_triton_package()
@@ -109,7 +109,7 @@ class KernelBackend(StrEnum):
     """No bf16 and no Triton tensor-core dot: fp16 torch kernels where Triton would run."""
     AMD_TRITON = "amd-triton"
     AMD_PREBUILT = "amd-prebuilt"
-    """No Triton: only kernels built ahead of time, and no ``torch.compile``."""
+    """AMD kernels built ahead of time; packaged builds compile UNet 4x separately."""
     CPU = "cpu"
 
     @property
@@ -122,7 +122,7 @@ def kernel_backend(device: torch.device | str) -> KernelBackend:
     if resolved.type != "cuda":
         return KernelBackend.CPU
     if is_amd_device(resolved):
-        return KernelBackend.AMD_TRITON if has_triton() else KernelBackend.AMD_PREBUILT
+        return KernelBackend.AMD_TRITON if has_triton() and not is_frozen() else KernelBackend.AMD_PREBUILT
     if torch.cuda.get_device_capability(resolved) < (8, 0):
         return KernelBackend.NVIDIA_PRE_SM80
     return KernelBackend.NVIDIA

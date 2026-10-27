@@ -86,7 +86,7 @@ Jasna は `TMP`、次に `TEMP` を使います。`TMPDIR` は使いません。
 
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
-| `--secondary-restoration` | `none` | `unet-4x`、`tvai`、または `rtx-super-res`。詳しくは[モデル](models.md)。 |
+| `--secondary-restoration` | `none` | `unet-4x`（NVIDIA・AMD）、`tvai`、または `rtx-super-res`（NVIDIA）。詳しくは[モデル](models.md)。 |
 | `--rtx-scale` | `4` | RTX Super Res の拡大倍率（`2` または `4`）。 |
 | `--rtx-quality` | `high` | `low`、`medium`、`high`、`ultra`。 |
 | `--rtx-denoise` | `medium` | `none`、`low`、`medium`、`high`、`ultra`。 |

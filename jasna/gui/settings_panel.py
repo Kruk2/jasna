@@ -267,6 +267,7 @@ class SettingsPanel(ctk.CTkFrame):
 
     def set_gpu_support(self, *, vendor: AcceleratorVendor, blackwell: bool):
         self._model_section.set_gpu_support(vendor=vendor, blackwell=blackwell)
+        self._secondary_section.set_gpu_support(vendor)
         self._update_modified_indicator()
 
     def set_on_interactive_image_restore(self, callback: callable):

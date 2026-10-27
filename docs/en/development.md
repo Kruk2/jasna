@@ -119,7 +119,12 @@ $env:CXX = "$R\lib\llvm\bin\clang-cl.exe"
 A new GPU target needs its matching `device-gfx*` extra above.
 
 AMD runs RF-DETR as the `rfdetr` torch model and decodes/encodes with AMF
-(software decode when AMF can't). Secondary restoration is NVIDIA-only.
+(software decode when AMF can't). UNet 4x secondary restoration uses a PyTorch
+network loaded from the same ONNX model as NVIDIA's TensorRT path. Its fixed
+forward pass compiles when Triton is installed; Windows AMD pins
+`triton-windows==3.8.0.post29`. Compilation preserves intermediate FP16 rounding
+(`emulate_precision_casts=True`) because frame feedback amplifies rounding changes.
+TVAI and RTX Super Res still require NVIDIA.
 The model runs rfdetr's export forward with Jasna's own transformer and
 deformable-attention forwards (`mosaic/rfdetr_sync_free.py`), which never wait
 for the GPU; recheck them against rfdetr's code when bumping the `rfdetr` pin.
@@ -198,7 +203,7 @@ the tests use it as the reference. The GPU parity tests run on whichever vendor
 the machine has.
 
 Three AMD paths run Triton kernels compiled ahead of time, on Linux and Windows
-alike (AMD ships Triton for Linux only): the BasicVSR++ propagation step
+alike: the BasicVSR++ propagation step
 (`restorer/basicvsrpp_fused_body.py`), the RF-DETR segmentation-head blocks
 (`mosaic/rfdetr_fused_head.py`) and the LTX VAE kernels
 (`models/ltx_vae/{na,diffusion,layout}_hip.py`). The Triton sources sit next to
