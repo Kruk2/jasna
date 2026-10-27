@@ -278,27 +278,12 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 
 | 选项 | 说明 |
 | ------ | ----- |
-| `--machine-key` | 显示机器密钥后退出，无需启动 GPU 或 GUI。 |
 | `--license-code CODE` | 在 GPU 初始化之前，使用你的许可证码激活。未指定处理选项时，激活后退出。有 TPM 2.0 安全芯片的电脑之后可离线使用；否则 Jasna 使用支持者模型时会在线核验许可证。 |
-| `--cloud-workspace` | 与 `--machine-key` 一起使用，创建或复用云身份。使用 `--license-code` 时不需要。 |
-| `--activation-key KEY` | 保存本机的激活密钥。未指定处理选项时，激活后退出。 |
-
-在线激活：
 
 ```bash
 jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
 ```
-
-手动激活：显示机器密钥，在任意设备上打开[激活页面](https://jasna-activation.kruk2.workers.dev)，
-输入机器密钥和许可证码，然后保存返回的激活密钥：
-
-```bash
-jasna --machine-key
-jasna --activation-key "YOUR_ACTIVATION_KEY"
-```
-
-`--license-code` 不能与 `--machine-key` 或 `--activation-key` 一起使用。
 
 - 有 TPM 2.0 安全芯片时，激活后可离线使用。Windows 可能会请求一次权限，这是一次性的许可证检查。
   在 Linux 上需要运行 `sudo usermod -aG tss $USER` 时，Jasna 会提示。

@@ -289,28 +289,12 @@ To replace the file, use a script with a temporary file. `ffmpeg` must be on
 
 | Option | Notes |
 | ------ | ----- |
-| `--machine-key` | Print the Machine key and exit. No GPU or GUI startup is needed. |
 | `--license-code CODE` | Activate with your License code before GPU setup. With no processing options, activate and exit. On a PC with a TPM 2.0 security chip, Jasna then works offline; otherwise it checks the license online while it uses supporter models. |
-| `--cloud-workspace` | Create or reuse a cloud identity with `--machine-key`. Not needed with `--license-code`. |
-| `--activation-key KEY` | Save the Activation key for this machine. With no processing options, activate and exit. |
-
-Online activation:
 
 ```bash
 jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
 ```
-
-Manual activation: print the Machine key, enter it with your License code on
-the [activation page](https://jasna-activation.kruk2.workers.dev) from any
-device, then save the Activation key it returns:
-
-```bash
-jasna --machine-key
-jasna --activation-key "YOUR_ACTIVATION_KEY"
-```
-
-Don't combine `--license-code` with `--machine-key` or `--activation-key`.
 
 - With a TPM 2.0 security chip, Jasna works offline after activation. On
   Windows it may ask for permission once; that is a one-time license check.
