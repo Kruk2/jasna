@@ -174,6 +174,7 @@ def test_frozen_windows_engine_compiler_uses_running_binary_when_python_placehol
     import jasna.engine_compiler as compiler
     from jasna import os_utils
 
+    pytest.importorskip("jasna.protection.runtime")
     expected = sys.executable
     monkeypatch.setattr(compiler, "is_frozen", lambda: True)
     monkeypatch.setattr(os_utils, "is_frozen", lambda: True)

@@ -20,7 +20,7 @@ def public_checkout(tmp_path, request):
 
 def run_public(checkout, script):
     environment = {**os.environ, "PYTHONPATH": str(checkout),
-                   "XDG_CONFIG_HOME": str(checkout / "config"), "CUDA_VISIBLE_DEVICES": ""}
+                   "XDG_CONFIG_HOME": str(checkout / "config"), "CUDA_VISIBLE_DEVICES": "", "PYTHONIOENCODING": "utf-8"}
     environment.pop("JASNA_MAIN_PID", None)
     prefix = """
 import sys
@@ -28,7 +28,7 @@ sys.meta_path[:] = [finder for finder in sys.meta_path
                    if not getattr(finder, '__module__', type(finder).__module__).startswith('__editable___jasna_')]
 """
     return subprocess.run([sys.executable, "-B", "-c", prefix + script], cwd=checkout,
-                          env=environment, capture_output=True, text=True, timeout=30)
+                          env=environment, capture_output=True, encoding="utf-8", timeout=30)
 
 
 def test_public_startup_imports_and_license_status(public_checkout):
