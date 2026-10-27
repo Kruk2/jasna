@@ -11,8 +11,8 @@ Windows と GitHub のソース版には対応していません。
 - ライセンスコードの入手先に**クラウド利用**をオンにしてもらう。
 - 普通のコンテナー。Vast は使えます。`--pid=host` で起動した
   Docker コンテナーは使えません。
-- 今のところ RunPod では LTX が使えません（BasicVSR++ は使えます）。LTX には
-  Vast を使ってください。
+- 今のところ RunPod と gVisor コンテナー（Modal など）では LTX が使えません
+  （BasicVSR++ は使えます）。LTX には Vast を使ってください。
 - ドライバー **580 以降**の NVIDIA GPU。
 - **80 GB** 以上のディスク。
 - テンプレートかインスタンスの設定に `NVIDIA_DRIVER_CAPABILITIES=all`。

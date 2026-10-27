@@ -9,7 +9,7 @@
 
 - 请向你获得许可证码的地方申请为它打开**云权限**。
 - 普通容器即可。Vast 能用。用 `--pid=host` 启动的 Docker 容器不行。
-- 目前 RunPod 上不能用 LTX（BasicVSR++ 可以用）。要用 LTX 请选 Vast。
+- 目前 RunPod 和 gVisor 容器（例如 Modal）上不能用 LTX（BasicVSR++ 可以用）。要用 LTX 请选 Vast。
 - NVIDIA 显卡，驱动 **580 或更新**。
 - 至少 **80 GB** 磁盘。
 - 在模板或实例设置里加上 `NVIDIA_DRIVER_CAPABILITIES=all`。
