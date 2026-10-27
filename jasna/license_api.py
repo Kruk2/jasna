@@ -20,3 +20,10 @@ def protection_available() -> bool:
 def require_protection() -> None:
     if not protection_available():
         raise ProtectionUnavailableError("Supporter models and activation require the official Jasna release.")
+
+
+class LicenseCheckStopped(Exception):
+    """A license check that every later paid-model job would also fail; ``code`` names the reason
+    (expired, offline, devices_full, token_not_found, already_converted, no_activation)."""
+
+    code: str

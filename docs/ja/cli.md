@@ -292,8 +292,8 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | オプション | 説明 |
 | ------ | ----- |
 | `--machine-key` | マシンキーを表示して終了します。GPU や GUI の起動は不要です。 |
-| `--license-code CODE` | GPU の準備前に、ライセンスコードでオンラインで有効化します。処理オプションがなければ有効化して終了します。 |
-| `--cloud-workspace` | `--machine-key` または `--license-code` と併用し、クラウドの識別情報を作成または再利用します。対応するコンテナー内で実行する Linux 公式版の CLI 専用で、ライセンスコードのクラウド利用許可が必要です。 |
+| `--license-code CODE` | GPU の準備前に、ライセンスコードでオンラインで有効化します。処理オプションがなければ有効化して終了します。Linux では、その後 Jasna が支援者向けモデルを使う間、ライセンスをオンラインで確認します。 |
+| `--cloud-workspace` | `--machine-key` と併用し、クラウドの識別情報を作成または再利用します。Linux で `--license-code` を使う場合は不要です。 |
 | `--activation-key KEY` | このマシンのアクティベーションキーを保存します。処理オプションがなければ有効化して終了します。 |
 
 オンラインでの有効化:
@@ -314,13 +314,15 @@ jasna --activation-key "YOUR_ACTIVATION_KEY"
 
 `--license-code` は `--machine-key` や `--activation-key` と併用しないでください。
 
-- レンタル GPU（RunPod、Vast）: `--cloud-workspace` を付け、`XDG_CONFIG_HOME` を
-  バックアップする非公開のフォルダーに設定します。このフォルダーに有効化の情報が
-  入るので、毎回同じフォルダーを使ってください:
+- Linux では、支援者向けモデルを使う間、ライセンスをオンラインで確認します。
+  台数に数えられるのは Jasna を動かしている間だけです。
+- レンタル GPU（RunPod、Vast）: `XDG_CONFIG_HOME` を残しておく非公開の
+  フォルダーに設定します。このフォルダーに有効化の情報が入るので、毎回同じ
+  フォルダーを使ってください:
 
   ```bash
   export XDG_CONFIG_HOME=/root/jasna-config
-  ./jasna --license-code "YOUR_LICENSE_CODE" --cloud-workspace
+  ./jasna --license-code "YOUR_LICENSE_CODE"
   ```
 
   RunPod の `/workspace` は使わないでください。非公開のファイル権限が無視されます。

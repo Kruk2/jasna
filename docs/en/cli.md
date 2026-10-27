@@ -290,8 +290,8 @@ To replace the file, use a script with a temporary file. `ffmpeg` must be on
 | Option | Notes |
 | ------ | ----- |
 | `--machine-key` | Print the Machine key and exit. No GPU or GUI startup is needed. |
-| `--license-code CODE` | Activate online with your License code before GPU setup. With no processing options, activate and exit. |
-| `--cloud-workspace` | Create or reuse a cloud identity with `--machine-key` or `--license-code`. CLI only: the official Linux release must run inside a supported container, with cloud turned on for your License code. |
+| `--license-code CODE` | Activate online with your License code before GPU setup. With no processing options, activate and exit. On Linux, Jasna then checks the license online while it uses supporter models. |
+| `--cloud-workspace` | Create or reuse a cloud identity with `--machine-key`. Not needed on Linux with `--license-code`. |
 | `--activation-key KEY` | Save the Activation key for this machine. With no processing options, activate and exit. |
 
 Online activation:
@@ -312,13 +312,14 @@ jasna --activation-key "YOUR_ACTIVATION_KEY"
 
 Don't combine `--license-code` with `--machine-key` or `--activation-key`.
 
-- Rented GPUs (RunPod, Vast): add `--cloud-workspace`, and set
-  `XDG_CONFIG_HOME` to a private folder that you back up. It holds your
-  activation, so use the same folder every run:
+- Linux checks the license online while it uses supporter models. A device
+  counts only while Jasna runs.
+- Rented GPUs (RunPod, Vast): set `XDG_CONFIG_HOME` to a private folder that
+  you keep. It holds your activation, so use the same folder every run:
 
   ```bash
   export XDG_CONFIG_HOME=/root/jasna-config
-  ./jasna --license-code "YOUR_LICENSE_CODE" --cloud-workspace
+  ./jasna --license-code "YOUR_LICENSE_CODE"
   ```
 
   Don't use RunPod's `/workspace`, which ignores private file permissions.

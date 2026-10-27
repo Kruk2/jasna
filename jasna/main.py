@@ -940,9 +940,13 @@ def main() -> None:
             parser.exit(1, f"Activation error: {exc}\n")
         return
     if args.activation_key is not None or args.license_code is not None:
-        from jasna.protection import ProtectionError, activation, license_store, machine
+        from jasna.protection import ProtectionError, activation, lease, license_store, machine
+        activated = "Jasna activated. The Activation key is saved on this machine."
         try:
-            if args.license_code is not None:
+            if args.license_code is not None and lease.enabled():
+                lease.activate_license_code(args.license_code)
+                activated = "Jasna activated. It checks your license online while it uses supporter models."
+            elif args.license_code is not None:
                 from jasna.gui.locales import get_locale
 
                 activation.activate_license_code(
@@ -953,7 +957,7 @@ def main() -> None:
                 license_store.set_license(args.activation_key.strip())
         except (ProtectionError, OSError) as exc:
             parser.exit(1, f"Activation error: {exc}\n")
-        print("Jasna activated. The Activation key is saved on this machine.")
+        print(activated)
         if args.input is None and not args.stream and not args.benchmark:
             return
     codec_was_explicit = any(
