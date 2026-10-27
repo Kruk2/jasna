@@ -63,3 +63,5 @@ Measured peaks: 219 TFLOPS bf16 (8192^3 GEMM), 1581 GB/s device copy.
 
 Everything at 100 % of peak would save about 57 ms of the 288 ms; the remaining fusable work is a few percent.
 FP8 GEMMs in the MLP (per-row scales) were tried and dropped: 38.8 dB against bf16 even in stage 5 alone.
+The MLP GEMMs beat cuBLAS on the same shapes (160 / 149 TFLOPS); two slab Q/K/V redesigns (one wide dot per
+projection, a K-tiled GEMM with the norm in its prologue) were 0-5 % slower than the shipped kernel.
