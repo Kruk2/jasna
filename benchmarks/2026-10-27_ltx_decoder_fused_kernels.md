@@ -65,3 +65,6 @@ Everything at 100 % of peak would save about 57 ms of the 288 ms; the remaining 
 FP8 GEMMs in the MLP (per-row scales) were tried and dropped: 38.8 dB against bf16 even in stage 5 alone.
 The MLP GEMMs beat cuBLAS on the same shapes (160 / 149 TFLOPS); two slab Q/K/V redesigns (one wide dot per
 projection, a K-tiled GEMM with the norm in its prologue) were 0-5 % slower than the shipped kernel.
+Neighborhood attention issues 187 TFLOPS over its query tiles' KV boxes, 89 % of the 211 TFLOPS of the best
+dense attention here (torch SDPA flash / cuDNN, head dim 64); its shipped config is the fastest of about 110
+(tiles up to 128 queries, 2-8 warps, 32-128-key blocks).
