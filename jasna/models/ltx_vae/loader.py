@@ -209,20 +209,29 @@ def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
         _clear_tensors(checkpoint.values(), encoder)
 
 
+def _diffusion_block_count(tensors: Iterable[str]) -> int:
+    return len({name.split(".")[1] for name in tensors if name.startswith("diff_blocks.")})
+
+
 def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.device) -> DiffusionVideoDecoder:
     """Eval ``DiffusionVideoDecoder`` in ``half_dtype(device)`` (fp16 before SM 8.0) with the
-    fine-tuned decoder tensors overlaid."""
+    fine-tuned decoder tensors overlaid. A fine-tune that carries stage-5 diffusion blocks sets how many
+    there are (a distilled decoder keeps fewer than the checkpoint), and replaces them all."""
     decoder, complete = None, False
     checkpoint, tuned, overlay = {}, {}, {}
     try:
         with open_tensors(vae_path) as reader:
             kwargs = decoder_kwargs(read_vae_config(reader))
             checkpoint = _read_tensors(reader, ("decoder.", "per_channel_statistics."))
-        state = decoder_state_dict(checkpoint)
-        dtype = half_dtype(device)
-        decoder = _build(lambda: DiffusionVideoDecoder(**kwargs), state, device, dtype)
         with open_tensors(tuned_decoder_path) as reader:
             tuned = _read_tensors(reader, ("",))
+        depth = _diffusion_block_count(tuned) or kwargs["stage_depths"][-1]
+        kwargs["stage_depths"] = (*kwargs["stage_depths"][:-1], depth)
+        state = decoder_state_dict(checkpoint)
+        _clear_tensors([state.pop(name) for name in list(state)
+                        if name.startswith("diff_blocks.") and int(name.split(".")[1]) >= depth], None)
+        dtype = half_dtype(device)
+        decoder = _build(lambda: DiffusionVideoDecoder(**kwargs), state, device, dtype)
         own = decoder.state_dict()
         unknown = sorted(set(tuned) - set(own))
         if unknown:

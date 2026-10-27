@@ -397,9 +397,9 @@ def test_decoder_load_failure_clears_the_already_built_base_and_owned_sources(tm
     exception, message = (ValueError, "final-check") if failure == "stream" else (KeyError, "not in the decoder")
     with pytest.raises(exception, match=message):
         loader.load_video_decoder(base_path, tuned_path, torch.device("cpu"))
-    assert torch.count_nonzero(constructed[0].weight).item() == 0
     assert torch.count_nonzero(loaded[0]["decoder.weight"]).item() == 0
     if failure == "unknown":
+        assert torch.count_nonzero(constructed[0].weight).item() == 0
         assert torch.count_nonzero(loaded[1]["unexpected"]).item() == 0
 
 
@@ -473,7 +473,7 @@ def test_ltx25_tile_schedule_masks_partition_unity():
     torch.testing.assert_close(coverage, torch.ones_like(coverage))
 
 
-def _tiny_decoder() -> DiffusionVideoDecoder:
+def _tiny_decoder(stage5_depth: int = 1) -> DiffusionVideoDecoder:
     torch.manual_seed(0)
     return DiffusionVideoDecoder(
         in_channels=8,
@@ -481,7 +481,7 @@ def _tiny_decoder() -> DiffusionVideoDecoder:
         patch_size=4,
         head_dim=16,
         stage_channels=(128, 64, 32, 32, 16),
-        stage_depths=(1, 1, 1, 1, 1),
+        stage_depths=(1, 1, 1, 1, stage5_depth),
         stage_kernels=((3, 3, 3),) * 5,
         upsamples=(((1, 2, 2), 2), ((2, 1, 1), 2), ((2, 2, 2), 1), ((2, 2, 2), 2)),
         stage5_kernel=(3, 3, 3),
@@ -523,6 +523,24 @@ def test_load_video_decoder_opens_base_once(tmp_path, monkeypatch):
     decoder = loader.load_video_decoder(base, tuned, torch.device("cpu"))
     assert torch.equal(decoder.state_dict()[name], overlay.bfloat16())
     assert opened == [base, tuned]
+
+
+def test_a_tuned_decoder_with_fewer_diffusion_blocks_sets_and_replaces_stage5(tmp_path):
+    source = _tiny_decoder(stage5_depth=3)
+    config = {**LTX25_DECODER_CONFIG, "in_channels": 8, "head_dim": 16, "stage_channels": [128, 64, 32, 32, 16],
+              "stage_depths": [1, 1, 1, 1, 3], "stage_kernels": [[3, 3, 3]] * 5, "stage5_kernel": [3, 3, 3],
+              "stage5_channels": 16, "t_emb_dim": 32}
+    base, tuned = tmp_path / "base.safetensors", tmp_path / "tuned.safetensors"
+    save_file({f"decoder.{name}": tensor for name, tensor in source.state_dict().items()}, str(base),
+              metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, config)})})
+    student = {name: torch.full_like(tensor, index + 2.0) for name, tensor in source.state_dict().items()
+               for index in (0, 1) if name.startswith(f"diff_blocks.{index}.")}
+    save_file(student, str(tuned))
+
+    decoder = loader.load_video_decoder(base, tuned, torch.device("cpu"))
+
+    assert len(decoder.diff_blocks) == 2
+    assert all(torch.equal(decoder.state_dict()[name], tensor.bfloat16()) for name, tensor in student.items())
 
 
 def test_load_video_decoder_builds_and_compiles_in_the_devices_half_dtype(tmp_path, monkeypatch):
