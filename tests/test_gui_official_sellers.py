@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import customtkinter as ctk
-import pytest
 
 from jasna.gui import wizard
 from jasna.gui.locales import t
@@ -22,34 +21,14 @@ def test_wizard_names_the_official_sellers(tk_root, monkeypatch):
     assert t("official_sellers_notice") in _label_texts(dialog)
 
 
-@pytest.mark.parametrize("error_name, message_key", [
-    ("ForgedLicenseError", "license_forged"),
-    ("RetiredLicenseError", "license_retired"),
-    ("LicenseError", "license_invalid"),
-    ("MalformedLicenseError", "license_malformed"),
-])
-def test_license_dialog_explains_rejected_keys(tk_root, monkeypatch, settle_activation, error_name, message_key):
-    license_store = pytest.importorskip("jasna.protection.license_store")
-    from jasna import protection
+def test_license_dialog_names_the_official_sellers(tk_root, settle_activation, monkeypatch, tmp_path):
     from jasna.gui.components import LicenseDialog
 
-    def reject(key):
-        raise getattr(protection, error_name)("english text")
-
-    monkeypatch.setattr(license_store, "load_license", lambda: None)
-    monkeypatch.setattr(license_store, "is_licensed", lambda: False)
-    monkeypatch.setattr(license_store, "_decode", lambda key: (b"JM1-" + b"1" * 64, {}))
-    monkeypatch.setattr(protection.signing, "license_identity", lambda proof: proof.decode())
-    monkeypatch.setattr(license_store, "set_license", reject)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     dialog = LicenseDialog(tk_root, on_activated=lambda: None)
+    settle_activation(dialog)
+
     assert t("license_official_sellers") in _label_texts(dialog)
-    settle_activation(dialog)
-
-    dialog._activate_button.invoke()
-    settle_activation(dialog)
-
-    expected = t(message_key) + ("\nenglish text" if error_name == "LicenseError" else "")
-    assert dialog._status.cget("text") == expected
 
 
 def test_wizard_blocks_amd_without_amf_and_links_the_fix(tk_root, monkeypatch):

@@ -10,7 +10,7 @@ from jasna.gui.branding import create_xianyu_qr_image
 from jasna.gui import activation_worker
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.gui.locales import get_locale, t
+from jasna.gui.locales import t
 from jasna.license_api import protection_available
 
 logger = logging.getLogger(__name__)
@@ -238,13 +238,11 @@ def shows_xianyu_seller(language: str) -> bool:
 
 
 class LicenseDialog(ctk.CTkToplevel):
-    """Activate online or save a manually issued offline Activation key; on Linux only the License code."""
+    """Activate with the License code."""
 
     def __init__(self, master, on_activated):
         super().__init__(master)
         self._closed = False
-        self._busy = True
-        self._lease = activation_worker.uses_online_lease()
         self._on_activated = on_activated
         self._main_thread = MainThreadCalls(self, 50)
 
@@ -274,125 +272,44 @@ class LicenseDialog(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 10))
 
-        machine_label = ctk.CTkLabel(
-            outer, text=t("license_machine_key"), text_color=Colors.TEXT_PRIMARY,
-        )
-        machine_row = ctk.CTkFrame(outer, fg_color="transparent")
-        if not self._lease:
-            machine_label.pack(anchor="w")
-            machine_row.pack(fill="x", pady=(0, 10))
-        self._machine = ctk.CTkEntry(
-            machine_row, width=370, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
-            text_color=Colors.TEXT_PRIMARY, state="readonly",
-        )
-        self._machine.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        attach_entry_context_menu(self._machine)
-        self._copy = ctk.CTkButton(
-            machine_row, text=t("ctx_copy"), width=80,
-            command=self._copy_machine_key, state="disabled",
-        )
-        self._copy.pack(side="right")
-        self._method = ctk.CTkSegmentedButton(
-            outer, values=[t("license_online"), t("license_manual")],
-            command=self._select_method, state="disabled",
-        )
-        self._method.set(t("license_online"))
-        if not self._lease:
-            self._method.pack(fill="x", pady=(0, 10))
-
-        self._online_frame = ctk.CTkFrame(outer, fg_color="transparent")
-        self._online_frame.pack(fill="x")
         ctk.CTkLabel(
-            self._online_frame, text=t("license_code"), text_color=Colors.TEXT_PRIMARY,
+            outer, text=t("license_code"), text_color=Colors.TEXT_PRIMARY,
         ).pack(anchor="w")
         self._code = ctk.CTkEntry(
-            self._online_frame, width=460, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            outer, width=460, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
             text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_code"),
         )
         self._code.pack(fill="x", pady=(0, 10))
         attach_entry_context_menu(self._code)
-        self._online_activate_button = ctk.CTkButton(
-            self._online_frame, text=t("license_activate" if self._lease else "license_activate_online"),
+        self._activate_button = ctk.CTkButton(
+            outer, text=t("license_activate"),
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
-            command=self._activate_online, state="disabled",
+            command=self._activate, state="disabled",
         )
-        self._online_activate_button.pack(anchor="w")
+        self._activate_button.pack(anchor="w")
         ctk.CTkLabel(
-            self._online_frame, text=t("license_lease_hint" if self._lease else "license_online_hint"), text_color=Colors.TEXT_PRIMARY,
+            outer, text=t("license_lease_hint"), text_color=Colors.TEXT_PRIMARY,
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(6, 0))
 
-        self._manual_frame = ctk.CTkFrame(outer, fg_color="transparent")
-        ctk.CTkLabel(
-            self._manual_frame, text=t("license_activation_steps"), text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
-        ).pack(anchor="w", pady=(0, 6))
-        ctk.CTkLabel(
-            self._manual_frame, text=t("license_activation_key"), text_color=Colors.TEXT_PRIMARY,
-        ).pack(anchor="w")
-        self._key = ctk.CTkEntry(
-            self._manual_frame, width=460, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
-            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_activation_key"),
-        )
-        self._key.pack(fill="x", pady=(0, 10))
-        attach_entry_context_menu(self._key)
-
-        action = ctk.CTkFrame(self._manual_frame, fg_color="transparent")
-        action.pack(fill="x")
-        self._activate_button = ctk.CTkButton(
-            action, text=t("license_activate"), width=110,
-            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
-            command=self._activate, state="disabled",
-        )
-        self._activate_button.pack(side="left")
-        self._activation_page_button = ctk.CTkButton(
-            action, text=t("license_activation_page"), width=180,
-            command=self._open_activation_page,
-        )
-        self._activation_page_button.pack(side="left", padx=(12, 0))
         self._status = ctk.CTkLabel(
             outer, text="", text_color=Colors.TEXT_PRIMARY,
             wraplength=460, justify="left",
         )
         self._status.pack(anchor="w", pady=(6, 0))
-        self._devices = ctk.CTkLabel(
-            outer, text="", text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
-        )
         if protection_available():
             activation_worker.start_license_info(
                 lambda info, error: self._post_result(self._loaded, info, error)
             )
         else:
             self._set_busy(True, lock_inputs=True)
-            self._activation_page_button.configure(state="disabled")
             self._show_error(t("license_source_unavailable"))
 
         self._resize()
 
-    def _open_activation_page(self):
-        from jasna.protection.activation import activation_urls
-
-        webbrowser.open(activation_urls(get_locale().current_language == "zh")[0])
-
-    def _select_method(self, method):
-        self._online_frame.pack_forget()
-        self._manual_frame.pack_forget()
-        frame = self._online_frame if method == t("license_online") else self._manual_frame
-        frame.pack(fill="x", before=self._status)
-        self._resize()
-
     def _set_busy(self, busy, *, lock_inputs=False):
-        self._busy = busy
-        state = "disabled" if busy else "normal"
-        for widget in (self._activate_button, self._method):
-            widget.configure(state=state)
-        for widget in (self._key, self._code):
-            widget.configure(state="disabled" if busy and lock_inputs else "normal")
-        has_machine = bool(self._machine.get()) and not busy
-        self._copy.configure(state="normal" if has_machine else "disabled")
-        ready = (self._lease or has_machine) and not busy
-        self._online_activate_button.configure(state="normal" if ready else "disabled")
+        self._activate_button.configure(state="disabled" if busy else "normal")
+        self._code.configure(state="disabled" if busy and lock_inputs else "normal")
 
     def _resize(self):
         self.update_idletasks()
@@ -421,133 +338,22 @@ class LicenseDialog(ctk.CTkToplevel):
         self._set_busy(False)
         if error is not None:
             self._show_error(str(error))
-            if not self._lease:
-                self._load_machine_key()
             return
-        key, licensed, identity = info
-        if self._lease:
-            if licensed:
-                offline = identity is not None and identity.startswith("JT1-")
-                self._status.configure(text=t("license_offline_active" if offline else "license_lease_active"),
-                                       text_color=Colors.STATUS_COMPLETED)
-            self._resize()
-            return
-        if identity is not None and identity.startswith("JW1-"):
-            self._show_error(t("license_cloud_cli_only"))
-        else:
-            if key:
-                self._key.insert(0, key)
-            if licensed:
-                self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
-                self._devices.configure(text=t("license_devices_checking"))
-                self._devices.pack(anchor="w", pady=(6, 0))
-                self._resize()
-                activation_worker.start_device_count(
-                    key, lambda count, error: self._post_result(self._devices_ready, count, error)
-                )
-        self._load_machine_key()
-
-    def _devices_ready(self, count, error):
-        if error is not None:
-            self._devices.configure(text=t("license_devices_unavailable"))
-        else:
-            used, limit = count
-            self._devices.configure(text=t("license_devices_count", used=used, limit=limit))
+        licensed, identity = info
+        if licensed:
+            offline = identity is not None and identity.startswith("JT1-")
+            self._status.configure(text=t("license_offline_active" if offline else "license_lease_active"),
+                                   text_color=Colors.STATUS_COMPLETED)
         self._resize()
-
-    def _load_machine_key(self):
-        self._set_busy(True)
-        self._set_machine_key("")
-        activation_worker.start_machine_key(
-            lambda key, error: self._post_result(self._machine_ready, key, error),
-        )
-
-    def _machine_ready(self, key, error):
-        self._set_busy(False)
-        if error is not None:
-            logger.warning("Machine key unavailable: %s", error)
-            self._show_error(str(error))
-            return
-        self._set_machine_key(key)
-
-    def _set_machine_key(self, key):
-        self._machine.configure(state="normal")
-        self._machine.delete(0, "end")
-        self._machine.insert(0, key)
-        self._machine.configure(state="readonly")
-        state = "normal" if key and not self._busy else "disabled"
-        self._copy.configure(state=state)
-        self._online_activate_button.configure(state=state)
-
-    def _copy_machine_key(self):
-        self.clipboard_clear()
-        self.clipboard_append(self._machine.get())
 
     def _activate(self):
         self._set_busy(True, lock_inputs=True)
-        self._status.configure(text=t("license_working"), text_color=Colors.TEXT_PRIMARY)
-        activation_worker.start_activation(
-            self._key.get().strip(),
-            lambda identity, error: self._post_result(self._activation_done, identity, error),
+        self._status.configure(text=t("license_offline_permission" if sys.platform == "win32" else "license_connecting"),
+                               text_color=Colors.TEXT_PRIMARY)
+        activation_worker.start_lease_activation(
+            self._code.get().strip(),
+            lambda result, error: self._post_result(self._lease_activation_done, result, error),
         )
-
-    def _activate_online(self):
-        code, machine_key = self._code.get().strip(), self._machine.get()
-        self._set_busy(True, lock_inputs=True)
-        self._status.configure(text=t("license_connecting"), text_color=Colors.TEXT_PRIMARY)
-        if self._lease:
-            if sys.platform == "win32":
-                self._status.configure(text=t("license_offline_permission"))
-            activation_worker.start_lease_activation(
-                code, lambda result, error: self._post_result(self._lease_activation_done, result, error),
-            )
-            return
-        activation_worker.start_online_activation(
-            code, machine_key,
-            lambda result, error: self._post_result(self._online_activation_done, result, error),
-        )
-
-    def _online_activation_done(self, result, error):
-        if error is None:
-            key, identity = result
-            self._key.configure(state="normal")
-            self._key.delete(0, "end")
-            self._key.insert(0, key)
-            self._code.configure(state="normal")
-            self._code.delete(0, "end")
-        else:
-            identity = None
-        self._activation_done(identity, error)
-
-    def _activation_done(self, identity, error):
-        from jasna.protection.activation import ActivationServiceError
-        from jasna.protection import (
-            ForgedLicenseError, LicenseError, MalformedLicenseError,
-            RetiredLicenseError,
-        )
-        self._set_busy(False)
-        if isinstance(error, ActivationServiceError):
-            self._show_error(t(f"license_service_{error.code}"))
-            return
-        if isinstance(error, ForgedLicenseError):
-            self._show_error(t("license_forged"))
-            return
-        if isinstance(error, RetiredLicenseError):
-            self._show_error(t("license_retired"))
-            return
-        if isinstance(error, MalformedLicenseError):
-            self._show_error(t("license_malformed"))
-            return
-        if isinstance(error, LicenseError):
-            self._show_error(f"{t('license_invalid')}\n{error}")
-            return
-        if error is not None:
-            self._show_error(str(error))
-            return
-        self._set_machine_key(identity)
-        self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
-        self._devices.pack_forget()
-        self._on_activated()
 
     def _lease_activation_done(self, result, error):
         from jasna.protection.activation import ActivationServiceError

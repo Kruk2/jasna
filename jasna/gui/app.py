@@ -516,7 +516,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _license_chip_ready(self, info, error):
         if error is not None:
             logger.warning("Could not read activation status: %s", error)
-        licensed = error is None and info[1]
+        licensed = error is None and info[0]
         self._license_chip.configure(
             text=t("license_chip_active") if licensed else t("license_chip_inactive"),
             text_color=Colors.STATUS_COMPLETED if licensed else Colors.STATUS_WARNING,

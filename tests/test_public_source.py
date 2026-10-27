@@ -40,7 +40,7 @@ assert not protection_available()
 results = []
 worker = activation_worker.start_license_info(lambda info, error: results.append((info, error)))
 worker.join(5)
-assert results == [((None, False, None), None)], results
+assert results == [((False, None), None)], results
 assert 'jasna.protection.license_store' not in sys.modules
 """)
     assert result.returncode == 0, result.stderr
@@ -57,13 +57,10 @@ runpy.run_module('jasna', run_name='__main__')
     assert result.stdout.strip()
 
 
-@pytest.mark.parametrize("arguments", [
-    ["--machine-key"], ["--activation-key", "fake"], ["--license-code", "fake"],
-])
-def test_public_activation_reports_unavailable_without_traceback(public_checkout, arguments):
-    result = run_public(public_checkout, f"""
+def test_public_activation_reports_unavailable_without_traceback(public_checkout):
+    result = run_public(public_checkout, """
 import runpy
-sys.argv = ['jasna', *{arguments!r}]
+sys.argv = ['jasna', '--license-code', 'fake']
 runpy.run_module('jasna', run_name='__main__')
 """)
     assert result.returncode == 1
@@ -120,8 +117,7 @@ root.update()
 dialog = LicenseDialog(root, on_activated=lambda: None)
 root.update()
 assert dialog._status.cget('text') == t('license_source_unavailable')
-for widget in (dialog._activate_button, dialog._online_activate_button, dialog._activation_page_button):
-    assert widget.cget('state') == 'disabled'
+assert dialog._activate_button.cget('state') == 'disabled'
 dialog.destroy()
 root.destroy()
 """)
