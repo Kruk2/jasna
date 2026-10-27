@@ -29,6 +29,12 @@ FUSED_QKV_DIMS = (DIFFUSION_DIM, 512)
 """Widths the fused Q/K/V kernel is built for: the diffusion blocks' and the 512-wide deterministic stages
 3-4 (the 1024/2048-wide stages 1-2 do not fit its one-tile projections). Only the diffusion blocks' kernel
 modulates its slab."""
+FUSED_MLP_DIMS = (DIFFUSION_DIM, 512, 1024)
+"""Widths the fused residual MLP is built for: the diffusion blocks' and deterministic stages 2-4 (at stage 1's
+2048 it is slower than torch on an RTX 3090, 4090 and 5090)."""
+DIFFUSION_CONTEXT_DIM = 512
+DIFFUSION_CONTEXT_STRIDE = (2, 2, 2)
+"""Width and pixel-shuffle stride of the stage-4 context the diffusion blocks inject."""
 EAGER_ROPE_T_TILES = 4
 DIFFUSION_W_CHUNKS = 4
 SWIGLU_TILE_TOKENS = 16_384
@@ -156,6 +162,8 @@ class DecoderKernels(NamedTuple):
     na3d: Callable | None = None
     residual_swiglu: Callable | None = None
     slab_qkv: Callable | None = None
+    proj_residual: Callable | None = None
+    context_add: Callable | None = None
 
 
 @torch.compiler.disable
@@ -172,19 +180,23 @@ def decoder_kernels(device: torch.device) -> DecoderKernels:
     ahead of time on AMD (``na_hip``, with or without Triton); before SM 8.0, where Triton has no
     tensor-core dot, through the fp16 pure-torch ``na3d``. The slab Q/K/V projections run as one fused
     kernel (JIT ``diffusion_triton`` on NVIDIA, ahead of time ``diffusion_hip`` on AMD), which also serves
-    the 512-wide deterministic stages; on AMD the diffusion blocks' residual MLP is fused too (NVIDIA's
-    compiled torch MLP is faster than every fused config that fits its shared memory)."""
+    the 512-wide deterministic stages. The residual MLP of every ``FUSED_MLP_DIMS``-wide block runs as two
+    fused kernels, and the diffusion blocks' attention output projection and stage-4 context inject run with
+    their adds fused (``diffusion_triton`` JIT on NVIDIA with per-GPU launch configs, built ahead of time by
+    ``diffusion_hip`` on AMD)."""
     backend = kernel_backend(device)
     if backend is KernelBackend.NVIDIA_PRE_SM80:
         return DecoderKernels(na3d=_fp16_eager_na3d)
     if backend.is_amd:
         from jasna.models.ltx_vae import diffusion_hip, na_hip
 
-        return DecoderKernels(na_hip.na3d, diffusion_hip.residual_swiglu_, diffusion_hip.slab_qkv)
+        return DecoderKernels(na_hip.na3d, diffusion_hip.residual_swiglu_, diffusion_hip.slab_qkv,
+                              diffusion_hip.proj_residual_, diffusion_hip.context_add_)
     if backend is KernelBackend.NVIDIA:
         from jasna.models.ltx_vae import diffusion_triton, na_triton
 
-        return DecoderKernels(na3d=na_triton.na3d, slab_qkv=diffusion_triton.slab_qkv)
+        return DecoderKernels(na_triton.na3d, diffusion_triton.residual_swiglu_, diffusion_triton.slab_qkv,
+                              diffusion_triton.proj_residual_, diffusion_triton.context_add_)
     return DecoderKernels()
 
 
@@ -377,6 +389,9 @@ class NABlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.norm1(x))
+        if self.mlp.kernels.residual_swiglu is not None and x.is_cuda and x.shape[-1] in FUSED_MLP_DIMS:
+            no_modulation = x.new_zeros(x.shape[-1])
+            return residual_modulating_mlp(x, self.mlp, self.norm2, no_modulation, no_modulation)
         return x + swiglu_token_chunked(self.norm2(x), self.mlp)
 
 
@@ -390,10 +405,12 @@ def _attn_on_w_slab(
     scale: torch.Tensor,
     shift: torch.Tensor,
     core_len: int,
+    project: bool,
 ) -> torch.Tensor:
     """One W slab, ``left_halo`` then ``x``'s W ``columns`` (the fused Q/K/V kernel, or compiled, reads
     that gather in the slab's first read): rms_norm + modulate + QKV / in-slab RoPE / NA / proj, output
-    for the ``core_len`` columns after the ``kernel_w // 2`` halo only."""
+    for the ``core_len`` columns after the ``kernel_w // 2`` halo only; without ``project`` the NA output
+    before proj."""
     batch, t, h = x.shape[:3]
     halo = attn.kernel_size[2] // 2
     if attn.kernels.slab_qkv is not None and x.is_cuda and scale.numel() == attn.dim:
@@ -417,7 +434,8 @@ def _attn_on_w_slab(
 
     out = neighborhood_attention(attn, q.contiguous(), k.contiguous(), v.contiguous(), halo)
     del q, k, v
-    return F.linear(out.reshape(batch, t, h, core_len, attn.dim), attn.proj.weight, attn.proj.bias)
+    out = out.reshape(batch, t, h, core_len, attn.dim)
+    return F.linear(out, attn.proj.weight, attn.proj.bias) if project else out
 
 
 def w_chunked_attention_residual(
@@ -440,6 +458,7 @@ def w_chunked_attention_residual(
     extent = chunk_w + 2 * halo
     left_halo = x[:, :, :, :1].expand(-1, -1, -1, halo, -1).contiguous()
     slab_attention = _slab_attention if x.is_cuda else _attn_on_w_slab
+    proj_residual = attn.kernels.proj_residual if x.is_cuda else None
 
     for i in range(w_chunks):
         core_start = i * chunk_w
@@ -457,8 +476,12 @@ def w_chunked_attention_residual(
             take = min(halo, core_len)
             left_halo = x.new_zeros(*x.shape[:3], halo, x.shape[4])
             left_halo[:, :, :, halo - take :] = x[:, :, :, core_end - take : core_end]
-        out = slab_attention(attn, norm, slab_left_halo, x, columns, w_pos, scale, shift, core_len)
-        x[:, :, :, core_start:core_end, :].add_(out)
+        out = slab_attention(attn, norm, slab_left_halo, x, columns, w_pos, scale, shift, core_len,
+                             proj_residual is None)
+        if proj_residual is None:
+            x[:, :, :, core_start:core_end, :].add_(out)
+        else:
+            proj_residual(x, out, attn.proj.weight, attn.proj.bias, core_start)
 
     return x
 
@@ -517,17 +540,23 @@ def inject_deferred_context(
     stage4_feat: torch.Tensor,
     upsample: LinearPixelShuffleUpsample,
     context_proj: nn.Linear,
+    context_add: Callable | None,
     *,
     drop_leading_frame: bool,
 ) -> torch.Tensor:
-    """``x += context_proj(upsample(stage4_feat))`` over ``DIFFUSION_W_CHUNKS`` stage-4 W slabs."""
+    """``x += context_proj(upsample(stage4_feat))`` over ``DIFFUSION_W_CHUNKS`` stage-4 W slabs, through the
+    fused ``context_add`` kernel on CUDA when given."""
     weight, bias = fold_context_projection(upsample, context_proj)
+    fused = context_add if x.is_cuda else None
     add_context = _add_context if x.is_cuda else add_folded_context
     w_hi = x.shape[3]
     lo = 0
     for feat_chunk in torch.chunk(stage4_feat, DIFFUSION_W_CHUNKS, dim=3):
         hi = min(w_hi, lo + feat_chunk.shape[3] * upsample.stride[2])
-        add_context(x[:, :, :, lo:hi, :], feat_chunk, weight, bias, tuple(upsample.stride), drop_leading_frame)
+        if fused is None:
+            add_context(x[:, :, :, lo:hi, :], feat_chunk, weight, bias, tuple(upsample.stride), drop_leading_frame)
+        else:
+            fused(x, lo, hi - lo, feat_chunk, weight, bias, tuple(upsample.stride), drop_leading_frame)
         lo = hi
     return x
 
@@ -563,7 +592,8 @@ class ChunkedDiffusionNABlock(nn.Module):
     ) -> torch.Tensor:
         scale_msa, shift_msa, scale_mlp, shift_mlp = self._modulation(modulation)
         x = inject_deferred_context(
-            x, stage4_feat, stage4_upsample, self.context_proj, drop_leading_frame=drop_leading_frame
+            x, stage4_feat, stage4_upsample, self.context_proj, self.attn.kernels.context_add,
+            drop_leading_frame=drop_leading_frame,
         )
         x = w_chunked_attention_residual(x, self.attn, self.norm1, scale_msa, shift_msa)
         return residual_modulating_mlp(x, self.mlp, self.norm2, scale_mlp, shift_mlp)

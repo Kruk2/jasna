@@ -697,7 +697,7 @@ def test_slab_attention_of_core_columns_matches_full_slab_attention():
         full = na3d(q, k, v, attn.kernel_size, 0).reshape(1, 4, 6, 12, 32)
         expected = attn.proj(full)[:, :, :, halo : halo + core_len]
         columns = torch.arange(halo, 12)
-        actual = T._attn_on_w_slab(attn, norm, x[:, :, :, :halo], x, columns, w_pos, scale, shift, core_len)
+        actual = T._attn_on_w_slab(attn, norm, x[:, :, :, :halo], x, columns, w_pos, scale, shift, core_len, True)
 
     torch.testing.assert_close(actual, expected)
 
@@ -735,7 +735,7 @@ def test_folded_context_matches_upsample_then_context_proj(drop_leading_frame):
         context = context_proj(upsample(stage4, drop_leading_frame=drop_leading_frame))
         expected = x + context[:, :, :, :17]
         actual = T.inject_deferred_context(
-            x.clone(), stage4, upsample, context_proj, drop_leading_frame=drop_leading_frame
+            x.clone(), stage4, upsample, context_proj, None, drop_leading_frame=drop_leading_frame
         )
 
     torch.testing.assert_close(actual, expected)
@@ -754,7 +754,7 @@ def test_w_chunked_attention_equals_one_slab_with_edge_replicated_halos():
         padded = torch.cat([left.expand(-1, -1, -1, halo, -1), x, right.expand(-1, -1, -1, halo, -1)], dim=3)
         w_pos = torch.arange(16 + 2 * halo, dtype=torch.float32) - halo
         columns = torch.arange(halo, 16 + 2 * halo)
-        expected = x + T._attn_on_w_slab(attn, norm, padded[:, :, :, :halo], padded, columns, w_pos, scale, shift, 16)
+        expected = x + T._attn_on_w_slab(attn, norm, padded[:, :, :, :halo], padded, columns, w_pos, scale, shift, 16, True)
         actual = T.w_chunked_attention_residual(x.clone(), attn, norm, scale, shift)
 
     torch.testing.assert_close(actual, expected)

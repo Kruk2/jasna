@@ -1,10 +1,13 @@
-"""The diffusion blocks' fused kernels (``diffusion_triton``) built ahead of time for AMD
+"""The decoder's fused kernels (``diffusion_triton``) built ahead of time for AMD
 (``scripts/build_ltx_vae_hipfbs.py``): every AMD GPU runs them, with or without Triton.
 
 - ``residual_swiglu_``: ``transformer.modulated_swiglu`` plus the residual add, ``x += w_down(silu(gate) * up)``
-  with ``gate, up = w_gate(y), w_up(y)`` and ``y = rms_norm(x) * (1 + scale) + shift``.
+  with ``gate, up = w_gate(y), w_up(y)`` and ``y = rms_norm(x) * (1 + scale) + shift``, at every
+  ``FUSED_MLP_DIMS`` width, as the gate/up and down kernels.
 - ``slab_qkv``: a W slab's Q/K/V projections with Q/K RMSNorm and absolute RoPE (``_attn_on_w_slab``),
   an opaque op, so a compiled slab calls it in one piece.
+- ``proj_residual_`` / ``context_add_``: a diffusion block's attention output projection and stage-4 context
+  inject with their adds into the block input.
 """
 
 import torch
@@ -12,30 +15,51 @@ import torch
 from jasna.media.cuda_kernel import aot_kernel
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
 from jasna.models.ltx_vae.transformer import (
+    DIFFUSION_CONTEXT_DIM,
+    DIFFUSION_CONTEXT_STRIDE,
     DIFFUSION_DIM,
     DIFFUSION_HEAD_DIM,
-    DIFFUSION_HIDDEN,
     DIFFUSION_ROPE_PAIRS,
+    FUSED_MLP_DIMS,
     FUSED_QKV_DIMS,
+    _swiglu_hidden_dim,
 )
 
-# Launch configs, fastest on a Radeon AI PRO R9700 (gfx1201). Residual SwiGLU: rows per program,
-# hidden columns per step, warps (swept 64/128 rows, 32/64 columns, 4/8 warps, 1/2 stages). Slab
-# Q/K/V: rows per program and warps (swept 16-128 rows, 4-16 warps, at widths 256 and 512).
-SWIGLU_BLOCK_ROWS = 128
-SWIGLU_BLOCK_HIDDEN = 64
-SWIGLU_WARPS = 8
+# Per-program (rows, columns, K step, warps, stages) of each kernel: per kernel the config with the least
+# worst-case slowdown on an RX 9060 XT (gfx1200) and an RX 7900 XTX (gfx1100) of 32-128 rows x 64-256 columns x
+# 32-64 K x 4-8 warps x 1-4 stages at the decode's shapes. The MLP's are (gate/up, down) per width. Slab Q/K/V:
+# rows per program and warps, fastest on a Radeon AI PRO R9700 (gfx1201) of 16-128 rows x 4-16 warps.
+SWIGLU_LAUNCH = {
+    256: ((32, 256, 64, 8, 1), (32, 256, 64, 4, 1)),
+    512: ((32, 256, 64, 8, 1), (32, 256, 64, 4, 1)),
+    1024: ((64, 128, 64, 8, 1), (64, 256, 64, 8, 1)),
+}
+PROJ_RESIDUAL_LAUNCH = (32, 256, 64, 4, 1)
+CONTEXT_ADD_LAUNCH = (32, 256, 64, 8, 1)
 QKV_BLOCK_ROWS = 32
 QKV_WARPS = 8
-SWIGLU_MODULE = f"ltx_swiglu_{DIFFUSION_DIM}x{DIFFUSION_HIDDEN}"
+PROJ_RESIDUAL_MODULE = f"ltx_proj_residual_{DIFFUSION_DIM}"
+CONTEXT_ADD_MODULE = f"ltx_context_add_{DIFFUSION_CONTEXT_DIM}x{DIFFUSION_DIM}"
+
+
+def swiglu_modules(dim: int) -> tuple[str, str]:
+    hidden = _swiglu_hidden_dim(dim)
+    return f"ltx_swiglu_gate_up_{dim}x{hidden}", f"ltx_swiglu_down_{dim}x{hidden}"
 
 
 def qkv_module(dim: int) -> str:
     return f"ltx_slab_qkv_{dim}x{DIFFUSION_HEAD_DIM}"
 
 
-_SWIGLU_POINTERS = ("x_ptr", "norm_ptr", "scale_ptr", "shift_ptr", "gate_ptr", "up_ptr", "down_ptr")
-SWIGLU_ARGUMENTS = {**{name: "*bf16" for name in _SWIGLU_POINTERS}, "rows": "i32"}
+GATE_UP_ARGUMENTS = {**{name: "*bf16" for name in ("x_ptr", "norm_ptr", "scale_ptr", "shift_ptr", "gate_ptr",
+                                                   "up_ptr", "h_ptr")}, "rows": "i32"}
+DOWN_ARGUMENTS = {"h_ptr": "*bf16", "down_ptr": "*bf16", "x_ptr": "*bf16", "rows": "i32"}
+PROJ_RESIDUAL_ARGUMENTS = {"a_ptr": "*bf16", "w_ptr": "*bf16", "b_ptr": "*bf16", "x_ptr": "*bf16:wide",
+                           **{name: "i32" for name in ("rows", "core_len", "x_line_stride", "core_start")}}
+CONTEXT_ADD_ARGUMENTS = {"f_ptr": "*bf16", "w_ptr": "*bf16", "b_ptr": "*bf16", "x_ptr": "*bf16:wide",
+                         **{name: "i32" for name in ("rows", "f_t", "f_h", "f_w", "f_stride_b", "f_stride_t",
+                                                     "f_stride_h", "f_stride_w", "x_t", "x_h", "x_w", "x_w_start",
+                                                     "x_w_len", "drop_frames")}}
 _QKV_BF16 = ("norm_ptr", "scale_ptr", "shift_ptr", "wq_ptr", "bq_ptr", "wk_ptr", "bk_ptr", "wv_ptr", "bv_ptr", "qn_ptr", "kn_ptr")
 _QKV_FP32 = ("inv_ptr", "wpos_ptr")
 _QKV_OUT = ("q_ptr", "k_ptr", "v_ptr")
@@ -47,16 +71,17 @@ QKV_ARGUMENTS = {
 }
 
 
-def _launch(module: str, arguments: dict[str, str], rows_per_program: int, rows: int, device: torch.device, args) -> None:
+def _launch(module: str, arguments: dict[str, str], grid: tuple[int, int], device: torch.device, args) -> None:
     aot_kernel(KERNEL_LAUNCH, module, device, arguments).launch(
-        (-(-rows // rows_per_program), 1, 1), torch.cuda.current_stream(device).cuda_stream, *args,
+        (*grid, 1), torch.cuda.current_stream(device).cuda_stream, *args,
     )
 
 
 def _require_bf16(tensors, shapes_match: bool) -> None:
     if not shapes_match or {t.dtype for t in tensors} != {torch.bfloat16} or not all(t.is_contiguous() for t in tensors):
-        raise ValueError(f"the ahead-of-time diffusion-block kernels take contiguous bf16 tensors of width {DIFFUSION_DIM}"
-                         f" (Q/K/V: {' or '.join(map(str, FUSED_QKV_DIMS))})")
+        raise ValueError("the ahead-of-time decoder kernels take contiguous bf16 tensors of the widths they are built "
+                         f"for (MLP: {', '.join(map(str, FUSED_MLP_DIMS))}; Q/K/V: "
+                         f"{' or '.join(map(str, FUSED_QKV_DIMS))}; diffusion blocks: {DIFFUSION_DIM})")
 
 
 def residual_swiglu_(
@@ -69,11 +94,48 @@ def residual_swiglu_(
     w_down: torch.Tensor,
 ) -> None:
     """In place on contiguous ``x`` ``(rows, dim)``: one row each of ``scale``/``shift`` ``(dim,)``,
-    ``w_gate``/``w_up`` ``(hidden, dim)``, ``w_down`` ``(dim, hidden)``, at the shipped decoder's shapes."""
+    ``w_gate``/``w_up`` ``(hidden, dim)``, ``w_down`` ``(dim, hidden)``, at a ``FUSED_MLP_DIMS`` width."""
+    rows, dim = x.shape
+    hidden = _swiglu_hidden_dim(dim)
     tensors = (x, norm_weight, scale, shift, w_gate, w_up, w_down)
-    _require_bf16(tensors, x.shape[1] == DIFFUSION_DIM and w_gate.shape == (DIFFUSION_HIDDEN, DIFFUSION_DIM))
-    rows = x.shape[0]
-    _launch(SWIGLU_MODULE, SWIGLU_ARGUMENTS, SWIGLU_BLOCK_ROWS, rows, x.device, (*tensors, rows))
+    _require_bf16(tensors, dim in FUSED_MLP_DIMS and w_gate.shape == (hidden, dim))
+    h = x.new_empty(rows, hidden)
+    (gate_up_rows, gate_up_cols, *_), (down_rows, down_cols, *_) = SWIGLU_LAUNCH[dim]
+    gate_up, down = swiglu_modules(dim)
+    _launch(gate_up, GATE_UP_ARGUMENTS, (-(-rows // gate_up_rows), hidden // gate_up_cols), x.device,
+            (x, norm_weight, scale, shift, w_gate, w_up, h, rows))
+    _launch(down, DOWN_ARGUMENTS, (-(-rows // down_rows), dim // down_cols), x.device, (h, w_down, x, rows))
+
+
+def proj_residual_(
+    x: torch.Tensor, out: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor, core_start: int
+) -> None:
+    """``diffusion_triton.proj_residual_`` at the diffusion blocks' width."""
+    batch, t, h, w, dim = x.shape
+    _require_bf16((x, out, weight, bias), dim == DIFFUSION_DIM and weight.shape == (dim, dim))
+    core_len = out.shape[3]
+    rows = batch * t * h * core_len
+    block_rows, block_cols, *_ = PROJ_RESIDUAL_LAUNCH
+    _launch(PROJ_RESIDUAL_MODULE, PROJ_RESIDUAL_ARGUMENTS, (-(-rows // block_rows), dim // block_cols), x.device,
+            (out, weight, bias, x, rows, core_len, w * dim, core_start))
+
+
+def context_add_(
+    x: torch.Tensor, w_start: int, w_len: int, feat: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor,
+    stride: tuple[int, int, int], drop_leading_frame: bool,
+) -> None:
+    """``diffusion_triton.context_add_`` at the diffusion blocks' widths and stride."""
+    batch, t, h, w, in_dim = feat.shape
+    dim = x.shape[4]
+    positions = stride[0] * stride[1] * stride[2]
+    _require_bf16((x, weight, bias), in_dim == DIFFUSION_CONTEXT_DIM and dim == DIFFUSION_DIM
+                  and tuple(stride) == DIFFUSION_CONTEXT_STRIDE and feat.dtype == torch.bfloat16
+                  and feat.stride(4) == 1)
+    rows = batch * t * h * w
+    block_rows, block_cols, *_ = CONTEXT_ADD_LAUNCH
+    _launch(CONTEXT_ADD_MODULE, CONTEXT_ADD_ARGUMENTS, (-(-rows // block_rows), positions * dim // block_cols),
+            x.device, (feat, weight, bias, x, rows, t, h, w, *feat.stride()[:4], x.shape[1], x.shape[2], x.shape[3],
+                       w_start, w_len, int(stride[0] == 2 and drop_leading_frame)))
 
 
 @torch.library.custom_op("jasna::slab_qkv_aot", mutates_args=())
@@ -111,7 +173,7 @@ def slab_qkv(
     norm, scale, shift = modulation or (x, x, x)
     pointers = (x, left_halo, columns, norm, scale, shift, *weights, inv_freqs.float().contiguous(),
                 w_pos.float().contiguous(), q, k, v)
-    _launch(qkv_module(dim), QKV_ARGUMENTS, QKV_BLOCK_ROWS, rows, x.device,
+    _launch(qkv_module(dim), QKV_ARGUMENTS, (-(-rows // QKV_BLOCK_ROWS), 1), x.device,
             (*pointers, rows, h, w, ext, halo, core_len, q_scale))
     return q, k, v
 
