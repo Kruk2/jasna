@@ -295,8 +295,9 @@ def test_offline_frame_writer_opens_the_encoder_on_first_write_and_closes_it_onc
     assert heartbeat[0] > 0
 
 
-@pytest.mark.parametrize(("frames_written", "segment"), [(1, 3), (9, 3), (10, 4), (25, 5)])
-def test_streaming_frame_writer_reports_the_segment_being_produced(frames_written, segment):
+@pytest.mark.parametrize(("frames_written", "segment"), [(1, 3), (9, 3), (10, 4), (25, 5), (100, 13)])
+def test_streaming_frame_writer_reports_the_segment_being_produced(monkeypatch, frames_written, segment):
+    monkeypatch.setattr("jasna.streaming_pipeline.time.monotonic", lambda: 50.0)
     encoder = MagicMock(frames_per_segment=10)
     server = MagicMock()
     stop = threading.Event()

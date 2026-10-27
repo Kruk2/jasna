@@ -37,10 +37,9 @@ class _StreamingFrameWriter:
         if frames_written == 1:
             log.debug("[stream-blend-encode] first frame encoded: %.2fs", time.monotonic() - self._t0)
         elif frames_written % 100 == 0:
-            log.debug(
-                "[stream-blend-encode] %d frames encoded (%.1f fps)",
-                frames_written, frames_written / (time.monotonic() - self._t0),
-            )
+            # Windows clocks can tick in ~16 ms steps, so the elapsed time may still read 0.
+            elapsed = max(time.monotonic() - self._t0, 1e-6)
+            log.debug("[stream-blend-encode] %d frames encoded (%.1f fps)", frames_written, frames_written / elapsed)
 
         current_seg = self._start_segment + frames_written // self._frames_per_seg
         self._hls_server.update_production(current_seg)
