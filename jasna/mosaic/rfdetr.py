@@ -230,8 +230,18 @@ class RfDetrMosaicDetectionModel:
         boxes_cpu = boxes_and_counts[:, :-1].reshape(b, k, 4)
         counts_cpu = boxes_and_counts[:, -1].astype(np.int64)
 
-        boxes_list = [boxes_cpu[i, : counts_cpu[i]] for i in range(b)]
-        masks_list = [masks[i, : counts_cpu[i]].clone() for i in range(b)]
+        boxes_list = []
+        masks_list = []
+        for i in range(b):
+            frame_boxes = boxes_cpu[i, : counts_cpu[i]]
+            # RF-DETR sometimes scores an empty box such as [0, 0, 0, 0] above the threshold.
+            keep = np.flatnonzero((frame_boxes[:, 2] > frame_boxes[:, 0]) & (frame_boxes[:, 3] > frame_boxes[:, 1]))
+            if keep.size == len(frame_boxes):
+                boxes_list.append(frame_boxes)
+                masks_list.append(masks[i, : counts_cpu[i]].clone())
+            else:
+                boxes_list.append(frame_boxes[keep])
+                masks_list.append(masks[i, keep.tolist()])
         return boxes_list, masks_list
 
     def scan_scores_masks(
