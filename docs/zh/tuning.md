@@ -75,6 +75,27 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 
 更改最大片段大小不会重新开始编译。
 
+## AMD 更快的修复
+
+在 AMD 上，Jasna 默认以更快的模式运行 BasicVSR++。在 Radeon RX 7000 上，
+马赛克多的视频快约 25%。较新的显卡提升不大。它会多用约 1 GB 显存。
+遇到 GPU 错误或显存不足时，按以下方式关闭它：
+
+Windows（在 Jasna 文件夹中打开 PowerShell）：
+
+```powershell
+$env:JASNA_AMD_GRAPHS = "0"
+.\jasna.exe
+```
+
+Linux：
+
+```bash
+JASNA_AMD_GRAPHS=0 ./run_jasna_amd.sh
+```
+
+此设置在关闭该终端前有效。
+
 ## AMD 实验性注意力
 
 在 AMD 上，Jasna 默认使用更快的实验性注意力，在 Windows 上检测快约 3 倍。
