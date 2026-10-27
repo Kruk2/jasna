@@ -12,8 +12,8 @@ CLI_HELP: dict[str, str] = {
         "Without --input, --stream or --benchmark, activate and exit."
     ),
     "license_code": (
-        "Activate online using your License code. On Linux, Jasna then checks your license online while it "
-        "uses supporter models; on Windows it saves an Activation key for offline use. "
+        "Activate with your License code. On a computer with a TPM 2.0 security chip, Jasna then works offline; "
+        "otherwise it checks your license online while it uses supporter models. "
         "Without --input, --stream or --benchmark, activate and exit."
     ),
     "restoration_model_name": (

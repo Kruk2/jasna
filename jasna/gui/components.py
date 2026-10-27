@@ -1,6 +1,7 @@
 """Reusable UI components for Jasna GUI."""
 
 import logging
+import sys
 import tkinter
 import customtkinter as ctk
 import webbrowser
@@ -426,7 +427,9 @@ class LicenseDialog(ctk.CTkToplevel):
         key, licensed, identity = info
         if self._lease:
             if licensed:
-                self._status.configure(text=t("license_lease_active"), text_color=Colors.STATUS_COMPLETED)
+                offline = identity is not None and identity.startswith("JT1-")
+                self._status.configure(text=t("license_offline_active" if offline else "license_lease_active"),
+                                       text_color=Colors.STATUS_COMPLETED)
             self._resize()
             return
         if identity is not None and identity.startswith("JW1-"):
@@ -493,8 +496,10 @@ class LicenseDialog(ctk.CTkToplevel):
         self._set_busy(True, lock_inputs=True)
         self._status.configure(text=t("license_connecting"), text_color=Colors.TEXT_PRIMARY)
         if self._lease:
+            if sys.platform == "win32":
+                self._status.configure(text=t("license_offline_permission"))
             activation_worker.start_lease_activation(
-                code, lambda models, error: self._post_result(self._lease_activation_done, error),
+                code, lambda result, error: self._post_result(self._lease_activation_done, result, error),
             )
             return
         activation_worker.start_online_activation(
@@ -544,7 +549,7 @@ class LicenseDialog(ctk.CTkToplevel):
         self._devices.pack_forget()
         self._on_activated()
 
-    def _lease_activation_done(self, error):
+    def _lease_activation_done(self, result, error):
         from jasna.protection.activation import ActivationServiceError
 
         self._set_busy(False)
@@ -556,7 +561,10 @@ class LicenseDialog(ctk.CTkToplevel):
             self._show_error(str(error))
             return
         self._code.delete(0, "end")
-        self._status.configure(text=t("license_lease_active"), text_color=Colors.STATUS_COMPLETED)
+        text = t("license_offline_active" if result.offline else "license_lease_active")
+        if result.tpm_needs_group:
+            text += "\n" + t("license_tss_hint")
+        self._status.configure(text=text, text_color=Colors.STATUS_COMPLETED)
         self._resize()
         self._on_activated()
 

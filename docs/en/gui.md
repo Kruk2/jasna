@@ -120,43 +120,34 @@ Jasna shows a warning and lets you continue. This does not confirm compatibility
 Supporter models (UNet 4x, SD 1.5, LTX) need activation. Open **Activate Jasna** in
 the header.
 
-On **Linux**, enter your **License code** and click **Activate**. That's all:
-Jasna checks your license online while it uses supporter models, so keep the
-PC connected. If the connection drops, the video that is running finishes;
-the queue stops if Jasna can't reach the check for about an hour. Start it
-again once you are back online.
+Enter your **License code** and click **Activate**. Jasna picks how it checks
+your license by itself:
 
-On **Windows**, once activated, this window shows **Devices used**, for
-example **2 of 3**. It needs internet for that; restoring works offline.
-
-- **Online** (default): enter your **License code** and click
-  **Activate online**.
-- **Manual**, for a PC without internet or when online fails:
-  1. Copy the **Machine key**.
-  2. On any device with internet, open the
-     [activation page](https://jasna-activation.kruk2.workers.dev) (or click
-     **Open activation page**) and enter the Machine key and your License code.
-     You can also send both to where you got your License code.
-  3. Paste the **Activation key** you get back into Jasna and click
-     **Activate**.
+- **PC with a TPM 2.0 security chip** (most Windows 11 PCs): Jasna works
+  offline from then on. On Windows, a permission prompt may appear once; this
+  is a one-time license check for offline use. If you decline it, Jasna checks
+  online instead.
+- **Other PCs and rented GPUs**: Jasna checks your license online while it uses
+  supporter models, so keep the PC connected. If the connection drops, the
+  video that is running finishes; the queue stops if Jasna can't reach the
+  check for about an hour. Start it again once you are back online.
 
 Good to know:
 
 - One License code works on **3 devices at the same time**. Activating the
   same PC again does not use a new slot.
-- Windows: a new motherboard counts as a new PC and uses a slot. Reinstalling
-  Windows or changing the GPU, disk or RAM does not: just activate again. On a
-  few Windows PCs without a real motherboard ID, a new system disk also counts
-  as a new PC.
-- Linux: a device counts only while Jasna runs. "In use on 3 devices"? Close
+- Offline PCs keep their slot. Reinstalling the system or changing the GPU,
+  disk or RAM keeps it; a new motherboard or a security chip reset in the BIOS
+  counts as a new PC. To free a slot, ask where you got your License code.
+- Online devices count only while Jasna runs. "In use on 3 devices"? Close
   Jasna on another device and start again.
-- Moved from an older Jasna on Linux? Your activation carries over on the
-  first job. If it says the activation moved, enter your License code again.
-- An Activation key covers only the models you bought.
-- **Activate online** sends only your License code and Machine key. After
-  that, Jasna works offline.
-- Key rejected? Check the Machine key and copy the whole Activation key again.
-  Keys made for older Jasna versions need a new key from where you got your License code.
+- Linux with a security chip: Jasna asks you to run
+  `sudo usermod -aG tss $USER`. Log in again and activate again to work
+  offline.
+- Moved from an older Jasna? Your activation carries over on the first job. If
+  it says the activation moved, enter your License code again.
+- Activation sends only your License code and, for offline use, a one-time
+  check from the security chip.
 - Have an email and key from Jasna 0.10? That key no longer works. Get a new
   License code from where you bought it.
 

@@ -24,6 +24,6 @@ def require_protection() -> None:
 
 class LicenseCheckStopped(Exception):
     """A license check that every later paid-model job would also fail; ``code`` names the reason
-    (expired, offline, devices_full, token_not_found, already_converted, no_activation)."""
+    (expired, offline, devices_full, token_not_found, already_converted, no_activation, offline_check)."""
 
     code: str

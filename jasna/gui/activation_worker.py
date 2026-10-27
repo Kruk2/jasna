@@ -41,7 +41,10 @@ def read_license_info() -> tuple[str | None, bool, str | None]:
     from jasna.protection import license_store, signing
 
     if uses_online_lease():
-        return None, license_store.is_licensed(), None
+        from jasna.protection import offline
+
+        grant = offline.saved_grant()
+        return None, license_store.is_licensed(), grant[0] if grant is not None else None
 
     key = license_store.load_license()
     identity = None
@@ -100,6 +103,8 @@ def start_activation(key: str, on_done) -> threading.Thread:
 
 
 def start_lease_activation(code: str, on_done) -> threading.Thread:
+    """Calls ``on_done(Activated, error)``: offline on a certified TPM, else online leases."""
+
     def activate():
         require_protection()
         from jasna.protection import lease
