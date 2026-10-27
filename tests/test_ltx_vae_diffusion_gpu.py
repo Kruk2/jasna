@@ -90,16 +90,16 @@ def test_the_fused_diffusion_mlp_covers_every_token_chunk(monkeypatch):
 
 def _slab(core_len: int = 6):
     torch.manual_seed(0)
-    attn = T.NeighborhoodAttention3D(T.DIFFUSION_DIM, (3, 5, 11), head_dim=T.DIFFUSION_HEAD_DIM).cuda().bfloat16().eval()
+    attn = T.NeighborhoodAttention3D(T.DIFFUSION_DIM, (3, 5, 5), head_dim=T.DIFFUSION_HEAD_DIM).cuda().bfloat16().eval()
     norm = torch.nn.RMSNorm(T.DIFFUSION_DIM).cuda().bfloat16()
     with torch.no_grad():
         for parameter in (attn.q_norm.weight, attn.k_norm.weight, norm.weight):
             parameter.uniform_(0.5, 1.5)
     x = torch.randn(1, 4, 6, 16, T.DIFFUSION_DIM, device="cuda", dtype=torch.bfloat16)
     scale, shift = torch.randn(2, 1, 1, 1, 1, T.DIFFUSION_DIM, device="cuda", dtype=torch.bfloat16) * 0.1
-    left_halo = torch.randn(1, 4, 6, 5, T.DIFFUSION_DIM, device="cuda", dtype=torch.bfloat16)
-    columns = torch.arange(3, 3 + core_len + 5, device="cuda").clamp(max=15)
-    w_pos = torch.arange(core_len + 10, device="cuda", dtype=torch.float32) - 2
+    left_halo = torch.randn(1, 4, 6, 2, T.DIFFUSION_DIM, device="cuda", dtype=torch.bfloat16)
+    columns = torch.arange(3, 3 + core_len + 2, device="cuda").clamp(max=15)
+    w_pos = torch.arange(core_len + 4, device="cuda", dtype=torch.float32) - 2
     return attn, norm, left_halo, x, columns, w_pos, scale, shift, core_len, True
 
 
@@ -117,8 +117,7 @@ def test_fused_slab_qkv_matches_the_torch_slab(kernel):
 @pytest.mark.parametrize("kernel", SLAB_QKV_KERNELS)
 def test_the_fused_slab_qkv_compiles_into_the_slab_without_a_graph_break(kernel):
     slab = _slab()
-    slab[0].kernels = (T.decoder_kernels(torch.device("cuda")) if kernel is _jit_slab_qkv
-                       else T.DecoderKernels(slab_qkv=kernel))
+    slab[0].kernels = T.decoder_kernels(torch.device("cuda"))._replace(slab_qkv=kernel)
     torch._dynamo.reset()
     with torch.inference_mode():
         explanation = torch._dynamo.explain(T._attn_on_w_slab)(*slab)
