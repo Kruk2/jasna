@@ -944,8 +944,13 @@ def main() -> None:
         activated = "Jasna activated. The Activation key is saved on this machine."
         try:
             if args.license_code is not None and lease.enabled():
-                lease.activate_license_code(args.license_code)
-                activated = "Jasna activated. It checks your license online while it uses supporter models."
+                if sys.platform == "win32":
+                    print("Windows may ask for permission once. This is a one-time license check for offline use.")
+                result = lease.activate_license_code(args.license_code)
+                activated = ("Jasna activated. It works offline on this computer." if result.offline else
+                             "Jasna activated. It checks your license online while it uses supporter models.")
+                if result.tpm_needs_group:
+                    activated += "\nFor offline use run `sudo usermod -aG tss $USER` and log in again."
             elif args.license_code is not None:
                 from jasna.gui.locales import get_locale
 

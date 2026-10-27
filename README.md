@@ -161,21 +161,21 @@ GitHub.
 
 1. Support on one of the pages above. You get a **License code**.
 2. In Jasna, open **Activate Jasna**, enter the License code and press
-   **Activate** (Linux) or **Activate online** (Windows).
-3. Windows PC without internet, or it fails? Choose **Manual**, see
-   [Activate supporter models](docs/en/gui.md#activate-supporter-models).
+   **Activate**.
 
 One License code works on **3 devices at the same time**.
 
-- **Windows**: after activation, Jasna works offline. A new motherboard
-  counts as a new PC and uses one of your 3 slots. Reinstalling Windows or
-  changing the GPU, disk or RAM does not: just activate again with the same
-  License code. A few Windows PCs have no real motherboard ID; on those, a
-  new system disk also counts as a new PC.
-- **Linux**: Jasna checks your license online while it uses supporter models,
-  so keep the PC connected. A device counts only while Jasna runs; close it
-  and another device can start. Rented GPUs work the same way, see
+- **PC with a TPM 2.0 security chip** (most Windows 11 PCs): after
+  activation, Jasna works offline and the PC keeps one of your 3 slots.
+  Windows may ask for permission once; that is a one-time license check.
+  Reinstalling the system or changing the GPU, disk or RAM keeps the slot. A
+  new motherboard or a security chip reset in the BIOS counts as a new PC.
+- **Other PCs and rented GPUs**: Jasna checks your license online while it
+  uses supporter models, so keep the PC connected. A device counts only while
+  Jasna runs; close it and another device can start. See
   [Cloud GPUs](docs/en/cloud.md).
+- Linux with a security chip: to use it offline, run
+  `sudo usermod -aG tss $USER`, log in again and activate again.
 
 Have an email and key from Jasna 0.10? They no longer work. Get a new License
 code from where you bought it.

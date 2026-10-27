@@ -292,8 +292,8 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | オプション | 説明 |
 | ------ | ----- |
 | `--machine-key` | マシンキーを表示して終了します。GPU や GUI の起動は不要です。 |
-| `--license-code CODE` | GPU の準備前に、ライセンスコードでオンラインで有効化します。処理オプションがなければ有効化して終了します。Linux では、その後 Jasna が支援者向けモデルを使う間、ライセンスをオンラインで確認します。 |
-| `--cloud-workspace` | `--machine-key` と併用し、クラウドの識別情報を作成または再利用します。Linux で `--license-code` を使う場合は不要です。 |
+| `--license-code CODE` | GPU の準備前に、ライセンスコードで有効化します。処理オプションがなければ有効化して終了します。TPM 2.0 セキュリティチップのある PC では、その後オフラインで動きます。それ以外では、支援者向けモデルを使う間、ライセンスをオンラインで確認します。 |
+| `--cloud-workspace` | `--machine-key` と併用し、クラウドの識別情報を作成または再利用します。`--license-code` を使う場合は不要です。 |
 | `--activation-key KEY` | このマシンのアクティベーションキーを保存します。処理オプションがなければ有効化して終了します。 |
 
 オンラインでの有効化:
@@ -314,7 +314,10 @@ jasna --activation-key "YOUR_ACTIVATION_KEY"
 
 `--license-code` は `--machine-key` や `--activation-key` と併用しないでください。
 
-- Linux では、支援者向けモデルを使う間、ライセンスをオンラインで確認します。
+- TPM 2.0 セキュリティチップがあれば、有効化後はオフラインで動きます。Windows では
+  一度だけ許可を求めることがあります。これは一度きりのライセンス確認です。Linux で
+  `sudo usermod -aG tss $USER` が必要なときは、Jasna が知らせます。
+- それ以外では、支援者向けモデルを使う間、ライセンスをオンラインで確認します。
   台数に数えられるのは Jasna を動かしている間だけです。
 - レンタル GPU（RunPod、Vast）: `XDG_CONFIG_HOME` を残しておく非公開の
   フォルダーに設定します。このフォルダーに有効化の情報が入るので、毎回同じ

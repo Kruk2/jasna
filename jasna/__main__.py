@@ -40,6 +40,11 @@ if sys.argv[1:2] == ["--ltx-worker"]:
     worker_main()
     raise SystemExit(0)
 
+if sys.argv[1:2] == ["--tpm-activate"]:
+    from jasna.protection.offline import elevated_main
+
+    raise SystemExit(elevated_main(sys.argv[2:]))
+
 if len(sys.argv) >= 3 and sys.argv[1] == "--compile-engines":
     from jasna.engine_compiler import EngineCompilationRequest, _subprocess_compile
     _subprocess_compile(EngineCompilationRequest.from_json(sys.argv[2]))
