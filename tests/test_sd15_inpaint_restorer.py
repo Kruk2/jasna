@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import torch
 from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 import jasna.restorer.sd15_inpaint_restorer as sd15
 from jasna.engine_paths import SD15_CKPT_ENC_PATH, SD15_CKPT_PATH
@@ -75,3 +76,31 @@ def test_restore_crop_is_a_seeded_uint8_crop(tiny_model_dir):
     assert torch.equal(restore(7), first) and not torch.equal(restore(8), first)
     assert not torch.equal(restore(7, FREEU), first)
     assert torch.equal(restore(7), first)
+
+
+def test_amd_vae_round_trip_avoids_broken_fused_attention(tiny_model_dir, monkeypatch):
+    monkeypatch.setattr("jasna.accelerator.is_amd_device", lambda _device: True)
+    restorer = Sd15InpaintRestorer(tiny_model_dir, torch.device("cpu"), fp16=False)
+    pixels = torch.rand(1, 3, 64, 64, generator=torch.Generator().manual_seed(0))
+    reference = AutoencoderKL.from_pretrained(tiny_model_dir / "vae", low_cpu_mem_usage=False).eval()
+
+    def round_trip():
+        with torch.no_grad():
+            return restorer.vae.decode(restorer.vae.encode(pixels).latent_dist.mode()).sample
+
+    with torch.no_grad(), sdpa_kernel(SDPBackend.MATH):
+        expected = reference.decode(reference.encode(pixels).latent_dist.mode()).sample
+
+    attention = torch.nn.functional.scaled_dot_product_attention
+
+    def reject_fused_attention(*args, **kwargs):
+        if torch.backends.cuda.flash_sdp_enabled() or torch.backends.cuda.mem_efficient_sdp_enabled():
+            raise RuntimeError("hipErrorProfilerNotInitialized")
+        return attention(*args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.functional, "scaled_dot_product_attention", reject_fused_attention)
+    with sdpa_kernel([SDPBackend.MATH, SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
+        actual = round_trip()
+        assert torch.backends.cuda.flash_sdp_enabled()
+        assert torch.backends.cuda.mem_efficient_sdp_enabled()
+    torch.testing.assert_close(actual, expected)
