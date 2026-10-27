@@ -40,7 +40,7 @@ nvidia = [
   "torchvision==0.27.1+cu130",
   "tensorrt==10.16.1.11",
   "torch-tensorrt==2.12.0",
-  "nvidia-vfx",
+  "nvidia-vfx==0.2.0.0",
   # LTX self-attention kernel (INT8, prebuilt abi3 wheels for Linux and Windows).
   "comfy-kitchen==0.2.38",
   "scipy",
