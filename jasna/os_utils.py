@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 MIN_GPU_COMPUTE = (7, 5)
 MIN_DRIVER_VERSION = 580 if sys.platform == "linux" else 610
+MIN_AMD_WINDOWS_DRIVER = (32, 0, 31041, 5005)
+# AMD's loaded module version ends in the driver release: 30100200 = 30.10.2.
+MIN_AMD_LINUX_DRIVER_RELEASE = 30100200
 
 
 def get_application_executable() -> str:
@@ -355,14 +358,63 @@ def windows_module_loaded(name: str) -> bool:
     return bool(get_module_handle(name))
 
 
-def check_gpu_driver_version() -> tuple[bool, str]:
+def _check_amd_driver_version() -> tuple[bool | None, str]:
+    """None means the OS cannot identify a comparable driver version."""
+    if sys.platform == "win32":
+        powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        command = (
+            "$ErrorActionPreference = 'Stop'; "
+            "Get-CimInstance Win32_VideoController | "
+            "Where-Object { $_.PNPDeviceID -like 'PCI\\VEN_1002&*' -and $_.ConfigManagerErrorCode -eq 0 } | "
+            "Select-Object -ExpandProperty DriverVersion"
+        )
+        try:
+            result = subprocess.run(
+                [str(powershell), "-NoProfile", "-NonInteractive", "-Command", command],
+                capture_output=True, text=True, check=False, timeout=10,
+                **subprocess_no_window_kwargs(),
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            logger.warning("Could not query the AMD display driver: %s", error)
+            return None, "AMD driver version could not be checked; install the ROCm 10.1 driver"
+        versions = result.stdout.split()
+        if result.returncode or not versions or any(not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", v) for v in versions):
+            logger.warning("AMD driver query failed: %s %s", result.stdout, result.stderr)
+            return None, "AMD driver version could not be checked; install the ROCm 10.1 driver"
+        supported = {tuple(map(int, version.split("."))) >= MIN_AMD_WINDOWS_DRIVER for version in versions}
+        info = "AMD " + ", ".join(sorted(set(versions)))
+        if len(supported) != 1:
+            return None, f"{info}; mixed driver versions, compatibility could not be checked"
+        if False in supported:
+            return False, f"{info} (requires 32.0.31041.5005+; install AMD's ROCm 10.1 driver and reboot)"
+        return True, info
+
+    try:
+        version = Path("/sys/module/amdgpu/version").read_text().strip()
+    except OSError as error:
+        logger.warning("Could not read the loaded AMD driver version: %s", error)
+        return None, "AMD driver version could not be checked (distribution kernel or hidden sysfs)"
+    # In-kernel drivers have no AMD release number; kernel versions are not comparable.
+    match = re.fullmatch(r"\d+\.\d+\.\d+\.(\d{5}|\d{8})", version)
+    if not match:
+        return None, f"amdgpu {version}; compatibility could not be checked"
+    if int(match[1]) < MIN_AMD_LINUX_DRIVER_RELEASE:
+        return False, f"amdgpu {version} (requires AMD driver 30.10.2+ for ROCm 10.1; update the host driver and reboot)"
+    return True, f"amdgpu {version}"
+
+
+def check_gpu_driver_version() -> tuple[bool | None, str]:
+    """Return pass, failure or an unverified-version warning (None)."""
     import torch
 
     hip_version = torch.version.hip
     if hip_version:
+        driver_ok, driver_info = _check_amd_driver_version()
+        if driver_ok is False:
+            return False, f"ROCm {hip_version}; {driver_info}"
         if not torch.cuda.is_available():
             return False, f"ROCm {hip_version} is installed but no AMD GPU is available"
-        return True, f"ROCm {hip_version}"
+        return driver_ok, f"ROCm {hip_version}; {driver_info}"
 
     nvidia_smi = find_executable("nvidia-smi")
     if not nvidia_smi:

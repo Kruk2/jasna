@@ -73,6 +73,15 @@ uv pip install --system --break-system-packages -e ".[amd,dev]"
 Windows: use Python 3.12 and [AMD's driver for ROCm 10.1](https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-ROCM-10-01.html)
 (26.10.41.05; Windows driver version 32.0.31041.5005), then reboot.
 Release users only install the driver: Jasna bundles ROCm 10.1.
+
+The shared startup driver check reads Windows display-driver versions through
+`Win32_VideoController` (minimum 32.0.31041.5005). On Linux it checks the loaded
+`/sys/module/amdgpu/version` release identifier against AMD driver 30.10.2,
+the oldest driver supported by [AMD's compatibility matrix](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/compatibility/compatibility-matrix.html).
+Missing or unrecognized versions and mixed Windows driver support produce a
+warning, not a compatibility pass or a setup block. Distribution kernel versions
+and installed package versions cannot reliably identify the loaded AMD driver.
+
 For source development, install the matching PyTorch builds and GPU kernel
 packs from AMD's index:
 

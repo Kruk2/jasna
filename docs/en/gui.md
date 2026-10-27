@@ -101,6 +101,11 @@ On AMD it also checks AMD's AMF video runtime, which Jasna needs to read and
 write videos. To install the AMD driver and AMF, see
 [Quick start](../../README.md#quick-start).
 
+The AMD driver check stops setup when it detects an older driver: Windows needs
+32.0.31041.5005 or newer; AMD's Linux driver needs 30.10.2 or newer.
+If the version cannot be verified, including some Linux distribution drivers,
+Jasna shows a warning and lets you continue. This does not confirm compatibility.
+
 ## Other settings
 
 - **Language**: the first start uses your system language. Change it in the

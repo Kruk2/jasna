@@ -58,12 +58,16 @@ def _warm_up_cuda() -> tuple[AcceleratorVendor, bool]:
     An unsupported GPU gets no kernel launch; the system check reports it instead.
     Returns (GPU vendor, Blackwell GPU) for the LTX model options; CPU without a supported GPU."""
     from jasna.os_utils import check_supported_gpu
+    from jasna.accelerator import supports_nvfp4, vendor_for_device
 
+    if vendor_for_device() is AcceleratorVendor.AMD:
+        driver_ok, _ = os_utils.check_gpu_driver_version()
+        if driver_ok is False:
+            return AcceleratorVendor.CPU, False
     gpu_ok, _ = check_supported_gpu()
     if not gpu_ok:
         return AcceleratorVendor.CPU, False
     import torch
-    from jasna.accelerator import supports_nvfp4, vendor_for_device
 
     torch.zeros(1, device="cuda")
     vendor = vendor_for_device()
@@ -536,7 +540,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             return
         if all_passed:
             self._preset_manager.set_system_check_passed_version(__version__)
-        self._log_panel.info(t("wizard_log_ready"))
+            self._log_panel.info(t("wizard_log_ready"))
+        else:
+            self._log_panel.warning(t("wizard_warnings_only"))
 
     def _on_system_check_complete(self, can_continue: bool, all_passed: bool = False):
         """Dismissing a re-run system check only closes the dialog; it never quits the app."""
@@ -544,7 +550,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             return
         if all_passed:
             self._preset_manager.set_system_check_passed_version(__version__)
-        self._log_panel.info(t("wizard_log_ready"))
+            self._log_panel.info(t("wizard_log_ready"))
+        else:
+            self._log_panel.warning(t("wizard_warnings_only"))
             
     def _on_jobs_changed(self):
         jobs = self._queue_panel.get_jobs()

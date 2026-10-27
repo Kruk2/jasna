@@ -482,7 +482,7 @@ EN = {
         "wizard_not_found": "Not found in PATH",
         "wizard_all_passed": "✓ All checks passed! You're ready to go.",
         "wizard_required_failed": "✕ Required checks failed. Fix the issues above to use Jasna.",
-        "wizard_warnings_only": "✓ Ready to go. Some optional checks have warnings.",
+        "wizard_warnings_only": "Some checks have warnings. You can continue, but review them first.",
         "btn_get_started": "Get started",
         "btn_exit": "Exit",
         "wizard_log_ready": "System check passed — ready to process.",

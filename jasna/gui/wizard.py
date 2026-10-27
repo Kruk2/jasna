@@ -244,7 +244,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             passed, info = self._check_results.get(key, (False, t("wizard_not_checked")))
             if passed:
                 icon, color = "✓", Colors.STATUS_COMPLETED
-            elif key in WARNING_ONLY_CHECKS:
+            elif key in WARNING_ONLY_CHECKS or (key == "driver" and passed is None):
                 icon, color = "⚠", Colors.STATUS_WARNING
             else:
                 icon, color = "✕", Colors.STATUS_ERROR

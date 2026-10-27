@@ -482,7 +482,7 @@ ZH = {
         "wizard_not_found": "未在 PATH 中找到",
         "wizard_all_passed": "✓ 所有检查已通过！可以开始使用了。",
         "wizard_required_failed": "✕ 必要检查未通过。请先解决以上问题才能使用 Jasna。",
-        "wizard_warnings_only": "✓ 可以使用。部分可选检查有警告。",
+        "wizard_warnings_only": "部分检查有警告。可以继续，但请先查看警告内容。",
         "btn_get_started": "开始使用",
         "btn_exit": "退出",
         "wizard_log_ready": "系统检查通过——可以开始处理。",

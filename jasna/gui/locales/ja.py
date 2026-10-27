@@ -482,7 +482,7 @@ JA = {
         "wizard_not_found": "PATH に見つかりません",
         "wizard_all_passed": "✓ すべてのチェックに合格しました！準備完了です。",
         "wizard_required_failed": "✕ 必須チェックが失敗しました。Jasna を使用するには上記の問題を解決してください。",
-        "wizard_warnings_only": "✓ 使用可能です。一部のオプションチェックに警告があります。",
+        "wizard_warnings_only": "一部のチェックに警告があります。続行できますが、先に内容を確認してください。",
         "btn_get_started": "開始する",
         "btn_exit": "終了",
         "wizard_log_ready": "システムチェック合格——処理を開始できます。",
