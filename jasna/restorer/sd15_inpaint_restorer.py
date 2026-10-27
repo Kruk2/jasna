@@ -13,7 +13,9 @@ from diffusers import (
     DPMSolverMultistepScheduler,
     UNet2DConditionModel,
 )
+from diffusers.models.attention_processor import AttnProcessor
 
+from jasna import accelerator
 from jasna._frozen import is_frozen
 from jasna.engine_paths import SD15_CKPT_ENC_PATH, SD15_CKPT_PATH
 
@@ -86,6 +88,9 @@ class Sd15InpaintRestorer:
             .to(self.device)
             .eval()
         )
+        if accelerator.is_amd_device(self.device):
+            # ROCm fused SDPA can fail in the VAE; keep both encode and decode on math attention.
+            self.vae.set_attn_processor(AttnProcessor())
 
         ddpm_config = DDPMScheduler.from_pretrained(
             self.model_dir / "scheduler",
