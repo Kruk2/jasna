@@ -22,6 +22,13 @@ needs_bf16_sdpa = pytest.mark.skipif(
     torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8,
     reason="the bf16 SDPA self-attention these blocks run needs SM 8.0",
 )
+# The reference these compare against is cuBLAS, so "bit-exact" is a statement
+# about the NVIDIA path only; a ROCm host runs its own GEMM with its own
+# accumulation order and can differ in the last bit without either side being wrong.
+needs_cublas = pytest.mark.skipif(
+    not torch.cuda.is_available() or torch.version.hip is not None,
+    reason="bit-exactness is asserted against cuBLAS, which only exists on NVIDIA",
+)
 needs_blackwell = pytest.mark.skipif(
     not torch.cuda.is_available() or torch.version.cuda is None or torch.cuda.get_device_capability()[0] != 12,
     reason="NVFP4 needs consumer Blackwell",
@@ -86,6 +93,7 @@ def test_int8_residual_mm_adds_the_gated_projection_per_half(kernels):
     torch.testing.assert_close(out.float(), expected, atol=1e-2, rtol=1e-2)
 
 
+@needs_cublas
 def test_int8_scaled_mm_is_bit_exact_with_the_reference_rescale(kernels, monkeypatch):
     monkeypatch.setattr(T, "_quant_kernels", None)
     generator = torch.Generator().manual_seed(0)
@@ -105,6 +113,7 @@ def test_int8_scaled_mm_is_bit_exact_with_the_reference_rescale(kernels, monkeyp
         assert torch.allclose(gelu, expected, rtol=2**-7, atol=2**-7)
 
 
+@needs_cublas
 def test_cublas_gemm_with_triton_epilogue_is_bit_exact(kernels, monkeypatch):
     monkeypatch.setattr(kernels, "_cached_gpu_architecture", lambda device: next(iter(kernel_policy.CUBLAS_INT8_MM)))
     test_int8_scaled_mm_is_bit_exact_with_the_reference_rescale(kernels, monkeypatch)

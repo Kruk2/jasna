@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from pathlib import Path
 from tkinter import TclError, messagebox
@@ -42,6 +43,30 @@ def _install(directory: Path, model: str, *, fast: bool) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     for name in bundle_names(model, fast=fast):
         (directory / name).touch()
+
+
+def _fake_sizes(monkeypatch, sizes: dict[str, int]) -> None:
+    """Report the given byte counts for those file names without writing them.
+
+    The check under test only reads ``st_size``, and these files are 7.7 and
+    13.4 GB. Creating them for real turned this file into a multi-minute disk
+    write on Windows (``truncate`` allocates there, sparse attribute or not) and
+    could fail on a full volume, so the size is supplied instead of stored.
+    """
+    real_stat = Path.stat
+
+    def stat(self, *args, **kwargs):
+        info = real_stat(self, *args, **kwargs)
+        override = sizes.get(self.name)
+        if override is None:
+            return info
+        class _Fake:
+            st_mode = info.st_mode
+            st_size = override
+            st_mtime = info.st_mtime
+        return _Fake()
+
+    monkeypatch.setattr(Path, "stat", stat)
 
 
 @pytest.fixture(autouse=True)
@@ -163,9 +188,17 @@ def test_ensure_warns_before_replacing_models_from_older_release(tmp_path, monke
     monkeypatch.setattr(model_files, "is_frozen", lambda: True)
     monkeypatch.setattr(ltx_models_module, "t", lambda key, **values: EN[key].format(**values))
     names = bundle_names("distilled2", fast=fast)
-    for index, name in enumerate(names):
-        with (tmp_path / (name + ".enc")).open("wb") as stream:
-            stream.truncate(old_size if index == 0 else model_files.LTX_DOWNLOADS[name].size_bytes)
+    for name in names:
+        (tmp_path / (name + ".enc")).touch()
+    # Only the first file is stale; the rest must still read as current, which is
+    # what makes the "1 missing" assertion mean anything.
+    _fake_sizes(monkeypatch, {
+        names[0] + ".enc": old_size,
+        **{
+            name + ".enc": model_files.LTX_DOWNLOADS[name].size_bytes
+            for name in names[1:]
+        },
+    })
     asked = _answer(monkeypatch, yes=False)
     downloads = _fake_download(monkeypatch, error=None)
     models = LtxModels(tmp_path, _NowCalls(), lambda: None)

@@ -126,10 +126,12 @@ def test_extension_sources_look_up_no_launchers_at_runtime():
     assert {path.name for path in sources} >= {
         "block.cpp", "glue.cu", *native._ATTENTION_SOURCES, *(path.name for path in native._HIP_ATTENTION_SOURCES)}
     for path in sources:
-        text = path.read_text()
+        # The sources are UTF-8; the default encoding on a Windows host is the
+        # ANSI code page, which cannot decode them.
+        text = path.read_text(encoding="utf-8")
         for lookup in ("dlopen", "dlsym", "GetProcAddress", "GetModuleHandle", 'extern "C" void', "kitchen_library"):
             assert lookup not in text, f"{path.name} uses {lookup}"
-    assert '"launch_' not in (native._HERE / "block.cpp").read_text()
+    assert '"launch_' not in (native._HERE / "block.cpp").read_text(encoding="utf-8")
 
 
 def test_package_data_ships_every_native_source():
@@ -468,15 +470,20 @@ def test_shipped_kernels_must_fit_the_models_widths_and_gpu(monkeypatch, tmp_pat
 
 
 @pytest.mark.parametrize("frozen,windows,expected", [
-    (False, False, native._HERE / "prebuilt"),
-    (True, True, native._HERE / "prebuilt"),
-    (True, False, Path("/opt/dist/ltx/native/prebuilt")),
+    (False, False, "beside_package"),
+    (True, True, "beside_package"),
+    (True, False, "beside_executable"),
 ])
 def test_frozen_linux_release_ships_the_prebuilt_block_beside_its_executable(monkeypatch, frozen, windows, expected):
     monkeypatch.setattr(native, "is_frozen", lambda: frozen)
     monkeypatch.setattr(native, "_IS_WINDOWS", windows)
     monkeypatch.setattr(native.sys, "executable", "/opt/dist/jasna")
-    assert native._prebuilt_directory() == expected
+    # ``Path("/opt/dist/jasna")`` is absolute only on the platform that owns that
+    # layout, so the expected value is built through the same two expressions the
+    # code uses (resolve, then join) rather than as a literal.
+    want = (native._HERE / "prebuilt" if expected == "beside_package"
+            else Path("/opt/dist/jasna").resolve().parent / "ltx" / "native" / "prebuilt")
+    assert native._prebuilt_directory() == want
 
 
 def test_native_block_and_its_policy_import_without_triton():
@@ -673,4 +680,6 @@ def test_amd_extension_builds_host_sources_only_so_nothing_is_hipified(monkeypat
     built = native._build_extension(tmp_path / "build")
     assert built["sources"] == [str(native._HERE / "module.cpp"), str(native._HERE / "block.cpp")]
     assert built["extra_ldflags"] == ["-L/torch/lib", "-lamdhip64", "-lc10_hip", "-ltorch_hip", *map(str, objects)]
-    assert built["extra_include_paths"] == ["/rocm/include"]
+    # ``Path("/rocm") / "include"`` renders with the running platform's separator;
+    # the flag itself is what matters, not the spelling of the path.
+    assert built["extra_include_paths"] == [str(Path("/rocm") / "include")]

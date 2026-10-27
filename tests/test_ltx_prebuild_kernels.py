@@ -117,6 +117,9 @@ def test_prebuild_delegates_then_preserves_extension_copy_and_cleanup(monkeypatc
     monkeypatch.setattr(native, "prebuild_kernels", lambda path: calls.append(("kernels", path)))
     monkeypatch.setattr(native, "cuda_arch_list", lambda: "7.5;8.6;8.9;12.0;12.1")
     monkeypatch.setenv("TORCH_CUDA_ARCH_LIST", "previous")
+    # Pin the host: Windows keeps the loaded .pyd locked and deliberately skips
+    # the build-directory cleanup, so the expected call list depends on it.
+    monkeypatch.setattr(native, "_IS_WINDOWS", False)
     _vendor(monkeypatch, None)
 
     def extension(path):
@@ -131,6 +134,21 @@ def test_prebuild_delegates_then_preserves_extension_copy_and_cleanup(monkeypatc
                      ("extension", directory / "build", "7.5;8.6;8.9;12.0;12.1"),
                      ("copy", module.__file__, directory / "jasna_ltx_native.pyd"),
                      ("cleanup", directory / "build")]
+
+
+def test_prebuild_keeps_the_build_directory_locked_on_windows(monkeypatch):
+    """Windows cannot delete a loaded .pyd, so the release caller is responsible."""
+    directory = Path("owned-windows-prebuild")
+    module = SimpleNamespace(__file__=str(directory / "build" / "jasna_ltx_native.pyd"))
+    calls = []
+    monkeypatch.setattr(native, "prebuild_kernels", lambda path: None)
+    monkeypatch.setattr(native, "cuda_arch_list", lambda: "7.5")
+    monkeypatch.setattr(native, "_IS_WINDOWS", True)
+    monkeypatch.setattr(native, "_build_extension", lambda path: module)
+    monkeypatch.setattr(native.shutil, "copy2", lambda source, target: calls.append("copy"))
+    monkeypatch.setattr(native.shutil, "rmtree", lambda path: calls.append("cleanup"))
+    native.prebuild(directory)
+    assert calls == ["copy"]
 
 
 def test_prebuild_kernel_failure_prevents_extension_and_env_change(monkeypatch):

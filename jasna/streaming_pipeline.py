@@ -37,9 +37,13 @@ class _StreamingFrameWriter:
         if frames_written == 1:
             log.debug("[stream-blend-encode] first frame encoded: %.2fs", time.monotonic() - self._t0)
         elif frames_written % 100 == 0:
+            # ``monotonic()`` advances in whole scheduler ticks on Windows (~15.6 ms),
+            # so the first hundred frames of a fast run can land in the same tick and
+            # the rate would divide by zero.
+            elapsed = max(time.monotonic() - self._t0, 1e-6)
             log.debug(
                 "[stream-blend-encode] %d frames encoded (%.1f fps)",
-                frames_written, frames_written / (time.monotonic() - self._t0),
+                frames_written, frames_written / elapsed,
             )
 
         current_seg = self._start_segment + frames_written // self._frames_per_seg

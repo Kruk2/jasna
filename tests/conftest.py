@@ -95,6 +95,28 @@ def nvidia_vendor(monkeypatch):
     monkeypatch.setattr(torch.version, "cuda", "13.0")
 
 
+@pytest.fixture(autouse=True)
+def _reset_locale_after_test():
+    """Keep one test's UI language from changing another's expected strings.
+
+    ``LocaleManager`` reads the language from the real ``settings.json`` on first
+    use, so on a machine whose GUI is in Chinese every assertion written against
+    the English strings sees Chinese. Tests that switch language also do it on the
+    shared manager, and a plain ``monkeypatch.setattr`` on ``_current_lang`` only
+    restores the value it saw - not the one a previous test wrote. Resetting to
+    English before each test makes the expectation independent of both.
+    """
+    from jasna.gui import locales
+
+    manager = locales.get_locale()
+    previous = manager.current_language
+    manager._current_lang = "en"
+    try:
+        yield
+    finally:
+        manager._current_lang = previous
+
+
 @pytest.fixture
 def no_gpu_cleanup(monkeypatch):
     """Skip the per-job torch cleanup: it initializes CUDA, which can outlast thread joins in a busy run."""
