@@ -12,6 +12,7 @@ from pathlib import Path
 import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
+from jasna.media.lut import GpuLutApplier, parse_cube_file
 from jasna.media.audio_utils import aac_reencode_args, needs_audio_reencode, source_audio_codec
 from jasna.media.probe import VideoMetadata
 from jasna.os_utils import find_executable, subprocess_no_window_kwargs
@@ -40,12 +41,14 @@ class StreamingEncoder:
         metadata: VideoMetadata,
         source_video: str,
         device: torch.device | None = None,
+        lut_path: str | None = None,
     ):
         self.segments_dir = Path(segments_dir)
         self.segment_duration = float(segment_duration)
         self.metadata = metadata
         self.source_video = source_video
         self._vendor = vendor_for_device(device)
+        self._lut_applier = GpuLutApplier(parse_cube_file(lut_path), device) if lut_path else None
 
         self._width = metadata.video_width
         self._height = metadata.video_height
@@ -101,6 +104,8 @@ class StreamingEncoder:
         if not self._started:
             return
         if frame.dim() == 3 and frame.shape[0] == 3:
+            if self._lut_applier is not None:
+                frame = self._lut_applier.apply(frame)
             raw = frame.permute(1, 2, 0).contiguous().cpu().numpy().tobytes()
         else:
             raw = frame.cpu().numpy().tobytes()
