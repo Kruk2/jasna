@@ -79,7 +79,7 @@ def license_missing(directory: Path, model: LtxModelName, fast: bool) -> bool:
 
     try:
         if model_files.needs_license(directory, model, fast=fast):
-            if not read_license_info()[1]:
+            if not read_license_info()[0]:
                 return True
             from jasna.protection.protected_tensors import check_saved_ltx_license
 

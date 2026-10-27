@@ -26,80 +26,18 @@ def _start(
     return thread
 
 
-def uses_online_lease() -> bool:
-    """Whether this platform activates with the License code alone and checks it online during paid-model work."""
+def read_license_info() -> tuple[bool, str | None]:
+    """Whether Jasna is activated, and the offline activation's identity when it has one."""
     if not protection_available():
-        return False
-    from jasna.protection import lease
+        return False, None
+    from jasna.protection import license_store, offline
 
-    return lease.enabled()
-
-
-def read_license_info() -> tuple[str | None, bool, str | None]:
-    if not protection_available():
-        return None, False, None
-    from jasna.protection import license_store, signing
-
-    if uses_online_lease():
-        from jasna.protection import offline
-
-        grant = offline.saved_grant()
-        return None, license_store.is_licensed(), grant[0] if grant is not None else None
-
-    key = license_store.load_license()
-    identity = None
-    if key:
-        try:
-            proof, _ = signing.decode_license(key)
-            identity = signing.license_identity(proof)
-        except ValueError:
-            identity = None
-    licensed = not (identity is not None and identity.startswith("JW1-")) and license_store.is_licensed()
-    return key, licensed, identity
+    grant = offline.saved_grant()
+    return license_store.is_licensed(), grant[0] if grant is not None else None
 
 
 def start_license_info(on_done) -> threading.Thread:
     return _start(read_license_info, on_done)
-
-
-def start_device_count(key: str, on_done) -> threading.Thread:
-    from jasna.gui.locales import get_locale
-
-    prefer_hong_kong = get_locale().current_language == "zh"
-
-    def read():
-        require_protection()
-        from jasna.protection import activation
-
-        return activation.get_device_count(key, prefer_hong_kong=prefer_hong_kong)
-
-    return _start(read, on_done)
-
-
-def start_machine_key(on_done) -> threading.Thread:
-    def read():
-        require_protection()
-        from jasna.protection import machine
-
-        return machine.machine_key(cloud_workspace=False)
-
-    return _start(read, on_done)
-
-
-def start_activation(key: str, on_done) -> threading.Thread:
-    def activate():
-        require_protection()
-        from jasna.protection import license_store, signing
-        from jasna.gui.locales import t
-
-        proof, _ = license_store._decode(key)
-        identity = signing.license_identity(proof)
-        if identity.startswith("JW1-"):
-            raise ValueError(t("license_cloud_cli_only"))
-        license_store.set_license(key)
-        return identity
-
-    return _start(activate, on_done)
 
 
 def start_lease_activation(code: str, on_done) -> threading.Thread:
@@ -110,24 +48,5 @@ def start_lease_activation(code: str, on_done) -> threading.Thread:
         from jasna.protection import lease
 
         return lease.activate_license_code(code)
-
-    return _start(activate, on_done)
-
-
-def start_online_activation(code: str, machine_key: str, on_done) -> threading.Thread:
-    from jasna.gui.locales import get_locale
-
-    prefer_hong_kong = get_locale().current_language == "zh"
-
-    def activate():
-        require_protection()
-        from jasna.protection import activation, signing
-        from jasna.gui.locales import t
-
-        if machine_key.startswith("JW1-"):
-            raise ValueError(t("license_cloud_cli_only"))
-        key = activation.activate_license_code(code, machine_key, prefer_hong_kong=prefer_hong_kong)
-        proof, _ = signing.decode_license(key)
-        return key, signing.license_identity(proof)
 
     return _start(activate, on_done)

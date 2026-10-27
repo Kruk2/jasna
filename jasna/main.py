@@ -373,26 +373,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     license_group = parser.add_argument_group("Activation")
     license_group.add_argument(
-        "--machine-key",
-        action="store_true",
-        help=CLI_HELP["machine_key"],
-    )
-    license_group.add_argument(
-        "--cloud-workspace",
-        action="store_true",
-        help=CLI_HELP["cloud_workspace"],
-    )
-    activation_input = license_group.add_mutually_exclusive_group()
-    activation_input.add_argument(
         "--license-code",
         type=str,
         help=CLI_HELP["license_code"],
-    )
-    activation_input.add_argument(
-        "--activation-key",
-        type=str,
-        default=None,
-        help=CLI_HELP["activation_key"],
     )
 
     rtx = parser.add_argument_group("RTX Super Res")
@@ -921,47 +904,24 @@ def _reject_options_of_other_restoration_backend(
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    if args.cloud_workspace and not args.machine_key and args.license_code is None:
-        parser.error("--cloud-workspace needs --machine-key or --license-code")
-    if args.machine_key and (args.activation_key is not None or args.license_code is not None):
-        parser.error("--machine-key cannot be combined with --activation-key or --license-code")
-    if args.machine_key or args.activation_key is not None or args.license_code is not None:
+    if args.license_code is not None:
         from jasna.license_api import ProtectionUnavailableError, require_protection
 
         try:
             require_protection()
         except ProtectionUnavailableError as exc:
             parser.exit(1, f"Activation error: {exc}\n")
-    if args.machine_key:
-        from jasna.protection import ProtectionError, machine
+        from jasna.protection import ProtectionError, lease
+        if sys.platform == "win32":
+            print("Windows may ask for permission once. This is a one-time license check for offline use.")
         try:
-            print(machine.machine_key(cloud_workspace=args.cloud_workspace))
+            result = lease.activate_license_code(args.license_code)
         except (ProtectionError, OSError) as exc:
             parser.exit(1, f"Activation error: {exc}\n")
-        return
-    if args.activation_key is not None or args.license_code is not None:
-        from jasna.protection import ProtectionError, activation, lease, license_store, machine
-        activated = "Jasna activated. The Activation key is saved on this machine."
-        try:
-            if args.license_code is not None and lease.enabled():
-                if sys.platform == "win32":
-                    print("Windows may ask for permission once. This is a one-time license check for offline use.")
-                result = lease.activate_license_code(args.license_code)
-                activated = ("Jasna activated. It works offline on this computer." if result.offline else
-                             "Jasna activated. It checks your license online while it uses supporter models.")
-                if result.tpm_needs_group:
-                    activated += "\nFor offline use run `sudo usermod -aG tss $USER` and log in again."
-            elif args.license_code is not None:
-                from jasna.gui.locales import get_locale
-
-                activation.activate_license_code(
-                    args.license_code, machine.machine_key(cloud_workspace=args.cloud_workspace),
-                    prefer_hong_kong=get_locale().current_language == "zh",
-                )
-            else:
-                license_store.set_license(args.activation_key.strip())
-        except (ProtectionError, OSError) as exc:
-            parser.exit(1, f"Activation error: {exc}\n")
+        activated = ("Jasna activated. It works offline on this computer." if result.offline else
+                     "Jasna activated. It checks your license online while it uses supporter models.")
+        if result.tpm_needs_group:
+            activated += "\nFor offline use run `sudo usermod -aG tss $USER` and log in again."
         print(activated)
         if args.input is None and not args.stream and not args.benchmark:
             return

@@ -27,11 +27,10 @@ def test_xianyu_seller_shown_only_in_chinese():
     assert not any(shows_xianyu_seller(lang) for lang in ("en", "ja", "ko", "th"))
 
 
-def test_official_seller_texts_name_xianyu_only_in_chinese_and_english():
+def test_official_seller_text_names_xianyu_only_in_chinese_and_english():
     for lang, strings in TRANSLATIONS.items():
         names_xianyu = lang in ("zh", "en")
         assert ("闲鱼" in strings["license_official_sellers"]) is names_xianyu, lang
-        assert ("闲鱼" in strings["license_forged"]) is names_xianyu, lang
 
 
 def test_support_buttons_do_not_depend_on_emoji_fonts(tk_root):
