@@ -78,7 +78,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   [LTX を手動でダウンロードする](#ltx-を手動でダウンロードする)を見てください。
 
 LTX は VR180 サイドバイサイド動画とストリーミングでは使えません。LTX では
-二次復元とノイズ除去はオフになります。
+二次復元とノイズ除去はオフになります。**大きなモザイクだけ LTX**
+（`--ltx-auto-split`）では、BasicVSR++ で復元する小さなモザイクに二次復元が使われます。
 
 ESET をお使いの場合: LTX が起動せず、メッセージに `ebehmonl.dll` または
 `ebehmoni.dll` が出るときは、ESET のディープビヘイビアインスペクション

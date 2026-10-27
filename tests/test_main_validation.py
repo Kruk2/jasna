@@ -86,6 +86,17 @@ def test_ltx_auto_split_without_a_split_runs_the_whole_video(tmp_path):
     assert pipeline_cls.call_args.kwargs["config"].codec == "hevc"
 
 
+def test_ltx_auto_split_passes_secondary_restoration_for_the_basicvsrpp_parts(tmp_path):
+    with patch("jasna.session_factory.ltx_auto_split", return_value=None), _ltx_installed():
+        pipeline_cls = run_cli(cli_args(
+            tmp_path, "--restoration-model-name", "ltx", "--ltx-auto-split", "12",
+            "--secondary-restoration", "rtx-super-res", "--denoise", "low",
+        ))
+
+    config = pipeline_cls.call_args.kwargs["config"]
+    assert (config.secondary_restoration, config.denoise_strength) == ("rtx-super-res", "low")
+
+
 def test_ltx_trial_needs_no_model_files_or_download(tmp_path, capsys):
     with (
         patch("jasna.accelerator.is_nvidia_device", return_value=True),
@@ -174,7 +185,7 @@ def test_usage_error_is_one_short_message(tmp_path, capsys):
     ("args", "missing", "error"),
     [
         (["--restoration-model-name", "ltx-undistilled", "--denoise", "low"], (),
-         "--restoration-model-name ltx-undistilled does not support --denoise"),
+         "--restoration-model-name ltx-undistilled supports --denoise only with --ltx-auto-split"),
         ([], ("--input",), "input not found"),
     ],
 )

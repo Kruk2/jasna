@@ -261,7 +261,7 @@ def _select_ltx(panel) -> None:
 
 def test_ltx_hides_standard_only_settings_and_restores_them(panel_factory) -> None:
     panel = panel_factory(True)
-    secondary = panel._model_aware_sections[2]
+    secondary = panel._secondary_section
     panel.update_idletasks()
     clip_row = panel._widgets["max_clip_size"].master
     overlap_row = panel._widgets["temporal_overlap"].master
@@ -283,6 +283,18 @@ def test_ltx_hides_standard_only_settings_and_restores_them(panel_factory) -> No
     assert not panel._model_section._ltx_options.winfo_manager()
     order = panel._scroll.pack_slaves()
     assert order.index(secondary._section) == order.index(secondary._previous_section) + 1
+
+
+def test_ltx_auto_split_shows_secondary_restoration_for_the_basicvsrpp_parts(panel_factory) -> None:
+    panel = panel_factory(True)
+    secondary = panel._secondary_section._section
+    _select_ltx(panel)
+
+    panel._widgets["ltx_auto_split"]._toggle()
+    assert secondary.winfo_manager()
+
+    panel._widgets["ltx_auto_split"]._toggle()
+    assert not secondary.winfo_manager()
 
 
 def test_ltx_without_model_files_runs_as_a_trial(panel_factory, monkeypatch) -> None:

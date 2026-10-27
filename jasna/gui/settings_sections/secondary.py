@@ -259,11 +259,11 @@ class SecondarySection:
         elif secondary == "rtx-super-res":
             self._rtx_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
 
-    def set_model(self, model: str) -> None:
-        if model == "ltx":
-            self._section.pack_forget()
-        else:
+    def set_visible(self, visible: bool) -> None:
+        if visible:
             self._section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL), after=self._previous_section)
+        else:
+            self._section.pack_forget()
 
     def set_enabled(self, enabled: bool) -> None:
         state = "normal" if enabled else "disabled"
