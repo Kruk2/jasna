@@ -12,6 +12,7 @@ from pathlib import Path
 import av
 
 from jasna.accelerator import AcceleratorVendor
+from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.media.probe import VideoMetadata, resolve_video_start_pts
 from jasna.media.audio_utils import aac_reencode_args, needs_audio_reencode
 from jasna.media.container_utils import (
@@ -141,7 +142,11 @@ def validate_smart_render(
         raise SmartRenderCompatibilityError(
             f"Smart rendering supports MP4, MOV, and MKV output, not {suffix or 'an extensionless file'}"
         )
-    if retarget_high_fps:
+    if resolve_frame_rate_retarget(
+        metadata.video_fps_exact,
+        enabled=retarget_high_fps,
+        measured_fps=metadata.average_fps,
+    ).active:
         raise SmartRenderCompatibilityError(
             "Smart rendering cannot be combined with frame-rate retargeting"
         )

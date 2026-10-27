@@ -300,7 +300,7 @@ def test_validation_rejects_unsupported_h264_profile() -> None:
         )
 
 
-def test_validation_rejects_vfr_and_retargeting() -> None:
+def test_validation_rejects_vfr_and_active_retargeting() -> None:
     with pytest.raises(SmartRenderCompatibilityError, match="constant-frame-rate"):
         validate_smart_render(
             _metadata(average_fps=29.0),
@@ -308,13 +308,22 @@ def test_validation_rejects_vfr_and_retargeting() -> None:
             codec="h264",
             retarget_high_fps=False,
         )
+    fps = Fraction(60_000, 1_001)
     with pytest.raises(SmartRenderCompatibilityError, match="frame-rate retargeting"):
         validate_smart_render(
-            _metadata(),
+            _metadata(video_fps=float(fps), average_fps=float(fps), video_fps_exact=fps),
             output_path="out.mp4",
             codec="h264",
             retarget_high_fps=True,
         )
+
+
+@pytest.mark.parametrize("fps", [Fraction(30, 1), Fraction(30_000, 1_001)])
+def test_validation_allows_retarget_option_when_source_rate_is_unchanged(fps: Fraction) -> None:
+    metadata = _metadata(video_fps=float(fps), average_fps=float(fps), video_fps_exact=fps)
+    assert validate_smart_render(
+        metadata, output_path="out.mp4", codec="h264", retarget_high_fps=True
+    ) == "h264"
 
 
 def test_random_access_classifier_distinguishes_hevc_idr_from_cra() -> None:
