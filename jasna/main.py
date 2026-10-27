@@ -649,16 +649,18 @@ def _check_system(args: argparse.Namespace) -> None:
 
     check_required_executables()
 
-    gpu_ok, gpu_result = check_supported_gpu(str(args.device))
-    if not gpu_ok:
-        print(f"Error: {gpu_check_error(gpu_result)}")
-        sys.exit(1)
-
     driver_ok, driver_info = check_gpu_driver_version()
-    if not driver_ok:
+    if driver_ok is False:
         print(f"Error: GPU driver version check failed: {driver_info}")
         if "ROCm" not in driver_info:
             print(f"Please update your NVIDIA driver to version {MIN_DRIVER_VERSION} or newer.")
+        sys.exit(1)
+    if driver_ok is None:
+        print(f"Warning: {driver_info}")
+
+    gpu_ok, gpu_result = check_supported_gpu(str(args.device))
+    if not gpu_ok:
+        print(f"Error: {gpu_check_error(gpu_result)}")
         sys.exit(1)
 
     from jasna.accelerator import is_amd_device, is_nvidia_device

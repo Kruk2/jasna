@@ -482,7 +482,7 @@ KO = {
         "wizard_not_found": "PATH에서 찾을 수 없음",
         "wizard_all_passed": "✓ 모든 점검을 통과했습니다! 사용할 준비가 되었습니다.",
         "wizard_required_failed": "✕ 필수 점검이 실패했습니다. Jasna를 사용하려면 위의 문제를 해결하세요.",
-        "wizard_warnings_only": "✓ 사용 가능합니다. 일부 선택적 점검에 경고가 있습니다.",
+        "wizard_warnings_only": "일부 점검에 경고가 있습니다. 계속할 수 있지만 먼저 내용을 확인하세요.",
         "btn_get_started": "시작하기",
         "btn_exit": "종료",
         "wizard_log_ready": "시스템 점검 통과 — 처리를 시작할 수 있습니다.",

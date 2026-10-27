@@ -24,14 +24,16 @@ def test_elapsed_ms_is_monotonic_nonnegative():
         ({"ascii_path": (True, "")}, ["ascii_path", "gpu", "cuda"], (False, True)),
         ({"gpu": (True, ""), "sysmem": (False, "")}, None, (False, False)),
         ({"gpu": (True, ""), "amf": (False, "")}, None, (False, True)),
+        ({"gpu": (True, ""), "driver": (None, "unknown driver")}, None, (False, False)),
+        ({"gpu": (True, ""), "driver": (False, "old driver")}, None, (False, True)),
     ],
-    ids=["all-passed", "missing-check", "sysmem-warning-only", "amf-blocks"],
+    ids=["all-passed", "missing-check", "sysmem-warning-only", "amf-blocks", "unknown-driver-warns", "old-driver-blocks"],
 )
 def test_evaluate_check_results(results, checks, expected):
     assert evaluate_check_results(results, results.keys() if checks is None else checks) == expected
 
 
-def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, vendor=AcceleratorVendor.NVIDIA, major=8) -> tuple[dict, tuple]:
+def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, vendor=AcceleratorVendor.NVIDIA, major=8, driver_ok=True) -> tuple[dict, tuple]:
     from jasna import accelerator, os_utils
 
     calls = {}
@@ -42,6 +44,7 @@ def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, vendor=Accelerator
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setattr(accelerator, "torch", fake_torch)
     monkeypatch.setattr(os_utils, "check_supported_gpu", lambda: gpu_check_result)
+    monkeypatch.setattr(os_utils, "check_gpu_driver_version", lambda: (driver_ok, "driver"))
     monkeypatch.setattr(accelerator, "vendor_for_device", lambda device=None: vendor)
     from jasna.gui.app import _warm_up_cuda
 
@@ -75,8 +78,33 @@ def test_warm_up_cuda_launches_no_kernel_on_unsupported_gpu(monkeypatch, gpu_che
     assert support == (AcceleratorVendor.CPU, False)
 
 
+def test_warm_up_launches_no_kernel_with_an_old_driver(monkeypatch):
+    calls, support = _warm_up_with_gpu_check(
+        monkeypatch, (True, "AMD GPU"), vendor=AcceleratorVendor.AMD, driver_ok=False,
+    )
+    assert calls == {}
+    assert support == (AcceleratorVendor.CPU, False)
+
+
 def _logged_warnings(app) -> list[str]:
     return [message for _, level, message in app._log_panel._entries if level == "WARNING"]
+
+
+@pytest.mark.parametrize("rerun", [False, True])
+@pytest.mark.parametrize("all_passed", [False, True])
+def test_continuing_with_warnings_does_not_record_a_pass(jasna_app, rerun, all_passed):
+    from jasna import __version__
+    from jasna.gui.locales import t
+
+    previous = jasna_app._preset_manager.get_system_check_passed_version()
+    if rerun:
+        jasna_app._on_system_check_complete(True, all_passed)
+    else:
+        jasna_app._on_wizard_complete(True, all_passed)
+
+    expected = __version__ if all_passed else previous
+    assert jasna_app._preset_manager.get_system_check_passed_version() == expected
+    assert _logged_warnings(jasna_app) == ([] if all_passed else [t("wizard_warnings_only")])
 
 
 @pytest.mark.parametrize("loaded", [True, False])
@@ -127,6 +155,28 @@ def test_system_checks_check_amf_only_on_amd(monkeypatch, amd):
     assert ("amf" in results) is amd
 
 
+def test_system_checks_do_not_probe_the_gpu_with_an_old_driver(monkeypatch):
+    from jasna import accelerator, os_utils
+    from jasna.gui import system_checks
+
+    monkeypatch.setattr(os_utils, "check_ascii_install_path", lambda: (True, ""))
+    monkeypatch.setattr(os_utils, "check_windows_nvidia_sysmem_fallback_policy", lambda: (True, ""))
+    monkeypatch.setattr(system_checks, "check_ffprobe", lambda: (True, ""))
+    monkeypatch.setattr(os_utils, "check_gpu_driver_version", lambda: (False, "old driver"))
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda: False)
+    def unavailable_probe():
+        raise AssertionError("probed an incompatible driver")
+    monkeypatch.setattr(system_checks, "check_gpu", unavailable_probe)
+    monkeypatch.setattr(system_checks, "check_cuda", unavailable_probe)
+
+    results = {}
+    system_checks.run_system_checks(results)
+
+    assert results["gpu"][0] is False
+    assert results["cuda"][0] is False
+    assert evaluate_check_results(results, results) == (False, True)
+
+
 @pytest.mark.parametrize(
     "platform,message",
     [
@@ -155,6 +205,29 @@ def wizard_factory(tk_root, monkeypatch):
         return wizard_module.FirstRunWizard(tk_root, on_complete=on_complete)
 
     return build
+
+
+@pytest.mark.parametrize("driver_ok,can_continue", [(None, True), (False, False)])
+def test_wizard_distinguishes_an_unverified_driver_from_an_old_one(wizard_factory, driver_ok, can_continue):
+    from jasna.gui.locales import t
+    from jasna.gui.theme import Colors
+
+    def checks(results):
+        results.update({key: (True, "ok") for key in ("ascii_path", "ffprobe", "gpu", "cuda", "sysmem", "amf")})
+        results["driver"] = driver_ok, "AMD driver"
+
+    completed = []
+    wizard = wizard_factory(checks=checks, on_complete=lambda allowed, passed: completed.append((allowed, passed)))
+    wizard._start_checks_in_background()
+    wizard._checks_thread.join()
+    wizard._poll_checks_thread()
+
+    label = wizard._check_labels["driver"][0]
+    assert label.cget("text") == ("⚠" if can_continue else "✕")
+    assert label.cget("text_color") == (Colors.STATUS_WARNING if can_continue else Colors.STATUS_ERROR)
+    assert wizard._continue_btn.cget("text") == t("btn_get_started" if can_continue else "btn_exit")
+    wizard._continue_btn.invoke()
+    assert completed == [(can_continue, False)]
 
 
 def test_wizard_close_button_releases_the_user(wizard_factory) -> None:

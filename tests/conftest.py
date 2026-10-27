@@ -192,3 +192,11 @@ def amd_gpu(monkeypatch):
         )
 
     return use
+
+
+@pytest.fixture
+def amd_driver_environment(monkeypatch, amd_gpu):
+    import torch
+
+    amd_gpu()
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)

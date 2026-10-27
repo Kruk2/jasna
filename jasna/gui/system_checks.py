@@ -15,7 +15,7 @@ WARNING_ONLY_CHECKS = {"sysmem"}
 
 
 def evaluate_check_results(
-    results: dict[str, tuple[bool, str]], keys: Iterable[str]
+    results: dict[str, tuple[bool | None, str]], keys: Iterable[str]
 ) -> tuple[bool, bool]:
     """Return ``(all_passed, has_required_failure)`` for the displayed check keys.
 
@@ -25,18 +25,22 @@ def evaluate_check_results(
     passed = {key: results.get(key, (False, ""))[0] for key in keys}
     all_passed = all(passed.values())
     has_required_failure = any(
-        not ok and key not in WARNING_ONLY_CHECKS for key, ok in passed.items()
+        not ok and key not in WARNING_ONLY_CHECKS and not (key == "driver" and ok is None)
+        for key, ok in passed.items()
     )
     return all_passed, has_required_failure
 
 
-def run_system_checks(results: dict[str, tuple[bool, str]]) -> None:
+def run_system_checks(results: dict[str, tuple[bool | None, str]]) -> None:
     """Fill ``results`` one check at a time, so a caller that stops waiting still sees the finished ones."""
     results["ascii_path"] = os_utils.check_ascii_install_path()
     results["ffprobe"] = check_ffprobe()
-    results["gpu"] = check_gpu()
-    results["cuda"] = check_cuda()
     results["driver"] = os_utils.check_gpu_driver_version()
+    if results["driver"][0] is False:
+        results["gpu"] = results["cuda"] = results["driver"]
+    else:
+        results["gpu"] = check_gpu()
+        results["cuda"] = check_cuda()
     if os.name == "nt":
         results["sysmem"] = os_utils.check_windows_nvidia_sysmem_fallback_policy()
     from jasna.accelerator import is_amd_device

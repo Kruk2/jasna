@@ -216,6 +216,26 @@ def _system_checks_pass(*, driver: str):
         yield
 
 
+@pytest.mark.parametrize("driver_ok", [False, None])
+def test_cli_reports_amd_driver_failures_and_warnings(capsys, driver_ok):
+    with (
+        _system_checks_pass(driver="ROCm 10.1"),
+        patch.object(main, "check_gpu_driver_version", return_value=(driver_ok, "ROCm 10.1; AMD driver needs attention")),
+        patch("jasna.accelerator.is_amd_device", return_value=True),
+        patch.object(main, "check_amd_amf_runtime", return_value=(True, "AMF")),
+    ):
+        if driver_ok is False:
+            with pytest.raises(SystemExit) as exit_info:
+                main._check_system(argparse.Namespace(device="cuda:0"))
+            assert exit_info.value.code == 1
+        else:
+            main._check_system(argparse.Namespace(device="cuda:0"))
+    out = capsys.readouterr().out
+    assert ("Error:" if driver_ok is False else "Warning:") in out
+    assert "AMD driver needs attention" in out
+    assert "NVIDIA driver" not in out
+
+
 @pytest.mark.parametrize("hard_disk", [True, False])
 def test_cli_warns_when_installed_on_a_hard_disk(capsys, hard_disk):
     with (
