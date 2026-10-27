@@ -35,6 +35,38 @@ def pytest_configure(config):
 
 
 @pytest.fixture
+def rocm_probe(monkeypatch, tmp_path):
+    """Set up a frozen AMD startup with a native GPU probe result."""
+    import subprocess
+
+    from jasna import os_utils, rocm_bootstrap
+
+    monkeypatch.setattr(rocm_bootstrap, "is_frozen", lambda: True)
+    monkeypatch.setattr(rocm_bootstrap.sys, "argv", ["jasna"])
+    monkeypatch.setattr(rocm_bootstrap.sys, "executable", str(tmp_path / "jasna"))
+    monkeypatch.setattr(os_utils, "get_application_executable", lambda: str(tmp_path / "jasna"))
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    for name in ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "GPU_DEVICE_ORDINAL"):
+        monkeypatch.delenv(name, raising=False)
+
+    def configure(output, platform):
+        monkeypatch.setattr(rocm_bootstrap.sys, "platform", platform)
+        relative = "lib/llvm/bin/offload-arch.exe" if platform == "win32" else "bin/rocminfo"
+        tool = tmp_path / "_rocm_sdk_core" / relative
+        tool.parent.mkdir(parents=True, exist_ok=True)
+        tool.touch()
+
+        def probe(*args, **kwargs):
+            if isinstance(output, Exception):
+                raise output
+            return subprocess.CompletedProcess(args[0], 0, output)
+
+        monkeypatch.setattr(subprocess, "run", probe)
+
+    return configure
+
+
+@pytest.fixture
 def tk_root():
     """A CTk root window, destroyed after the test; skips when there is no display."""
     from tkinter import TclError
