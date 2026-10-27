@@ -34,6 +34,21 @@ def test_postprocess_keeps_the_most_confident_queries_as_pixel_boxes_and_masks(d
     assert torch.equal(kept_masks[1].cpu(), torch.tensor([False, True, True]).view(3, 1, 1).expand(3, 2, 2))
 
 
+@pytest.mark.parametrize("device", _DEVICES)
+def test_postprocess_drops_confident_empty_boxes(device):
+    logits = torch.tensor([[[5.0], [4.0], [3.0]]])
+    boxes_cxcywh = torch.tensor([[[0.5, 0.5, 0.2, 0.2], [0.0, 0.0, 0.0, 0.0], [0.25, 0.25, 0.5, 0.5]]])
+    masks = torch.tensor([-1.0, 1.0, 1.0]).view(1, 3, 1, 1)
+
+    boxes, kept_masks = RfDetrMosaicDetectionModel._postprocess(
+        pred_boxes=boxes_cxcywh.to(device), pred_logits=logits.to(device), pred_masks=masks.to(device),
+        target_hw=(480, 640), score_threshold=0.5, max_select=3,
+    )
+
+    np.testing.assert_allclose(boxes[0], [[256, 192, 384, 288], [0, 0, 320, 240]], atol=1e-3)
+    assert kept_masks[0].cpu().view(-1).tolist() == [False, True]
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_postprocess_waits_for_the_gpu_once():
     b, q = 4, 200
