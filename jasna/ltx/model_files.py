@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 LTX_MODELS: tuple[LtxModelName, ...] = get_args(LtxModelName)
 
 # The Hugging Face branch holding the files of LTX_DOWNLOADS; bump both together.
-LTX_MODEL_BRANCH = "0.12.0"
+LTX_MODEL_BRANCH = "0.12.1"
 LTX_DOWNLOAD_URL = f"https://huggingface.co/Kruk2/ltx-restore/resolve/{LTX_MODEL_BRANCH}"
 LTX_MIRROR_URL = f"https://hf-mirror.com/Kruk2/ltx-restore/resolve/{LTX_MODEL_BRANCH}"
 _NETWORK_ERRORS = (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError)
@@ -70,7 +70,7 @@ LTX_DOWNLOADS: dict[str, DownloadableFile] = {
         ("ltx-restore-alpha1-int8.safetensors", 13_368_048_765, "2892db743471ef1574f4dc47412a1b901a0e02accdc8cbda31c65dbe3c4b06a6"),
         ("ltx-restore-alpha1-nvfp4.safetensors", 7_733_295_013, "71bbbccf96c25f8509fe16da00ef090195e600ad8f467040485bdf75da9aefbd"),
         ("vae.safetensors", 1_472_223_815, "b9252d5a799748d1932d4eed60a2d77461949a19f6feb57f2238dbffe08f5e25"),
-        ("vae-decoder.safetensors", 38_718_609, "c60c3572871203bd364d6bb2390225fa4c347f7ea5c64fe468256c900caeea2d"),
+        ("vae-decoder.safetensors", 29_768_681, "3ddd4022913caa825bc6b47aa90329a52e84bb8e33e2bbe8bec7ff4803d3872b"),
     )
 }
 
