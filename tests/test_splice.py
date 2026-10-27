@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from fractions import Fraction
 from pathlib import Path
+import subprocess
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 from av.video.reformatter import ColorRange, Colorspace
 
 from jasna.accelerator import AcceleratorVendor
-from jasna.media.probe import VideoMetadata
+from jasna.os_utils import resolve_executable
+from jasna.media.probe import VideoMetadata, get_video_meta_data
 from jasna.media.splice import (
     KeyframeIndex,
     SpliceSpan,
@@ -331,6 +333,37 @@ def test_validation_allows_retarget_option_when_source_rate_is_unchanged(fps: Fr
     assert validate_smart_render(
         metadata, output_path="out.mp4", codec="h264", retarget_high_fps=True
     ) == "h264"
+
+
+def _field_order_bt_source(tmp_path: Path, *, interlaced: bool) -> Path:
+    encoded = tmp_path / "encoded.mp4"
+    interlace_args = ["-flags", "+ilme+ildct", "-top", "1"] if interlaced else []
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc2=size=128x96:rate=30:duration=2",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", *interlace_args, str(encoded),
+        ],
+        check=True,
+    )
+    flagged = tmp_path / "flagged.mkv"
+    subprocess.run(
+        [resolve_executable("ffmpeg"), "-y", "-loglevel", "error", "-i", str(encoded),
+         "-c", "copy", "-field_order", "bt", str(flagged)],
+        check=True,
+    )
+    return flagged
+
+
+@pytest.mark.parametrize("interlaced", [False, True])
+def test_validation_checks_frames_when_the_stream_is_flagged_interlaced(tmp_path, interlaced: bool) -> None:
+    metadata = get_video_meta_data(str(_field_order_bt_source(tmp_path, interlaced=interlaced)))
+    assert metadata.field_order in {"bt", "tt"}
+    if interlaced:
+        with pytest.raises(SmartRenderCompatibilityError, match="progressive"):
+            validate_smart_render(metadata, output_path="out.mp4", codec="h264", retarget_high_fps=False)
+    else:
+        assert validate_smart_render(metadata, output_path="out.mp4", codec="h264", retarget_high_fps=False) == "h264"
 
 
 def test_random_access_classifier_distinguishes_hevc_idr_from_cra() -> None:

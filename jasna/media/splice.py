@@ -28,6 +28,8 @@ log = logging.getLogger(__name__)
 
 SUPPORTED_SMART_CODECS = frozenset({"h264", "hevc", "av1"})
 SUPPORTED_SMART_OUTPUTS = frozenset({".mp4", ".mov", ".mkv"})
+_FIELD_ORDER_SAMPLE_POINTS = (0.0, 0.25, 0.5, 0.75)
+_FIELD_ORDER_SAMPLE_FRAMES = 8
 H264_SMART_PROFILES = {
     "baseline": "baseline",
     "constrained baseline": "baseline",
@@ -180,7 +182,7 @@ def validate_smart_render(
             f"Smart rendering requires 4:2:0 input; pixel format {pixel_format!r} is unsupported"
         )
     field_order = metadata.field_order.lower()
-    if field_order not in {"", "unknown", "progressive"}:
+    if field_order not in {"", "unknown", "progressive"} and not _sampled_frames_are_progressive(metadata):
         raise SmartRenderCompatibilityError("Smart rendering currently requires progressive video")
     if input_codec == "h264" and metadata.is_10bit:
         raise SmartRenderCompatibilityError("10-bit H.264 smart rendering is not supported")
@@ -193,6 +195,18 @@ def validate_smart_render(
         if relative_delta > 0.001:
             raise SmartRenderCompatibilityError("Smart rendering currently requires constant-frame-rate video")
     return input_codec
+
+
+def _sampled_frames_are_progressive(metadata: VideoMetadata) -> bool:
+    """A container can flag a progressive stream as interlaced; the frames themselves decide."""
+    with av.open(metadata.video_file) as container:
+        stream = container.streams.video[0]
+        for fraction in _FIELD_ORDER_SAMPLE_POINTS:
+            container.seek(metadata.start_pts + int(metadata.duration * fraction / metadata.time_base), stream=stream)
+            for _, frame in zip(range(_FIELD_ORDER_SAMPLE_FRAMES), container.decode(stream)):
+                if frame.interlaced_frame:
+                    return False
+    return True
 
 
 def _analyze_packet_reordering(packet_pts: tuple[int, ...] | list[int]) -> tuple[int, bool]:
