@@ -31,9 +31,9 @@ from jasna.packaging.windows_dll_paths import configure_windows_dll_search_paths
 
 configure_windows_dll_search_paths()
 
-from jasna.rocm_bootstrap import configure_windows_rocm_devices
+from jasna.rocm_bootstrap import configure_rocm_devices
 
-configure_windows_rocm_devices()
+configure_rocm_devices()
 
 if sys.argv[1:2] == ["--ltx-worker"]:
     expected_args = 6 if is_frozen() else 2
