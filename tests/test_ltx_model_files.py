@@ -145,7 +145,7 @@ def test_replacement_models_use_release_branch_on_both_sources(tmp_path, monkeyp
 
     monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
     model_files.download_files(tmp_path, [file], None, mirror_first=mirror_first)
-    expected = [f"https://{host}/Kruk2/ltx-restore/resolve/0.12.0/{name}"
+    expected = [f"https://{host}/Kruk2/ltx-restore/resolve/0.12.1/{name}"
                 for host in ("huggingface.co", "hf-mirror.com")]
     assert requests == (list(reversed(expected)) if mirror_first else expected)
     assert (tmp_path / name).read_bytes() == content
