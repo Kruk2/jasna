@@ -397,7 +397,7 @@ KO = {
         "license_connecting": "온라인 활성화 중…",
         "license_service_invalid_license_code": "라이선스 코드를 빠짐없이 입력했는지 확인하세요.",
         "license_service_license_not_found": "라이선스 코드를 찾을 수 없습니다. 확인하거나 라이선스 코드를 받은 곳에 문의하세요.",
-        "license_service_slots_full": "등록 3개를 모두 사용 중입니다. 교체하려면 라이선스 코드를 받은 곳에 문의하세요.",
+        "license_service_slots_full": "기기 3대에서 모두 사용 중입니다. 다른 기기의 Jasna를 닫고 다시 시도하거나, 기기를 바꾸려면 라이선스 코드를 받은 곳에 문의하세요.",
         "license_service_owner_approval_required": "이 기기는 소유자 승인이 필요합니다. 라이선스 코드를 받은 곳에 문의하세요.",
         "license_source_unavailable": "무료 모델은 소스에서 실행할 수 있습니다. 후원자 모델을 활성화하려면 Jasna 공식 릴리스를 다운로드하세요.",
         "license_activate": "활성화",

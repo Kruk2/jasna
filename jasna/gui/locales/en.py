@@ -397,7 +397,7 @@ EN = {
         "license_connecting": "Activating online…",
         "license_service_invalid_license_code": "Check that you entered the complete License code.",
         "license_service_license_not_found": "License code not found. Check it or ask where you got it.",
-        "license_service_slots_full": "All 3 registrations are in use. Ask where you got your License code to replace one.",
+        "license_service_slots_full": "All 3 devices are in use. Close Jasna on another device and try again, or ask where you got your License code to replace a device.",
         "license_service_owner_approval_required": "This device needs owner approval. Ask where you got your License code.",
         "license_source_unavailable": "Free models work from source. To activate supporter models, download the official Jasna release.",
         "license_activate": "Activate",
