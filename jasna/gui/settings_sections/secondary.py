@@ -6,8 +6,27 @@ from tkinter import filedialog
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
-from jasna.gui.settings_sections.widgets import add_setting_label, create_slider_value_label, get_tooltip
+from jasna.gui.settings_sections.widgets import (
+    ValueOptionMenu,
+    add_setting_label,
+    create_slider_value_label,
+    get_tooltip,
+)
 from jasna.gui.theme import Colors, Fonts, Sizing
+from jasna.session_config import AMD_UPSCALE_ENGINE_MODELS, AMD_UPSCALE_MODEL_DEFAULT
+
+# Labels are the real checkpoint file names, so the picker reads as a weight list.
+_AMD_MODEL_LABELS = {
+    "x4v3": "realesr-general-x4v3",
+    "lsdir-c3": "4xLSDIRCompactC3",
+    "parimg-2x": "2xParimgCompact (2x)",
+}
+
+
+def _amd_model_options() -> dict[str, str]:
+    """Value->label map for the AMD model row."""
+    models = AMD_UPSCALE_ENGINE_MODELS["real-esr"]
+    return {model: _AMD_MODEL_LABELS.get(model, model) for model in models}
 
 
 class SecondarySection:
@@ -66,9 +85,24 @@ class SecondarySection:
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
             command=self._on_secondary_changed
         )
-        rtx_rb.pack(side="left")
-        self._engine_radios = {"none": none_rb, "unet-4x": unet4x_rb, "tvai": tvai_rb, "rtx-super-res": rtx_rb}
+        rtx_rb.pack(side="left", padx=(0, 16))
         Tooltip(rtx_rb, get_tooltip("secondary_rtx"))
+
+        amd_rb = ctk.CTkRadioButton(
+            engines_frame, text=f"{t('secondary_amd_upscale')} ({t('secondary_amd_hint')})",
+            variable=self._widgets["secondary_var"], value="amd-upscale",
+            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
+            command=self._on_secondary_changed
+        )
+        amd_rb.pack(side="left")
+        Tooltip(amd_rb, get_tooltip("secondary_amd"))
+        self._engine_radios = {
+            "none": none_rb,
+            "unet-4x": unet4x_rb,
+            "tvai": tvai_rb,
+            "rtx-super-res": rtx_rb,
+            "amd-upscale": amd_rb,
+        }
 
         # TVAI options (hidden by default)
         self._tvai_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
@@ -239,6 +273,53 @@ class SecondarySection:
         self._widgets["rtx_deblur"].pack(side="right")
         self._widgets["rtx_deblur"].set("None")
 
+        # AMD upscale options (hidden by default)
+        self._amd_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
+
+        amd_inner = ctk.CTkFrame(self._amd_frame, fg_color="transparent")
+        amd_inner.pack(fill="x", padx=12, pady=12)
+
+        # AMD model: the dropdown shows the actual weight file names.
+        amd_model_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_model_row.pack(fill="x", pady=(0, 8))
+        add_setting_label(amd_model_row, "model", "amd_model")
+        self._widgets["amd_upscale_model"] = ValueOptionMenu(
+            amd_model_row,
+            options=_amd_model_options(),
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=200
+        )
+        self._widgets["amd_upscale_model"].pack(side="right")
+        self._widgets["amd_upscale_model"].set_value(AMD_UPSCALE_MODEL_DEFAULT["real-esr"])
+
+        # AMD scale
+        amd_scale_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_scale_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(amd_scale_row, text=t("scale"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        self._widgets["amd_upscale_scale"] = ctk.CTkOptionMenu(
+            amd_scale_row, values=["2x", "4x"],
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=80
+        )
+        self._widgets["amd_upscale_scale"].pack(side="right")
+        self._widgets["amd_upscale_scale"].set("2x")
+
+        # AMD sharpness: CAS on the restored patch only, at its final resolution.
+        amd_sharpness_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_sharpness_row.pack(fill="x")
+        ctk.CTkLabel(amd_sharpness_row, text=t("amd_sharpness"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        amd_sharpness_tip = ctk.CTkLabel(amd_sharpness_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        amd_sharpness_tip.pack(side="left", padx=4)
+        Tooltip(amd_sharpness_tip, get_tooltip("amd_sharpness_patch"))
+        self._widgets["amd_upscale_sharpness"] = ctk.CTkEntry(
+            amd_sharpness_row, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, width=80
+        )
+        self._widgets["amd_upscale_sharpness"].pack(side="right")
+        self._widgets["amd_upscale_sharpness"].insert(0, "0")
+
     def _browse_tvai_ffmpeg(self):
         filepath = filedialog.askopenfilename(
             title=t("dialog_select_tvai_ffmpeg"),
@@ -253,11 +334,14 @@ class SecondarySection:
         secondary = self._widgets["secondary_var"].get()
         self._tvai_frame.pack_forget()
         self._rtx_frame.pack_forget()
+        self._amd_frame.pack_forget()
 
         if secondary == "tvai":
             self._tvai_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         elif secondary == "rtx-super-res":
             self._rtx_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+        elif secondary == "amd-upscale":
+            self._amd_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
 
     def set_model(self, model: str) -> None:
         if model == "ltx":
@@ -288,6 +372,16 @@ class SecondarySection:
         self._widgets["rtx_denoise"].set(preset.rtx_denoise.capitalize())
         self._widgets["rtx_deblur"].set(preset.rtx_deblur.capitalize())
 
+        self._widgets["amd_upscale_model"].set_value(preset.amd_upscale_model)
+        # A preset written by a build that also offered amf-sr can carry 6x/8x or a
+        # -1 sharpness sentinel; neither exists for the in-process networks, so snap
+        # both into the range this panel actually offers.
+        amd_scale = int(preset.amd_upscale_scale)
+        self._widgets["amd_upscale_scale"].set(f"{amd_scale}x" if amd_scale in (2, 4) else "2x")
+        amd_sharpness = max(0.0, float(preset.amd_upscale_sharpness))
+        self._widgets["amd_upscale_sharpness"].delete(0, "end")
+        self._widgets["amd_upscale_sharpness"].insert(0, str(amd_sharpness))
+
         self._on_secondary_changed()
 
     def collect(self) -> dict:
@@ -302,4 +396,7 @@ class SecondarySection:
             "rtx_quality": self._widgets["rtx_quality"].get().lower(),
             "rtx_denoise": self._widgets["rtx_denoise"].get().lower(),
             "rtx_deblur": self._widgets["rtx_deblur"].get().lower(),
+            "amd_upscale_model": self._widgets["amd_upscale_model"].get_value(),
+            "amd_upscale_scale": int(self._widgets["amd_upscale_scale"].get().replace("x", "")),
+            "amd_upscale_sharpness": float(self._widgets["amd_upscale_sharpness"].get() or 0),
         }

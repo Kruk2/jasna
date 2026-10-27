@@ -25,16 +25,21 @@ class RestorationPipeline:
         secondary_restorer: SecondaryRestorer | None = None,
         denoise_strength: DenoiseStrength = DenoiseStrength.NONE,
         denoise_step: DenoiseStep = DenoiseStep.AFTER_PRIMARY,
+        secondary_sharpen: float = 0.0,
     ) -> None:
         self.restorer = restorer
         self.secondary_restorer = secondary_restorer
         self._denoise_strength = denoise_strength
         self._denoise_step = denoise_step
+        # CAS sharpening for the secondary patch, applied at blend time (where the
+        # restored crop is back at final resolution). 0 disables it.
+        self._secondary_sharpen = max(0.0, float(secondary_sharpen))
         logger.info(
-            "RestorationPipeline: secondary=%s denoise=%s denoise_step=%s",
+            "RestorationPipeline: secondary=%s denoise=%s denoise_step=%s secondary_sharpen=%.2f",
             secondary_restorer.name if secondary_restorer else "none",
             denoise_strength.name,
             denoise_step.name,
+            self._secondary_sharpen,
         )
 
     @property
@@ -139,4 +144,5 @@ class RestorationPipeline:
             pad_offsets=pr.pad_offsets[ks:ke],
             resize_shapes=pr.resize_shapes[ks:ke],
             clip_keep_offset=ks,
+            sharpen_strength=self._secondary_sharpen,
         )

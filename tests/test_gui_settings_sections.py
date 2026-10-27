@@ -101,6 +101,9 @@ def _fake_section_widgets() -> dict:
         "rtx_quality": _FakeWidget("Ultra"),
         "rtx_denoise": _FakeWidget("None"),
         "rtx_deblur": _FakeWidget("Low"),
+        "amd_upscale_model": _FakeValueMenu({"parimg-2x": "2xParimgCompact (2x)", "x4v3": "realesr-general-x4v3"}, "parimg-2x"),
+        "amd_upscale_scale": _FakeWidget("2x"),
+        "amd_upscale_sharpness": _FakeWidget("0.3"),
         "image_restore_steps": _FakeWidget(30),
         "image_restore_strength": _FakeWidget(0.55),
         "image_restore_freeu": _FakeWidget(0),
@@ -569,6 +572,7 @@ def test_processing_locks_secondary_controls_and_keeps_missing_unet4x_disabled(
         "unet-4x": "disabled",
         "tvai": "normal",
         "rtx-super-res": "normal",
+        "amd-upscale": "normal",
     }
     assert secondary._tvai_denoise_switch.cget("state") == "normal"
     assert "does not support" not in caplog.text

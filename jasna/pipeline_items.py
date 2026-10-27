@@ -54,6 +54,10 @@ class PrimaryRestoreResult(_RestoreResultBase):
 class SecondaryRestoreResult(_RestoreResultBase):
     restored_frames: list[torch.Tensor]
     clip_keep_offset: int = 0
+    # CAS sharpening applied to the restored patch at blend time (0 = off). It
+    # lives on the result, not a global, because it is a property of the
+    # secondary engine that produced the frames.
+    sharpen_strength: float = 0.0
 
 
 @dataclass

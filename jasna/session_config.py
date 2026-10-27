@@ -17,7 +17,9 @@ LTX_DEFAULT_MODEL: LtxModelName = "distilled2"
 
 LTX_DEFAULT_SEED = 20260923
 LTX_AUTO_DEFAULT_PERCENT = 12
-SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res"]
+SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res", "amd-upscale"]
+AmdUpscaleEngineName = Literal["real-esr"]
+AmdUpscaleModelName = Literal["x4v3", "lsdir-c3", "parimg-2x"]
 DenoiseStrengthName = Literal["none", "low", "medium", "high"]
 DenoiseStepName = Literal["after_primary", "after_secondary"]
 VrModeName = Literal["auto", "off", "sbs", "sbs-fisheye"]
@@ -25,6 +27,41 @@ VrProjectionName = Literal["auto", "raw", "fisheye", "gnomonic"]
 RtxQualityName = Literal["low", "medium", "high", "ultra"]
 RtxLevelName = Literal["none", "low", "medium", "high", "ultra"]
 CodecName = Literal["hevc", "h264", "av1"]
+
+# All three secondaries are SRVGGNetCompact: no convolution runs at the output
+# size, so they are several times cheaper than an RRDBNet of comparable width.
+#   x4v3      - realesr-general-x4v3, 32 convs, the previous default.
+#   lsdir-c3  - 4xLSDIRCompactC3, 16 convs, trained on LSDIR live-action photos;
+#               noticeably more even across crops than the 32-conv net.
+#   parimg-2x - 2xParimgCompact, 16 convs, 2x-native; the fastest of the three.
+AMD_UPSCALE_ENGINE_ORDER: tuple[str, ...] = ("real-esr",)
+AMD_UPSCALE_ENGINE_MODELS: dict[str, tuple[str, ...]] = {
+    "real-esr": ("x4v3", "lsdir-c3", "parimg-2x"),
+}
+AMD_UPSCALE_MODEL_ENGINE: dict[str, str] = {
+    "x4v3": "real-esr",
+    "lsdir-c3": "real-esr",
+    "parimg-2x": "real-esr",
+}
+# parimg-2x beats x4v3 (2.07 vs 4.06 ms/frame per 256-px crop on an RX 7900 XT) at
+# essentially the same fidelity, and it is 2x-native, so a 2x secondary keeps the
+# SR engaged without the extra resample a 4x net needs.
+AMD_UPSCALE_MODEL_DEFAULT: dict[str, str] = {"real-esr": "parimg-2x"}
+
+
+def amd_upscale_engine_for(value: str, model: str) -> str:
+    """The engine a checkpoint belongs to, so a stale engine value stays consistent.
+
+    Presets written before the model row was split into classes record ``realesrgan``
+    for every checkpoint, SRVGGNetCompact ones included. The checkpoint decides here,
+    so such a preset shows up under the right class again instead of under a class
+    whose name does not cover it.
+    """
+    engine = str(value or "").strip().lower()
+    owner = AMD_UPSCALE_MODEL_ENGINE.get(str(model or "").strip().lower())
+    if owner is not None:
+        return owner
+    return engine if engine in AMD_UPSCALE_ENGINE_ORDER else "real-esr"
 
 
 @dataclass(frozen=True)
@@ -74,6 +111,11 @@ class SessionConfig:
     fmp4: bool
     sharpen_strength: float
     tvai_denoise: bool
+    amd_upscale_engine: AmdUpscaleEngineName = "real-esr"
+    amd_upscale_model: AmdUpscaleModelName = "parimg-2x"
+    amd_upscale_scale: int = 2
+    amd_upscale_sharpness: float = 0.0
+    amd_upscale_model_path: str | None = None
 
     def __post_init__(self) -> None:
         if self.batch_size <= 0:

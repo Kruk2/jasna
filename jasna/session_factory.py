@@ -141,6 +141,18 @@ def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
             denoise=None if config.rtx_denoise == "none" else config.rtx_denoise,
             deblur=None if config.rtx_deblur == "none" else config.rtx_deblur,
         )
+    if config.secondary_restoration == "amd-upscale":
+        from jasna.restorer.realesrgan_secondary_restorer import (
+            RealEsrganSecondaryRestorer,
+        )
+
+        return RealEsrganSecondaryRestorer(
+            device=device,
+            scale=int(config.amd_upscale_scale),
+            model_path=config.amd_upscale_model_path,
+            model=str(config.amd_upscale_model),
+            fp16=bool(config.fp16),
+        )
     raise ValueError(f"Unsupported secondary restoration: {config.secondary_restoration}")
 
 
@@ -194,6 +206,19 @@ def restoration_model_path_for(config: SessionConfig, name: RestorationModelName
     return default_restoration_model_path(name)
 
 
+def _secondary_patch_sharpen(config: SessionConfig) -> float:
+    """CAS sharpening for the secondary-restored patch, applied at blend time.
+
+    The AMD panel's sharpness box means "sharpen the patched region": the network
+    engines restore the crop but leave its final crispness flat, so the value is
+    applied to the restored patch at its final resolution. Returns 0 when no
+    secondary can use it.
+    """
+    if config.secondary_restoration != "amd-upscale":
+        return 0.0
+    return max(0.0, min(float(config.amd_upscale_sharpness), 1.0))
+
+
 def _build_basicvsrpp_pipeline(
     config: SessionConfig, device: "torch.device", *, log_callback: Callable[[str], None] | None
 ) -> "RestorationPipeline":
@@ -229,6 +254,7 @@ def _build_basicvsrpp_pipeline(
         secondary_restorer=_build_secondary_restorer(config, device),
         denoise_strength=DenoiseStrength(config.denoise_strength),
         denoise_step=DenoiseStep(config.denoise_step),
+        secondary_sharpen=_secondary_patch_sharpen(config),
     )
 
 

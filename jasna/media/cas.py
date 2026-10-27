@@ -57,6 +57,7 @@ def _sharpen_band(
     weight_scale: float,
     headroom: float,
     peak: float,
+    floor: bool = True,
 ) -> None:
     """Sharpen one horizontal band.
 
@@ -102,8 +103,10 @@ def _sharpen_band(
         centre + delta * weight / denominator,
         centre,
     )
-    # FFmpeg truncates rather than rounds on write; match it.
-    out.copy_(sharpened.clamp_(0.0, peak).floor_())
+    # FFmpeg truncates rather than rounds on write; match it. A fractional plane
+    # (an RGB patch's luma) keeps the fraction, so it is not biased down a level.
+    value = sharpened.clamp_(0.0, peak)
+    out.copy_(value.floor_() if floor else value)
 
 
 def sharpen_luma(
@@ -112,6 +115,7 @@ def sharpen_luma(
     weight_scale: float,
     headroom: float,
     peak: float,
+    floor: bool = True,
 ) -> torch.Tensor:
     """Sharpen a 2-D float32 luma plane held in code units."""
     height, width = plane.shape
@@ -130,8 +134,38 @@ def sharpen_luma(
             weight_scale=weight_scale,
             headroom=headroom,
             peak=peak,
+            floor=floor,
         )
     return out
+
+
+# Luma coefficients used to lift the luma out of an RGB patch; the sharpened
+# luma's delta is added back to all three channels, so hue is left alone.
+_RGB_LUMA = (0.299, 0.587, 0.114)
+
+
+def sharpen_rgb_patch(patch: torch.Tensor, strength: float) -> torch.Tensor:
+    """CAS-sharpen an RGB patch (float, roughly 0..255 code units) via its luma.
+
+    The secondary sharpening has to run at the patch's *final* resolution: the
+    upscaler emits a larger crop that is resampled back down before it is
+    blended, so a sharpen applied on the network output would be averaged away.
+    Only the luma is sharpened and its delta is added to all three channels, so
+    hue is untouched. ``strength`` <= 0 returns the patch unchanged and values
+    above 1 are clamped, mirroring the global ``--sharpen`` control.
+    """
+    if strength <= 0.0:
+        return patch
+    weight_scale = cas_weight_scale(min(strength, 1.0))
+    luma = patch[0] * _RGB_LUMA[0] + patch[1] * _RGB_LUMA[1] + patch[2] * _RGB_LUMA[2]
+    sharpened = sharpen_luma(
+        luma,
+        weight_scale=weight_scale,
+        headroom=float(_HEADROOM_MULTIPLIER << 8),
+        peak=255.0,
+        floor=False,
+    )
+    return (patch + (sharpened - luma).unsqueeze(0)).clamp_(0.0, 255.0)
 
 
 _CAS_ARG_TYPES = (

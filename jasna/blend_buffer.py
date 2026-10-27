@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from jasna.crop_buffer import scale_offsets
+from jasna.media.cas import sharpen_rgb_patch
 from jasna.pipeline_items import SecondaryRestoreResult
 from jasna.tracking.blending import create_bbox_blend_mask
 
@@ -174,6 +175,12 @@ class BlendBuffer:
                 resized_back - original_projected, (x1, y1, x2, y2)
             )
             resized_back = original[:, y1:y2, x1:x2].float() + source_delta
+
+        if sr.sharpen_strength > 0.0:
+            # Sharpen the restored patch only, here at the resolution it actually
+            # lands at (the upscaler's output is resampled down above), so the rest
+            # of the frame and every other track stay untouched.
+            resized_back = sharpen_rgb_patch(resized_back, sr.sharpen_strength)
 
         blend_mask = self.blend_mask_fn(mask_lr, (x1, y1, x2, y2), sr.frame_shape)
 

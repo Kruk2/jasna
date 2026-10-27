@@ -49,6 +49,12 @@ def video_session_key(settings: AppSettings) -> tuple:
             settings.rtx_denoise,
             settings.rtx_deblur,
         )
+    elif settings.secondary_restoration == "amd-upscale":
+        key += (
+            settings.amd_upscale_model,
+            settings.amd_upscale_scale,
+            settings.amd_upscale_sharpness,
+        )
     return key
 
 
@@ -101,6 +107,10 @@ def video_session_config(
         rtx_quality=settings.rtx_quality.lower(),
         rtx_denoise=settings.rtx_denoise.lower(),
         rtx_deblur=settings.rtx_deblur.lower(),
+        amd_upscale_engine="real-esr",
+        amd_upscale_model=str(settings.amd_upscale_model).lower(),
+        amd_upscale_scale=int(settings.amd_upscale_scale),
+        amd_upscale_sharpness=float(settings.amd_upscale_sharpness),
         vr_mode=settings.vr_mode,
         vr_projection=settings.vr_projection,
         codec=codec,

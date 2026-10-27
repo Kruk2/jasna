@@ -129,7 +129,7 @@ class AppSettings:
     denoise_step: str = "after_primary"  # after_primary, after_secondary
     
     # Secondary restoration
-    secondary_restoration: str = "none"  # none, unet-4x, tvai, rtx-super-res
+    secondary_restoration: str = "none"  # none, unet-4x, tvai, rtx-super-res, amd-upscale
     tvai_ffmpeg_path: str = r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe"
     tvai_model: str = "iris-2"
     tvai_scale: int = 4
@@ -140,6 +140,9 @@ class AppSettings:
     rtx_quality: str = "high"  # low, medium, high, ultra
     rtx_denoise: str = "medium"  # none, low, medium, high, ultra
     rtx_deblur: str = "none"  # none, low, medium, high, ultra
+    amd_upscale_model: str = "parimg-2x"  # parimg-2x (2x-native, default), lsdir-c3, x4v3
+    amd_upscale_scale: int = 2  # 2, 4; pair with the checkpoint native factor
+    amd_upscale_sharpness: float = 0.0  # 0 off; CAS on the restored patch only, up to 1.0
     
     # Detection
     detection_model: str = "rfdetr-v6"  # RF-DETR, Lada YOLO, or ZeLeFans VR YOLO registry name
@@ -201,6 +204,24 @@ def _normalize_preset_codec(value: object) -> str:
     return canonical
 
 
+def _normalize_amd_model(value: object) -> str:
+    """Fall back to the shipped default when a preset names a dropped checkpoint.
+
+    Only three presets ship now (parimg-2x, lsdir-c3, x4v3); a preset written by a
+    build that offered others would otherwise leave the dropdown on a value its
+    list does not contain.
+    """
+    from jasna.session_config import AMD_UPSCALE_MODEL_DEFAULT, AMD_UPSCALE_ENGINE_MODELS
+
+    model = str(value or "").strip().lower()
+    if model in AMD_UPSCALE_ENGINE_MODELS["real-esr"]:
+        return model
+    if model:
+        logger.warning("Unknown AMD super-res model %r in preset; falling back to %s",
+                       value, AMD_UPSCALE_MODEL_DEFAULT["real-esr"])
+    return AMD_UPSCALE_MODEL_DEFAULT["real-esr"]
+
+
 def _migrate_preset_dict(preset_dict: dict) -> dict:
     known_fields = {f.name for f in fields(AppSettings)}
     migrated = {k: v for k, v in preset_dict.items() if k in known_fields}
@@ -231,6 +252,8 @@ def _migrate_preset_dict(preset_dict: dict) -> dict:
             )
     if "codec" in migrated:
         migrated["codec"] = _normalize_preset_codec(migrated["codec"])
+    if "amd_upscale_model" in migrated:
+        migrated["amd_upscale_model"] = _normalize_amd_model(migrated["amd_upscale_model"])
     return migrated
 
 

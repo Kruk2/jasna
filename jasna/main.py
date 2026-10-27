@@ -21,7 +21,15 @@ from jasna.os_utils import (
     gpu_check_error,
     install_on_hard_disk,
 )
-from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED, LtxModelName, RestorationModelName, SessionConfig
+from jasna.session_config import (
+    AMD_UPSCALE_MODEL_DEFAULT,
+    AMD_UPSCALE_MODEL_ENGINE,
+    LTX_DEFAULT_MODEL,
+    LTX_DEFAULT_SEED,
+    LtxModelName,
+    RestorationModelName,
+    SessionConfig,
+)
 
 # CLI restoration model name -> (restoration backend, LTX model variant).
 CLI_RESTORATION_MODELS: dict[str, tuple[RestorationModelName, LtxModelName]] = {
@@ -85,6 +93,11 @@ def _session_config_from_args(
         tvai_args=str(args.tvai_args),
         tvai_workers=int(args.tvai_workers),
         tvai_denoise=bool(args.tvai_denoise),
+        amd_upscale_engine="real-esr",
+        amd_upscale_model=str(args.amd_upscale_model or AMD_UPSCALE_MODEL_DEFAULT["real-esr"]).lower(),
+        amd_upscale_scale=int(args.amd_upscale_scale),
+        amd_upscale_sharpness=float(args.amd_upscale_sharpness),
+        amd_upscale_model_path=args.amd_upscale_model_path,
         rtx_scale=int(args.rtx_scale),
         rtx_quality=str(args.rtx_quality).lower(),
         rtx_denoise=str(args.rtx_denoise).lower(),
@@ -324,7 +337,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--secondary-restoration",
         type=str,
         default="none",
-        choices=["none", "unet-4x", "tvai", "rtx-super-res"],
+        choices=["none", "unet-4x", "tvai", "rtx-super-res", "amd-upscale"],
         help=CLI_HELP["secondary_restoration"],
     )
 
@@ -392,6 +405,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     rtx = parser.add_argument_group("RTX Super Res")
+    amd = parser.add_argument_group("AMD upscale")
+    amd.add_argument(
+        "--amd-upscale-model",
+        type=str,
+        default=AMD_UPSCALE_MODEL_DEFAULT["real-esr"],
+        choices=list(AMD_UPSCALE_MODEL_ENGINE),
+        help="Checkpoint for the AMD secondary restorer (default: %(default)s)",
+    )
+    amd.add_argument(
+        "--amd-upscale-model-path",
+        type=str,
+        default=None,
+        help="Explicit checkpoint path; overrides --amd-upscale-model",
+    )
+    amd.add_argument(
+        "--amd-upscale-scale",
+        type=int,
+        default=2,
+        choices=[2, 4],
+        help="AMD upscale factor (default: %(default)s)",
+    )
+    amd.add_argument(
+        "--amd-upscale-sharpness",
+        type=float,
+        default=0.0,
+        help="CAS sharpening applied to the restored patch only (0 disables)",
+    )
+
     rtx.add_argument(
         "--rtx-scale",
         type=int,
