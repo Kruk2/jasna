@@ -3,12 +3,13 @@
 > Cloud licenses are not sold right now. This will change in the future.
 
 You can run Jasna on a rented GPU. Use the Linux NVIDIA version from the
-command line inside a supported container. Cloud activation is CLI-only in the
-official Linux release; Windows and GitHub source checkouts do not support it.
+command line inside a supported container. GitHub source checkouts can't use
+supporter models.
 
 ## What you need
 
-- **Cloud** has to be turned on for your License code. Ask where you got it.
+- Internet on the machine: Jasna checks your license online while it uses
+  supporter models.
 - A normal container. Vast works. A Docker container started with
   `--pid=host` doesn't.
 - LTX doesn't work on RunPod or on gVisor containers (for example Modal) for now;
@@ -19,8 +20,6 @@ official Linux release; Windows and GitHub source checkouts do not support it.
   Jasna can't read or save videos without it. On Vast, add
   `-e NVIDIA_DRIVER_CAPABILITIES=all` to the Docker options.
 - Log in as `root`. RunPod and Vast do this by default.
-- A fixed `/etc/machine-id`. Some containers (for example Modal or some Docker
-  images) don't have one, and activation fails. Add one to your image.
 
 ## Install
 
@@ -58,7 +57,7 @@ there.
 
 ```bash
 export XDG_CONFIG_HOME=/root/jasna-config
-./jasna --license-code YOUR-LICENSE-CODE --cloud-workspace
+./jasna --license-code YOUR-LICENSE-CODE
 ```
 
 After `installation verified` it can look stuck for up to a minute. Just
@@ -68,10 +67,9 @@ RunPod's `/workspace` can ignore private file permissions. Keep activation in
 `/root/jasna-config` as above. On other providers, you can use a persistent
 folder that preserves private permissions.
 
-Run the `export` line every time before starting Jasna. Before deleting the
-Pod, download `jasna-config` privately to your PC. Restore it under `/root` on
-the next Pod, keeping the folder private. This reuses the same activation slot.
-If you lose it, you need a free slot to activate again.
+Run the `export` line every time before starting Jasna. A rented GPU counts as
+one of your 3 devices only while Jasna runs on it. Keep `jasna-config` to skip
+entering the code next time; if you lose it, just activate again.
 
 ## Restore a video
 
@@ -99,10 +97,10 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | ------- | ------- |
 | `unsigned or modified Jasna runtime` | Unpack again in `/root` as `root`. |
 | `libGL.so.1: cannot open shared object file` | Run the `apt-get` line from Install. |
-| `Cloud workspace activation requires a supported Linux container` | Use the latest Linux release, a container without `--pid=host`, and config under `/root` on RunPod. |
 | `Failed to open hevc encoder` | This machine's video encoder is broken. Rent another one. |
-| `enable cloud activation` | Ask where you got your License code to turn on cloud. |
-| `No activation found` or `Cloud workspace identity is missing` | Run the `export` line, then start Jasna again. |
+| `in use on three devices` | Close Jasna on another device, then try again. |
+| `could not reach the license service` or `lost the connection` | Check the machine's internet, then start again. |
+| `No activation found` or `Activate Jasna with your License code` | Run the `export` line, then start Jasna again, or activate again. |
 | `unsafe Jasna launch environment` | Start it with `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` |
 
 `Bit depth 10 ... not supported` is OK. Jasna reads that video a bit

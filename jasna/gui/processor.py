@@ -10,6 +10,8 @@ from dataclasses import dataclass, replace
 from typing import Callable
 
 from jasna.job_resume import ResumeMismatchError, resume_directories, run_with_resume_prompt
+from jasna.license_api import LicenseCheckStopped
+from jasna.gui.locales import t
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus, AppSettings
 from jasna.gui.video_session import build_image_session, build_video_session, release_session_memory, video_session_config
 from jasna.media.probe import UnsupportedVideoError
@@ -139,6 +141,7 @@ class Processor:
         
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._license_stopped = False
         
         self._jobs: list[JobItem] = []
         self._settings: AppSettings | None = None
@@ -166,7 +169,8 @@ class Processor:
         self._output_folder = output_folder
         self._output_pattern = output_pattern
         self._stop_event.clear()
-        
+        self._license_stopped = False
+
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         
@@ -211,15 +215,17 @@ class Processor:
                     break
 
                 self._process_job(job)
-                if job.status is JobStatus.PENDING:
-                    break  # stopped mid-job; it stays queued for the next run
+                if job.status is JobStatus.PENDING or self._license_stopped:
+                    break  # stopped mid-job it stays queued; a failed license check fails every later job too
         finally:
             self._close_image_session()
             self._close_video_session()
 
-        queue_finished = not self._stop_event.is_set()
+        queue_finished = not self._stop_event.is_set() and not self._license_stopped
         if queue_finished:
             self._log("INFO", "Processing completed")
+        elif self._license_stopped:
+            self._log("WARNING", "Processing stopped: the license check failed")
         else:
             self._log("INFO", "Processing stopped by user")
         if self._on_complete:
@@ -311,6 +317,16 @@ class Processor:
                 message="Saved LTX work kept",
             ))
             self._log("WARNING", f"Skipped {job.filename}: saved LTX work kept")
+
+        except LicenseCheckStopped as e:
+            job.status = JobStatus.ERROR
+            self._license_stopped = True
+            self._progress(ProgressUpdate(
+                job_id=job.id,
+                status=JobStatus.ERROR,
+                message=t(f"license_problem_{e.code}"),
+            ))
+            self._log("ERROR", f"Failed to process {job.filename}: {e}")
 
         except UnsupportedVideoError as e:
             e.__traceback__ = None

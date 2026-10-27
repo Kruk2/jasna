@@ -237,12 +237,13 @@ def shows_xianyu_seller(language: str) -> bool:
 
 
 class LicenseDialog(ctk.CTkToplevel):
-    """Activate online or save a manually issued offline Activation key."""
+    """Activate online or save a manually issued offline Activation key; on Linux only the License code."""
 
     def __init__(self, master, on_activated):
         super().__init__(master)
         self._closed = False
         self._busy = True
+        self._lease = activation_worker.uses_online_lease()
         self._on_activated = on_activated
         self._main_thread = MainThreadCalls(self, 50)
 
@@ -272,11 +273,13 @@ class LicenseDialog(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 10))
 
-        ctk.CTkLabel(
+        machine_label = ctk.CTkLabel(
             outer, text=t("license_machine_key"), text_color=Colors.TEXT_PRIMARY,
-        ).pack(anchor="w")
+        )
         machine_row = ctk.CTkFrame(outer, fg_color="transparent")
-        machine_row.pack(fill="x", pady=(0, 10))
+        if not self._lease:
+            machine_label.pack(anchor="w")
+            machine_row.pack(fill="x", pady=(0, 10))
         self._machine = ctk.CTkEntry(
             machine_row, width=370, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
             text_color=Colors.TEXT_PRIMARY, state="readonly",
@@ -293,7 +296,8 @@ class LicenseDialog(ctk.CTkToplevel):
             command=self._select_method, state="disabled",
         )
         self._method.set(t("license_online"))
-        self._method.pack(fill="x", pady=(0, 10))
+        if not self._lease:
+            self._method.pack(fill="x", pady=(0, 10))
 
         self._online_frame = ctk.CTkFrame(outer, fg_color="transparent")
         self._online_frame.pack(fill="x")
@@ -307,13 +311,13 @@ class LicenseDialog(ctk.CTkToplevel):
         self._code.pack(fill="x", pady=(0, 10))
         attach_entry_context_menu(self._code)
         self._online_activate_button = ctk.CTkButton(
-            self._online_frame, text=t("license_activate_online"),
+            self._online_frame, text=t("license_activate" if self._lease else "license_activate_online"),
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
             command=self._activate_online, state="disabled",
         )
         self._online_activate_button.pack(anchor="w")
         ctk.CTkLabel(
-            self._online_frame, text=t("license_online_hint"), text_color=Colors.TEXT_PRIMARY,
+            self._online_frame, text=t("license_lease_hint" if self._lease else "license_online_hint"), text_color=Colors.TEXT_PRIMARY,
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(6, 0))
 
@@ -386,7 +390,8 @@ class LicenseDialog(ctk.CTkToplevel):
             widget.configure(state="disabled" if busy and lock_inputs else "normal")
         has_machine = bool(self._machine.get()) and not busy
         self._copy.configure(state="normal" if has_machine else "disabled")
-        self._online_activate_button.configure(state="normal" if has_machine else "disabled")
+        ready = (self._lease or has_machine) and not busy
+        self._online_activate_button.configure(state="normal" if ready else "disabled")
 
     def _resize(self):
         self.update_idletasks()
@@ -415,9 +420,15 @@ class LicenseDialog(ctk.CTkToplevel):
         self._set_busy(False)
         if error is not None:
             self._show_error(str(error))
-            self._load_machine_key()
+            if not self._lease:
+                self._load_machine_key()
             return
         key, licensed, identity = info
+        if self._lease:
+            if licensed:
+                self._status.configure(text=t("license_lease_active"), text_color=Colors.STATUS_COMPLETED)
+            self._resize()
+            return
         if identity is not None and identity.startswith("JW1-"):
             self._show_error(t("license_cloud_cli_only"))
         else:
@@ -481,6 +492,11 @@ class LicenseDialog(ctk.CTkToplevel):
         code, machine_key = self._code.get().strip(), self._machine.get()
         self._set_busy(True, lock_inputs=True)
         self._status.configure(text=t("license_connecting"), text_color=Colors.TEXT_PRIMARY)
+        if self._lease:
+            activation_worker.start_lease_activation(
+                code, lambda models, error: self._post_result(self._lease_activation_done, error),
+            )
+            return
         activation_worker.start_online_activation(
             code, machine_key,
             lambda result, error: self._post_result(self._online_activation_done, result, error),
@@ -526,6 +542,22 @@ class LicenseDialog(ctk.CTkToplevel):
         self._set_machine_key(identity)
         self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
         self._devices.pack_forget()
+        self._on_activated()
+
+    def _lease_activation_done(self, error):
+        from jasna.protection.activation import ActivationServiceError
+
+        self._set_busy(False)
+        if isinstance(error, ActivationServiceError):
+            code = "license_lease_network_error" if error.code in ("network_error", "invalid_response") else f"license_service_{error.code}"
+            self._show_error(t(code))
+            return
+        if error is not None:
+            self._show_error(str(error))
+            return
+        self._code.delete(0, "end")
+        self._status.configure(text=t("license_lease_active"), text_color=Colors.STATUS_COMPLETED)
+        self._resize()
         self._on_activated()
 
     def _show_error(self, text: str) -> None:

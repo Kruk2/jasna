@@ -26,10 +26,22 @@ def _start(
     return thread
 
 
+def uses_online_lease() -> bool:
+    """Whether this platform activates with the License code alone and checks it online during paid-model work."""
+    if not protection_available():
+        return False
+    from jasna.protection import lease
+
+    return lease.enabled()
+
+
 def read_license_info() -> tuple[str | None, bool, str | None]:
     if not protection_available():
         return None, False, None
     from jasna.protection import license_store, signing
+
+    if uses_online_lease():
+        return None, license_store.is_licensed(), None
 
     key = license_store.load_license()
     identity = None
@@ -83,6 +95,16 @@ def start_activation(key: str, on_done) -> threading.Thread:
             raise ValueError(t("license_cloud_cli_only"))
         license_store.set_license(key)
         return identity
+
+    return _start(activate, on_done)
+
+
+def start_lease_activation(code: str, on_done) -> threading.Thread:
+    def activate():
+        require_protection()
+        from jasna.protection import lease
+
+        return lease.activate_license_code(code)
 
     return _start(activate, on_done)
 

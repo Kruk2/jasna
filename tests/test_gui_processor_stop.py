@@ -285,3 +285,30 @@ def test_only_a_finished_queue_is_reported_as_completed(jasna_app, queue_finishe
 
     assert (bar._percent_label.cget("text") == "100%") is queue_finished
     assert ("All jobs completed" in [message for _, _, message in jasna_app._log_panel._entries]) is queue_finished
+
+
+def test_a_failed_license_check_fails_that_job_and_stops_the_queue(tmp_path):
+    from jasna.gui.locales import t
+    from jasna.license_api import LicenseCheckStopped
+
+    class ConnectionLost(LicenseCheckStopped):
+        code = "expired"
+
+    runs = []
+
+    def fake_run_pipeline(job_id, input_path, output_path, **kwargs):
+        runs.append(job_id)
+        raise ConnectionLost("lost the connection")
+
+    processor, job, updates = _processor_with_job(tmp_path, fake_run_pipeline)
+    later = JobItem(path=tmp_path / "later.mp4")
+    processor._jobs.append(later)
+    completions = []
+    processor._on_complete = completions.append
+
+    processor._run()
+
+    assert runs == [job.id]
+    assert job.status is JobStatus.ERROR and later.status is JobStatus.PENDING
+    assert updates[-1].message == t("license_problem_expired")
+    assert completions == [False]

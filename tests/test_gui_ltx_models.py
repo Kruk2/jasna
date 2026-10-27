@@ -467,7 +467,7 @@ def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch, downlo
 
     monkeypatch.setattr(model_files, "needs_license", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(ltx_models_module, "read_license_info", lambda: (True, True))
-    monkeypatch.setattr("jasna.protection.protected_tensors.check_ltx_license", refuse)
+    monkeypatch.setattr("jasna.protection.protected_tensors.check_saved_ltx_license", refuse)
     assert ltx_models_module.license_missing(directory, "distilled", False)
 
 

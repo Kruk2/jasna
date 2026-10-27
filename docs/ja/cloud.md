@@ -3,12 +3,13 @@
 > クラウドライセンスは現在販売していません。今後、販売する予定です。
 
 レンタルした GPU でも Jasna を使えます。Linux NVIDIA 版をコマンドラインで
-対応するコンテナー内で使います。クラウド有効化は Linux 公式版の CLI 専用で、
-Windows と GitHub のソース版には対応していません。
+対応するコンテナー内で使います。GitHub のソース版では支援者向けモデルを
+使えません。
 
 ## 必要なもの
 
-- ライセンスコードの入手先に**クラウド利用**をオンにしてもらう。
+- マシンのインターネット接続。Jasna は支援者向けモデルを使う間、ライセンスを
+  オンラインで確認します。
 - 普通のコンテナー。Vast は使えます。`--pid=host` で起動した
   Docker コンテナーは使えません。
 - 今のところ RunPod と gVisor コンテナー（Modal など）では LTX が使えません
@@ -19,8 +20,6 @@ Windows と GitHub のソース版には対応していません。
   これがないと動画を読み込めず、保存もできません。Vast では Docker
   オプションに `-e NVIDIA_DRIVER_CAPABILITIES=all` を追加します。
 - `root` でログイン。RunPod と Vast は最初からそうなっています。
-- 固定の `/etc/machine-id`。これがないコンテナ（Modal や一部の Docker イメージ
-  など）では有効化に失敗します。イメージに追加してください。
 
 ## インストール
 
@@ -59,7 +58,7 @@ Jasna はマシン自身のディスク（ext4、Btrfs、XFS、ZFS、または�
 
 ```bash
 export XDG_CONFIG_HOME=/root/jasna-config
-./jasna --license-code YOUR-LICENSE-CODE --cloud-workspace
+./jasna --license-code YOUR-LICENSE-CODE
 ```
 
 `installation verified` の後、最大 1 分ほど止まって見えることがあります。
@@ -69,9 +68,10 @@ RunPod の `/workspace` ではファイルを非公開にする権限が反映�
 あります。有効化は上のとおり `/root/jasna-config` に保存してください。
 ほかのサービスでは、非公開の権限を保つ永続フォルダーも使えます。
 
-Jasna を起動する前に毎回 `export` を実行してください。Pod を削除する前に、
-`jasna-config` を自分の PC に非公開で保存してください。次の Pod の `/root`
-に非公開のまま戻すと、同じ有効化の枠を使えます。なくすと、もう一度有効化するには空き枠が必要です。
+Jasna を起動する前に毎回 `export` を実行してください。レンタル GPU が 3 台の
+枠の 1 つに数えられるのは、そこで Jasna を動かしている間だけです。
+`jasna-config` を残しておけば、次回コードを入力し直す必要はありません。
+なくした場合は、もう一度有効化するだけです。
 
 ## 動画を復元する
 
@@ -99,10 +99,10 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | ---- | -------- |
 | `unsigned or modified Jasna runtime` | `root` で `/root` に展開し直す。 |
 | `libGL.so.1: cannot open shared object file` | インストールの `apt-get` の行を実行する。 |
-| `Cloud workspace activation requires a supported Linux container` | 最新の Linux 版と `--pid=host` のないコンテナーを使う。RunPod では設定を `/root` に置く。 |
 | `Failed to open hevc encoder` | このマシンの動画エンコーダーが壊れています。別のマシンを借りる。 |
-| `enable cloud activation` | ライセンスコードの入手先にクラウド利用をオンにしてもらう。 |
-| `No activation found` または `Cloud workspace identity is missing` | `export` の行を実行してから Jasna を起動し直す。 |
+| `in use on three devices` | 別の端末の Jasna を閉じてから、もう一度試す。 |
+| `could not reach the license service` または `lost the connection` | マシンのインターネット接続を確認して、もう一度開始する。 |
+| `No activation found` または `Activate Jasna with your License code` | `export` の行を実行してから Jasna を起動し直すか、もう一度有効化する。 |
 | `unsafe Jasna launch environment` | `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` で起動する。 |
 
 `Bit depth 10 ... not supported` は大丈夫です。その動画の読み込みが少し遅く

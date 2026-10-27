@@ -120,8 +120,14 @@ Jasna shows a warning and lets you continue. This does not confirm compatibility
 Supporter models (UNet 4x, SD 1.5, LTX) need activation. Open **Activate Jasna** in
 the header.
 
-Once activated, this window shows **Devices used**, for example **2 of 3**.
-It needs internet for that; restoring works offline.
+On **Linux**, enter your **License code** and click **Activate**. That's all:
+Jasna checks your license online while it uses supporter models, so keep the
+PC connected. If the connection drops, the video that is running finishes;
+the queue stops if Jasna can't reach the check for about an hour. Start it
+again once you are back online.
+
+On **Windows**, once activated, this window shows **Devices used**, for
+example **2 of 3**. It needs internet for that; restoring works offline.
 
 - **Online** (default): enter your **License code** and click
   **Activate online**.
@@ -136,12 +142,16 @@ It needs internet for that; restoring works offline.
 
 Good to know:
 
-- One License code works on **3 PCs or cloud workspaces**. Activating the same
-  PC again does not use a new slot.
-- A new motherboard (Windows) or a fresh Linux install counts as a new PC
-  and uses a slot. Reinstalling Windows or changing the GPU, disk or RAM
-  does not: just activate again. On a few Windows PCs without a real
-  motherboard ID, a new system disk also counts as a new PC.
+- One License code works on **3 devices at the same time**. Activating the
+  same PC again does not use a new slot.
+- Windows: a new motherboard counts as a new PC and uses a slot. Reinstalling
+  Windows or changing the GPU, disk or RAM does not: just activate again. On a
+  few Windows PCs without a real motherboard ID, a new system disk also counts
+  as a new PC.
+- Linux: a device counts only while Jasna runs. "In use on 3 devices"? Close
+  Jasna on another device and start again.
+- Moved from an older Jasna on Linux? Your activation carries over on the
+  first job. If it says the activation moved, enter your License code again.
 - An Activation key covers only the models you bought.
 - **Activate online** sends only your License code and Machine key. After
   that, Jasna works offline.

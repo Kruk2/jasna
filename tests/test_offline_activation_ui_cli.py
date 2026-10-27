@@ -13,10 +13,11 @@ import pytest
 def protection_api(monkeypatch, gui_language):
     pytest.importorskip("jasna.protection.license_store")
     from jasna import protection
-    from jasna.protection import license_store, signing
+    from jasna.protection import lease, license_store, signing
 
     machine = SimpleNamespace(machine_key=Mock(return_value="JM1-" + "1" * 64))
     gui_language("en")
+    monkeypatch.setattr(lease, "enabled", lambda: False)
     monkeypatch.setattr(protection, "machine", machine, raising=False)
     monkeypatch.setattr(license_store, "load_license", lambda: None)
     monkeypatch.setattr(license_store, "is_licensed", lambda: False)
@@ -418,6 +419,7 @@ def controlled_activation_workers(monkeypatch):
     from jasna.gui import activation_worker
 
     pending = SimpleNamespace(info=[], machine=[], activation=[], online=[], devices=[])
+    monkeypatch.setattr(activation_worker, "uses_online_lease", lambda: False)
     monkeypatch.setattr(activation_worker, "start_license_info", lambda done: pending.info.append(done))
     monkeypatch.setattr(activation_worker, "start_machine_key", lambda done: pending.machine.append(done))
     monkeypatch.setattr(activation_worker, "start_activation", lambda key, done: pending.activation.append((key, done)))
@@ -764,3 +766,60 @@ def test_online_worker_runs_network_off_tk_thread(protection_api, monkeypatch, l
     assert network_threads == [(thread.ident, prefer_hong_kong)]
     assert thread.ident != threading.get_ident()
     assert results == [(("returned-activation", "JM1-" + "1" * 64), None, thread.ident)]
+
+
+@pytest.fixture
+def lease_api(protection_api, monkeypatch):
+    """Linux activation: the License code alone, checked online while supporter models run."""
+    from jasna.protection import lease
+
+    monkeypatch.setattr(lease, "enabled", lambda: True)
+    activate = Mock(return_value=["ltx-2.5-v2"])
+    monkeypatch.setattr(lease, "activate_license_code", activate)
+    return activate
+
+
+def test_lease_dialog_activates_with_the_license_code_only(tk_root, lease_api, settle_activation):
+    from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import t
+
+    callback_threads = []
+    dialog = LicenseDialog(tk_root, on_activated=lambda: callback_threads.append(threading.get_ident()))
+    settle_activation(dialog)
+    tk_root.update_idletasks()
+    assert not dialog._machine.winfo_ismapped() and not dialog._method.winfo_ismapped()
+    assert dialog._online_activate_button.cget("text") == t("license_activate")
+    assert dialog._online_activate_button.cget("state") == "normal"
+    dialog._code.insert(0, "  JL1-code  ")
+    dialog._online_activate_button.invoke()
+    settle_activation(dialog)
+    lease_api.assert_called_once_with("JL1-code")
+    assert dialog._status.cget("text") == t("license_lease_active")
+    assert dialog._code.get() == ""
+    assert callback_threads == [threading.get_ident()]
+
+
+@pytest.mark.parametrize(("code", "message"), [("network_error", "license_lease_network_error"),
+                                                ("license_not_found", "license_service_license_not_found")])
+def test_lease_dialog_explains_a_failed_activation(tk_root, lease_api, settle_activation, code, message):
+    from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import t
+    from jasna.protection.activation import ActivationServiceError
+
+    lease_api.side_effect = ActivationServiceError(code)
+    dialog = LicenseDialog(tk_root, on_activated=lambda: pytest.fail("failed activation reported success"))
+    settle_activation(dialog)
+    dialog._code.insert(0, "JL1-code")
+    dialog._online_activate_button.invoke()
+    settle_activation(dialog)
+    assert dialog._status.cget("text") == t(message)
+
+
+def test_cli_license_code_on_linux_saves_only_the_online_activation(monkeypatch, lease_api, capsys):
+    from jasna import main
+
+    monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", "JL1-code"])
+    monkeypatch.setattr(main, "_check_system", lambda args: pytest.fail("GPU check ran"))
+    main.main()
+    lease_api.assert_called_once_with("JL1-code")
+    assert "checks your license online" in capsys.readouterr().out
