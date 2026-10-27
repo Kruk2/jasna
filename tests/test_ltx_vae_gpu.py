@@ -62,7 +62,7 @@ def test_na3d_compiles_into_the_slab_with_at_most_one_graph_break(kernel, breaks
 
     torch._dynamo.reset()
     with torch.inference_mode():
-        slab = (attn, norm, left_halo, x, columns, w_pos, scale, shift, 12)
+        slab = (attn, norm, left_halo, x, columns, w_pos, scale, shift, 12, True)
         explanation = torch._dynamo.explain(T._attn_on_w_slab)(*slab)
 
     assert explanation.graph_count == breaks + 1
@@ -75,11 +75,13 @@ def test_compiled_diffusion_block_matches_eager(dtype, monkeypatch):
     monkeypatch.setattr(T, "_mlp_chunk", T.modulated_swiglu)
     monkeypatch.setattr(T, "_add_context", T.add_folded_context)
     torch.manual_seed(0)
-    block = T.ChunkedDiffusionNABlock(64, (3, 5, 5), context_channels=16, head_dim=32).cuda().to(dtype).eval()
-    upsample = T.LinearPixelShuffleUpsample(32, (2, 2, 2), 2).cuda().to(dtype).eval()
-    x = torch.randn(1, 7, 16, 16, 64, device="cuda", dtype=dtype)
-    stage4 = torch.randn(1, 4, 8, 8, 32, device="cuda", dtype=dtype)
-    modulation = tuple(torch.randn(1, 1, 1, 1, 64, device="cuda", dtype=dtype) * 0.1 for _ in range(7))
+    dim = T.DIFFUSION_DIM
+    block = T.ChunkedDiffusionNABlock(dim, (3, 5, 5), context_channels=dim, head_dim=T.DIFFUSION_HEAD_DIM)
+    block = block.cuda().to(dtype).eval()
+    upsample = T.LinearPixelShuffleUpsample(T.DIFFUSION_CONTEXT_DIM, T.DIFFUSION_CONTEXT_STRIDE, 2).cuda().to(dtype).eval()
+    x = torch.randn(1, 7, 16, 16, dim, device="cuda", dtype=dtype)
+    stage4 = torch.randn(1, 4, 8, 8, T.DIFFUSION_CONTEXT_DIM, device="cuda", dtype=dtype)
+    modulation = tuple(torch.randn(1, 1, 1, 1, dim, device="cuda", dtype=dtype) * 0.1 for _ in range(7))
 
     def run() -> torch.Tensor:
         with torch.inference_mode():
