@@ -99,8 +99,8 @@ Jasna を更新した場合は、最初からやり直す前に確認します�
 ### LTX を手動でダウンロードする
 
 Jasna でのダウンロードが何度も失敗する場合は、ブラウザで
-[huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.0)
-（または [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.0)）から
+[huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.1)
+（または [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.1)）から
 ファイルを取得してください。必要なのは 3 ファイルです：選んだモデルのファイル 1 つと、
 VAE の 2 ファイル。
 Jasna 0.11.3 以前では `main` ブランチを使ってください。

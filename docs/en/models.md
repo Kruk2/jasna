@@ -102,8 +102,8 @@ BasicVSR++ jobs do not resume.
 ### Downloading LTX yourself
 
 If the download in Jasna keeps failing, get the files in your browser from
-[huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.0)
-(or [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.0)).
+[huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.1)
+(or [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.1)).
 For Jasna 0.11.3 or older, use the `main` branch instead.
 You need 3 files: one for the model you picked, plus the two VAE files.
 
