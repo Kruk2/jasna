@@ -642,4 +642,4 @@ def test_amd_extension_builds_host_sources_only_so_nothing_is_hipified(monkeypat
     built = native._build_extension(tmp_path / "build")
     assert built["sources"] == [str(native._HERE / "module.cpp"), str(native._HERE / "block.cpp")]
     assert built["extra_ldflags"] == ["-L/torch/lib", "-lamdhip64", "-lc10_hip", "-ltorch_hip", *map(str, objects)]
-    assert built["extra_include_paths"] == ["/rocm/include"]
+    assert built["extra_include_paths"] == [str(Path("/rocm") / "include")]
