@@ -1,0 +1,11 @@
+run,model,precision,ltx_s,encode_s,denoise_s,compose_s
+1,distilled1,int8,36.5,10.8,12.8,10.7
+1,distilled2,int8,48.3,10.8,24.7,10.8
+2,distilled1,int8,38.3,11.3,13.6,11.1
+2,distilled2,int8,49.2,11.5,24.9,10.5
+3,distilled1,int8,37.2,11.1,13.3,10.5
+3,distilled2,int8,48.1,10.9,24.8,10.1
+1,distilled1,nvfp4,32.3,9.7,10.1,10.4
+1,distilled2,nvfp4,41.1,9.7,18.8,10.6
+2,distilled1,nvfp4,34.2,10.8,10.3,11.0
+2,distilled2,nvfp4,46.4,11.6,20.6,11.8

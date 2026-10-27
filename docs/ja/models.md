@@ -71,7 +71,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   | --- | ---: |
   | 標準画質（デフォルト） | 約 15 GB |
   | 高速モード | 約 9 GB |
-  | 良好画質・高画質・最高画質（追加） | それぞれさらに約 13 GB |
+  | 基本画質・良好画質・高画質・最高画質（追加） | それぞれさらに約 13 GB |
 
   Hugging Face に接続できない場合（中国など）は、自動で hf-mirror.com を
   使います。それでも失敗する場合は
@@ -107,6 +107,8 @@ Jasna 0.11.3 以前では `main` ブランチを使ってください。
 
 | 選んだモデル | ファイル |
 | --- | --- |
+| 基本画質 | `ltx-restore-alpha1-distill1-int8.safetensors.enc` |
+| 基本画質 + 高速モード | `ltx-restore-alpha1-distill1-nvfp4.safetensors.enc` |
 | 標準画質 | `ltx-restore-alpha1-distill2-int8.safetensors.enc` |
 | 標準画質 + 高速モード | `ltx-restore-alpha1-distill2-nvfp4.safetensors.enc` |
 | 良好画質 | `ltx-restore-alpha1-distill4-int8.safetensors.enc` |
@@ -123,11 +125,11 @@ LTX のジョブをもう一度始めると、ダウンロードの確認は出�
 
 ### LTX のオプション
 
-- **モデル**: **標準画質**（デフォルト、おすすめ）、**良好画質**、**高画質**、**最高画質**。
-  標準画質が最も速く、良好画質は少し精細で約 1.5 倍遅くなります。高画質は
+- **モデル**: **基本画質**、**標準画質**（デフォルト、おすすめ）、**良好画質**、**高画質**、**最高画質**。
+  基本画質は標準画質より約 1.3 倍速く、少しやわらかい仕上がりです。良好画質は少し精細で約 1.5 倍遅くなります。高画質は
   より精細で約 2.5 倍遅くなります。最高画質は高画質より少し良く、約 5 倍遅く、
   通常は不要です。RTX 5090 では、標準画質は動画の長さの約 1〜2 倍の時間がかかります。
-  CLI: `--restoration-model-name ltx`（標準）、`ltx-4step`（良好）、`ltx-8step`（高画質）、`ltx-undistilled`（最高）。
+  CLI: `--restoration-model-name ltx-basic`（基本）、`ltx`（標準）、`ltx-4step`（良好）、`ltx-8step`（高画質）、`ltx-undistilled`（最高）。
 - **高速モード**（RTX 50 シリーズのみ）: 約 1.4 倍速く、ディテールはわずかに
   減り、ダウンロードも小さくなります。CLI: `--ltx-fast`。
 - **大きなモザイクをより鮮明に**: 大きなモザイク（クローズアップ、4K）を
