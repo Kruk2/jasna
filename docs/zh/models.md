@@ -65,7 +65,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   | --- | ---: |
   | 标准画质（默认） | 约 15 GB |
   | 快速模式 | 约 9 GB |
-  | 良好画质、高画质或顶级画质，额外 | 每个再加约 13 GB |
+  | 基础、良好、高画质或顶级画质，额外 | 每个再加约 13 GB |
 
   如果无法访问 Hugging Face（例如在中国），Jasna 会自动使用 hf-mirror.com。
   仍然下载失败？见[手动下载 LTX](#手动下载-ltx)。
@@ -95,6 +95,8 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
 
 | 你选的模型 | 文件 |
 | --- | --- |
+| 基础画质 | `ltx-restore-alpha1-distill1-int8.safetensors.enc` |
+| 基础画质 + 快速模式 | `ltx-restore-alpha1-distill1-nvfp4.safetensors.enc` |
 | 标准画质 | `ltx-restore-alpha1-distill2-int8.safetensors.enc` |
 | 标准画质 + 快速模式 | `ltx-restore-alpha1-distill2-nvfp4.safetensors.enc` |
 | 良好画质 | `ltx-restore-alpha1-distill4-int8.safetensors.enc` |
@@ -111,10 +113,10 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
 
 ### LTX 选项
 
-- **模型**：**标准画质**（默认，推荐）、**良好画质**、**高画质**或**顶级画质**。标准画质最快；
+- **模型**：**基础画质**、**标准画质**（默认，推荐）、**良好画质**、**高画质**或**顶级画质**。基础画质比标准画质快约 1.3 倍，画面稍柔和；
   良好画质细节稍多，慢约 1.5 倍；高画质细节更多，慢约 2.5 倍；
   顶级画质比高画质稍好，慢约 5 倍，通常不值得。在 RTX 5090 上，标准画质耗时约为视频长度的 1–2 倍。
-  CLI：`--restoration-model-name ltx`（标准）、`ltx-4step`（良好）、`ltx-8step`（高画质）或 `ltx-undistilled`（顶级）。
+  CLI：`--restoration-model-name ltx-basic`（基础）、`ltx`（标准）、`ltx-4step`（良好）、`ltx-8step`（高画质）或 `ltx-undistilled`（顶级）。
 - **快速模式**（仅限 RTX 50 系列）：快约 1.4 倍，细节略少，下载更小。
   CLI：`--ltx-fast`。
 - **大马赛克更清晰**：大马赛克（特写、4K）细节更多，这部分约慢 3 倍。

@@ -124,7 +124,7 @@ def test_codec_names_are_case_insensitive(tmp_path):
     assert run_cli(cli_args(tmp_path, "--codec", "AV1")).call_args.kwargs["config"].codec == "av1"
 
 
-LTX_NEEDED = "needs --restoration-model-name ltx, ltx-4step, ltx-8step or ltx-undistilled"
+LTX_NEEDED = "needs --restoration-model-name ltx-basic, ltx, ltx-4step, ltx-8step or ltx-undistilled"
 
 
 @pytest.mark.parametrize(

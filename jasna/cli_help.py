@@ -7,7 +7,8 @@ CLI_HELP: dict[str, str] = {
         "Without --input, --stream or --benchmark, activate and exit."
     ),
     "restoration_model_name": (
-        "Restoration model for video: basicvsrpp (fast), ltx (Standard Quality LTX: more detail, much slower; "
+        "Restoration model for video: basicvsrpp (fast), ltx-basic (Basic Quality LTX: about 1.3x faster than ltx, "
+        "slightly softer), ltx (Standard Quality LTX: more detail, much slower; "
         "NVIDIA RTX or AMD Radeon RX 7000/9000; recommended), ltx-4step (Good Quality: a bit more detail, about 1.5x slower than ltx), "
         "ltx-8step (High Quality: more detail, about 2.5x slower than ltx) or ltx-undistilled (Top Quality: "
         "slightly better, about 5x slower than ltx). LTX doesn't "

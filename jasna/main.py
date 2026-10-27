@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 # CLI restoration model name -> (restoration backend, LTX model variant).
 CLI_RESTORATION_MODELS: dict[str, tuple[RestorationModelName, LtxModelName]] = {
     "basicvsrpp": ("basicvsrpp", LTX_DEFAULT_MODEL),
+    "ltx-basic": ("ltx", "distilled1"),
     "ltx": ("ltx", "distilled2"),
     "ltx-4step": ("ltx", "distilled4"),
     "ltx-8step": ("ltx", "distilled"),
@@ -894,7 +895,7 @@ def _reject_options_of_other_restoration_backend(
     if restoration_backend == "ltx":
         foreign_dests, needed_models = BASICVSRPP_ONLY_ARG_DESTS, "basicvsrpp"
     else:
-        foreign_dests, needed_models = LTX_ONLY_ARG_DESTS, "ltx, ltx-4step, ltx-8step or ltx-undistilled"
+        foreign_dests, needed_models = LTX_ONLY_ARG_DESTS, "ltx-basic, ltx, ltx-4step, ltx-8step or ltx-undistilled"
     for dest in foreign_dests:
         if getattr(args, dest) != parser.get_default(dest):
             option = "--" + dest.replace("_", "-")

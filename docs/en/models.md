@@ -73,7 +73,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   | --- | ---: |
   | Standard Quality (default) | about 15 GB |
   | Fast mode | about 9 GB |
-  | Good, High or Top Quality, on top | about 13 GB more each |
+  | Basic, Good, High or Top Quality, on top | about 13 GB more each |
 
   If Hugging Face can't be reached (for example in China), Jasna uses
   hf-mirror.com automatically. Download still fails? See
@@ -109,6 +109,8 @@ You need 3 files: one for the model you picked, plus the two VAE files.
 
 | You picked | Files |
 | --- | --- |
+| Basic Quality | `ltx-restore-alpha1-distill1-int8.safetensors.enc` |
+| Basic Quality + Fast mode | `ltx-restore-alpha1-distill1-nvfp4.safetensors.enc` |
 | Standard Quality | `ltx-restore-alpha1-distill2-int8.safetensors.enc` |
 | Standard Quality + Fast mode | `ltx-restore-alpha1-distill2-nvfp4.safetensors.enc` |
 | Good Quality | `ltx-restore-alpha1-distill4-int8.safetensors.enc` |
@@ -125,11 +127,11 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
 
 ### LTX options
 
-- **Model**: **Standard Quality** (default, recommended), **Good Quality**, **High Quality** or
-  **Top Quality**. Standard Quality is the fastest. Good Quality has a bit more detail and is
+- **Model**: **Basic Quality**, **Standard Quality** (default, recommended), **Good Quality**, **High Quality** or
+  **Top Quality**. Basic Quality is about 1.3x faster than Standard Quality and slightly softer. Good Quality has a bit more detail and is
   about 1.5x slower. High Quality has more detail and is about 2.5x slower. Top Quality is
   slightly better than High Quality and about 5x slower; it is rarely worth it. On an RTX 5090,
-  Standard Quality takes about 1-2x the video's length. CLI: `--restoration-model-name ltx` (Standard),
+  Standard Quality takes about 1-2x the video's length. CLI: `--restoration-model-name ltx-basic` (Basic), `ltx` (Standard),
   `ltx-4step` (Good), `ltx-8step` (High) or `ltx-undistilled` (Top).
 - **Fast mode** (RTX 50-series only): about 1.4x faster, slightly less detail,
   smaller download. CLI: `--ltx-fast`.

@@ -129,6 +129,7 @@ def test_cli_ltx_args_are_mapped() -> None:
     assert defaults.ltx_seed == 20260923
     assert defaults.ltx_model == "distilled2"
 
+    assert _cli_config(["--restoration-model-name", "ltx-basic"]).ltx_model == "distilled1"
     assert _cli_config(["--restoration-model-name", "ltx"]).ltx_model == "distilled2"
     assert _cli_config(["--restoration-model-name", "ltx-4step"]).ltx_model == "distilled4"
     assert _cli_config(["--restoration-model-name", "ltx-8step"]).ltx_model == "distilled"
