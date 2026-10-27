@@ -363,6 +363,7 @@ def test_player_secondary_options_follow_gpu_and_model_availability(
     from jasna import accelerator, engine_paths
 
     monkeypatch.setattr(accelerator, "is_nvidia_device", lambda: True)
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda: False)
     monkeypatch.setattr(engine_paths, "UNET4X_ONNX_PATH", tmp_path / "missing.onnx")
     monkeypatch.setattr(engine_paths, "UNET4X_ONNX_ENC_PATH", tmp_path / "missing.enc")
 
@@ -376,6 +377,10 @@ def test_player_secondary_options_follow_gpu_and_model_availability(
     )
 
     monkeypatch.setattr(accelerator, "is_nvidia_device", lambda: False)
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda: True)
+    assert available_player_secondary_restorations() == ("none", "unet-4x")
+
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda: False)
     assert available_player_secondary_restorations() == ("none",)
 
 

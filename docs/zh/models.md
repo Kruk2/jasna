@@ -160,7 +160,7 @@ Jasna 把每个马赛克修复成一张 256x256 的图。在大马赛克、特�
 看起来模糊。二次模型会先把这张图放大（512x512 或 1024x1024），再放回画面，
 所以结果更清晰。
 
-仅限 NVIDIA。
+UNet 4x 支持 NVIDIA 和兼容的 AMD 显卡。RTX Super Res 和 Topaz TVAI 需要 NVIDIA。
 
 - **UNet 4x**（支持者专享）：质量接近 TVAI `iris-2`，比 TVAI 快。见
   [SLS Discord 上的示例](https://discord.com/channels/1196376491815092265/1199059436199759943/1516497879684874260)

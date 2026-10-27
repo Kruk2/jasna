@@ -83,10 +83,10 @@ def test_tvai_denoise_requires_tvai_secondary() -> None:
         _build_session(session_config(tvai_denoise=True))
 
 
-def test_session_selects_unet_secondary() -> None:
-    pytest.importorskip("tensorrt")
+@pytest.mark.parametrize("amd", [False, True])
+def test_session_selects_unet_secondary(amd) -> None:
     session, compiled, _, pipeline_cls, unet_cls = _build_session(
-        session_config(secondary_restoration="unet-4x")
+        session_config(secondary_restoration="unet-4x"), amd=amd,
     )
 
     assert pipeline_cls.call_args.kwargs["secondary_restorer"] is unet_cls.return_value
@@ -118,9 +118,10 @@ def test_ltx_allows_secondary_restoration_only_with_auto_split() -> None:
     assert session.ltx_files is not None
 
 
-def test_amd_rejects_secondary_restoration() -> None:
+@pytest.mark.parametrize("secondary", ["tvai", "rtx-super-res"])
+def test_amd_rejects_secondary_restoration(secondary) -> None:
     with pytest.raises(ValueError, match="not available in the AMD build"):
-        _build_session(session_config(secondary_restoration="tvai"), amd=True)
+        _build_session(session_config(secondary_restoration=secondary), amd=True)
 
 
 def test_amd_disables_basicvsrpp_compilation() -> None:

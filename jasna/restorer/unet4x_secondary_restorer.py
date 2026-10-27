@@ -14,7 +14,6 @@ from jasna.engine_paths import (
     get_unet4x_engine_path,
 )
 from jasna.license_api import require_protection
-from jasna.trt.trt_runner import TrtRunner
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +30,15 @@ UNET4X_INPUT_SHAPES = {
 
 def use_plaintext_unet4x() -> bool:
     return UNET4X_ONNX_PATH.exists() and not is_frozen()
+
+
+def read_unet4x_onnx() -> bytes:
+    if use_plaintext_unet4x():
+        return UNET4X_ONNX_PATH.read_bytes()
+    require_protection()
+    from jasna.protection import protected_model
+
+    return protected_model.decrypt_model_bytes(UNET4X_MODEL_ID, UNET4X_ONNX_ENC_PATH)
 
 
 def compile_unet4x_engine(
@@ -57,7 +65,7 @@ def compile_unet4x_engine(
         else:
             return engine_path
 
-    onnx_bytes = protected_model.decrypt_model_bytes(UNET4X_MODEL_ID, UNET4X_ONNX_ENC_PATH)
+    onnx_bytes = read_unet4x_onnx()
     try:
         return compile_onnx_bytes_to_encrypted_engine(
             onnx_bytes,
@@ -78,8 +86,40 @@ class Unet4xSecondaryRestorer:
     prefers_cpu_input = False
 
     def __init__(self, *, device: torch.device, fp16: bool = True) -> None:
+        from jasna.accelerator import has_triton, is_amd_device
+
         self.device = torch.device(device)
         self.fp16 = bool(fp16)
+        self.runner = None
+        self.model = None
+
+        if is_amd_device(self.device):
+            from jasna.models.unet4x import Unet4x
+
+            self._dtype = torch.float16 if self.fp16 else torch.float32
+            self.model = Unet4x(read_unet4x_onnx()).to(device=self.device, dtype=self._dtype)
+            if has_triton():
+                # Temporal warping must keep the export's intermediate half rounding.
+                self.model = torch.compile(
+                    self.model, fullgraph=True, dynamic=False, options={"emulate_precision_casts": True},
+                )
+            logger.info("Unet4xSecondaryRestorer loaded: PyTorch (%s)", self._dtype)
+        else:
+            self._load_trt_runner()
+            self._dtype = self.runner.input_dtypes["lr_curr"]
+
+        self._g_lr_prev = torch.zeros(1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3, dtype=self._dtype, device=self.device)
+        self._g_lr_curr = torch.zeros(1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3, dtype=self._dtype, device=self.device)
+        self._g_hr_prev = torch.zeros(1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3, dtype=self._dtype, device=self.device)
+
+        if self.runner is not None:
+            self._stream = torch.cuda.current_stream(self.device)
+            self.runner.context.set_tensor_address("lr_prev", self._g_lr_prev.data_ptr())
+            self.runner.context.set_tensor_address("lr_curr", self._g_lr_curr.data_ptr())
+            self.runner.context.set_tensor_address("hr_prev", self._g_hr_prev.data_ptr())
+
+    def _load_trt_runner(self) -> None:
+        from jasna.trt.trt_runner import TrtRunner
 
         if use_plaintext_unet4x():
             self.engine_path = get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=self.fp16)
@@ -121,26 +161,17 @@ class Unet4xSecondaryRestorer:
             UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE,
         )
 
-        self._dtype = self.runner.input_dtypes["lr_curr"]
-        self._stream = torch.cuda.current_stream(self.device)
-
-        self._g_lr_prev = torch.zeros(1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3, dtype=self._dtype, device=self.device)
-        self._g_lr_curr = torch.zeros(1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3, dtype=self._dtype, device=self.device)
-        self._g_hr_prev = torch.zeros(1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3, dtype=self._dtype, device=self.device)
-
-        self.runner.context.set_tensor_address("lr_prev", self._g_lr_prev.data_ptr())
-        self.runner.context.set_tensor_address("lr_curr", self._g_lr_curr.data_ptr())
-        self.runner.context.set_tensor_address("hr_prev", self._g_hr_prev.data_ptr())
-
     def _to_nhwc(self, frames_nchw: torch.Tensor) -> torch.Tensor:
         return frames_nchw.permute(0, 2, 3, 1).contiguous()
 
-    def _infer(self) -> None:
+    def _infer(self) -> torch.Tensor:
+        if self.model is not None:
+            return self.model(self._g_lr_prev, self._g_lr_curr, self._g_hr_prev)
         self.runner.context.execute_async_v3(self._stream.cuda_stream)
+        return self.runner.outputs["out"]
 
     def _advance_temporal(self) -> None:
-        self._infer()
-        self._g_hr_prev.copy_(self.runner.outputs["out"])
+        self._g_hr_prev.copy_(self._infer())
         self._g_lr_prev.copy_(self._g_lr_curr)
 
     def _bootstrap(self, first_frame_nhwc: torch.Tensor) -> None:
@@ -155,6 +186,7 @@ class Unet4xSecondaryRestorer:
         self._g_hr_prev.copy_(hr_init_nchw.permute(0, 2, 3, 1))
         self._advance_temporal()
 
+    @torch.inference_mode()
     def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
         T = int(frames_256.shape[0])
         if T == 0:
@@ -191,6 +223,7 @@ class Unet4xSecondaryRestorer:
         return list(kept_nchw.unbind(0))
 
     def close(self) -> None:
+        self.model = None
         if self.runner is not None:
             self.runner.close()
             self.runner = None

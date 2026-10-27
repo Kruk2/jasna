@@ -3,6 +3,7 @@
 import customtkinter as ctk
 from tkinter import filedialog
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
@@ -13,6 +14,8 @@ from jasna.gui.theme import Colors, Fonts, Sizing
 class SecondarySection:
     def __init__(self, parent, widgets: dict):
         self._widgets = widgets
+        self._vendor = AcceleratorVendor.NVIDIA
+        self._enabled = True
 
         self._previous_section = parent.pack_slaves()[-1]
         section = CollapsibleSection(parent, t("section_secondary"), expanded=False)
@@ -266,11 +269,20 @@ class SecondarySection:
             self._section.pack_forget()
 
     def set_enabled(self, enabled: bool) -> None:
+        self._enabled = enabled
         state = "normal" if enabled else "disabled"
         for value, radio in self._engine_radios.items():
             unavailable = value == "unet-4x" and not self._unet4x_available
+            if self._vendor is not AcceleratorVendor.NVIDIA:
+                unavailable |= value in ("tvai", "rtx-super-res")
+            if self._vendor is AcceleratorVendor.CPU:
+                unavailable |= value == "unet-4x"
             radio.configure(state="disabled" if unavailable else state)
         self._tvai_denoise_switch.configure(state=state)
+
+    def set_gpu_support(self, vendor: AcceleratorVendor) -> None:
+        self._vendor = vendor
+        self.set_enabled(self._enabled)
 
     def apply(self, preset):
         self._widgets["secondary_var"].set(preset.secondary_restoration)

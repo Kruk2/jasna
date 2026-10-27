@@ -86,7 +86,7 @@ The `--ltx-*` options need `--restoration-model-name ltx-basic`, `ltx`, `ltx-4st
 
 | Option | Default | Notes |
 | ------ | ------- | ----- |
-| `--secondary-restoration` | `none` | `unet-4x`, `tvai`, or `rtx-super-res`. See [Models](models.md). |
+| `--secondary-restoration` | `none` | `unet-4x` (NVIDIA or AMD), `tvai`, or `rtx-super-res` (NVIDIA). See [Models](models.md). |
 | `--rtx-scale` | `4` | RTX Super Res upscale factor (`2` or `4`). |
 | `--rtx-quality` | `high` | `low`, `medium`, `high`, `ultra`. |
 | `--rtx-denoise` | `medium` | `none`, `low`, `medium`, `high`, `ultra`. |

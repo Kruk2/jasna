@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 import torch
 
+from factories import TemporalUpscaler
 from jasna.restorer.unet4x_secondary_restorer import (
     UNET4X_INPUT_SIZE,
     UNET4X_OUTPUT_SIZE,
@@ -30,7 +31,40 @@ def plaintext_model(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def torch_restorer(plaintext_model, monkeypatch):
+    monkeypatch.setattr("jasna.accelerator.is_amd_device", lambda _device: True)
+    monkeypatch.setattr("jasna.accelerator.has_triton", lambda: False)
+    monkeypatch.setattr("jasna.models.unet4x.Unet4x", lambda _data: TemporalUpscaler())
+    return Unet4xSecondaryRestorer(device=torch.device("cpu"), fp16=False)
+
+
+def test_torch_restorer_advances_both_previous_frames_and_resets_between_clips(torch_restorer):
+    clip = torch.tensor([0.0, 1.0, 0.0, 1.0])[:, None, None, None].expand(-1, 3, 256, 256)
+    first = torch_restorer.restore(clip, keep_start=0, keep_end=4)
+    again = torch_restorer.restore(clip, keep_start=0, keep_end=4)
+
+    assert [int(frame[0, 0, 0]) for frame in first] == [0, 63, 95, 111]
+    assert all(torch.equal(left, right) for left, right in zip(first, again))
+    assert all(frame.shape == (3, 1024, 1024) and frame.dtype == torch.uint8 for frame in first)
+
+
+def test_torch_restorer_uses_the_frame_before_the_kept_range(torch_restorer):
+    clip = torch.tensor([0.0, 1.0, 0.0, 1.0])[:, None, None, None].expand(-1, 3, 256, 256)
+    kept = torch_restorer.restore(clip, keep_start=2, keep_end=4)
+
+    assert [int(frame[0, 0, 0]) for frame in kept] == [191, 159]
+    torch_restorer.close()
+    assert torch_restorer.model is None
+
+
+@pytest.mark.parametrize(("frames", "start", "end"), [(0, 0, 0), (2, 2, 3), (2, 1, 1)])
+def test_torch_restorer_empty_ranges(torch_restorer, frames, start, end):
+    assert torch_restorer.restore(torch.empty(frames, 3, 256, 256), keep_start=start, keep_end=end) == []
+
+
+@pytest.fixture
 def restorer(tmp_path: Path, plaintext_model):
+    pytest.importorskip("tensorrt")
     device = torch.device("cpu")
     fake_engine = tmp_path / "fake_engine.trt"
     fake_engine.write_text("x")
@@ -38,7 +72,7 @@ def restorer(tmp_path: Path, plaintext_model):
     mock_stream.cuda_stream = 0
     with (
         patch("jasna.restorer.unet4x_secondary_restorer.get_unet4x_engine_path", return_value=fake_engine),
-        patch("jasna.restorer.unet4x_secondary_restorer.TrtRunner", return_value=_make_fake_runner(device, torch.float32)),
+        patch("jasna.trt.trt_runner.TrtRunner", return_value=_make_fake_runner(device, torch.float32)),
         patch("torch.cuda.current_stream", return_value=mock_stream),
     ):
         r = Unet4xSecondaryRestorer(device=device, fp16=False)
@@ -62,6 +96,7 @@ def test_restore_returns_the_kept_frames_upscaled(restorer, frames, keep_start, 
 
 class TestEngineDtypeMismatch:
     def test_buffers_match_half_engine_bindings_when_fp16_off(self, tmp_path: Path, plaintext_model):
+        pytest.importorskip("tensorrt")
         device = torch.device("cpu")
         fake_engine = tmp_path / "fake_engine.trt"
         fake_engine.write_text("x")
@@ -69,7 +104,7 @@ class TestEngineDtypeMismatch:
         mock_stream.cuda_stream = 0
         with (
             patch("jasna.restorer.unet4x_secondary_restorer.get_unet4x_engine_path", return_value=fake_engine),
-            patch("jasna.restorer.unet4x_secondary_restorer.TrtRunner", return_value=_make_fake_runner(device, torch.float16)),
+            patch("jasna.trt.trt_runner.TrtRunner", return_value=_make_fake_runner(device, torch.float16)),
             patch("torch.cuda.current_stream", return_value=mock_stream),
         ):
             r = Unet4xSecondaryRestorer(device=device, fp16=False)

@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import torch
 
-from jasna.accelerator import has_triton
+from jasna.accelerator import KernelBackend, has_triton, is_amd_device, kernel_backend
 
 
 def pad_batch_with_last(x: torch.Tensor, *, batch_size: int) -> torch.Tensor:
@@ -32,15 +32,16 @@ def half_dtype(device: torch.device) -> torch.dtype:
 
 def compiles(device: torch.device, dtype: torch.dtype) -> bool:
     """Whether :func:`compile_static` compiles a function computing in ``dtype`` on ``device``."""
+    if is_amd_device(device) and kernel_backend(device) is KernelBackend.AMD_PREBUILT:
+        return False
     return has_triton() and (dtype != torch.bfloat16 or half_dtype(device) == torch.bfloat16)
 
 
 def compile_static(fn: Callable, mode: str, device: torch.device, dtype: torch.dtype) -> Callable:
     """``fn`` (computing in ``dtype``) compiled with static shapes. Raises dynamo's recompile
     limits so every shape a run meets gets its own graph, and makes hitting them an error
-    instead of a silent eager run. ``fn`` stays eager without Triton (Windows ROCm ships none, so
-    inductor has no GPU backend there) and, in bf16, where inductor has no bf16 (:func:`half_dtype`
-    is fp16)."""
+    instead of a silent eager run. ``fn`` stays eager for packaged AMD kernels, without
+    Triton, and in bf16 where inductor has no bf16 (:func:`half_dtype` is fp16)."""
     if not compiles(device, dtype):
         return fn
     torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 64)

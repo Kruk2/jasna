@@ -48,7 +48,7 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 
 - NVIDIA：你的 GPU 在 NVIDIA 的 [GPU 表格](https://developer.nvidia.com/cuda/gpus)
   中需要计算能力 7.5 或更高。
-- AMD：见下表。二次修复仅限 NVIDIA。
+- AMD：见下表。支持 UNet 4x 二次修复。
 - 磁盘格式：Windows 用 NTFS；Linux 用 ext4、Btrfs、XFS 或 ZFS。不支持网络磁盘。请使用
   固态硬盘（SSD）；在机械硬盘（HDD）上 Jasna 启动和加载模型都很慢。
 - LTX 需要 NVIDIA RTX 或 AMD Radeon RX 7000/9000 显卡，至少 8 GB 显存和 16 GB 内存。见
@@ -92,6 +92,7 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 **第一个任务会很慢。** 在 NVIDIA 上，Jasna 会先为你的 GPU 准备模型。这大约需要
 **15–60 分钟**，只会发生一次。在此期间请关闭其他应用，也不要使用电脑。更新 Jasna 时，
 把 `model_weights` 文件夹复制到新版本中，这样就不用再等一次。更新后，LTX 仍可能要求重新下载模型。
+在 AMD 上首次使用 UNet 4x 时也需要准备。
 
 每个设置都有提示：把鼠标移到 ⓘ 图标上即可查看。GPU 显存不足？降低
 **最大片段大小**，例如从 `90` 降到 `60`。见[调整显存和 GPU 占用](docs/zh/tuning.md)。
@@ -192,7 +193,7 @@ Jasna 0.10 的邮箱和密钥已不能使用，请向购买的地方申请新的
    不支持该音频时才会重新编码）。
 
 第一个任务很慢，因为第 2 步和第 4 步的模型（如果使用 UNet 4x，也包括它）要为你的 GPU
-做准备（仅限 NVIDIA）。结果保存在 `model_weights` 中，之后会重复使用。你可以把它复制到
+做准备（NVIDIA）。在 AMD 上，UNet 4x 也会在首次使用时准备。结果保存在 `model_weights` 中，之后会重复使用。你可以把它复制到
 新版本的 Jasna 中。
 
 LTX 的工作方式不同。它会把视频处理 4 遍：查找马赛克、准备、用扩散模型修复、保存。它更慢，但能加入更多真实细节。

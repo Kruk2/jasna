@@ -56,6 +56,7 @@ amd = [
   # Exact AMD builds from stable.repo.amd.com/rocm/whl-next on both OSes.
   "torch==2.14.0+rocm10.1.0",
   "torchvision==0.29.0a0+rocm10.1.0",
+  "triton-windows==3.8.0.post29; sys_platform == 'win32'",
   # AMD runs RF-DETR through the rfdetr torch model (ROCm), not ONNX/MIGraphX,
   # which sidesteps the Windows-only MIGraphX wheels (see issue #240).
   "rfdetr==1.8.3",

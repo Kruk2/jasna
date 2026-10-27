@@ -184,7 +184,8 @@ Jasna は各モザイクを 256x256 の画像として復元します。大き�
 この画像をフレームに戻す前に大きく（512x512 または 1024x1024）するので、
 結果がよりシャープになります。
 
-NVIDIA のみです。
+UNet 4x は NVIDIA と対応 AMD GPU で使えます。RTX Super Res と Topaz TVAI は
+NVIDIA が必要です。
 
 - **UNet 4x**（支援者向け）: 品質は TVAI `iris-2` に近く、
   TVAI より高速です。

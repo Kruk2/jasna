@@ -55,7 +55,7 @@ and a command line, and runs on your GPU.
 
 - NVIDIA: your GPU needs compute capability 7.5 or higher in NVIDIA's
   [GPU table](https://developer.nvidia.com/cuda/gpus).
-- AMD: see the table below. Secondary restoration is NVIDIA only.
+- AMD: see the table below. UNet 4x secondary restoration is supported.
 - Disk format: NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux. Network disks
   are not supported. Use an SSD; on a hard disk (HDD) Jasna starts and loads
   models slowly.
@@ -103,6 +103,7 @@ your exact GPU. This takes about **15–60 minutes**, only once. Close other
 apps and don't use the PC during this time. When you update Jasna, copy the
 `model_weights` folder to the new version, so you don't wait again. LTX may
 still ask to download its model again after an update.
+UNet 4x also needs preparation on its first use on AMD.
 
 Every setting has a tooltip: move the mouse over the ⓘ icon. Out of GPU
 memory (VRAM)? Lower **Max Clip Size**, for example from `90` to `60`. See
@@ -200,8 +201,8 @@ Almost everything runs on the GPU, from reading the video to saving it.
 7. **Encode** with the GPU encoder (NVENC on NVIDIA, AMF on AMD). Audio is
    copied (encoded again only if the output format can't hold it).
 
-The first job is slow because the models for steps 2 and 4 (and UNet 4x, if
-used) are prepared for your exact GPU (NVIDIA only). The result is saved in
+On NVIDIA, the first job prepares the models for steps 2 and 4 (and UNet 4x,
+if used) for your exact GPU. UNet 4x also prepares itself on AMD. The result is saved in
 `model_weights` and used again later. You can copy it to a newer Jasna
 version.
 

@@ -297,6 +297,26 @@ def test_ltx_auto_split_shows_secondary_restoration_for_the_basicvsrpp_parts(pan
     assert not secondary.winfo_manager()
 
 
+def test_amd_secondary_choices_and_busy_state(panel_factory, monkeypatch, tmp_path) -> None:
+    from jasna import engine_paths
+
+    model = tmp_path / "unet-4x.onnx"
+    model.touch()
+    monkeypatch.setattr(engine_paths, "UNET4X_ONNX_PATH", model)
+    panel = panel_factory(True)
+    panel.set_gpu_support(vendor=AcceleratorVendor.AMD, blackwell=False)
+    radios = panel._secondary_section._engine_radios
+    radios["unet-4x"].invoke()
+    assert panel.get_settings().secondary_restoration == "unet-4x"
+    assert radios["tvai"].cget("state") == radios["rtx-super-res"].cget("state") == "disabled"
+
+    panel._secondary_section.set_enabled(False)
+    panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=False)
+    assert radios["unet-4x"].cget("state") == "disabled"
+    panel._secondary_section.set_enabled(True)
+    assert radios["tvai"].cget("state") == "normal"
+
+
 def test_ltx_without_model_files_runs_as_a_trial(panel_factory, monkeypatch) -> None:
     monkeypatch.setattr(ltx_models_module, "protection_available", lambda: False)
     panel = panel_factory(False)
