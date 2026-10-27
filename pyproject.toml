@@ -15,7 +15,7 @@ dependencies = [
   "psutil",
   "diffusers",
   "huggingface-hub",
-  "safetensors",
+  "safetensors>=0.6",
   "requests",
   "mmengine==0.10.7",
   "opencv-python<5",
