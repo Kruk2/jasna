@@ -48,8 +48,18 @@ The one-kernel MLP that `main` ships for AMD runs 5.8x slower than compiled torc
 the two-kernel MLP replaces it. AMD launch configs are one per kernel: the least worst-case slowdown on these two
 GPUs (at most 1.07x). Output against `main`: 52-60 dB PSNR.
 
-## Kernel time, RTX 5090, distilled decoder, 512 (Nsight Systems, ms per decode)
+## Headroom, RTX 5090, distilled decoder, 512 (Nsight Systems, one decode)
 
-NA attention 77, MLP 72, slab Q/K/V 39, other GEMMs about 60, elementwise and copies about 15. The fused MLP
-GEMMs run at about 165 TFLOPS against a 219 TFLOPS bf16 square-GEMM peak; neighborhood attention computes about
-2.4x the useful work at 9x9x9 (query-tile box over window), which only a different attention pattern removes.
+Measured peaks: 219 TFLOPS bf16 (8192^3 GEMM), 1581 GB/s device copy.
+
+| kernel | ms | achieved | of peak |
+|---|---|---|---|
+| neighborhood attention 9x9x9 | 82.3 | 74 TFLOPS useful | 34 % (about 80 % counting the 2.4x masked box) |
+| MLP gate/up | 75.8 | 173 TFLOPS | 79 % |
+| MLP down | 36.4 | 181 TFLOPS | 82 % |
+| slab Q/K/V | 38.9 | 129 TFLOPS | 59 % |
+| projection + residual | 7.7 | 1587 GB/s | 100 % |
+| context inject | 12.2 | 171 TFLOPS | 78 % |
+
+Everything at 100 % of peak would save about 57 ms of the 288 ms; the remaining fusable work is a few percent.
+FP8 GEMMs in the MLP (per-row scales) were tried and dropped: 38.8 dB against bf16 even in stage 5 alone.
