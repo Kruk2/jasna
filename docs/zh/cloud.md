@@ -1,6 +1,6 @@
 # 云 GPU（RunPod、Vast、Docker）
 
-> 云许可证目前暂不出售，以后会开放。
+> 任何许可证码都可以在租用的 GPU 上使用。Jasna 运行期间，它占用 3 台设备中的 1 台。
 
 租用的 GPU 也能运行 Jasna。用 Linux NVIDIA 官方版，在受支持容器的命令行里运行。
 GitHub 源码版不能使用支持者模型。

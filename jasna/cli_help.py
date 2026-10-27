@@ -3,9 +3,9 @@
 CLI_HELP: dict[str, str] = {
     "machine_key": "Print this machine's Machine key for activation, then exit. No GPU is needed.",
     "cloud_workspace": (
-        "Use with --machine-key to get a Machine key for a rented GPU (RunPod, Vast) "
-        "with the official Linux release. Cloud must be turned on for your License code (ask where you got it). "
-        "Keep the Jasna config folder on a persistent volume. On Linux, --license-code alone also works on rented GPUs."
+        "On Linux, --license-code alone works on rented GPUs (RunPod, Vast); you don't need this option. "
+        "Older way: use it with --machine-key to get a cloud Machine key, which needs cloud turned on for your "
+        "License code (ask where you got it)."
     ),
     "activation_key": (
         "Save the Activation key returned for this Machine key by the activation page. "

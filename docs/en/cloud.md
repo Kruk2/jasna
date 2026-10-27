@@ -1,6 +1,6 @@
 # Cloud GPUs (RunPod, Vast, Docker)
 
-> Cloud licenses are not sold right now. This will change in the future.
+> Any License code works on a rented GPU. It counts as one of your 3 devices while Jasna runs on it.
 
 You can run Jasna on a rented GPU. Use the Linux NVIDIA version from the
 command line inside a supported container. GitHub source checkouts can't use
