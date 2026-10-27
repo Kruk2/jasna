@@ -546,7 +546,7 @@ KO = {
         "tip_segments_seed_use": "이 구간에 이 시드를 사용합니다.",
         "tip_denoise_strength": "복원된 영역의 노이즈와 입자를 줄여줍니다. 높을수록 부드럽지만 세부 디테일이 줄어들 수 있습니다.\n\n없음: 노이즈 제거 안 함. 낮음/중간: 좋은 시작점. 높음: 강력한 평활화.\n기본값: 없음",
         "tip_denoise_step": "노이즈 제거 시점:\n- 1차 복원 후: 업스케일 전. 더 빠릅니다.\n- 2차 복원 후: 업스케일 후, 전체 크기 화면에서.\n\n기본값: 1차 복원 후",
-        "tip_secondary_restoration": "복원된 영역을 더 선명하게 하는 선택적 추가 처리입니다. 특히 클로즈업과 4K 비디오에서 효과가 큽니다. NVIDIA 전용입니다.\n\nUNet 4x: 고품질이며 빠릅니다. 후원자용이며 Jasna를 활성화하면 사용할 수 있습니다.\nRTX Super Res: 무료이고 매우 빠르며 품질은 보통입니다.\nTopaz TVAI: Topaz Video를 따로 구매해 설치해야 합니다.",
+        "tip_secondary_restoration": "복원된 영역을 더 선명하게 하는 선택적 추가 처리입니다. 특히 클로즈업과 4K 비디오에서 효과가 큽니다. NVIDIA와 AMD 모두 사용할 수 있습니다.\n\nUNet 4x: 고품질이며 빠릅니다. 후원자용이며 Jasna를 활성화하면 사용할 수 있습니다.\nRTX Super Res: 무료이고 매우 빠르며 품질은 보통입니다.\nTopaz TVAI: Topaz Video를 따로 구매해 설치해야 합니다.\nAMD 업스케일: 무료이며 빠르고 AMD GPU에서 실행됩니다.",
         "tip_secondary_unet_4x": "사용할 수 있다면 가장 좋은 선택입니다. 이 용도로 만든 후원자 모델입니다.\n\n고품질이며 TVAI보다 훨씬 빠르고, 활성화 후에는 다른 앱이 필요 없습니다.",
         "tip_secondary_tvai": "고품질이지만 느립니다. Topaz Video를 별도로 설치해야 합니다(유료, Windows 전용).\n\n품질은 선택한 Topaz 모델과 설정에 따라 달라집니다. 특정 TVAI 모델을 선호할 때 사용하세요.",
         "tip_secondary_rtx": "매우 빠르고 무료입니다. NVIDIA RTX Super Resolution을 사용하며 외부 앱이 필요 없습니다.\n\n품질은 보통 괜찮지만 UNet 4x/TVAI보다 낮고, 일부 비디오에서는 깜빡임이 있을 수 있습니다. 짧은 클립으로 먼저 테스트하세요.",

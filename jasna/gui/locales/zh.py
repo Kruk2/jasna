@@ -546,7 +546,7 @@ ZH = {
         "tip_segments_seed_use": "此区间使用这个种子。",
         "tip_denoise_strength": "降低修复区域的噪点和颗粒感。强度越高画面越平滑，但可能丢失细节。\n\n无：不降噪。低/中：推荐起步值。高：强力平滑。\n默认值：无",
         "tip_denoise_step": "何时降噪：\n- 主修复后：放大之前。更快。\n- 二次修复后：放大之后，在完整画面上降噪。\n\n默认值：主修复后",
-        "tip_secondary_restoration": "可选的第二步处理，让修复区域更清晰，特别是近景和 4K 视频。仅限 NVIDIA。\n\nUNet 4x：质量高、速度快。支持者模型，激活 Jasna 后可用。\nRTX Super Res：免费且非常快，质量尚可。\nTopaz TVAI：需要单独购买并安装 Topaz Video。",
+        "tip_secondary_restoration": "可选的第二步处理，让修复区域更清晰，特别是近景和 4K 视频。NVIDIA 与 AMD 均可用。\n\nUNet 4x：质量高、速度快。支持者模型，激活 Jasna 后可用。\nRTX Super Res：免费且非常快，质量尚可。\nTopaz TVAI：需要单独购买并安装 Topaz Video。\nAMD 超分：免费且快速，在 AMD 显卡上运行。",
         "tip_secondary_unet_4x": "可用时的最佳选择。专为此用途制作的支持者模型。\n\n质量高，比 TVAI 快很多，激活后不需要其他应用。",
         "tip_secondary_tvai": "质量高但速度慢。需要单独安装 Topaz Video（付费，仅 Windows）。\n\n质量取决于所选 Topaz 模型和设置。适合明确想使用某个 TVAI 模型时。",
         "tip_secondary_rtx": "非常快且免费。使用 NVIDIA RTX Super Resolution，不需要外部应用。\n\n质量通常尚可，但低于 UNet 4x/TVAI，部分视频可能闪烁。建议先用短片段测试。",
