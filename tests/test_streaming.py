@@ -305,13 +305,16 @@ def _ffmpeg_process():
     return process
 
 
-def _encoder(tmp_path, *, segment_duration=4.0, source_video="nonexistent.mp4", device=None, **metadata) -> StreamingEncoder:
+def _encoder(
+    tmp_path, *, segment_duration=4.0, source_video="nonexistent.mp4", device=None, lut_path=None, **metadata
+) -> StreamingEncoder:
     return StreamingEncoder(
         segments_dir=tmp_path,
         segment_duration=segment_duration,
         metadata=_metadata(duration=20.0, **metadata),
         source_video=source_video,
         device=device,
+        lut_path=lut_path,
     )
 
 
@@ -415,6 +418,20 @@ def test_frames_reach_ffmpeg_as_packed_rgb(tmp_path, layout):
         encoder.stop()
 
     process.stdin.write.assert_called_once_with(frame.permute(1, 2, 0).contiguous().numpy().tobytes())
+
+
+def test_color_lut_is_applied_to_streamed_frames(tmp_path):
+    lut = tmp_path / "invert.cube"
+    lut.write_text("LUT_1D_SIZE 2\n1 1 1\n0 0 0\n")
+    process = _ffmpeg_process()
+    frame = torch.tensor([0, 255], dtype=torch.uint8).repeat(3, 1, 1)
+    with patch("jasna.streaming_encoder.subprocess.Popen", return_value=process):
+        encoder = _encoder(tmp_path, lut_path=str(lut))
+        encoder.start(start_number=0)
+        encoder.write_frame(frame, pts=0)
+        encoder.stop()
+
+    process.stdin.write.assert_called_once_with(bytes([255, 255, 255, 0, 0, 0]))
 
 
 def test_write_before_start_is_dropped(tmp_path):

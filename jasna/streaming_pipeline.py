@@ -59,7 +59,10 @@ def run_streaming(pipeline, hls_server: HlsStreamingServer) -> None:
         metadata=metadata,
         source_video=str(pipeline.input_video),
         device=pipeline.device,
+        lut_path=pipeline.lut_path,
     )
+    if pipeline.sharpen_strength > 0:
+        log.warning("[stream] sharpening is not used while streaming")
     try:
         _streaming_loop(
             pipeline=pipeline,
