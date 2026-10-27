@@ -397,7 +397,7 @@ ZH = {
         "license_connecting": "正在在线激活…",
         "license_service_invalid_license_code": "请检查输入的许可证码是否完整。",
         "license_service_license_not_found": "未找到许可证码。请检查，或联系你获得许可证码的地方。",
-        "license_service_slots_full": "已用完 3 个注册名额。请联系你获得许可证码的地方更换设备。",
+        "license_service_slots_full": "3 台设备都在使用中。请关闭其他设备上的 Jasna 后重试，或联系你获得许可证码的地方更换设备。",
         "license_service_owner_approval_required": "此设备需要所有者批准。请联系你获得许可证码的地方。",
         "license_source_unavailable": "免费模型可从源代码运行。要激活支持者模型，请下载 Jasna 官方发行版。",
         "license_activate": "激活",
