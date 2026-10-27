@@ -129,7 +129,12 @@ class _PlaintextHandle:
         return self._source.keys()
 
     def offset_keys(self):
-        return self._source.offset_keys()
+        # safetensors' safe_open exposes keys/get_tensor/get_slice/metadata and
+        # nothing else - there is no offset_keys on it, so forwarding raised
+        # AttributeError the first time a plaintext LTX bundle was read. keys()
+        # already comes back in header order, which is the order the tensors sit
+        # in the file, and that is what the staged reader wants.
+        return self._source.keys()
 
     def metadata(self):
         return self._source.metadata()

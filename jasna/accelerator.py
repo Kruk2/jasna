@@ -170,6 +170,59 @@ def ipc_collect(device: torch.device | str) -> None:
         module.ipc_collect()
 
 
+#: Captured CUDA/HIP graph pools, registered by the restorers that own them.
+#: empty_cache() cannot spare a selected pool, so while any graph is registered
+#: release_vram_cache() skips the release entirely - freeing a pool under a
+#: captured graph leaves replay reading re-mapped pages, which corrupts the
+#: graph's output silently. Owners compare hip_graph_pool_generation() against
+#: the value they captured at and re-capture when a release slipped through
+#: another path.
+_graph_pool_owners: set[int] = set()
+_hip_graph_pool_generation = 0
+
+
+def register_graph_pool(token: int) -> None:
+    """Mark a captured graph's pool as exempt from cold-cache releases."""
+    _graph_pool_owners.add(int(token))
+
+
+def unregister_graph_pool(token: int) -> None:
+    _graph_pool_owners.discard(int(token))
+
+
+def hip_graph_pool_generation() -> int:
+    """Bumped whenever a cold-cache release actually runs; owners re-capture."""
+    return _hip_graph_pool_generation
+
+
+def release_vram_cache(device: torch.device | str | None = None) -> None:
+    """Return every cached-but-unused block to the driver (defragmentation).
+
+    Live allocations are untouched; only the allocator's cold cache is released,
+    which is what otherwise grows until Windows starts demoting hot pages to
+    shared memory and the frame rate collapses.
+
+    Skipped while a captured graph pool is registered: empty_cache() cannot
+    exclude the graph's static buffers, and freeing the pool under a captured
+    graph silently corrupts its replays.
+    """
+    global _hip_graph_pool_generation
+    import gc
+
+    gc.collect()
+    if not torch.cuda.is_available():
+        return
+    if _graph_pool_owners:
+        log.debug(
+            "VRAM cold-cache release skipped: %d captured graph pool(s) registered",
+            len(_graph_pool_owners),
+        )
+        return
+    synchronize(device)
+    _hip_graph_pool_generation += 1
+    empty_cache(device)
+
+
 def reset_peak_memory_stats(device: torch.device | str) -> None:
     module = device_module(torch.device(device))
     if hasattr(module, "reset_peak_memory_stats"):

@@ -54,6 +54,9 @@ def test_read_gpu_vram_returns_none_when_gpu_tools_and_amd_sysfs_are_missing(
 ) -> None:
     monkeypatch.setattr(system_stats.os_utils, "find_executable", lambda name: None)
     monkeypatch.setattr(system_stats, "_DRM_CLASS_PATH", tmp_path)
+    # This test covers the sysfs path, which is the non-Windows branch.
+    monkeypatch.setattr(system_stats.sys, "platform", "linux")
+    monkeypatch.setattr(system_stats, "_read_amd_adl_util", lambda: None)
 
     def _should_not_run(*args, **kwargs):
         raise AssertionError("subprocess.run should not be called when nvidia-smi is missing")
@@ -74,8 +77,34 @@ def test_read_gpu_vram_reads_amd_sysfs_without_torch(monkeypatch, tmp_path) -> N
     (device / "mem_info_vram_total").write_text("1200\n", encoding="utf-8")
     monkeypatch.setattr(system_stats.os_utils, "find_executable", lambda name: None)
     monkeypatch.setattr(system_stats, "_DRM_CLASS_PATH", tmp_path)
+    # sysfs is the non-Windows branch: Windows reads ADL PMLog instead.
+    monkeypatch.setattr(system_stats.sys, "platform", "linux")
+    monkeypatch.setattr(system_stats, "_read_amd_adl_util", lambda: None)
 
     assert system_stats.read_gpu_vram() == (73, 25)
+
+
+def test_read_gpu_vram_uses_adl_activity_on_windows_amd(monkeypatch) -> None:
+    """The Windows AMD branch reads GPU activity from ADL, not PDH or sysfs.
+
+    ADL PMLog sensor 19 is the counter AMD Software plots; Task Manager's PDH
+    "3D engine" figure reads 0 on AMD while the card is working.
+    """
+    monkeypatch.setattr(system_stats.os_utils, "find_executable", lambda name: None)
+    monkeypatch.setattr(system_stats.sys, "platform", "win32")
+    monkeypatch.setattr(system_stats, "_read_amd_adl_util", lambda: 67)
+    monkeypatch.setattr(system_stats, "_read_torch_vram_util", lambda: 41)
+
+    assert system_stats.read_gpu_vram() == (67, 41)
+
+
+def test_read_gpu_vram_falls_back_to_sysfs_when_adl_is_unavailable(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(system_stats.os_utils, "find_executable", lambda name: None)
+    monkeypatch.setattr(system_stats.sys, "platform", "win32")
+    monkeypatch.setattr(system_stats, "_read_amd_adl_util", lambda: None)
+    monkeypatch.setattr(system_stats, "_DRM_CLASS_PATH", tmp_path)
+
+    assert system_stats.read_gpu_vram() == (None, None)
 
 
 def test_read_gpu_vram_parses_first_device(monkeypatch) -> None:

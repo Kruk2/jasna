@@ -9,6 +9,18 @@ from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, WINDOW_HOP, shared_latents
 from jasna.ltx.sampler import fuse_overlaps, patchify, unpatchify
 
 
+def _has_triton() -> bool:
+    from torch.utils._triton import has_triton_package
+
+    return has_triton_package()
+
+
+needs_triton = pytest.mark.skipif(
+    not _has_triton(),
+    reason="without Triton there is no inductor backend, so torch.compile stays eager",
+)
+
+
 def _block_weights(dim: int, heads: int, generator: torch.Generator) -> dict[str, torch.Tensor]:
     def rand(*shape: int) -> torch.Tensor:
         return (torch.randn(*shape, generator=generator) * 0.05).to(torch.bfloat16)
@@ -35,6 +47,7 @@ def test_rotation_is_its_own_inverse():
 
 
 
+@needs_triton
 def test_compiled_rotation_emits_no_cache_warning():
     import warnings
 
@@ -196,6 +209,10 @@ def test_self_attention_falls_back_to_sdpa_off_gpu():
 
 @pytest.mark.parametrize("package", ["triton", "comfy_kitchen"])
 def test_ltx_refuses_to_run_without_its_kernels(package, monkeypatch):
+    # require_kernels() reports the first missing package, which on this install is
+    # always triton, so the comfy_kitchen phrasing is unreachable here.
+    if package == "comfy_kitchen" and not _has_triton():
+        pytest.skip("triton is missing too, and require_kernels names it first")
     import importlib.util
 
     monkeypatch.setattr(torch.version, "hip", None)
@@ -223,6 +240,7 @@ def test_ltx_names_why_the_int8_attention_extension_did_not_load(monkeypatch):
         T.require_kernels(torch.device("cuda"))
 
 
+@needs_triton
 def test_compiled_functions_fail_instead_of_running_eager_past_the_recompile_limit(monkeypatch):
     from jasna.tensor_utils import compile_static
 

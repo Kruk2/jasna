@@ -7,6 +7,7 @@ from torch import Tensor
 
 from jasna.accelerator import is_amd_device, is_nvidia_device
 from jasna.models.basicvsrpp.inference import load_model
+from jasna.restorer.basicvsrpp_hip_graph import HipGraphReplay, graph_lengths
 
 
 
@@ -19,6 +20,7 @@ class BasicvsrppMosaicRestorer:
         use_tensorrt: bool,
         fp16: bool,
         config: str | dict | None = None,
+        temporal_overlap: int = 0,
     ):
         self.device = torch.device(device)
         self.max_clip_size = int(max_clip_size)
@@ -26,6 +28,7 @@ class BasicvsrppMosaicRestorer:
 
         self._split_forward = None
         self.model = None
+        self._hip_graph = HipGraphReplay(self.device)
 
         if use_tensorrt and is_nvidia_device(self.device):
             from jasna.restorer.basicvsrpp_sub_engines import create_split_forward
@@ -51,7 +54,17 @@ class BasicvsrppMosaicRestorer:
             self.model = load_model(config, checkpoint_path, self.device, fp16)
             logger.info("BasicVSR++ loaded from checkpoint: %s (fp16=%s)", checkpoint_path, fp16)
 
+        # Capture before any pipeline thread exists: capture poisons concurrent
+        # CUDA calls from other threads, replay is thread-safe.
+        if self._split_forward is not None and self._hip_graph.enabled:
+            self._hip_graph.capture(
+                self._split_forward,
+                graph_lengths(self.max_clip_size, temporal_overlap),
+                dtype=self.input_dtype,
+            )
+
     def close(self) -> None:
+        self._hip_graph.close()
         if self._split_forward is not None:
             self._split_forward.close()
             self._split_forward = None
@@ -67,8 +80,12 @@ class BasicvsrppMosaicRestorer:
         with torch.inference_mode():
             stacked = torch.stack(video).to(device=self.device, dtype=self.input_dtype, memory_format=torch.contiguous_format).div_(255.0)
 
+            batched = stacked.unsqueeze(0)
             if self._split_forward is not None:
-                result = self._split_forward(stacked.unsqueeze(0))
+                replayed = self._hip_graph.replay(batched)
+                if replayed is not None:
+                    return replayed.squeeze(0)
+                result = self._split_forward(batched)
             else:
-                result = self.model(inputs=stacked.unsqueeze(0))
+                result = self.model(inputs=batched)
             return result.squeeze(0)

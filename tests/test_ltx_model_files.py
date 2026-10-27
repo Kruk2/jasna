@@ -61,7 +61,18 @@ def test_installed_checks_the_chosen_model_only(tmp_path):
 
 @pytest.mark.parametrize("old_size", [64, 96])
 def test_outdated_encrypted_model_is_missing_until_verified_download_replaces_it(tmp_path, monkeypatch, old_size):
-    from jasna.protection import protected_tensors
+    # jasna.protection ships only in the release build, and this test only needs
+    # *a* module carrying check_ltx_license to observe the call count - the logic
+    # under test (outdated file -> missing -> verified re-download) is independent
+    # of it. Stand one in so a plain checkout still exercises that path.
+    import sys
+    import types
+
+    protected_tensors = sys.modules.get("jasna.protection.protected_tensors")
+    if protected_tensors is None:
+        protected_tensors = types.ModuleType("jasna.protection.protected_tensors")
+        protected_tensors.check_ltx_license = lambda *a, **k: None
+        sys.modules["jasna.protection.protected_tensors"] = protected_tensors
 
     names = bundle_names("distilled2", fast=False)
     current = b"m" * 80

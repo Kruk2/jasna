@@ -446,6 +446,31 @@ def mount_source(mountinfo: str, path: Path) -> str:
     return source
 
 
+_ENV_TRUE = frozenset({"1", "true", "yes", "on"})
+_ENV_FALSE = frozenset({"0", "false", "no", "off"})
+
+
+def env_flag(name: str, *, default: bool = False) -> bool:
+    """Read a boolean environment flag.
+
+    Unset or empty keeps ``default``; the usual spellings are accepted, and the
+    value is stripped because ``set FOO=1 && prog`` in cmd.exe binds ``"1 "``
+    (the space before ``&&`` is folded into the value), which a literal
+    ``== "1"`` read would silently treat as off.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if not value:
+        return default
+    if value in _ENV_TRUE:
+        return True
+    if value in _ENV_FALSE:
+        return False
+    return default
+
+
 def sysfs_block_is_rotational(block: Path) -> bool:
     """``block`` is a ``/sys/dev/block/MAJOR:MINOR`` link; a partition reports its disk's queue."""
     if not block.exists():

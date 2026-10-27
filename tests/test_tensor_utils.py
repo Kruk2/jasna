@@ -65,6 +65,10 @@ def test_compile_static_runs_bf16_eager_where_inductor_has_no_bf16(monkeypatch) 
 
 @pytest.mark.parametrize("major, dtype", [(7, torch.float16), (8, torch.bfloat16)])
 def test_compile_static_compiles_fp16_everywhere_and_bf16_from_sm80(major, dtype, monkeypatch) -> None:
+    from torch.utils._triton import has_triton_package
+
+    if not has_triton_package():
+        pytest.skip("compile_static short-circuits to eager without Triton")
     from jasna.tensor_utils import compile_static
 
     monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(major=major))

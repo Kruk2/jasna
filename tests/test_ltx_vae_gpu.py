@@ -6,17 +6,23 @@ import importlib.util
 import pytest
 import torch
 
-from jasna.models.ltx_vae import na_triton, video_encoder
-from jasna.models.ltx_vae import transformer as T
-from jasna.models.ltx_vae.eager_na import na3d
-from jasna.models.ltx_vae.loader import encoder_kwargs
-from jasna.tensor_utils import compile_static
+# These tests need Triton at import time: ``na_triton`` builds its kernel
+# configurations (``triton.Config``) at module scope, so a plain skipif cannot
+# help - the import fails while the module is being collected, before any mark
+# is evaluated, and that aborts the whole run instead of skipping 40 tests.
+# Windows ROCm ships no Triton, so this is the common case there.
+if importlib.util.find_spec("triton") is None:
+    pytest.skip("needs Triton (not shipped by the Windows ROCm wheels)", allow_module_level=True)
+
+from jasna.models.ltx_vae import na_triton, video_encoder  # noqa: E402
+from jasna.models.ltx_vae import transformer as T  # noqa: E402
+from jasna.models.ltx_vae.eager_na import na3d  # noqa: E402
+from jasna.models.ltx_vae.loader import encoder_kwargs  # noqa: E402
+from jasna.tensor_utils import compile_static  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available()
-    or torch.version.cuda is None
-    or importlib.util.find_spec("triton") is None,
-    reason="needs an NVIDIA GPU and Triton",
+    not torch.cuda.is_available() or torch.version.cuda is None,
+    reason="needs an NVIDIA GPU",
 )
 
 

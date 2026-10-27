@@ -8,6 +8,7 @@ import traceback
 
 import torch
 
+from jasna.accelerator import release_vram_cache
 from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer
 
@@ -127,7 +128,12 @@ class VramOffloader:
             if used > self._threshold:
                 freed = self._offload(used - self._threshold)
                 if freed > 0:
-                    torch.cuda.empty_cache()
+                    # Go through the guard rather than torch.cuda.empty_cache()
+                    # directly: while a captured HIP graph is registered the
+                    # release is a no-op, because empty_cache() cannot spare the
+                    # graph's pool and freeing it under a replay silently
+                    # corrupts the clip.
+                    release_vram_cache()
                     self.stats.offload_count += 1
                     self.stats.total_offloaded_bytes += freed
                     _log.debug(

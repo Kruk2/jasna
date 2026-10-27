@@ -230,8 +230,27 @@ class RfDetrMosaicDetectionModel:
         boxes_cpu = boxes_and_counts[:, :-1].reshape(b, k, 4)
         counts_cpu = boxes_and_counts[:, -1].astype(np.int64)
 
-        boxes_list = [boxes_cpu[i, : counts_cpu[i]] for i in range(b)]
-        masks_list = [masks[i, : counts_cpu[i]].clone() for i in range(b)]
+        boxes_list: list[np.ndarray] = []
+        masks_list: list[torch.Tensor] = []
+        for i in range(b):
+            n = int(counts_cpu[i])
+            kept = boxes_cpu[i, :n]
+            # RF-DETR intermittently emits a query whose box is exactly
+            # [0, 0, 0, 0] with a score above threshold; it is a zero-area
+            # detection and never a usable one. Left in, it becomes a 20-px
+            # corner crop and the mosaic inside goes unrestored for as long as
+            # the track lives. The score prefix is still the right count, so the
+            # filter only runs on the frames that actually contain one.
+            if n:
+                usable = np.flatnonzero((kept[:, 2] > kept[:, 0]) & (kept[:, 3] > kept[:, 1]))
+                if usable.size != n:
+                    kept = kept[usable]
+                    masks_i = masks[i, :n][torch.from_numpy(usable).to(masks.device)].clone()
+                    boxes_list.append(kept)
+                    masks_list.append(masks_i)
+                    continue
+            boxes_list.append(kept)
+            masks_list.append(masks[i, :n].clone())
         return boxes_list, masks_list
 
     def scan_scores_masks(

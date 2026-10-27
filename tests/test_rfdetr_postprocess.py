@@ -135,6 +135,68 @@ class TestRfDetrPostprocess:
         assert box[2] == pytest.approx(640.0, abs=1)
         assert box[3] == pytest.approx(480.0, abs=1)
 
+    def test_degenerate_zero_area_box_is_dropped(self):
+        """A zero-area box above the score threshold is never a usable detection.
+
+        RF-DETR emits these intermittently (measured: 3 of 447 detections in one
+        450-frame 1080p run). Left in, one becomes a 20-px corner crop and the
+        mosaic inside it goes unrestored.
+        """
+        B, Q, C = 1, 3, 1
+        pred_boxes = torch.tensor([[[0.5, 0.5, 0.2, 0.2],
+                                    [0.0, 0.0, 0.0, 0.0],
+                                    [0.5, 0.5, 0.2, 0.2]]])
+        pred_logits = torch.tensor([[[5.0], [5.0], [-5.0]]])
+        pred_masks = torch.ones((B, Q, 8, 8), dtype=torch.bool)
+
+        boxes_list, masks_list = RfDetrMosaicDetectionModel._postprocess(
+            pred_boxes=pred_boxes,
+            pred_logits=pred_logits,
+            pred_masks=pred_masks,
+            target_hw=(100, 200),
+            score_threshold=0.5,
+            max_select=Q,
+        )
+
+        assert boxes_list[0].shape[0] == 1, "only the real box may survive"
+        assert masks_list[0].shape[0] == 1, "masks must follow the boxes"
+        assert boxes_list[0][0][2] > boxes_list[0][0][0]
+
+    def test_degenerate_only_batch_yields_no_detections(self):
+        B, Q, C = 1, 2, 1
+        pred_boxes = torch.zeros((B, Q, 4))
+        pred_logits = torch.full((B, Q, C), 5.0)
+        pred_masks = torch.ones((B, Q, 8, 8), dtype=torch.bool)
+
+        boxes_list, masks_list = RfDetrMosaicDetectionModel._postprocess(
+            pred_boxes=pred_boxes,
+            pred_logits=pred_logits,
+            pred_masks=pred_masks,
+            target_hw=(100, 200),
+            score_threshold=0.5,
+            max_select=Q,
+        )
+
+        assert boxes_list[0].shape[0] == 0
+        assert masks_list[0].shape[0] == 0
+
+    def test_zero_width_box_is_dropped(self):
+        B, Q, C = 1, 1, 1
+        pred_boxes = torch.tensor([[[0.5, 0.5, 0.0, 0.3]]])
+        pred_logits = torch.tensor([[[5.0]]])
+        pred_masks = torch.ones((B, Q, 8, 8), dtype=torch.bool)
+
+        boxes_list, masks_list = RfDetrMosaicDetectionModel._postprocess(
+            pred_boxes=pred_boxes,
+            pred_logits=pred_logits,
+            pred_masks=pred_masks,
+            target_hw=(100, 200),
+            score_threshold=0.5,
+            max_select=Q,
+        )
+        assert boxes_list[0].shape[0] == 0
+        assert masks_list[0].shape[0] == 0
+
 
 def _boolean_mask_postprocess(*, pred_boxes, pred_logits, pred_masks, target_hw, score_threshold, max_select):
     b, q, c = pred_logits.shape

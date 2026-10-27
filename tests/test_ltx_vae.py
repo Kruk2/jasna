@@ -15,6 +15,21 @@ from jasna.models.ltx_vae.loader import decoder_kwargs, decoder_state_dict, enco
 from jasna.models.ltx_vae.tiling import DimensionSizeConfig, TileSizeConfig, scale_by_masks_1d
 from jasna.models.ltx_vae.video_encoder import VideoEncoder
 
+def _has_kitchen() -> bool:
+    """comfy-kitchen's fp16_conv3d op is only registered where Triton is available."""
+    try:
+        import comfy_kitchen  # noqa: F401
+    except Exception:  # noqa: BLE001
+        return False
+    return hasattr(torch.ops.comfy_kitchen, "fp16_conv3d")
+
+
+needs_kitchen = pytest.mark.skipif(
+    not _has_kitchen(),
+    reason="needs comfy-kitchen's fp16_conv3d (built with Triton; the Windows ROCm wheels have neither)",
+)
+
+
 TINY_ENCODER_CONFIG = {
     "_class_name": "Encoder",
     "dims": 3,
@@ -159,6 +174,9 @@ def test_tiny_encoder_output_shape_and_frame_crop():
 
 
 def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch):
+    from torch.utils._triton import has_triton_package
+
+    has_triton = has_triton_package()
     torch.manual_seed(0)
     source = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)))
     tensors = {f"encoder.{k}": v for k, v in source.state_dict().items() if not k.startswith("per_channel")}
@@ -185,7 +203,12 @@ def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch):
     assert torch.equal(encoder.conv_in.conv.weight, source.conv_in.conv.weight.bfloat16())
     assert torch.equal(encoder.per_channel_statistics.get_buffer("std-of-means"), torch.full((8,), 2.0).bfloat16())
     assert encoder.conv_in.conv.weight.is_contiguous(memory_format=torch.channels_last_3d)
-    assert video_encoder._encode_cropped is not video_encoder.encode_cropped
+    if has_triton:
+        assert video_encoder._encode_cropped is not video_encoder.encode_cropped
+    else:
+        # No Triton means no inductor backend, so compile_static hands the function
+        # back untouched and the encoder runs eagerly.
+        assert video_encoder._encode_cropped is video_encoder.encode_cropped
     assert opened == [path]
 
 
@@ -219,8 +242,11 @@ def _amd_encoder_checkpoint(tmp_path):
     return path
 
 
+@needs_kitchen
 @pytest.mark.parametrize("triton", (True, False))
 def test_an_eager_amd_encoder_keeps_only_the_kitchen_head_channels_last(tmp_path, monkeypatch, triton):
+    # Both parametrisations run through enable_kitchen_conv3d(), which imports
+    # comfy_kitchen unconditionally, so the whole test needs it.
     path = _amd_encoder_checkpoint(tmp_path)
     monkeypatch.setattr(loader, "is_amd_device", lambda device: True)
     monkeypatch.setattr(loader, "has_triton_package", lambda: triton)
@@ -241,6 +267,7 @@ def test_an_eager_amd_encoder_keeps_only_the_kitchen_head_channels_last(tmp_path
     assert converted.dtype == torch.bfloat16 and converted.is_contiguous(memory_format=tail_format)
 
 
+@needs_kitchen
 def test_load_video_encoder_on_amd_runs_the_full_resolution_head_on_kitchen(tmp_path, monkeypatch):
     path = _amd_encoder_checkpoint(tmp_path)
     compiled = []
@@ -261,6 +288,7 @@ def test_load_video_encoder_on_amd_runs_the_full_resolution_head_on_kitchen(tmp_
     assert compiled == [torch.bfloat16]
 
 
+@needs_kitchen
 def test_kitchen_conv3d_matches_the_causal_conv_and_fuses_the_residual(monkeypatch):
     torch.manual_seed(0)
     block = video_encoder.ResnetBlock3D(16).half()
@@ -653,6 +681,10 @@ def test_modulating_mlp_chunks_match_one_unchunked_pass(monkeypatch):
     torch.testing.assert_close(actual, expected)
 
 
+@pytest.mark.skipif(
+    not __import__("torch").utils._triton.has_triton_package(),
+    reason="without Triton there is no inductor backend, so compile_diffusion_blocks stays eager",
+)
 def test_decoder_blocks_compile_once_with_static_shapes(monkeypatch):
     monkeypatch.setattr(T, "_slab_attention", T._attn_on_w_slab)
     monkeypatch.setattr(T, "_mlp_chunk", T.modulated_swiglu)

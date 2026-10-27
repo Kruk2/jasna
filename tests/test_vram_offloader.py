@@ -223,8 +223,8 @@ class TestVramOffloaderLifecycle:
         assert not offloader._thread.is_alive()
 
     @patch("jasna.vram_offloader.torch.cuda.mem_get_info", return_value=(0, 2_000_000))
-    @patch("jasna.vram_offloader.torch.cuda.empty_cache")
-    def test_run_loop_triggers_offload_and_empty_cache(self, mock_empty_cache, mock_mem_info):
+    @patch("jasna.vram_offloader.release_vram_cache")
+    def test_run_loop_triggers_offload_and_empty_cache(self, mock_release, mock_mem_info):
         bb = BlendBuffer(device=torch.device("cpu"))
         sr = _make_sr(track_id=1, start_frame=0, frame_count=1)
         bb.register_frame(0, {1})
@@ -245,7 +245,10 @@ class TestVramOffloaderLifecycle:
 
         assert offloader.stats.sample_count > 0
         assert offloader.stats.offload_count >= 1
-        mock_empty_cache.assert_called()
+        # The offloader goes through the graph-pool guard rather than calling
+        # empty_cache itself: while a captured HIP graph is registered the release
+        # must be a no-op, or the next replay reads re-mapped pages.
+        mock_release.assert_called()
 
 
 class TestEncodeStallDetection:
