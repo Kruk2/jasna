@@ -106,6 +106,7 @@ def job_fingerprints(
     what the saved auto split, track plans and latents depend on, so a change to the rest
     (codec, quality, LUT, sharpening, BasicVSR++ settings) keeps them."""
     from jasna.ltx.model_files import bundle_paths
+    from jasna.ltx.plan import track_max_gap
 
     stat = source.stat()
     settings = asdict(config)
@@ -129,6 +130,9 @@ def job_fingerprints(
         "input": [str(source.resolve()), stat.st_size, stat.st_mtime_ns],
         "video": [metadata.num_frames, str(metadata.time_base), metadata.duration],
         "settings": {key: settings.pop(key) for key in LATENT_SETTINGS},
+        # LTX plans only change when --max-detection-gap exceeds MAX_GAP, so changes within
+        # 0..MAX_GAP reuse saved latents; BasicVSR++ gap fill is still tracked in ``job``.
+        "ltx_max_gap": track_max_gap(config.max_detection_gap),
         "segments": [asdict(segment) for segment in ranges],
         "models": latent_models,
     })
