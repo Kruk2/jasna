@@ -3,7 +3,7 @@ import json
 import tempfile
 import threading
 import weakref
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait as futures_wait
 from pathlib import Path
 from types import SimpleNamespace
 from dataclasses import replace
@@ -14,8 +14,7 @@ import torch
 
 from jasna.ltx import inference, restore
 from jasna.ltx.camera import CropFrame
-from jasna.ltx.plan import MAX_GAP
-from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, Region, Window
+from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, MAX_GAP, Region, Window
 from jasna.tensor_utils import half_dtype
 
 FILES = restore.LtxModelFiles(Path("t"), Path("v"), Path("d"))
@@ -1004,6 +1003,41 @@ def test_a_failed_scan_waits_for_the_worker_start_before_it_raises(fakes, monkey
                               replace(_render(tmp_path), files=files), tmp_path, progress=restore.Progress(12, disable=True, report=None),
                               cancel=threading.Event(), runtime=runtime)
     assert finished == ["prepare_transformer"]
+
+
+def test_a_worker_that_fails_to_start_stops_the_scan(fakes, monkeypatch, tmp_path):
+    started: list[Future] = []
+    first_batch_scanned = threading.Event()
+
+    class RecordingExecutor(ThreadPoolExecutor):
+        def submit(self, *args, **kwargs):
+            started.append(super().submit(*args, **kwargs))
+            return started[-1]
+
+    def request(self, op, params, tensors, advance=None):
+        assert first_batch_scanned.wait(5)
+        raise RuntimeError("LTX worker could not start")
+
+    source = _source(_video(12, range(2, 10)))
+
+    def frames():
+        for index, batch in enumerate(source()):
+            if index:
+                first_batch_scanned.set()
+                futures_wait(started, timeout=5)
+            yield batch
+
+    detector = _Detector()
+    monkeypatch.setattr(restore, "ThreadPoolExecutor", RecordingExecutor)
+    monkeypatch.setattr(inference.ModelRuntime, "request", request)
+    files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
+    runtime = inference.ModelRuntime(files, torch.device("cpu"), threading.Event())
+    with pytest.raises(RuntimeError, match="LTX worker could not start"):
+        restore.prepare_spans([restore.LtxSpan(frames, (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), _Writer)],
+                              replace(_render(tmp_path), files=files, detector=detector), tmp_path,
+                              progress=restore.Progress(12, disable=True, report=None),
+                              cancel=threading.Event(), runtime=runtime)
+    assert detector.batches == [[0, 1, 2, 3]]
 
 
 def test_a_run_without_a_speed_profile_runs_a_speed_test_first(fakes, tmp_path):

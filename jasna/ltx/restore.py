@@ -924,7 +924,7 @@ def prepare_spans(
         worker_ready = starting.submit(runtime.prepare_transformer)
         starting.shutdown(wait=False)
     try:
-        prepared = _scan_spans(spans, render, directory, progress=progress, cancel=cancel)
+        prepared = _scan_spans(spans, render, directory, progress=progress, cancel=cancel, worker_ready=worker_ready)
     except BaseException:
         _settle(worker_ready)
         raise
@@ -989,7 +989,8 @@ def _settle(worker_ready: Future | None) -> None:
 
 
 def _scan_spans(
-    spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event
+    spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event,
+    worker_ready: Future | None,
 ) -> list[PreparedSpan]:
     plans = []
     cached = [_saved_plans(span, directory) for span in spans]
@@ -1010,6 +1011,9 @@ def _scan_spans(
                     nonlocal count
                     with closing(span.frames()) as batches:
                         for batch, pts in batches:
+                            # A worker that failed to start ends the scan with its error.
+                            if worker_ready is not None and worker_ready.done():
+                                worker_ready.result()
                             count += len(pts)
                             yield batch, pts
 
