@@ -4,6 +4,7 @@ import sys
 import pytest
 import torch
 
+from jasna.ltx import kernel_policy
 from jasna.ltx import transformer as T
 from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, WINDOW_HOP, shared_latents
 from jasna.ltx.sampler import fuse_overlaps, patchify, unpatchify
@@ -312,11 +313,16 @@ def test_nvidia_without_triton_kernels_keeps_the_torch_linears(monkeypatch):
     assert T.enable_quant_kernels(torch.device("cuda")) is None
 
 
-@pytest.mark.parametrize("hip, expected", [("7.0", "int8"), (None, "sdpa")])
-def test_prompt_cross_attention_runs_int8_attention_only_on_amd(monkeypatch, hip, expected):
+@pytest.mark.parametrize("architecture, expected", [("gfx1201", True), ((12, 0), True), ((8, 9), False), ((7, 5), False)])
+def test_int8_cross_attention_runs_on_amd_and_blackwell(architecture, expected):
+    assert kernel_policy.int8_cross_attention(architecture) is expected
+
+
+@pytest.mark.parametrize("int8_cross, expected", [(True, "int8"), (False, "sdpa")])
+def test_prompt_cross_attention_runs_int8_attention_where_enabled(monkeypatch, int8_cross, expected):
     q, k, v = torch.randn(1, 2, 8, 64), torch.randn(1, 2, 4, 64), torch.randn(1, 2, 4, 64)
     monkeypatch.setattr(T, "_int8_attention", lambda q, k, v: "int8")
-    monkeypatch.setattr(torch.version, "hip", hip)
+    monkeypatch.setattr(T, "_int8_cross_attention", int8_cross)
     monkeypatch.setattr(torch.Tensor, "is_cuda", property(lambda self: True))
     monkeypatch.setattr(T.F, "scaled_dot_product_attention", lambda q, k, v: "sdpa")
     assert T.cross_attention(q, k, v) == expected

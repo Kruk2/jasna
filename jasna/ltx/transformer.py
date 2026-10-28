@@ -445,12 +445,17 @@ def require_kernels(device: torch.device) -> None:
 
 
 _int8_attention = None
+_int8_cross_attention = False
 
 
-def enable_int8_attention() -> None:
-    """Route CUDA video self-attention through comfy-kitchen's INT8 attention (an opaque op, so
+def enable_int8_attention(device: torch.device) -> None:
+    """Route CUDA video self-attention, and the prompt cross-attention where
+    ``kernel_policy.int8_cross_attention``, through comfy-kitchen's INT8 attention (an opaque op, so
     it compiles as one call); ``require_kernels`` checks that it can run."""
-    global _int8_attention
+    from jasna.ltx import kernel_policy
+
+    global _int8_attention, _int8_cross_attention
+    _int8_cross_attention = kernel_policy.int8_cross_attention(kernel_policy.gpu_architecture(device))
     if _int8_attention is None:
         import comfy_kitchen
 
@@ -472,9 +477,8 @@ def self_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.T
 
 def cross_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
     """Prompt cross-attention ``[1, heads, tokens, d]`` against ``[1, heads, prompt, d]``: INT8 attention
-    on AMD once enabled (twice AOTriton's flash speed on RDNA4, and Windows ROCm ships no AOTriton
-    kernels), else SDPA (on NVIDIA INT8 is slower here)."""
-    if _int8_attention is not None and is_amd_device() and q.is_cuda:
+    once enabled where ``kernel_policy.int8_cross_attention``, else SDPA."""
+    if _int8_attention is not None and _int8_cross_attention and q.is_cuda:
         return _int8_attention(q, k, v)
     with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
         return F.scaled_dot_product_attention(q, k, v)

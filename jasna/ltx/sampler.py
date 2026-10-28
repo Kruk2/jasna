@@ -144,7 +144,7 @@ def _block_functions(
     native_forward = native.load(device, block_specs)
     if native_forward is not None:
         return native_forward, T.prompt_key_value, "native"
-    T.enable_int8_attention()
+    T.enable_int8_attention(device)
     return (
         compiled_block_forward(device),
         compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs", device=device, dtype=torch.bfloat16),
@@ -190,7 +190,7 @@ class LtxTransformer:
                     self.blocks = BlockStore.from_reader(handle, names, device, resident=resident)
             logger.info("LTX quantized linears: %s", T.enable_quant_kernels(device) or "torch")
             if isinstance(self.blocks, OpaqueBlockStore):
-                T.enable_int8_attention()
+                T.enable_int8_attention(device)
             else:
                 self._block_forward, self._prompt_key_value, self.block_backend = _block_functions(device, block_specs)
         except BaseException as primary:

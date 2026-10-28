@@ -43,8 +43,8 @@ class Block {
                      const at::Tensor& x, const at::Tensor& block_rows, const at::Tensor& prompt_key,
                      const at::Tensor& prompt_value, const at::Tensor& rope_cos, const at::Tensor& rope_sin,
                      int64_t cta_k, bool skip_self_attention);
-  at::Tensor self_attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v, int64_t rows, int64_t heads,
-                            int64_t head_dim, int64_t cta_k);
+  at::Tensor attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v, int64_t heads, int64_t head_dim,
+                       int64_t cta_k);
   at::Tensor normed_self_attention(const at::Tensor& q_projection, const at::Tensor& k_projection, const at::Tensor& v,
                                    const at::Tensor& q_norm, const at::Tensor& k_norm, const at::Tensor& rope_cos,
                                    const at::Tensor& rope_sin, int64_t cta_k);

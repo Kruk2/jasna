@@ -94,7 +94,7 @@ def test_placeholder_block_runs_on_the_gpu(fast):
         keys = handle.keys()
         top = {k: handle.get_tensor(k).to(device) for k in keys if not k.startswith("blocks.")}
         block = {k.split(".", 2)[2]: handle.get_tensor(k).to(device) for k in keys if k.startswith("blocks.0.")}
-    T.enable_int8_attention()
+    T.enable_int8_attention(device)
     cond = T.step_conditioning(top, 0.5, device)
     rope = T.build_rope(2, 4, 4, dim=4096, heads=T.HEADS, device=device)
     tokens = torch.randn(1, 64, 128, device=device, dtype=torch.bfloat16)

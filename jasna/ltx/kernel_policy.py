@@ -108,6 +108,13 @@ def attention_key_tile(architecture: tuple[int, int] | str, head_dim: int, rows:
     return 128 if head_dim >= 128 and rows > 1024 else 64
 
 
+def int8_cross_attention(architecture: tuple[int, int] | str) -> bool:
+    """Whether the prompt cross-attention runs the INT8 attention: on AMD (twice AOTriton's flash speed on
+    RDNA4, and Windows ROCm ships no AOTriton kernels) and from SM 12.0 (twice cuDNN's bf16 speed on an
+    RTX 5090); elsewhere SDPA."""
+    return is_amd(architecture) or architecture[0] >= 12
+
+
 def supports(device: torch.device) -> bool:
     architecture = gpu_architecture(device)
     return architecture in INT8_MM_TILES or architecture in AMD_INT8_MM_TILES or architecture in CUBLAS_INT8_MM

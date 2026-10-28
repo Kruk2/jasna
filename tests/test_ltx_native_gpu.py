@@ -47,7 +47,7 @@ def _block(quantization: str) -> tuple[dict[str, torch.Tensor], dict]:
 def block(request):
     T.require_kernels(DEVICE)
     assert T.enable_quant_kernels(DEVICE)
-    T.enable_int8_attention()
+    T.enable_int8_attention(DEVICE)
     weights, specs = _block(request.param)
     forward = native.load(DEVICE, specs)
     assert forward is not None, "the native block did not build; see the log"
@@ -122,21 +122,27 @@ def int8_block():
     return forward
 
 
-# rows cover both key tiles, lengths off the tile, kitchen's short-K paths (<= 256 / 512)
-# and its Blackwell 64-row query tile (4096-4608 rows at head dim 128)
+# self-attention rows cover both key tiles, lengths off the tile, kitchen's short-K paths (<= 256 / 512)
+# and its Blackwell 64-row query tile (4096-4608 rows at head dim 128); then the prompt cross-attention
+# of a 512 / 768 canvas against 1024 prompt keys
 @pytest.mark.parametrize("head_dim", [64, 128, 256])
-@pytest.mark.parametrize("rows", [200, 500, 1000, 1100, 4200, 8192, 18432])
-def test_native_int8_attention_is_comfy_kitchens_bit_for_bit(int8_block, head_dim, rows):
+@pytest.mark.parametrize(
+    "rows, keys",
+    [(200, 200), (500, 500), (1000, 1000), (1100, 1100), (4200, 4200), (8192, 8192), (18432, 18432),
+     (8192, 1024), (18432, 1024)],
+)
+def test_native_int8_attention_is_comfy_kitchens_bit_for_bit(int8_block, head_dim, rows, keys):
     import comfy_kitchen
 
     heads = 4096 // head_dim
-    generator = torch.Generator(device=DEVICE).manual_seed(rows * head_dim)
-    q, k, v = (torch.randn(rows, heads * head_dim, generator=generator, device=DEVICE).to(torch.bfloat16) for _ in range(3))
-    cta_k = native.policy.attention_key_tile(native.policy.gpu_architecture(DEVICE), head_dim, rows)
-    attention = int8_block.block.self_attention(q, k, v, rows, heads, head_dim, cta_k)
+    generator = torch.Generator(device=DEVICE).manual_seed(rows * head_dim + keys)
+    q, k, v = (torch.randn(length, heads * head_dim, generator=generator, device=DEVICE).to(torch.bfloat16)
+               for length in (rows, keys, keys))
+    cta_k = native.policy.attention_key_tile(native.policy.gpu_architecture(DEVICE), head_dim, keys)
+    attention = int8_block.block.attention(q, k, v, heads, head_dim, cta_k)
 
     def heads_first(t: torch.Tensor) -> torch.Tensor:
-        return t.view(1, rows, heads, head_dim).transpose(1, 2)
+        return t.view(1, t.shape[0], heads, head_dim).transpose(1, 2)
 
     expected = comfy_kitchen.int8_attention(heads_first(q), heads_first(k), heads_first(v))
     assert torch.equal(attention, expected[0].transpose(0, 1))
@@ -171,7 +177,7 @@ def test_native_normed_self_attention_is_norm_rope_then_self_attention(int8_bloc
     q, k = torch.empty_like(q_projection), torch.empty_like(k_projection)
     module.norm_rope(q_projection, q_norm, rope.cos, rope.sin, q, head_dim, T.EPS)
     module.norm_rope(k_projection, k_norm, rope.cos, rope.sin, k, head_dim, T.EPS)
-    expected = int8_block.block.self_attention(q, k, v, rows, heads, head_dim, cta_k)
+    expected = int8_block.block.attention(q, k, v, heads, head_dim, cta_k)
     actual = int8_block.block.normed_self_attention(q_projection, k_projection, v, q_norm, k_norm, rope.cos, rope.sin, cta_k)
     assert torch.equal(actual, expected)
 

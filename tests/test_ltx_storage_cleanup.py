@@ -45,7 +45,7 @@ def _twenty_gib_free(device):
 def _without_compiling(monkeypatch):
     monkeypatch.setattr(sampler, "compiled_block_forward", lambda device: T.block_forward)
     monkeypatch.setattr(T, "require_kernels", lambda device: None)
-    monkeypatch.setattr(T, "enable_int8_attention", lambda: None)
+    monkeypatch.setattr(T, "enable_int8_attention", lambda device: None)
     monkeypatch.setattr(sampler, "compile_static", lambda function, **kwargs: function)
 
 
