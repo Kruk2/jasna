@@ -13,13 +13,13 @@ def test_cli_runs_the_job_on_the_chosen_device(tmp_path, nvidia_vendor) -> None:
     devices = []
 
     def record_device(device):
-        devices.append(device)
+        devices.append(torch.device(device))
         return nullcontext()
 
     with (
         cli_environment() as pipeline_cls,
         patch("jasna.main.check_supported_gpu", return_value=(True, "Fake GPU")) as check_gpu,
-        patch("torch.cuda.device", side_effect=record_device),
+        patch("jasna.accelerator.device_context", side_effect=record_device),
         patch("torch.cuda.Stream"),
         patch.object(sys, "argv", ["jasna", *cli_args(tmp_path, "--device", "cuda:1")]),
     ):
