@@ -262,7 +262,6 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._photo_size: tuple[int, int] | None = None
         self._fullscreen = False
         self._fullscreen_controls_visible = False
-        self._windowed_geometry: str | None = None
         self._closed = False
         self._stopping = False
         self._choose_after_stop = False
@@ -945,7 +944,6 @@ class VideoPlayerDialog(ctk.CTkToplevel):
     def _toggle_fullscreen(self, _event=None):
         if self._fullscreen:
             return self._exit_fullscreen(_event)
-        self._windowed_geometry = self.geometry()
         self._file_row.grid_remove()
         self._settings_card.grid_remove()
         self._actions.grid_remove()
@@ -968,8 +966,6 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._settings_card.grid()
         self._actions.grid()
         self._outer.pack_configure(padx=16, pady=16)
-        if self._windowed_geometry is not None:
-            self.geometry(self._windowed_geometry)
         self._fullscreen = False
         self._fullscreen_btn.configure(text=t("player_fullscreen"))
         return "break" if _event is not None else None
