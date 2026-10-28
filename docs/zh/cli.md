@@ -75,7 +75,7 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 | `--detection-model` | `rfdetr-v6` | 已安装模型从 `model_weights/` 中发现；`rfdetr-v6`（快速）、`rfdetr-vr-v1`（VR180）和 `lada-yolo-v4` 已内置，`rfdetr-v6-large` 和 `zelefans-vr-yolo-v2` 为可选下载。见[模型](models.md)。 |
 | `--detection-model-path` | 自动 | 默认为 `model_weights/<detection-model>`，并使用适合你显卡的文件类型：RF-DETR 在 NVIDIA 上用 `.onnx`，在 AMD 上用 `.pt`；YOLO 始终用 `.pt`。 |
 | `--detection-score-threshold` | 自动 | 取值 `0` 到 `1`。默认使用所选模型的推荐值（`rfdetr-v6`：0.35，`rfdetr-v6-large` 和 `rfdetr-vr-v1`：0.40，YOLO 模型：0.25）。漏检马赛克时调低；正常区域被误检时调高。 |
-| `--max-detection-gap` | `2` | 当马赛克在相同位置重新出现时，填补最多 N 帧的检测中断。`0` 表示禁用。 |
+| `--max-detection-gap` | `2` | 当马赛克在相同位置重新出现时，填补最多 N 帧的检测中断。`0` 表示禁用。LTX 始终填补不超过 3 帧的中断；大于 3 的值对 LTX 同样生效。 |
 | `--min-detection-duration` | `2` | 丢弃持续少于 N 帧的检测（视为误检，相应帧保持原样）。`0` 表示禁用。 |
 | `--scene-detection` | 开 | 检测硬切镜头并在切换点结束所有跟踪中的马赛克片段，使片段不会跨越两个镜头。使用 `--no-scene-detection` 关闭。 |
 

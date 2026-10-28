@@ -78,7 +78,7 @@ Jasna は `TMP`、次に `TEMP` を使います。`TMPDIR` は使いません。
 | `--detection-model` | `rfdetr-v6` | インストール済みモデルは `model_weights/` から検出されます。`rfdetr-v6`（高速）、`rfdetr-vr-v1`（VR180）、`lada-yolo-v4` は同梱、`rfdetr-v6-large` と `zelefans-vr-yolo-v2` は任意のダウンロードです。詳しくは[モデル](models.md)。 |
 | `--detection-model-path` | 自動 | デフォルトは `model_weights/<detection-model>` で、カードに合ったファイル形式を使います。RF-DETR は NVIDIA で `.onnx`、AMD で `.pt`。YOLO は常に `.pt`。 |
 | `--detection-score-threshold` | 自動 | `0` から `1`。デフォルトはモデルの推奨値です（`rfdetr-v6`：0.35、`rfdetr-v6-large` と `rfdetr-vr-v1`：0.40、YOLO モデル：0.25）。モザイクを見逃す場合は下げ、通常の領域が誤検出される場合は上げてください。 |
-| `--max-detection-gap` | `2` | モザイクが同じ位置に再出現する場合、最大 N フレームの検出途切れを補完します。`0` で無効。 |
+| `--max-detection-gap` | `2` | モザイクが同じ位置に再出現する場合、最大 N フレームの検出途切れを補完します。`0` で無効。LTX は常に 3 フレーム以下の途切れを補完します（4 以上で LTX にも適用）。 |
 | `--min-detection-duration` | `2` | N フレーム未満の検出を誤検出として破棄します（該当フレームは未処理のまま）。`0` で無効。 |
 | `--scene-detection` | オン | ハードカット（シーン切り替え）を検出し、その位置で追跡中のモザイククリップをすべて終了します。クリップが 2 つのショットにまたがりません。`--no-scene-detection` で無効化。 |
 

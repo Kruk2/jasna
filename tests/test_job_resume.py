@@ -16,7 +16,7 @@ from jasna.os_utils import atomic_write
 from jasna.session_factory import find_resume_output
 from jasna.ltx.camera import CropFrame
 from jasna.ltx.model_files import bundle_names
-from jasna.ltx.plan import TrackPlan, Window, plans_from_arrays, plans_to_arrays
+from jasna.ltx.plan import MAX_GAP, TrackPlan, Window, plans_from_arrays, plans_to_arrays
 from jasna.ltx.restore import LatentStore
 from jasna.segments import SegmentRange, SegmentRestoration
 
@@ -215,6 +215,15 @@ def test_fingerprint_detects_changes(job, monkeypatch, change):
     else:
         metadata = SimpleNamespace(num_frames=120, time_base=Fraction(1, 24), duration=5.0)
     assert job_fingerprints(config, source, output, metadata, _plan(ranges)) != original
+
+
+def test_latents_follow_the_detection_gap_only_where_ltx_tracks_use_it(job):
+    config, source, output, metadata = job
+    job_key, latents = job_fingerprints(config, source, output, metadata, None)
+    for gap, keeps_latents in ((0, True), (MAX_GAP, True), (MAX_GAP + 3, False)):
+        changed = job_fingerprints(replace(config, max_detection_gap=gap), source, output, metadata, None)
+        assert changed[0] != job_key
+        assert (changed[1] == latents) is keeps_latents
 
 
 def test_mismatch_preserves_every_file_until_confirmed(job):
