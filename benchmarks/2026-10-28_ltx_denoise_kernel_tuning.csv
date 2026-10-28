@@ -1,0 +1,17 @@
+date,commit,label,gpu,model,quant,canvas,windows,steps,stg,blocks,resident,inductor,compile_s,s_per_window,ms_per_window_step,peak_vram_gib,runs_s
+2026-10-28,afe14be4,main,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,native,48,,2.7,3.88,485.4,12.98,11.57 11.65 11.73
+2026-10-28,afe14be4,main,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,native,48,,4.7,10.86,1357.5,13.86,32.56 32.58 32.74
+2026-10-28,afe14be4,main,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,native,48,,1.6,3.04,379.9,7.87,9.09 9.12 9.13
+2026-10-28,afe14be4,main,NVIDIA GeForce RTX 5090,distilled,nvfp4,768,3,8,False,native,48,,3.8,9.0,1124.6,8.91,26.95 26.99 27.05
+2026-10-28,c9630a2e,branch,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,native,48,,2.2,3.84,480.3,12.98,11.52 11.53 11.54
+2026-10-28,c9630a2e,branch,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,native,48,,4.4,10.82,1352.3,13.86,32.46 32.44 32.60
+2026-10-28,c9630a2e,branch,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,native,48,,1.7,3.02,377.1,7.87,9.05 9.15 8.97
+2026-10-28,c9630a2e,branch,NVIDIA GeForce RTX 5090,distilled,nvfp4,768,3,8,False,native,48,,3.7,9.04,1130.1,8.91,26.86 27.12 27.16
+2026-10-28,afe14be4,main,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,native,48,,2.2,3.98,497.7,12.98,12.07 11.95 11.94
+2026-10-28,afe14be4,main,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,native,48,,4.5,11.07,1383.3,13.86,33.04 33.20 33.43
+2026-10-28,afe14be4,main,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,native,48,,1.6,3.08,384.5,7.87,9.23 9.23 9.23
+2026-10-28,afe14be4,main,NVIDIA GeForce RTX 5090,distilled,nvfp4,768,3,8,False,native,48,,3.9,9.06,1132.5,8.91,27.18 27.01 27.29
+2026-10-28,c9630a2e,branch,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,native,48,,1.8,3.83,478.8,12.98,11.43 11.49 11.50
+2026-10-28,c9630a2e,branch,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,native,48,,4.4,10.73,1340.9,13.86,32.12 32.18 32.22
+2026-10-28,c9630a2e,branch,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,native,48,,1.5,2.94,367.5,7.87,8.82 8.81 8.82
+2026-10-28,c9630a2e,branch,NVIDIA GeForce RTX 5090,distilled,nvfp4,768,3,8,False,native,48,,3.7,8.79,1098.4,8.91,26.35 26.36 26.40
