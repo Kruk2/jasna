@@ -257,3 +257,17 @@ def test_wizard_stops_waiting_on_a_wedged_check_thread(wizard_factory, monkeypat
         assert wizard._continue_btn.cget("text") == t("btn_exit")
     finally:
         release.set()
+
+
+@pytest.mark.parametrize(("info", "error", "key"), [
+    ((True, "offline"), None, "license_chip_offline"),
+    ((True, "online"), None, "license_chip_online"),
+    ((True, None), None, "license_chip_active"),
+    ((False, None), None, "license_chip_inactive"),
+    (None, OSError("unreadable"), "license_chip_inactive"),
+])
+def test_license_chip_names_how_jasna_checks_the_license(jasna_app, info, error, key):
+    from jasna.gui.locales import t
+
+    jasna_app._license_chip_ready(info, error)
+    assert jasna_app._license_chip.cget("text") == t(key)

@@ -27,13 +27,19 @@ def _start(
 
 
 def read_license_info() -> tuple[bool, str | None]:
-    """Whether Jasna is activated, and the offline activation's identity when it has one."""
+    """Whether Jasna is activated, and how it checks the license: "offline", "online", or None while an earlier
+    activation waits to move on the first supporter-model job."""
     if not protection_available():
         return False, None
-    from jasna.protection import license_store, offline
+    from jasna.protection import lease, license_store, offline
 
-    grant = offline.saved_grant()
-    return license_store.is_licensed(), grant[0] if grant is not None else None
+    if offline.saved_grant() is not None:
+        mode = "offline"
+    elif lease.load_token() is not None:
+        mode = "online"
+    else:
+        mode = None
+    return license_store.is_licensed(), mode
 
 
 def start_license_info(on_done) -> threading.Thread:
