@@ -126,9 +126,10 @@ Put all 4 in `model_weights/ltx-restore` inside your Jasna folder (create the
 including `.enc`. Start the LTX job again; Jasna will not ask to download.
 
 The VAE encoder and decoder are faster distilled copies of the full ones. To use others, set
-`JASNA_LTX_VAE_ENCODER=full|half|max` (`full` needs no extra file, `max` needs
-`vae-encoder-max.safetensors.enc`) or `JASNA_LTX_VAE_DECODER=half|max` (`half` needs
-`vae-decoder.safetensors.enc`) before starting Jasna.
+`JASNA_LTX_VAE_ENCODER=full|half|max` or `JASNA_LTX_VAE_DECODER=full|half|max` before starting Jasna.
+Encoder `half` / `max` needs `vae-encoder-half.safetensors.enc` / `vae-encoder-max.safetensors.enc`
+(`full` is inside `vae.safetensors.enc`); decoder `full` / `half` / `max` needs
+`vae-decoder-full.safetensors.enc` / `vae-decoder-half.safetensors.enc` / `vae-decoder-max.safetensors.enc`.
 
 ### LTX options
 

@@ -64,8 +64,10 @@ _VAE_NAME = "vae.safetensors"
 # Video encoders: the VAE's own, or one distilled from it with about half / a third of its residual
 # blocks (encode -45 % / -63 % on an RTX 5090).
 VAE_ENCODERS = {"full": _VAE_NAME, "half": "vae-encoder-half.safetensors", "max": "vae-encoder-max.safetensors"}
-# Decoders: 4 / 2 of the tuned decoder's 8 stage-5 blocks (decode -41 % / -61 %).
-VAE_DECODERS = {"half": "vae-decoder.safetensors", "max": "vae-decoder-max.safetensors"}
+# Decoders: the tuned decoder (8 stage-5 blocks), or one distilled from it with 4 / 2 of them
+# (decode -41 % / -61 %).
+VAE_DECODERS = {"full": "vae-decoder-full.safetensors", "half": "vae-decoder-half.safetensors",
+                "max": "vae-decoder-max.safetensors"}
 VAE_ENCODER_ENV, VAE_DECODER_ENV = "JASNA_LTX_VAE_ENCODER", "JASNA_LTX_VAE_DECODER"
 # Close to the full VAE in human A/Bs on real clips, at 0.41 instead of 0.69 s per 512 window.
 DEFAULT_VAE_ENCODER, DEFAULT_VAE_DECODER = "half", "max"
@@ -85,7 +87,8 @@ LTX_DOWNLOADS: dict[str, DownloadableFile] = {
         ("ltx-restore-alpha1-int8.safetensors", 13_368_048_765, "2892db743471ef1574f4dc47412a1b901a0e02accdc8cbda31c65dbe3c4b06a6"),
         ("ltx-restore-alpha1-nvfp4.safetensors", 7_733_295_013, "71bbbccf96c25f8509fe16da00ef090195e600ad8f467040485bdf75da9aefbd"),
         ("vae.safetensors", 1_472_223_815, "b9252d5a799748d1932d4eed60a2d77461949a19f6feb57f2238dbffe08f5e25"),
-        ("vae-decoder.safetensors", 29_768_681, "3ddd4022913caa825bc6b47aa90329a52e84bb8e33e2bbe8bec7ff4803d3872b"),
+        ("vae-decoder-full.safetensors", 38_718_609, "c60c3572871203bd364d6bb2390225fa4c347f7ea5c64fe468256c900caeea2d"),
+        ("vae-decoder-half.safetensors", 29_768_681, "3ddd4022913caa825bc6b47aa90329a52e84bb8e33e2bbe8bec7ff4803d3872b"),
         ("vae-decoder-max.safetensors", 25_293_713, "aa923a738dd366c2c9216f9987f9e7428f196bce69933c016f54db466fef5eb1"),
         ("vae-encoder-half.safetensors", 329_975_931, "d71a672fbd04630a9731e55fb9ae63adedc915d133f0a4093f1eb86b9fd43e88"),
         ("vae-encoder-max.safetensors", 292_811_931, "339ab2b4eee680113d4d93e9be0d3998e1df4343597226aeb30978122f717f2f"),
@@ -262,7 +265,7 @@ def _vae_choice(env: str, choices: dict[str, str], default: str) -> str:
 def bundle_names(model: LtxModelName, *, fast: bool) -> tuple[str, ...]:
     """(transformer, vae, decoder[, video encoder]) file names of one model choice; the encoder is
     named only when it is not the VAE's own. ``JASNA_LTX_VAE_ENCODER`` (full / half / max) and
-    ``JASNA_LTX_VAE_DECODER`` (half / max) override the default encoder and decoder."""
+    ``JASNA_LTX_VAE_DECODER`` (full / half / max) override the default encoder and decoder."""
     encoder = _vae_choice(VAE_ENCODER_ENV, VAE_ENCODERS, DEFAULT_VAE_ENCODER)
     decoder = _vae_choice(VAE_DECODER_ENV, VAE_DECODERS, DEFAULT_VAE_DECODER)
     return (_TRANSFORMER_NAMES[(model, fast)], _VAE_NAME, decoder, *((encoder,) if encoder != _VAE_NAME else ()))
