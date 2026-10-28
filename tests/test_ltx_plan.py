@@ -54,11 +54,11 @@ def test_build_tracks_links_across_short_gaps_but_not_cuts():
     frames = [[_group(100, 100, 80)] for _ in range(10)]
     frames[3] = []
     frames[4] = []
-    assert len(build_tracks(frames, cuts=set())) == 1
-    assert len(build_tracks(frames, cuts={6})) == 2
+    assert len(build_tracks(frames, cuts=set(), max_gap=MAX_GAP)) == 1
+    assert len(build_tracks(frames, cuts={6}, max_gap=MAX_GAP)) == 2
     frames[5] = frames[6] = frames[7] = []
     frames[3] = frames[4] = []
-    assert len(build_tracks(frames, cuts=set())) == 2
+    assert len(build_tracks(frames, cuts=set(), max_gap=MAX_GAP)) == 2
 
 
 def test_track_max_gap_only_widens_what_ltx_always_bridges():
@@ -69,46 +69,46 @@ def test_a_wider_max_gap_keeps_a_longer_dropout_in_one_filled_track():
     regions = [[_square(300, 300, 120)] for _ in range(200)]
     regions[100:106] = [[] for _ in range(6)]
 
-    def spans(cuts, **kwargs):
-        plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=False, window_hop=WINDOW_HOP, **kwargs)
+    def spans(cuts, max_gap):
+        plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=False, window_hop=WINDOW_HOP, max_gap=max_gap)
         return [(p.start, p.stop) for p in plans], plans
 
-    assert spans(set())[0] == [(0, 100), (106, 200)]
-    bridged, (plan,) = spans(set(), max_gap=6)
+    assert spans(set(), MAX_GAP)[0] == [(0, 100), (106, 200)]
+    bridged, (plan,) = spans(set(), 6)
     assert bridged == [(0, 200)]
     assert all(len(polygons) == 1 for polygons in plan.polygons[100:106])
-    assert spans({103}, max_gap=6)[0] == [(0, 100), (106, 200)]
+    assert spans({103}, 6)[0] == [(0, 100), (106, 200)]
 
 
 def test_merge_continuations_reaches_back_max_gap_frames():
     parent = Track(0, {i: _group(100, 100, 200) for i in range(10)})
     child = Track(1, {i: _group(150, 150, 60) for i in range(15, 25)})
-    assert len(merge_continuations([parent, child], cuts=set(), frame_w=1920, frame_h=1080)) == 2
+    assert len(merge_continuations([parent, child], cuts=set(), frame_w=1920, frame_h=1080, max_gap=MAX_GAP)) == 2
     assert len(merge_continuations([parent, child], cuts=set(), frame_w=1920, frame_h=1080, max_gap=5)) == 1
 
 
 def test_handover_leads_look_max_gap_frames_past_a_track():
     track = Track(0, {i: _group(150, 150, 100) for i in range(100, 200)})
     heir = Track(1, {i: _group(100, 100, 800) for i in range(205, 300)})
-    assert handover_leads([track, heir], set(), 300)[0] == (0, 0)
-    assert handover_leads([track, heir], set(), 300, max_gap=6)[0] == (0, BLEND_FRAMES)
+    assert handover_leads([track, heir], set(), 300, MAX_GAP)[0] == (0, 0)
+    assert handover_leads([track, heir], set(), 300, 6)[0] == (0, BLEND_FRAMES)
 
 
 def test_merge_continuations_folds_a_split_mosaic():
     parent = Track(0, {i: _group(100, 100, 200) for i in range(10)})
     child = Track(1, {i: _group(150, 150, 60) for i in range(5, 15)})
     elsewhere = Track(2, {i: _group(900, 900, 60) for i in range(5, 15)})
-    merged = merge_continuations([parent, child, elsewhere], cuts=set(), frame_w=1920, frame_h=1080)
+    merged = merge_continuations([parent, child, elsewhere], cuts=set(), frame_w=1920, frame_h=1080, max_gap=MAX_GAP)
     assert [t.track_id for t in merged] == [0, 2]
     assert merged[0].first == 0 and merged[0].last == 14
     assert len(merged[0].frames[6].polygons) == 2
-    assert len(merge_continuations([parent, child], cuts={5}, frame_w=1920, frame_h=1080)) == 2
+    assert len(merge_continuations([parent, child], cuts={5}, frame_w=1920, frame_h=1080, max_gap=MAX_GAP)) == 2
 
 
 def test_merge_continuations_keeps_the_gap_fill_of_both_tracks():
     parent = Track(0, {i: _group(100, 100, 200) for i in range(10) if i != 7})
     child = Track(1, {i: _group(150, 150, 60) for i in range(5, 15) if i != 8})
-    merged = merge_continuations([parent, child], cuts=set(), frame_w=1920, frame_h=1080)
+    merged = merge_continuations([parent, child], cuts=set(), frame_w=1920, frame_h=1080, max_gap=MAX_GAP)
     assert len(merged) == 1
     assert [len(merged[0].frames[i].polygons) for i in (6, 7, 8, 9)] == [2, 2, 2, 2]
     assert merged[0].frames[7].box == (100, 100, 300, 300)
@@ -123,7 +123,7 @@ def _split_video() -> list[list[Region]]:
 
 
 def test_a_lasting_split_gets_its_own_camera_with_a_handover():
-    plans = plan_video(_split_video(), set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=WINDOW_HOP)
+    plans = plan_video(_split_video(), set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP)
     assert [(p.start, p.stop) for p in plans] == [(0, 130), (100 - LEAD_IN_FRAMES, 500)]
     piece = plans[1]
     assert len(piece.presence) == len(piece.polygons) == piece.stop - piece.start
@@ -139,10 +139,10 @@ def test_a_lasting_split_gets_its_own_camera_with_a_handover():
 def test_handover_leads_stop_at_cuts_and_hand_back_to_a_covering_track():
     parent = Track(0, {i: _group(100, 100, 800) for i in range(300)})
     child = Track(1, {i: _group(150, 150, 100) for i in range(100, 200)})
-    assert handover_leads([parent, child], set(), 300) == [(0, 0), (LEAD_IN_FRAMES, BLEND_FRAMES)]
-    assert handover_leads([parent, child], {90}, 300)[1] == (10, BLEND_FRAMES)
-    assert handover_leads([parent, child], {200}, 300)[1] == (LEAD_IN_FRAMES, 0)
-    assert handover_leads([parent, child], {202}, 300)[1] == (LEAD_IN_FRAMES, 2)
+    assert handover_leads([parent, child], set(), 300, MAX_GAP) == [(0, 0), (LEAD_IN_FRAMES, BLEND_FRAMES)]
+    assert handover_leads([parent, child], {90}, 300, MAX_GAP)[1] == (10, BLEND_FRAMES)
+    assert handover_leads([parent, child], {200}, 300, MAX_GAP)[1] == (LEAD_IN_FRAMES, 0)
+    assert handover_leads([parent, child], {202}, 300, MAX_GAP)[1] == (LEAD_IN_FRAMES, 2)
 
 
 def test_handover_presence_ramps_in_and_out():
@@ -224,13 +224,13 @@ def test_shared_latents_encode_the_same_frames(hop):
 
 def test_plan_windows_follow_the_hop():
     regions = [[_square(300, 300, 120)] for _ in range(300)]
-    (plan,) = plan_video(regions, set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=LESS_OVERLAP_WINDOW_HOP)
+    (plan,) = plan_video(regions, set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=LESS_OVERLAP_WINDOW_HOP, max_gap=MAX_GAP)
     assert [w.start for w in plan.windows] == [0, 104, 208]
     assert plan.window_hop == LESS_OVERLAP_WINDOW_HOP
 
 
 def test_crossfade_weights_partition_unity():
-    plans = plan_video([[_square(300 + t, 300, 120)] for t in range(300)], set(), frame_w=1920, frame_h=1080, large_canvas=True, window_hop=WINDOW_HOP)
+    plans = plan_video([[_square(300 + t, 300, 120)] for t in range(300)], set(), frame_w=1920, frame_h=1080, large_canvas=True, window_hop=WINDOW_HOP, max_gap=MAX_GAP)
     windows = plans[0].windows
     total = np.zeros(300)
     for window, weight in zip(windows, crossfade_weights(windows)):
@@ -242,7 +242,7 @@ def test_crossfade_weights_partition_unity():
 def test_crossfade_hides_a_later_windows_unfused_lead_frames(hop):
     """A later window's free latent 0 sits in front of fused latents, and the decoder
     garbles the colour of that latent and the next one (#580): its first 9 frames get no weight."""
-    plans = plan_video([[_square(300, 300, 120)] for _ in range(400)], set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=hop)
+    plans = plan_video([[_square(300, 300, 120)] for _ in range(400)], set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=hop, max_gap=MAX_GAP)
     windows = plans[0].windows
     weights = crossfade_weights(windows)
     overlap = windows[0].stop - windows[1].start
@@ -270,9 +270,9 @@ def test_track_camera_contains_support_and_letterboxes():
 
 
 def test_large_crops_use_the_large_canvas():
-    plans = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=True, window_hop=WINDOW_HOP)
+    plans = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=True, window_hop=WINDOW_HOP, max_gap=MAX_GAP)
     assert plans[0].windows[0].canvas == LARGE_CANVAS
-    capped = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=WINDOW_HOP)
+    capped = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP)
     assert capped[0].windows[0].canvas == PLAN_CANVAS
     assert letterbox((0, 0, 900, 900), LARGE_CANVAS).resize_hw == (LARGE_CANVAS, LARGE_CANVAS)
 
@@ -340,7 +340,7 @@ def _plan_digest(plans) -> str:
 
 def test_plan_video_output_matches_the_recorded_plan():
     regions, cuts = _random_video(0, 4000)
-    plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=True, window_hop=window_hop(True))
+    plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=True, window_hop=window_hop(True), max_gap=MAX_GAP)
     assert _plan_digest(plans) == "1099f21ad72e3a86d0a9e3b1e2d94dc4b126535674cfdddf8d70d4c3e12f3e30"
 
 
@@ -349,6 +349,6 @@ def test_gap_fill_keeps_outlines_inside_the_frame_when_boxes_leave_it():
     tall = Region(box=(0.0, -800.0, 100.0, 100.0), polygon=outline)
     hugging = Region(box=(0.0, -5.0, 100.0, 100.0), polygon=outline)
     regions = [[tall], [], [], []] + [[hugging] for _ in range(200)]
-    (plan,) = plan_video(regions, set(), frame_w=1280, frame_h=720, large_canvas=False, window_hop=WINDOW_HOP)
+    (plan,) = plan_video(regions, set(), frame_w=1280, frame_h=720, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP)
     points = np.concatenate([polygon for polygons in plan.polygons for polygon in polygons])
     assert points.min() >= 0

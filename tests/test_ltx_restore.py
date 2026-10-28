@@ -14,6 +14,7 @@ import torch
 
 from jasna.ltx import inference, restore
 from jasna.ltx.camera import CropFrame
+from jasna.ltx.plan import MAX_GAP
 from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, Region, Window
 from jasna.tensor_utils import half_dtype
 
@@ -170,6 +171,7 @@ def _render(tmp_path):
         budget_name="segment",
         device=torch.device("cpu"),
         speed_profile=tmp_path / "speed.json",
+        max_gap=MAX_GAP,
     )
 
 
@@ -227,6 +229,7 @@ def test_a_segment_plans_the_same_wherever_decoding_starts(fakes):
             window_hop=restore.WINDOW_HOP,
             bar=_Bar(),
             cancel=threading.Event(),
+            max_gap=MAX_GAP,
         )
         results.append((plans, detector.batches))
     assert results[0] == results[1]
@@ -240,15 +243,15 @@ def test_scan_span_bridges_detection_gaps_up_to_max_gap(fakes):
     video = _video(30, set(range(10)) | set(range(15, 30)))
     whole = restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, seed=0)
 
-    def spans(**kwargs):
+    def spans(max_gap):
         (plans,) = restore.scan_span(
             _source(video), [whole], _Detector(), batch_size=4, frame_h=64, frame_w=64, large_canvas=False,
-            window_hop=restore.WINDOW_HOP, bar=_Bar(), cancel=threading.Event(), **kwargs,
+            window_hop=restore.WINDOW_HOP, bar=_Bar(), cancel=threading.Event(), max_gap=max_gap,
         )
         return [(plan.start, plan.stop) for plan in plans]
 
-    assert spans() == [(0, 10), (15, 30)]
-    assert spans(max_gap=5) == [(0, 30)]
+    assert spans(MAX_GAP) == [(0, 10), (15, 30)]
+    assert spans(5) == [(0, 30)]
 
 
 def test_restore_spans_seeds_segments_and_leaves_other_frames_untouched(fakes, tmp_path):
@@ -308,6 +311,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         speed_profile=tmp_path / "speed.json",
         progress=restore.Progress(12, disable=True, report=None),
         cancel=threading.Event(),
+        max_gap=MAX_GAP,
     )
     assert budgets == [123 << 20]
     assert _Transformer.seeds == [[5]]
@@ -779,6 +783,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
         speed_profile=tmp_path / "speed.json",
         progress=restore.Progress(0, disable=True, report=None),
         cancel=threading.Event(),
+        max_gap=MAX_GAP,
     )
     assert list(json.loads((tmp_path / "speed.json").read_text())) == [
         restore.speed.profile_key("Test GPU", "t", "free VRAM")
@@ -1156,7 +1161,7 @@ def test_resume_replays_whole_video_canvas_decision(fakes, monkeypatch, tmp_path
     kwargs = dict(
         detector=_Detector(), files=FILES, frame_h=64, frame_w=64, batch_size=4,
         window_hop=88, seed=7, device=torch.device("cpu"), work_dir=tmp_path,
-        speed_profile=tmp_path / "speed.json", resume_dir=tmp_path / "saved",
+        speed_profile=tmp_path / "speed.json", resume_dir=tmp_path / "saved", max_gap=MAX_GAP,
     )
     def run():
         restore.restore_video(
@@ -1184,7 +1189,7 @@ def test_resume_of_saved_768_px_windows_fails_plainly_when_vram_is_short(fakes, 
             span.frames, _Writer(), detector=_Detector(), files=FILES, frame_h=720, frame_w=1280, batch_size=4,
             large_canvas=True, window_hop=88, seed=7, device=torch.device("cpu"), work_dir=tmp_path,
             speed_profile=tmp_path / "speed.json", progress=restore.Progress(12, disable=True, report=None),
-            resume_dir=resume_dir, cancel=threading.Event(),
+            resume_dir=resume_dir, cancel=threading.Event(), max_gap=MAX_GAP,
         )
 
 
@@ -1210,6 +1215,7 @@ def test_the_speed_test_mosaics_plan_two_windows_on_each_canvas(frame_h, frame_w
     detections = restore._SpeedTestMosaics()(torch.zeros(1, 3, 8, 8), target_hw=(frame_h, frame_w))
     regions = restore.regions_per_frame(detections, frame_h, frame_w) * restore.SPEED_TEST_FRAMES
     plans = restore.plan_video(
-        regions, set(), frame_w=frame_w, frame_h=frame_h, large_canvas=True, window_hop=restore.WINDOW_HOP
+        regions, set(), frame_w=frame_w, frame_h=frame_h, large_canvas=True, window_hop=restore.WINDOW_HOP,
+        max_gap=MAX_GAP,
     )
     assert sorted(w.canvas for plan in plans for w in plan.windows) == [512, 512, 768, 768]

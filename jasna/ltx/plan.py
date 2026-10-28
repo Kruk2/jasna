@@ -223,11 +223,11 @@ def group_regions(regions: Sequence[Region]) -> list[RegionGroup]:
 def track_max_gap(max_detection_gap: int) -> int:
     """Max missing frames an LTX track bridges: ``max(MAX_GAP, --max-detection-gap)``
     (the default of 2 is for BasicVSR++, below LTX's 3-frame minimum)."""
-    return max(MAX_GAP, int(max_detection_gap))
+    return max(MAX_GAP, max_detection_gap)
 
 
 def build_tracks(
-    groups_per_frame: Sequence[Sequence[RegionGroup]], cuts: set[int], max_gap: int = MAX_GAP
+    groups_per_frame: Sequence[Sequence[RegionGroup]], cuts: set[int], max_gap: int
 ) -> list[Track]:
     """Greedy best-IoU linking; a track tolerates ``max_gap`` missing frames and never
     crosses a scene cut (``cuts`` holds first-frame-after-cut indices)."""
@@ -368,7 +368,7 @@ def restart_cameras(tracks: Sequence[Track], *, frame_w: int, frame_h: int) -> l
 
 
 def merge_continuations(
-    tracks: Sequence[Track], cuts: set[int], *, frame_w: int, frame_h: int, max_gap: int = MAX_GAP
+    tracks: Sequence[Track], cuts: set[int], *, frame_w: int, frame_h: int, max_gap: int
 ) -> list[Track]:
     """Fold a track whose first box lies >= ``CONTINUATION_COVER`` inside an earlier
     track's box from <= ``max_gap`` frames before (no cut between) into that track:
@@ -450,7 +450,7 @@ def rejoin_across_cover(tracks: Sequence[Track], cuts: set[int]) -> list[Track]:
 
 
 def handover_leads(
-    tracks: Sequence[Track], cuts: set[int], frame_count: int, max_gap: int = MAX_GAP
+    tracks: Sequence[Track], cuts: set[int], frame_count: int, max_gap: int
 ) -> list[tuple[int, int]]:
     """Per track the frames it renders before its first and after its last detection:
     a lead-in when it starts inside another track (a separated continuation), a lead-out
@@ -600,7 +600,7 @@ def plan_video(
     frame_h: int,
     large_canvas: bool,
     window_hop: int,
-    max_gap: int = MAX_GAP,
+    max_gap: int,
 ) -> list[TrackPlan]:
     """Every mosaic track of a video with its windows, in window-index order.
     Tracks bridge detection gaps up to ``max_gap`` frames (``track_max_gap``)."""
