@@ -327,6 +327,7 @@ class Pipeline:
         return Progress(frames, disable=self.disable_progress, report=report)
 
     def _run_ltx(self, metadata) -> None:
+        from jasna.ltx.plan import track_max_gap
         from jasna.ltx.restore import Cancelled, restore_video, video_frames
         from jasna.ltx.speed import profile_path
 
@@ -361,6 +362,7 @@ class Pipeline:
                     frame_rate.output_frame_count(metadata.num_frames), self.progress_callback
                 ),
                 cancel=self._cancel_event,
+                max_gap=track_max_gap(self.max_detection_gap),
             )
         except Cancelled:
             log.info("LTX restoration cancelled")
@@ -372,6 +374,7 @@ class Pipeline:
         """How LTX restores segments: the 768 px decision and the decode tiles follow the
         GPU's size, never the VRAM free at that moment, so a segment renders the same in a
         job and in a seed preview."""
+        from jasna.ltx.plan import track_max_gap
         from jasna.ltx.restore import LtxRender, segment_decode_budget, segment_large_canvas
         from jasna.ltx.speed import profile_path
 
@@ -389,6 +392,7 @@ class Pipeline:
             budget_name="segment",
             device=self.device,
             speed_profile=profile_path(),
+            max_gap=track_max_gap(self.max_detection_gap),
         )
 
     def ltx_span(

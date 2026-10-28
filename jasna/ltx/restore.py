@@ -41,6 +41,7 @@ from jasna.ltx.model_files import LtxModelFiles
 from jasna.ltx.inference import ModelRuntime, WorkerDecoder, WorkerEncoder, WorkerTransformer
 from jasna.ltx.plan import (
     LARGE_CANVAS,
+    MAX_GAP,
     WINDOW_HOP,
     Region,
     TrackPlan,
@@ -528,6 +529,7 @@ def scan_span(
     window_hop: int,
     bar: _StageBar,
     cancel: threading.Event,
+    max_gap: int = MAX_GAP,
 ) -> list[list[TrackPlan]]:
     """The track plans of each segment, frame indices counted from the segment's first frame."""
     regions: list[list[list[Region]]] = [[] for _ in segments]
@@ -548,6 +550,7 @@ def scan_span(
             frame_h=frame_h,
             large_canvas=large_canvas,
             window_hop=window_hop,
+            max_gap=max_gap,
         )
         logger.info(
             "LTX plan: %d frames, %d scene cuts, %d tracks, %d windows",
@@ -873,7 +876,8 @@ class LtxRender:
     """What every pass needs besides the spans: the detector, the model files, the frame
     size, detection batch size, the 768 px decision, the frames between window starts, the
     decode budget per canvas and its name (decode tiling follows the budget, so it keys the
-    speed profile), the GPU and the speed profile file (``speed.py``)."""
+    speed profile), the GPU, the speed profile file (``speed.py``) and the max detection gap
+    a track bridges (``track_max_gap``)."""
 
     detector: Callable
     files: LtxModelFiles
@@ -886,6 +890,7 @@ class LtxRender:
     budget_name: str
     device: torch.device
     speed_profile: Path
+    max_gap: int = MAX_GAP
 
 
 @dataclass(frozen=True)
@@ -1012,6 +1017,7 @@ def _scan_spans(
                     counted_frames, span.segments, render.detector,
                     batch_size=render.batch_size, frame_h=render.frame_h, frame_w=render.frame_w,
                     large_canvas=render.large_canvas, window_hop=render.window_hop, bar=bar, cancel=cancel,
+                    max_gap=render.max_gap,
                 )
                 _check(cancel)
                 with atomic_write(_plan_path(span, directory), "wb") as stream:
@@ -1269,6 +1275,7 @@ def restore_video(
     progress: Progress,
     resume_dir: Path,
     cancel: threading.Event,
+    max_gap: int = MAX_GAP,
 ) -> None:
     """Restore every mosaic of the video ``frames`` yields as one segment; the 768 px
     decision and the decode tiles follow the VRAM free when they are made."""
@@ -1299,6 +1306,7 @@ def restore_video(
             budget_name="free VRAM",
             device=device,
             speed_profile=speed_profile,
+            max_gap=max_gap,
         ),
         work_dir=work_dir,
         progress=progress,

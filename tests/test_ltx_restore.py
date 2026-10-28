@@ -237,6 +237,21 @@ def test_a_segment_plans_the_same_wherever_decoding_starts(fakes):
     assert plans[0].start == 0 and len(plans[0].polygons) == 10
 
 
+def test_scan_span_bridges_detection_gaps_up_to_max_gap(fakes):
+    video = _video(30, set(range(10)) | set(range(15, 30)))
+    whole = restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, seed=0)
+
+    def spans(**kwargs):
+        (plans,) = restore.scan_span(
+            _source(video), [whole], _Detector(), batch_size=4, frame_h=64, frame_w=64, large_canvas=False,
+            window_hop=restore.WINDOW_HOP, bar=_Bar(), cancel=threading.Event(), **kwargs,
+        )
+        return [(plan.start, plan.stop) for plan in plans]
+
+    assert spans() == [(0, 10), (15, 30)]
+    assert spans(max_gap=5) == [(0, 30)]
+
+
 def test_restore_spans_seeds_segments_and_leaves_other_frames_untouched(fakes, tmp_path):
     budgets, bars = fakes
     video = _video(30, range(3, 28))

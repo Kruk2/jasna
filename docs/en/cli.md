@@ -78,7 +78,7 @@ The `--ltx-*` options need `--restoration-model-name ltx`, `ltx-4step`, `ltx-8st
 | `--detection-model` | `rfdetr-v6` | Installed models are discovered from `model_weights/`; `rfdetr-v6` (fast), `rfdetr-vr-v1` (VR180) and `lada-yolo-v4` are bundled; `rfdetr-v6-large` and `zelefans-vr-yolo-v2` are optional downloads. See [Models](models.md). |
 | `--detection-model-path` | auto | Defaults to `model_weights/<detection-model>` with the right file type for your card: RF-DETR uses `.onnx` on NVIDIA and `.pt` on AMD; YOLO always uses `.pt`. |
 | `--detection-score-threshold` | auto | From `0` to `1`. Defaults to the model's recommended value (`rfdetr-v6`: 0.35, `rfdetr-v6-large` and `rfdetr-vr-v1`: 0.40, YOLO models: 0.25). Lower it when mosaics are missed; raise it when normal areas get falsely detected. |
-| `--max-detection-gap` | `2` | Fill detection dropouts up to N frames when the mosaic reappears at the same spot. `0` disables. |
+| `--max-detection-gap` | `2` | Fill detection dropouts up to N frames when the mosaic reappears at the same spot. `0` disables. LTX always fills dropouts of up to 3 frames; values above 3 apply to LTX too. |
 | `--min-detection-duration` | `2` | Drop detections shorter than N frames as false positives; those frames stay unrestored. `0` disables. |
 | `--scene-detection` | on | Detect hard scene cuts and end all tracked mosaic clips at the cut, so no clip spans two shots. Disable with `--no-scene-detection`. |
 

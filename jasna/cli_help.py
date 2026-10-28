@@ -69,7 +69,7 @@ CLI_HELP: dict[str, str] = {
     "tvai_workers": "Number of parallel TVAI ffmpeg workers (default: %(default)s)",
     "tvai_denoise": "Remove noise before the Topaz model runs. Cleaner, but slower and uses more VRAM.",
     "detection_score_threshold": "Detection threshold, 0-1. Lower finds more, higher finds fewer. Default: the selected model's recommended value.",
-    "max_detection_gap": "Fill detection dropouts up to N frames when the mosaic reappears at the same spot. 0 disables (default: %(default)s)",
+    "max_detection_gap": "Fill detection dropouts up to N frames when the mosaic reappears at the same spot. 0 disables (default: %(default)s). LTX always fills dropouts of up to 3 frames; values above 3 apply to LTX too",
     "min_detection_duration": "Drop detections shorter than N frames as false positives. 0 disables (default: %(default)s)",
     "scene_detection": "Detect hard scene cuts and end all tracked mosaic clips at the cut, so no clip spans two different shots. (default: %(default)s)",
     "codec": "Offline output video codec (HLS streaming always uses H.264). Default: %(default)s",

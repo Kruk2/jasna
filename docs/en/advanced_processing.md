@@ -24,12 +24,13 @@ frame not restored. A false detection on a single frame starts a restore that
 is not needed.
 
 - **Max Detection Gap** (`--max-detection-gap`, default `2`): fills gaps up to
-  N frames when the mosaic comes back at the same place.
+  N frames when the mosaic comes back at the same place. LTX always fills gaps
+  of up to 3 frames; values above 3 apply to LTX too.
 - **Min Detection Duration** (`--min-detection-duration`, default `2`): drops
   detections shorter than N frames. Those frames stay as they are.
 
 Keep both small, so real short mosaics are not affected. `0` turns either one
-off.
+off (for LTX, `0` still fills gaps of up to 3 frames).
 
 ## Scene cut detection
 

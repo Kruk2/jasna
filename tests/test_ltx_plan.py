@@ -11,6 +11,7 @@ from jasna.ltx.plan import (
     LARGE_CANVAS,
     LEAD_IN_FRAMES,
     LESS_OVERLAP_WINDOW_HOP,
+    MAX_GAP,
     WINDOW_HOP,
     Region,
     RegionGroup,
@@ -26,6 +27,7 @@ from jasna.ltx.plan import (
     rejoin_across_cover,
     restart_cameras,
     shared_latents,
+    track_max_gap,
     window_hop,
     window_starts,
 )
@@ -58,6 +60,39 @@ def test_build_tracks_links_across_short_gaps_but_not_cuts():
     frames[5] = frames[6] = frames[7] = []
     frames[3] = frames[4] = []
     assert len(build_tracks(frames, cuts=set())) == 2
+
+
+def test_track_max_gap_only_widens_what_ltx_always_bridges():
+    assert [track_max_gap(n) for n in (0, 2, MAX_GAP, 9)] == [MAX_GAP, MAX_GAP, MAX_GAP, 9]
+
+
+def test_a_wider_max_gap_keeps_a_longer_dropout_in_one_filled_track():
+    regions = [[_square(300, 300, 120)] for _ in range(200)]
+    regions[100:106] = [[] for _ in range(6)]
+
+    def spans(cuts, **kwargs):
+        plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=False, window_hop=WINDOW_HOP, **kwargs)
+        return [(p.start, p.stop) for p in plans], plans
+
+    assert spans(set())[0] == [(0, 100), (106, 200)]
+    bridged, (plan,) = spans(set(), max_gap=6)
+    assert bridged == [(0, 200)]
+    assert all(len(polygons) == 1 for polygons in plan.polygons[100:106])
+    assert spans({103}, max_gap=6)[0] == [(0, 100), (106, 200)]
+
+
+def test_merge_continuations_reaches_back_max_gap_frames():
+    parent = Track(0, {i: _group(100, 100, 200) for i in range(10)})
+    child = Track(1, {i: _group(150, 150, 60) for i in range(15, 25)})
+    assert len(merge_continuations([parent, child], cuts=set(), frame_w=1920, frame_h=1080)) == 2
+    assert len(merge_continuations([parent, child], cuts=set(), frame_w=1920, frame_h=1080, max_gap=5)) == 1
+
+
+def test_handover_leads_look_max_gap_frames_past_a_track():
+    track = Track(0, {i: _group(150, 150, 100) for i in range(100, 200)})
+    heir = Track(1, {i: _group(100, 100, 800) for i in range(205, 300)})
+    assert handover_leads([track, heir], set(), 300)[0] == (0, 0)
+    assert handover_leads([track, heir], set(), 300, max_gap=6)[0] == (0, BLEND_FRAMES)
 
 
 def test_merge_continuations_folds_a_split_mosaic():

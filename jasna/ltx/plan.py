@@ -220,8 +220,16 @@ def group_regions(regions: Sequence[Region]) -> list[RegionGroup]:
     ]
 
 
-def build_tracks(groups_per_frame: Sequence[Sequence[RegionGroup]], cuts: set[int]) -> list[Track]:
-    """Greedy best-IoU linking; a track tolerates ``MAX_GAP`` missing frames and never
+def track_max_gap(max_detection_gap: int) -> int:
+    """Max missing frames an LTX track bridges: ``max(MAX_GAP, --max-detection-gap)``
+    (the default of 2 is for BasicVSR++, below LTX's 3-frame minimum)."""
+    return max(MAX_GAP, int(max_detection_gap))
+
+
+def build_tracks(
+    groups_per_frame: Sequence[Sequence[RegionGroup]], cuts: set[int], max_gap: int = MAX_GAP
+) -> list[Track]:
+    """Greedy best-IoU linking; a track tolerates ``max_gap`` missing frames and never
     crosses a scene cut (``cuts`` holds first-frame-after-cut indices)."""
     sorted_cuts = sorted(cuts)
     tracks: list[Track] = []
@@ -230,7 +238,7 @@ def build_tracks(groups_per_frame: Sequence[Sequence[RegionGroup]], cuts: set[in
         active = [
             track
             for track in active
-            if frame_idx - track.last - 1 <= MAX_GAP and not _cut_between(sorted_cuts, track.last, frame_idx)
+            if frame_idx - track.last - 1 <= max_gap and not _cut_between(sorted_cuts, track.last, frame_idx)
         ]
         candidates: list[tuple[float, int, int]] = []
         if active and groups:
@@ -359,9 +367,11 @@ def restart_cameras(tracks: Sequence[Track], *, frame_w: int, frame_h: int) -> l
     return out
 
 
-def merge_continuations(tracks: Sequence[Track], cuts: set[int], *, frame_w: int, frame_h: int) -> list[Track]:
+def merge_continuations(
+    tracks: Sequence[Track], cuts: set[int], *, frame_w: int, frame_h: int, max_gap: int = MAX_GAP
+) -> list[Track]:
     """Fold a track whose first box lies >= ``CONTINUATION_COVER`` inside an earlier
-    track's box from <= ``MAX_GAP`` frames before (no cut between) into that track:
+    track's box from <= ``max_gap`` frames before (no cut between) into that track:
     a mosaic the detector split in two, or a link lost for a few frames. A continuation
     whose own camera would be much sharper stays a track (``worth_separating``)."""
     sorted_cuts = sorted(cuts)
@@ -370,10 +380,10 @@ def merge_continuations(tracks: Sequence[Track], cuts: set[int], *, frame_w: int
     for track in sorted(tracks, key=lambda item: (item.first, item.track_id)):
         head_idx = track.first
         head = track.frames[head_idx]
-        continuable = [candidate for candidate in continuable if head_idx - candidate.last - 1 <= MAX_GAP]
+        continuable = [candidate for candidate in continuable if head_idx - candidate.last - 1 <= max_gap]
         parent, best = None, CONTINUATION_COVER
         for candidate in continuable:
-            last = next((idx for idx in range(head_idx - 1, head_idx - 2 - MAX_GAP, -1) if idx in candidate.frames), None)
+            last = next((idx for idx in range(head_idx - 1, head_idx - 2 - max_gap, -1) if idx in candidate.frames), None)
             if last is None or _cut_between(sorted_cuts, last, head_idx):
                 continue
             cover = _cover(candidate.frames[last].box, head.box)
@@ -439,7 +449,9 @@ def rejoin_across_cover(tracks: Sequence[Track], cuts: set[int]) -> list[Track]:
     return kept
 
 
-def handover_leads(tracks: Sequence[Track], cuts: set[int], frame_count: int) -> list[tuple[int, int]]:
+def handover_leads(
+    tracks: Sequence[Track], cuts: set[int], frame_count: int, max_gap: int = MAX_GAP
+) -> list[tuple[int, int]]:
     """Per track the frames it renders before its first and after its last detection:
     a lead-in when it starts inside another track (a separated continuation), a lead-out
     when another track covers it right after it ends. Leads stop at cuts and at the
@@ -450,7 +462,7 @@ def handover_leads(tracks: Sequence[Track], cuts: set[int], frame_count: int) ->
     for track in tracks:
         first, last = track.first, track.last
         lead_in = lead_out = 0
-        for idx in range(first - 1, max(first - 2 - MAX_GAP, -1), -1):
+        for idx in range(first - 1, max(first - 2 - max_gap, -1), -1):
             if idx + 1 in cuts:
                 break
             parent = _covered_at(by_frame, track, track.frames[first].box, idx)
@@ -458,7 +470,7 @@ def handover_leads(tracks: Sequence[Track], cuts: set[int], frame_count: int) ->
                 since_cut = _last_cut_at_or_before(sorted_cuts, first)
                 lead_in = min(LEAD_IN_FRAMES, first - max(parent.first, since_cut))
                 break
-        for idx in range(last + 1, min(last + 2 + MAX_GAP, frame_count)):
+        for idx in range(last + 1, min(last + 2 + max_gap, frame_count)):
             if idx in cuts:
                 break
             heir = _covered_at(by_frame, track, track.frames[last].box, idx)
@@ -588,18 +600,23 @@ def plan_video(
     frame_h: int,
     large_canvas: bool,
     window_hop: int,
+    max_gap: int = MAX_GAP,
 ) -> list[TrackPlan]:
-    """Every mosaic track of a video with its windows, in window-index order."""
+    """Every mosaic track of a video with its windows, in window-index order.
+    Tracks bridge detection gaps up to ``max_gap`` frames (``track_max_gap``)."""
     groups = [group_regions(regions) for regions in regions_per_frame]
     tracks = rejoin_across_cover(
-        merge_continuations(build_tracks(groups, cuts), cuts, frame_w=frame_w, frame_h=frame_h), cuts
+        merge_continuations(
+            build_tracks(groups, cuts, max_gap), cuts, frame_w=frame_w, frame_h=frame_h, max_gap=max_gap
+        ),
+        cuts,
     )
     tracks = [
         Track(track_id, track.frames)
         for track_id, track in enumerate(restart_cameras(tracks, frame_w=frame_w, frame_h=frame_h))
     ]
     plans = []
-    for track, lead in zip(tracks, handover_leads(tracks, cuts, len(regions_per_frame))):
+    for track, lead in zip(tracks, handover_leads(tracks, cuts, len(regions_per_frame), max_gap)):
         plan = plan_track(
             track,
             lead=lead,
