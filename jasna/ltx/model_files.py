@@ -69,8 +69,16 @@ VAE_ENCODERS = {"full": _VAE_NAME, "half": "vae-encoder-half.safetensors", "max"
 VAE_DECODERS = {"full": "vae-decoder-full.safetensors", "half": "vae-decoder-half.safetensors",
                 "max": "vae-decoder-max.safetensors"}
 VAE_ENCODER_ENV, VAE_DECODER_ENV = "JASNA_LTX_VAE_ENCODER", "JASNA_LTX_VAE_DECODER"
-# Close to the full VAE in human A/Bs on real clips, at 0.41 instead of 0.69 s per 512 window.
-DEFAULT_VAE_ENCODER, DEFAULT_VAE_DECODER = "half", "max"
+# (encoder, decoder) per model. In human A/Bs on real clips the full VAE is slightly sharper than the half encoder
+# with the max decoder, which saves 14-29 % of a 1-step job but only 8-14 % of a 4-step one: the fast models take
+# the distilled VAE, the quality models the full one (benchmarks/2026-10-28_ltx_vae_choices.md).
+DEFAULT_VAES: dict[LtxModelName, tuple[str, str]] = {
+    "distilled1": ("half", "max"),
+    "distilled2": ("half", "max"),
+    "distilled4": ("full", "full"),
+    "distilled": ("full", "full"),
+    "undistilled": ("full", "full"),
+}
 
 # The published files (``.enc`` in releases): size for the download prompt and sha256.
 LTX_DOWNLOADS: dict[str, DownloadableFile] = {
@@ -265,9 +273,10 @@ def _vae_choice(env: str, choices: dict[str, str], default: str) -> str:
 def bundle_names(model: LtxModelName, *, fast: bool) -> tuple[str, ...]:
     """(transformer, vae, decoder[, video encoder]) file names of one model choice; the encoder is
     named only when it is not the VAE's own. ``JASNA_LTX_VAE_ENCODER`` (full / half / max) and
-    ``JASNA_LTX_VAE_DECODER`` (full / half / max) override the default encoder and decoder."""
-    encoder = _vae_choice(VAE_ENCODER_ENV, VAE_ENCODERS, DEFAULT_VAE_ENCODER)
-    decoder = _vae_choice(VAE_DECODER_ENV, VAE_DECODERS, DEFAULT_VAE_DECODER)
+    ``JASNA_LTX_VAE_DECODER`` (full / half / max) override the model's ``DEFAULT_VAES``."""
+    default_encoder, default_decoder = DEFAULT_VAES[model]
+    encoder = _vae_choice(VAE_ENCODER_ENV, VAE_ENCODERS, default_encoder)
+    decoder = _vae_choice(VAE_DECODER_ENV, VAE_DECODERS, default_decoder)
     return (_TRANSFORMER_NAMES[(model, fast)], _VAE_NAME, decoder, *((encoder,) if encoder != _VAE_NAME else ()))
 
 

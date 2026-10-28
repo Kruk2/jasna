@@ -90,7 +90,7 @@ BasicVSR++ 任务不支持续跑。
 如果在 Jasna 里下载一直失败，可以用浏览器从
 [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.1)
 （或 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.1)）
-下载。需要 4 个文件：你所选模型的文件 1 个，加上 3 个 VAE 文件。
+下载。需要你所选模型的文件和它的 VAE 文件（基础画质和标准画质共 4 个文件，其他画质共 3 个）。
 Jasna 0.11.3 或更早版本请使用 `main` 分支。
 
 | 你选的模型 | 文件 |
@@ -105,13 +105,14 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
 | 高画质 + 快速模式 | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
 | 顶级画质 | `ltx-restore-alpha1-int8.safetensors.enc` |
 | 顶级画质 + 快速模式 | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
-| 都需要 | `vae.safetensors.enc`、`vae-encoder-half.safetensors.enc` 和 `vae-decoder-max.safetensors.enc` |
+| VAE（基础画质、标准画质） | `vae.safetensors.enc`、`vae-encoder-half.safetensors.enc` 和 `vae-decoder-max.safetensors.enc` |
+| VAE（良好画质、高画质、顶级画质） | `vae.safetensors.enc` 和 `vae-decoder-full.safetensors.enc` |
 
-把这 4 个文件都放到 Jasna 文件夹里的 `model_weights/ltx-restore`（没有
+把这些文件都放到 Jasna 文件夹里的 `model_weights/ltx-restore`（没有
 `ltx-restore` 文件夹就新建一个）。文件名保持原样，包括 `.enc`。重新开始 LTX
 任务，Jasna 就不会再要求下载。
 
-VAE 编码器和解码器是从完整版蒸馏出的更快版本。要换用其他版本，请在启动 Jasna 前设置
+基础画质和标准画质使用蒸馏出的更快 VAE 编码器和解码器（完整版稍微清晰一些）。要换用其他版本，请在启动 Jasna 前设置
 `JASNA_LTX_VAE_ENCODER=full|half|max` 或 `JASNA_LTX_VAE_DECODER=full|half|max`。
 编码器 `half` / `max` 需要 `vae-encoder-half.safetensors.enc` / `vae-encoder-max.safetensors.enc`
 （`full` 包含在 `vae.safetensors.enc` 中）；解码器 `full` / `half` / `max` 需要

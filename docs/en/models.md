@@ -105,7 +105,8 @@ If the download in Jasna keeps failing, get the files in your browser from
 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.1)
 (or [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.1)).
 For Jasna 0.11.3 or older, use the `main` branch instead.
-You need 4 files: one for the model you picked, plus the three VAE files.
+You need the file of the model you picked plus its VAE files (4 files for Basic and Standard Quality, 3 for
+the others).
 
 | You picked | Files |
 | --- | --- |
@@ -119,13 +120,15 @@ You need 4 files: one for the model you picked, plus the three VAE files.
 | High Quality + Fast mode | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
 | Top Quality | `ltx-restore-alpha1-int8.safetensors.enc` |
 | Top Quality + Fast mode | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
-| Always | `vae.safetensors.enc`, `vae-encoder-half.safetensors.enc` and `vae-decoder-max.safetensors.enc` |
+| VAE, Basic or Standard Quality | `vae.safetensors.enc`, `vae-encoder-half.safetensors.enc` and `vae-decoder-max.safetensors.enc` |
+| VAE, Good, High or Top Quality | `vae.safetensors.enc` and `vae-decoder-full.safetensors.enc` |
 
-Put all 4 in `model_weights/ltx-restore` inside your Jasna folder (create the
+Put them all in `model_weights/ltx-restore` inside your Jasna folder (create the
 `ltx-restore` folder if it is missing). Keep the file names exactly as they are,
 including `.enc`. Start the LTX job again; Jasna will not ask to download.
 
-The VAE encoder and decoder are faster distilled copies of the full ones. To use others, set
+Basic and Standard Quality use faster distilled copies of the VAE encoder and decoder; the full ones are slightly
+sharper. To use others, set
 `JASNA_LTX_VAE_ENCODER=full|half|max` or `JASNA_LTX_VAE_DECODER=full|half|max` before starting Jasna.
 Encoder `half` / `max` needs `vae-encoder-half.safetensors.enc` / `vae-encoder-max.safetensors.enc`
 (`full` is inside `vae.safetensors.enc`); decoder `full` / `half` / `max` needs
