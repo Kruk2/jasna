@@ -119,7 +119,7 @@ def test_ensure_asks_and_downloads_the_missing_files(tmp_path, monkeypatch, down
 
     assert models.ensure("undistilled", False, on_ready=lambda: ready.append(True))
 
-    assert asked == [t("ltx_download_confirm", model=t("model_ltx_undistilled"), size="15.2 GB")]
+    assert asked == [t("ltx_download_confirm", model=t("model_ltx_undistilled"), size="14.9 GB")]
     assert len(downloads) == 1
     assert changes == [0, 40, None]
     assert ready == [True]

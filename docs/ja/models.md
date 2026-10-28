@@ -101,8 +101,8 @@ Jasna を更新した場合は、最初からやり直す前に確認します�
 Jasna でのダウンロードが何度も失敗する場合は、ブラウザで
 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.1)
 （または [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.1)）から
-ファイルを取得してください。必要なのは 4 ファイルです：選んだモデルのファイル 1 つと、
-VAE の 3 ファイル。
+ファイルを取得してください。必要なのは選んだモデルのファイルと、その VAE ファイルです（基本画質・標準画質は 4 ファイル、
+それ以外は 3 ファイル）。
 Jasna 0.11.3 以前では `main` ブランチを使ってください。
 
 | 選んだモデル | ファイル |
@@ -117,13 +117,15 @@ Jasna 0.11.3 以前では `main` ブランチを使ってください。
 | 高画質 + 高速モード | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
 | 最高画質 | `ltx-restore-alpha1-int8.safetensors.enc` |
 | 最高画質 + 高速モード | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
-| 常に必要 | `vae.safetensors.enc`、`vae-encoder-half.safetensors.enc`、`vae-decoder-max.safetensors.enc` |
+| VAE（基本画質・標準画質） | `vae.safetensors.enc`、`vae-encoder-half.safetensors.enc`、`vae-decoder-max.safetensors.enc` |
+| VAE（良好画質・高画質・最高画質） | `vae.safetensors.enc`、`vae-decoder-full.safetensors.enc` |
 
-4 つとも Jasna フォルダー内の `model_weights/ltx-restore` に置きます（`ltx-restore`
+すべて Jasna フォルダー内の `model_weights/ltx-restore` に置きます（`ltx-restore`
 フォルダーがなければ作成）。ファイル名は `.enc` を含めてそのままにしてください。
 LTX のジョブをもう一度始めると、ダウンロードの確認は出ません。
 
-VAE のエンコーダーとデコーダーは、元のものを蒸留した高速版です。別のものを使うには、Jasna を起動する前に
+基本画質・標準画質では VAE のエンコーダーとデコーダーに蒸留した高速版を使います（元のものの方がわずかに
+シャープです）。別のものを使うには、Jasna を起動する前に
 `JASNA_LTX_VAE_ENCODER=full|half|max` または `JASNA_LTX_VAE_DECODER=full|half|max` を設定してください。
 エンコーダー `half` / `max` には `vae-encoder-half.safetensors.enc` / `vae-encoder-max.safetensors.enc` が必要です
 （`full` は `vae.safetensors.enc` に含まれます）。デコーダー `full` / `half` / `max` には
