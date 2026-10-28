@@ -4,7 +4,7 @@ from __future__ import annotations
 import struct
 import subprocess
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -143,7 +143,7 @@ def cli_args(tmp_path: Path, *extra: str, missing: tuple[str, ...] = ()) -> list
 
 @contextmanager
 def cli_environment(pipeline=None):
-    """Passing system checks, no engine builds and a mocked ``Pipeline`` class, which it yields."""
+    """Passing system checks, no GPU context, no engine builds and a mocked ``Pipeline`` class, which it yields."""
     pipeline_cls = MagicMock(return_value=MagicMock() if pipeline is None else pipeline)
     with (
         patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
@@ -151,6 +151,7 @@ def cli_environment(pipeline=None):
         patch("jasna.main.check_gpu_driver_version", return_value=(True, "610.18")),
         patch("jasna.main.check_required_executables"),
         patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
+        patch("jasna.accelerator.device_context", side_effect=lambda _device: nullcontext()),
         patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
         patch("jasna.pipeline.Pipeline", pipeline_cls),
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
