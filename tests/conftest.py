@@ -44,6 +44,16 @@ def rocm_cuda_initialized():
 
 
 @pytest.fixture
+def torch_config():
+    """Set torch config values for one test through the config's own ``patch``: pytest 9.2's
+    ``monkeypatch.setattr`` deletes them on undo, which hides them for the rest of the run."""
+    from contextlib import ExitStack
+
+    with ExitStack() as stack:
+        yield lambda config, **values: stack.enter_context(config.patch(**values))
+
+
+@pytest.fixture
 def rocm_probe(monkeypatch, tmp_path):
     """Set up a frozen AMD startup with a native GPU probe result."""
     import subprocess
@@ -56,7 +66,9 @@ def rocm_probe(monkeypatch, tmp_path):
     monkeypatch.setattr(os_utils, "get_application_executable", lambda: str(tmp_path / "jasna"))
     monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
     for name in ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "GPU_DEVICE_ORDINAL"):
-        monkeypatch.delenv(name, raising=False)
+        # setenv records the original state, so the selection the probe writes is undone too.
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
 
     def configure(output, platform):
         monkeypatch.setattr(rocm_bootstrap.sys, "platform", platform)

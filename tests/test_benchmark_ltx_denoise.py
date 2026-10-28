@@ -20,9 +20,8 @@ def test_kernels_are_grouped_by_kind():
     assert bench.kernel_kind("fmha_cutlassF_f16_aligned_32x128_rf_sm75(PyTorchMemEffAttention::AttentionKernel") == "attention"
 
 
-def test_inductor_flags_are_set_from_literals(monkeypatch):
-    monkeypatch.setattr(torch._inductor.config, "force_fuse_int_mm_with_mul", False)
-    monkeypatch.setattr(torch._inductor.config.triton, "cudagraphs", False)
+def test_inductor_flags_are_set_from_literals(torch_config):
+    torch_config(torch._inductor.config, **{"force_fuse_int_mm_with_mul": False, "triton.cudagraphs": False})
     bench.set_inductor_flags(["force_fuse_int_mm_with_mul=True", "triton.cudagraphs=True"])
     assert torch._inductor.config.force_fuse_int_mm_with_mul is True
     assert torch._inductor.config.triton.cudagraphs is True

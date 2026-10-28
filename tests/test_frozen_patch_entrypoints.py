@@ -34,7 +34,7 @@ assert not any(name == 'cryptography' or name.startswith('cryptography.') for na
     )
 
 
-def test_frozen_config_scan_skips_source(caplog, monkeypatch):
+def test_frozen_config_scan_skips_source(caplog, monkeypatch, torch_config):
     import torch._inductor.config as inductor_config
     from torch._inductor import codecache
     import torch.jit
@@ -46,7 +46,7 @@ def test_frozen_config_scan_skips_source(caplog, monkeypatch):
     monkeypatch.setattr(_frozen, "register_ltx_sources", lambda root: None)
     monkeypatch.setattr(_frozen, "use_prebuilt_triton_modules", lambda directory: None)
     monkeypatch.setenv("TRITON_BACKENDS_IN_TREE", "1")
-    monkeypatch.setattr(inductor_config, "compile_threads", inductor_config.compile_threads)
+    torch_config(inductor_config, compile_threads=inductor_config.compile_threads)
     monkeypatch.setattr(codecache, "torch_key", codecache.torch_key_cache(lambda: b"source"))
     with (
         patch.object(torch.jit, "interface"),
@@ -179,7 +179,7 @@ def test_prebuilt_triton_helper_avoids_a_customer_c_compiler(monkeypatch, tmp_pa
         triton.runtime.build._build("missing", "source.c", str(tmp_path), [], [], [], [])
 
 
-def test_frozen_inductor_runs_in_process_and_keeps_runtime_cache_paths(monkeypatch):
+def test_frozen_inductor_runs_in_process_and_keeps_runtime_cache_paths(monkeypatch, torch_config):
     import torch._inductor.config as inductor_config
     from torch._inductor import codecache
     from jasna import _frozen
@@ -188,7 +188,7 @@ def test_frozen_inductor_runs_in_process_and_keeps_runtime_cache_paths(monkeypat
     monkeypatch.setattr(_frozen, "is_frozen", lambda: True)
     monkeypatch.setattr(_frozen, "register_ltx_sources", lambda root: None)
     monkeypatch.setattr(_frozen, "use_prebuilt_triton_modules", lambda directory: None)
-    monkeypatch.setattr(inductor_config, "compile_threads", 8)
+    torch_config(inductor_config, compile_threads=8)
     monkeypatch.setattr(codecache, "torch_key", codecache.torch_key_cache(lambda: b"source"))
     monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", "/private/process/inductor")
     monkeypatch.setenv("TRITON_CACHE_DIR", "/private/process/triton")
@@ -229,7 +229,7 @@ print([str(warning.message) for warning in caught if "CUDA" in str(warning.messa
 
 
 @pytest.mark.parametrize("platform", ("linux", "win32"))
-def test_frozen_build_compiles_in_process_with_prebuilt_triton_modules(monkeypatch, tmp_path, platform):
+def test_frozen_build_compiles_in_process_with_prebuilt_triton_modules(monkeypatch, tmp_path, platform, torch_config):
     import torch._inductor.config as inductor_config
     import torch.jit
     from jasna import _frozen, os_utils
@@ -242,7 +242,7 @@ def test_frozen_build_compiles_in_process_with_prebuilt_triton_modules(monkeypat
     monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.setattr(os_utils, "get_application_executable", lambda: str(tmp_path / "jasna"))
     monkeypatch.delenv("TRITON_BACKENDS_IN_TREE", raising=False)
-    monkeypatch.setattr(inductor_config, "compile_threads", inductor_config.compile_threads)
+    torch_config(inductor_config, compile_threads=inductor_config.compile_threads)
     monkeypatch.setattr(triton.knobs.build, "impl", None)
     directory = tmp_path / "triton_prebuilt"
     directory.mkdir()

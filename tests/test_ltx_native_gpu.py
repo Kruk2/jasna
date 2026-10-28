@@ -140,7 +140,11 @@ def test_native_int8_attention_is_comfy_kitchens_bit_for_bit(int8_block, head_di
 
     expected = comfy_kitchen.int8_attention(heads_first(q), heads_first(k), heads_first(v))
     assert torch.equal(attention, expected[0].transpose(0, 1))
-    exact = F.scaled_dot_product_attention(heads_first(q).float(), heads_first(k).float(), heads_first(v).float())
+    # One head at a time: ROCm's FP32 attention materializes rows x rows scores per head.
+    exact = torch.cat([
+        F.scaled_dot_product_attention(*(heads_first(t)[:, head:head + 1].float() for t in (q, k, v)))
+        for head in range(heads)
+    ], dim=1)
     assert _relative_error(attention, exact[0].transpose(0, 1)) < 3e-2
 
 
