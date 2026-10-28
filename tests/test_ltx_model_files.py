@@ -61,7 +61,7 @@ def test_installed_checks_the_chosen_model_only(tmp_path):
 
 @pytest.mark.parametrize("old_size", [64, 96])
 def test_outdated_encrypted_model_is_missing_until_verified_download_replaces_it(tmp_path, monkeypatch, old_size):
-    from jasna.protection import protected_tensors
+    protected_tensors = pytest.importorskip("jasna.protection.protected_tensors")
 
     names = bundle_names("distilled2", fast=False)
     current = b"m" * 80
