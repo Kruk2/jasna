@@ -386,7 +386,7 @@ def test_linear_slots_follow_the_transformer_names():
 def test_sampler_runs_native_blocks_with_eager_prompt_projections(monkeypatch):
     native_forward = object()
     monkeypatch.setattr(native, "load", lambda device, specs: native_forward)
-    monkeypatch.setattr(T, "enable_int8_attention", lambda: pytest.fail("compiled-path attention enabled"))
+    monkeypatch.setattr(T, "enable_int8_attention", lambda device: pytest.fail("compiled-path attention enabled"))
     monkeypatch.setattr(sampler, "compiled_block_forward", lambda device: pytest.fail("block forward compiled"))
     assert sampler._block_functions(torch.device("cuda"), {}) == (native_forward, T.prompt_key_value, "native")
 
@@ -394,7 +394,7 @@ def test_sampler_runs_native_blocks_with_eager_prompt_projections(monkeypatch):
 def test_sampler_compiles_blocks_when_native_cannot_run(monkeypatch):
     enabled = []
     monkeypatch.setattr(native, "load", lambda device, specs: None)
-    monkeypatch.setattr(T, "enable_int8_attention", lambda: enabled.append(True))
+    monkeypatch.setattr(T, "enable_int8_attention", lambda device: enabled.append(True))
     monkeypatch.setattr(sampler, "compiled_block_forward", lambda device: "compiled block")
     monkeypatch.setattr(sampler, "compile_static", lambda function, mode, device, dtype: ("compiled", function))
     assert sampler._block_functions(torch.device("cuda"), {}) == (

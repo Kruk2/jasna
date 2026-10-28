@@ -2,10 +2,10 @@
 //
 // GEMMs and quantization run the Triton kernels of ``jasna/ltx/kernels.py``, compiled ahead of
 // time to cubins / AMD code objects (``aot.py``) and launched through the GPU driver; NVFP4 GEMMs
-// and the NVIDIA prompt cross-attention are the same ATen ops the torch path calls; video
+// and the prompt cross-attention below SM 12.0 are the same ATen ops the torch path calls; video
 // self-attention is the INT8 attention vendored from comfy-kitchen (``sage_attention/``, on AMD
-// ``sage_attention_hip/``, which as in the AMD torch path also runs the prompt cross-attention);
-// the rest is ``glue.cu``. Every model constant and launch policy value comes from the shared
+// ``sage_attention_hip/``), which as in the torch path also runs the prompt cross-attention on AMD
+// and SM 12.0+; the rest is ``glue.cu``. Every model constant and launch policy value comes from the shared
 // typed configuration.
 
 #include <torch/extension.h>
@@ -305,8 +305,16 @@ class Block::Impl {
     // in the prompt key/value dtype; project_gated takes fp16 attention as it is
     const at::Tensor q = at::empty({rows, dim}, x.options().dtype(prompt_key.scalar_type()));
     norm_rope(linear(query, w[CrossQ]), cross_q_norm, nullptr, nullptr, q, head_dim, config_.eps);
-    const at::Tensor q_heads = q.view({1, rows, heads, head_dim}).transpose(1, 2);
-    const at::Tensor cross = at::scaled_dot_product_attention(q_heads, prompt_key, prompt_value)[0].transpose(0, 1);
+    at::Tensor cross;
+    if (int8_prompt_attention(x)) {
+      const auto token_major = [&](const at::Tensor& t) { return t[0].transpose(0, 1).reshape({t.size(2), dim}); };
+      const int64_t keys = prompt_key.size(2);
+      const int64_t cta_k = head_dim >= 128 && keys > 1024 ? 128 : 64;  // kernel_policy.attention_key_tile
+      cross = this->attention(q, token_major(prompt_key), token_major(prompt_value), heads, head_dim, cta_k);
+    } else {
+      const at::Tensor q_heads = q.view({1, rows, heads, head_dim}).transpose(1, 2);
+      cross = at::scaled_dot_product_attention(q_heads, prompt_key, prompt_value)[0].transpose(0, 1);
+    }
 #endif
     h = project_gated(cross, linear(query, w[CrossGate]), w[CrossOut], h, ada[8], rows, fp4);
 
@@ -315,52 +323,55 @@ class Block::Impl {
         .view({1, rows, dim});
   }
 
-  // comfy-kitchen's INT8 attention of token-major (rows, heads * head_dim) q/k/v, launched the way
-  // comfy_kitchen.sage_attention._int8_attention_cuda launches it unmasked; exposed for the
-  // bit-exactness test against comfy_kitchen.int8_attention.
-  at::Tensor self_attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v, int64_t rows, int64_t heads,
-                            int64_t head_dim, int64_t cta_k) {
+  // comfy-kitchen's INT8 attention of token-major (queries, heads * head_dim) q against (keys,
+  // heads * head_dim) k/v, launched the way comfy_kitchen.sage_attention._int8_attention_cuda launches
+  // it unmasked; exposed for the bit-exactness test against comfy_kitchen.int8_attention.
+  at::Tensor attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v, int64_t heads, int64_t head_dim,
+                       int64_t cta_k) {
     TORCH_CHECK(head_dim == 64 || head_dim == 128 || head_dim == 256, "INT8 attention needs a head size of 64/128/256");
     for (const auto* t : {&q, &k, &v}) {
-      TORCH_CHECK(t->scalar_type() == at::kBFloat16 && t->dim() == 2 && t->size(0) == rows &&
-                  t->size(1) == heads * head_dim && t->stride(1) == 1, "q/k/v must be (rows, heads * head_dim) bf16");
+      TORCH_CHECK(t->scalar_type() == at::kBFloat16 && t->dim() == 2 && t->size(1) == heads * head_dim &&
+                  t->stride(1) == 1, "q/k/v must be (tokens, heads * head_dim) bf16");
     }
+    TORCH_CHECK(k.size(0) == v.size(0), "keys and values must hold the same tokens");
+    const int64_t queries = q.size(0), keys = k.size(0);
 #ifdef USE_ROCM
     TORCH_CHECK(cta_k == kHipAttentionCtaK, "AMD INT8 attention runs ", kHipAttentionCtaK, "-key tiles");
-    const auto heads_first = [&](const at::Tensor& t) { return t.view({1, rows, heads, head_dim}).transpose(1, 2); };
+    const auto heads_first = [&](const at::Tensor& t) { return t.view({1, t.size(0), heads, head_dim}).transpose(1, 2); };
     return int8_attention(heads_first(q), heads_first(k), heads_first(v))[0].transpose(0, 1);
 #else
-    const int L = static_cast<int>(rows), H = static_cast<int>(heads), D = static_cast<int>(head_dim);
-    const int64_t padded = cdiv(L, cta_k) * cta_k;
+    const int Lq = static_cast<int>(queries), Lk = static_cast<int>(keys), H = static_cast<int>(heads),
+              D = static_cast<int>(head_dim);
+    const int64_t padded = cdiv(Lk, cta_k) * cta_k;
     const auto i8 = q.options().dtype(at::kChar), f32 = q.options().dtype(at::kFloat);
-    const at::Tensor q_int8 = at::empty({1, H, L, D}, i8), k_int8 = at::empty({1, H, L, D}, i8);
-    const at::Tensor q_scale = at::empty({1, H, cdiv(L, 128) * (D == 256 ? 64 : 32)}, f32);
-    const at::Tensor k_scale = at::empty({1, H, cdiv(L, cta_k) * 4}, f32);
+    const at::Tensor q_int8 = at::empty({1, H, Lq, D}, i8), k_int8 = at::empty({1, H, Lk, D}, i8);
+    const at::Tensor q_scale = at::empty({1, H, cdiv(Lq, 128) * (D == 256 ? 64 : 32)}, f32);
+    const at::Tensor k_scale = at::empty({1, H, cdiv(Lk, cta_k) * 4}, f32);
     const at::Tensor v_int8 = at::empty({H * D, padded}, i8), v_scale = at::empty({H * D}, f32);
     const at::Tensor anchors = at::empty({1, H}, q.options().dtype(at::kInt));
-    const at::Tensor out = at::empty({1, H, L, D}, q.options());
+    const at::Tensor out = at::empty({1, H, Lq, D}, q.options());
     const gpu::Stream stream = at::cuda::getCurrentCUDAStream();
-    const int64_t token_stride = q.stride(0);
     const int code = sage_attention::kBFloat16;
     sage_attention::launch_quant_qk_per_thread_int8(
         q.data_ptr(), q_int8.data_ptr(), q_scale.data_ptr(), k.data_ptr(), k_int8.data_ptr(), k_scale.data_ptr(), 1, H,
-        L, H, L, D, 128, D == 256 ? 16 : 32, static_cast<int>(cta_k), static_cast<int>(cta_k), q.numel(), D,
-        token_stride, k.numel(), D, k.stride(0), code, anchors.data_ptr(), stream);
-    sage_attention::launch_quant_v_int8_kernel(v.data_ptr(), v_int8.data_ptr(), v_scale.data_ptr(), 1, H, L, D,
+        Lq, H, Lk, D, 128, D == 256 ? 16 : 32, static_cast<int>(cta_k), static_cast<int>(cta_k), q.numel(), D,
+        q.stride(0), k.numel(), D, k.stride(0), code, anchors.data_ptr(), stream);
+    sage_attention::launch_quant_v_int8_kernel(v.data_ptr(), v_int8.data_ptr(), v_scale.data_ptr(), 1, H, Lk, D,
                                                static_cast<int>(padded), v.numel(), D, v.stride(0), code, stream);
-    const int64_t head_stride = static_cast<int64_t>(L) * D, v_head_stride = D * padded;
+    const int64_t q_head_stride = static_cast<int64_t>(Lq) * D, k_head_stride = static_cast<int64_t>(Lk) * D,
+                  v_head_stride = D * padded;
     sage_attention::launch_sage_attn_kernel(
         q_int8.data_ptr(), k_int8.data_ptr(), v_int8.data_ptr(), out.data_ptr(), q_scale.data_ptr(), k_scale.data_ptr(),
-        v_scale.data_ptr(), nullptr, 0, 0, 0, 0, -1, static_cast<int>(cta_k), 1, L, L, H, H, D, H * head_stride, D,
-        head_stride, H * head_stride, D, head_stride, H * v_head_stride, v_head_stride, static_cast<int>(padded),
-        H * head_stride, D, head_stride, static_cast<float>(1.0 / std::sqrt(static_cast<double>(D))), code, stream,
+        v_scale.data_ptr(), nullptr, 0, 0, 0, 0, -1, static_cast<int>(cta_k), 1, Lq, Lk, H, H, D, H * q_head_stride, D,
+        q_head_stride, H * k_head_stride, D, k_head_stride, H * v_head_stride, v_head_stride, static_cast<int>(padded),
+        H * q_head_stride, D, q_head_stride, static_cast<float>(1.0 / std::sqrt(static_cast<double>(D))), code, stream,
         nullptr);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    return out.view({H, L, D}).transpose(0, 1);
+    return out.view({H, Lq, D}).transpose(0, 1);
 #endif
   }
 
-  // self_attention of the q/k projections (rows, heads * head_dim) after norm_rope, each projection
+  // attention of the q/k projections (rows, heads * head_dim) after norm_rope, each projection
   // made when it is normalized; on AMD the norm runs inside comfy-kitchen's Q/K quantization
   // (norm_rope_quant.h), with the same result.
   template <class ProjectQ, class ProjectK>
@@ -386,7 +397,7 @@ class Block::Impl {
     const at::Tensor q = at::empty_like(v), k = at::empty_like(v);
     norm_rope(q_projection(), q_norm, &rope_cos, &rope_sin, q, head_dim, config_.eps);
     norm_rope(k_projection(), k_norm, &rope_cos, &rope_sin, k, head_dim, config_.eps);
-    return self_attention(q, k, v, rows, heads, head_dim, cta_k);
+    return attention(q, k, v, heads, head_dim, cta_k);
 #endif
   }
 
@@ -532,6 +543,11 @@ class Block::Impl {
   // tensor_utils.half_dtype: no fused attention kernel takes bf16 before SM 8.0.
   static at::ScalarType prompt_attention_dtype(const at::Tensor& context) {
     return at::cuda::getDeviceProperties(context.get_device())->major < 8 ? at::kHalf : at::kBFloat16;
+  }
+
+  // kernel_policy.int8_cross_attention on NVIDIA: INT8 is twice cuDNN's bf16 speed on an RTX 5090
+  static bool int8_prompt_attention(const at::Tensor& x) {
+    return at::cuda::getDeviceProperties(x.get_device())->major >= 12;
   }
 
  private:
@@ -796,9 +812,9 @@ at::Tensor Block::forward(const std::vector<std::optional<at::Tensor>>& linear_t
   return impl_->forward(linear_tensors, q_norm, k_norm, cross_q_norm, scale_shift_table, x, block_rows, prompt_key,
                         prompt_value, rope_cos, rope_sin, cta_k, skip_self_attention);
 }
-at::Tensor Block::self_attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v, int64_t rows,
-                                 int64_t heads, int64_t head_dim, int64_t cta_k) {
-  return impl_->self_attention(q, k, v, rows, heads, head_dim, cta_k);
+at::Tensor Block::attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v, int64_t heads,
+                            int64_t head_dim, int64_t cta_k) {
+  return impl_->attention(q, k, v, heads, head_dim, cta_k);
 }
 at::Tensor Block::normed_self_attention(const at::Tensor& q_projection, const at::Tensor& k_projection,
                                         const at::Tensor& v, const at::Tensor& q_norm, const at::Tensor& k_norm,
