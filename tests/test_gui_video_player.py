@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from pathlib import Path
@@ -293,6 +294,7 @@ def test_same_sized_frames_reuse_the_scaled_tk_image(player) -> None:
 
 def test_fullscreen_hides_chrome_and_shows_controls_at_the_bottom_edge(player) -> None:
     dialog, _closed = player()
+    dialog.update()  # the window manager places the window when it maps
     windowed = dialog.geometry()
 
     dialog._toggle_fullscreen()
@@ -310,6 +312,10 @@ def test_fullscreen_hides_chrome_and_shows_controls_at_the_bottom_edge(player) -
     dialog.update()
     assert dialog._settings_card.winfo_manager() == "grid"
     assert dialog._bottom_panel.winfo_manager() == "grid"
+    deadline = time.monotonic() + 2  # the window manager puts the window back
+    while dialog.geometry() != windowed and time.monotonic() < deadline:
+        dialog.update()
+        time.sleep(0.01)
     assert dialog.geometry() == windowed
 
 
