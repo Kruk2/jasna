@@ -7,7 +7,7 @@ import torch
 from factories import cli_args, cli_environment
 
 
-def test_cli_runs_the_job_on_the_chosen_device(tmp_path) -> None:
+def test_cli_runs_the_job_on_the_chosen_device(tmp_path, nvidia_vendor) -> None:
     from jasna.main import main
 
     devices = []

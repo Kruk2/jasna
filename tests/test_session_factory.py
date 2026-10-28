@@ -120,8 +120,10 @@ def test_ltx_allows_secondary_restoration_only_with_auto_split() -> None:
 
 @pytest.mark.parametrize("secondary", ["tvai", "rtx-super-res"])
 def test_amd_rejects_secondary_restoration(secondary) -> None:
-    with pytest.raises(ValueError, match="not available in the AMD build"):
-        _build_session(session_config(secondary_restoration=secondary), amd=True)
+    # Rejected before the restorer is built, so its NVIDIA-only module never needs to import.
+    with (patch("jasna.accelerator.is_amd_device", return_value=True),
+          pytest.raises(ValueError, match="not available in the AMD build")):
+        build_restoration_session(session_config(secondary_restoration=secondary), log_callback=None)
 
 
 def test_amd_disables_basicvsrpp_compilation() -> None:

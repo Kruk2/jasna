@@ -236,10 +236,10 @@ def test_ltx_names_the_amd_gpu_and_why_kitchens_hip_extension_did_not_load(monke
         T.require_kernels(torch.device("cuda"))
 
 
-def test_compiled_functions_fail_instead_of_running_eager_past_the_recompile_limit(monkeypatch):
+def test_compiled_functions_fail_instead_of_running_eager_past_the_recompile_limit(monkeypatch, torch_config):
     from jasna.tensor_utils import compile_static
 
-    monkeypatch.setattr(torch._dynamo.config, "fail_on_recompile_limit_hit", False)
+    torch_config(torch._dynamo.config, fail_on_recompile_limit_hit=False)
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: fn)
     compile_static(T.block_forward, mode="default", device=torch.device("cpu"), dtype=torch.bfloat16)
     assert torch._dynamo.config.fail_on_recompile_limit_hit is True

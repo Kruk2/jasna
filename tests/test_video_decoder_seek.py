@@ -90,6 +90,8 @@ class TestSeekBehavior:
     @pytest.mark.parametrize("backend", ["auto", "vali", "pyav-hw", "pyav-sw"])
     @pytest.mark.parametrize("seek_ts", [None, 0.0])
     def test_every_backend_reads_exactly_the_shown_frames_of_a_mid_gop_cut(self, tmp_path, monkeypatch, backend, seek_ts):
+        if backend == "vali" and torch.version.hip is not None:
+            pytest.skip("VALI decodes with NVDEC")
         import subprocess
 
         import av
