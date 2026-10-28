@@ -33,6 +33,16 @@ def pytest_configure(config):
         ctk.deactivate_automatic_dpi_awareness()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def rocm_cuda_initialized():
+    """Initialize ROCm torch before a test fakes ``torch.version.cuda``: torch's lazy CUDA
+    capability check would then parse gfx architecture names as CUDA ones and fail."""
+    import torch
+
+    if torch.version.hip and torch.cuda.is_available():
+        torch.cuda.init()
+
+
 @pytest.fixture
 def rocm_probe(monkeypatch, tmp_path):
     """Set up a frozen AMD startup with a native GPU probe result."""
