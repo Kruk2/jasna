@@ -339,11 +339,10 @@ class LicenseDialog(ctk.CTkToplevel):
         if error is not None:
             self._show_error(str(error))
             return
-        licensed, identity = info
+        licensed, mode = info
         if licensed:
-            offline = identity is not None and identity.startswith("JT1-")
-            self._status.configure(text=t("license_offline_active" if offline else "license_lease_active"),
-                                   text_color=Colors.STATUS_COMPLETED)
+            status = {"offline": "license_offline_active", "online": "license_lease_active"}.get(mode, "license_active")
+            self._status.configure(text=t(status), text_color=Colors.STATUS_COMPLETED)
         self._resize()
 
     def _activate(self):
@@ -370,6 +369,8 @@ class LicenseDialog(ctk.CTkToplevel):
         text = t("license_offline_active" if result.offline else "license_lease_active")
         if result.tpm_needs_group:
             text += "\n" + t("license_tss_hint")
+        if result.offline_declined:
+            text += "\n" + t("license_offline_retry")
         self._status.configure(text=text, text_color=Colors.STATUS_COMPLETED)
         self._resize()
         self._on_activated()

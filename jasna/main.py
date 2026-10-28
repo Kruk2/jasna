@@ -923,6 +923,8 @@ def main() -> None:
                      "Jasna activated. It checks your license online while it uses supporter models.")
         if result.tpm_needs_group:
             activated += "\nFor offline use run `sudo usermod -aG tss $USER` and log in again."
+        if result.offline_declined:
+            activated += "\nTo use Jasna offline, run this again and allow the Windows prompt."
         print(activated)
         if args.input is None and not args.stream and not args.benchmark:
             return

@@ -14,7 +14,7 @@ def lease_api(monkeypatch, gui_language):
 
     gui_language("en")
     monkeypatch.setattr(license_store, "is_licensed", lambda: False)
-    activate = Mock(return_value=lease.Activated(["ltx-2.5-v2"], False, False))
+    activate = Mock(return_value=lease.Activated(["ltx-2.5-v2"], False, False, False))
     monkeypatch.setattr(lease, "activate_license_code", activate)
     return activate
 
@@ -34,15 +34,16 @@ def test_cli_rejects_retired_options(monkeypatch, arguments):
     assert exc.value.code == 2
 
 
-@pytest.mark.parametrize(("offline", "needs_group", "expected"), [
-    (False, False, "checks your license online"), (True, False, "works offline on this computer"),
-    (False, True, "sudo usermod -aG tss $USER"),
+@pytest.mark.parametrize(("offline", "needs_group", "declined", "expected"), [
+    (False, False, False, "checks your license online"), (True, False, False, "works offline on this computer"),
+    (False, True, False, "sudo usermod -aG tss $USER"), (False, False, True, "run this again and allow the Windows prompt"),
 ])
-def test_cli_license_code_activates_and_exits_before_gpu_setup(monkeypatch, lease_api, capsys, offline, needs_group, expected):
+def test_cli_license_code_activates_and_exits_before_gpu_setup(monkeypatch, lease_api, capsys, offline, needs_group, declined,
+                                                               expected):
     from jasna import main
     from jasna.protection import lease
 
-    lease_api.return_value = lease.Activated(["ltx-2.5-v2"], offline, needs_group)
+    lease_api.return_value = lease.Activated(["ltx-2.5-v2"], offline, needs_group, declined)
     code = "JL1-" + "A" * 43
     monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", code])
     monkeypatch.setattr(main, "_check_system", lambda args: pytest.fail("GPU check ran"))
@@ -164,21 +165,23 @@ def test_dialog_ignores_worker_result_after_close(tk_root, controlled_activation
         dialog._activate_button.invoke()
         _, done = pending.activation.pop()
     dialog.destroy()
-    done(lease.Activated([], False, False) if stage == "activation" else (False, None), None)
+    done(lease.Activated([], False, False, False) if stage == "activation" else (False, None), None)
     tk_root.update()
     activated.assert_not_called()
     assert "closed activation dialog" in caplog.text
 
 
-@pytest.mark.parametrize(("offline", "needs_group", "message"), [
-    (False, False, "license_lease_active"), (True, False, "license_offline_active"), (False, True, "license_lease_active"),
+@pytest.mark.parametrize(("offline", "needs_group", "declined", "hints"), [
+    (False, False, False, ()), (True, False, False, ()), (False, True, False, ("license_tss_hint",)),
+    (False, False, True, ("license_offline_retry",)),
 ])
-def test_lease_dialog_activates_with_the_license_code_only(tk_root, lease_api, settle_activation, offline, needs_group, message):
+def test_lease_dialog_activates_with_the_license_code_only(tk_root, lease_api, settle_activation, offline, needs_group,
+                                                           declined, hints):
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t
     from jasna.protection import lease
 
-    lease_api.return_value = lease.Activated(["ltx-2.5-v2"], offline, needs_group)
+    lease_api.return_value = lease.Activated(["ltx-2.5-v2"], offline, needs_group, declined)
 
     callback_threads = []
     dialog = LicenseDialog(tk_root, on_activated=lambda: callback_threads.append(threading.get_ident()))
@@ -188,7 +191,8 @@ def test_lease_dialog_activates_with_the_license_code_only(tk_root, lease_api, s
     dialog._activate_button.invoke()
     settle_activation(dialog)
     lease_api.assert_called_once_with("JL1-code")
-    assert dialog._status.cget("text") == t(message) + ("\n" + t("license_tss_hint") if needs_group else "")
+    message = "license_offline_active" if offline else "license_lease_active"
+    assert dialog._status.cget("text") == "\n".join(t(key) for key in (message, *hints))
     assert dialog._code.get() == ""
     assert callback_threads == [threading.get_ident()]
 
@@ -209,15 +213,22 @@ def test_lease_dialog_explains_a_failed_activation(tk_root, lease_api, settle_ac
     assert dialog._status.cget("text") == t(message)
 
 
-def test_lease_dialog_names_an_offline_activation_when_reopened(tk_root, lease_api, settle_activation, monkeypatch):
+@pytest.mark.parametrize(("grant", "token", "mode", "message"), [
+    (("JT1-" + "a" * 64, b"", {}), None, "offline", "license_offline_active"),
+    (None, {"token": "t", "models": []}, "online", "license_lease_active"),
+    (None, None, None, "license_active"),
+])
+def test_lease_dialog_names_the_saved_activation_when_reopened(tk_root, lease_api, settle_activation, monkeypatch,
+                                                                grant, token, mode, message):
     from jasna.gui import activation_worker
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t
-    from jasna.protection import license_store, offline
+    from jasna.protection import lease, license_store, offline
 
     monkeypatch.setattr(license_store, "is_licensed", lambda: True)
-    monkeypatch.setattr(offline, "saved_grant", lambda: ("JT1-" + "a" * 64, b"", {}))
-    assert activation_worker.read_license_info() == (True, "JT1-" + "a" * 64)
+    monkeypatch.setattr(offline, "saved_grant", lambda: grant)
+    monkeypatch.setattr(lease, "load_token", lambda: token)
+    assert activation_worker.read_license_info() == (True, mode)
     dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     settle_activation(dialog)
-    assert dialog._status.cget("text") == t("license_offline_active")
+    assert dialog._status.cget("text") == t(message)

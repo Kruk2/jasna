@@ -126,7 +126,7 @@ your license by itself:
 - **PC with a TPM 2.0 security chip** (most Windows 11 PCs): Jasna works
   offline from then on. On Windows, a permission prompt may appear once; this
   is a one-time license check for offline use. If you decline it, Jasna checks
-  online instead.
+  online instead; enter your License code again to switch to offline.
 - **Other PCs and rented GPUs**: Jasna checks your license online while it uses
   supporter models, so keep the PC connected. If the connection drops, the
   video that is running finishes; the queue stops if Jasna can't reach the
@@ -134,6 +134,7 @@ your license by itself:
 
 Good to know:
 
+- The header shows **Active (offline)** or **Active (online)**.
 - One License code works on **3 devices at the same time**. Activating the
   same PC again does not use a new slot.
 - Offline PCs keep their slot. Reinstalling the system or changing the GPU,
@@ -145,7 +146,8 @@ Good to know:
   `sudo usermod -aG tss $USER`. Log in again and activate again to work
   offline.
 - Moved from an older Jasna? Your activation carries over on the first job. If
-  it says the activation moved, enter your License code again.
+  it says the activation moved, enter your License code again. Jasna 0.11 keeps
+  working on the same PC.
 - Activation sends only your License code and, for offline use, a one-time
   check from the security chip.
 - Have an email and key from Jasna 0.10? That key no longer works. Get a new

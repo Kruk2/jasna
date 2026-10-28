@@ -178,6 +178,9 @@ One License code works on **3 devices at the same time**.
 - Linux with a security chip: to use it offline, run
   `sudo usermod -aG tss $USER`, log in again and activate again.
 
+Coming from Jasna 0.11? Your activation carries over the first time you use a
+supporter model, and Jasna 0.11 keeps working on the same PC.
+
 Have an email and key from Jasna 0.10? They no longer work. Get a new License
 code from where you bought it.
 
