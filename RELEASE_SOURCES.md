@@ -1,8 +1,8 @@
-# v0.11.1 release source correspondence
+# Release source correspondence
 
-This file records the custom and patched inputs used by v0.11.1 packages.
-The Linux and Windows native-LTX continuations include changes beyond the
-v0.11.1 tag. Native build receipts identify the exact native sources and
+This file records the custom and patched inputs selected for the next
+v0.12.1 packages. Already published packages keep their original inputs.
+Native build receipts identify the exact native sources and
 toolchains. Windows freeze receipts identify the frozen application inputs;
 Linux builds require a fresh application freeze. Qualification reports bind
 the packaged executable and native libraries to their source revisions.
@@ -14,15 +14,16 @@ notices, and full license texts.
 
 | Component | Revision or source |
 | --- | --- |
-| Jasna | `v0.11.1` base plus native-LTX continuation; exact packaged inputs are recorded in build receipts |
+| Jasna | `0.12.1` source checkout; exact packaged inputs are recorded in build receipts |
 | Protection component | Private gitlink plus receipt-bound native sources; source is not published |
 | PyAV | Unmodified PyPI `av` 18.1.0, tag [`v18.1.0`](https://github.com/PyAV-Org/PyAV/commit/7e3d950a8b72062502c1a60d672f8ca565313af5) |
-| VALI | [`0e5c01ee57222a8ef4f9c7591284c4324bb3fba5`](https://codeberg.org/Kruk2/vali/commit/0e5c01ee57222a8ef4f9c7591284c4324bb3fba5) in the public Kruk2 fork |
+| VALI | [`fc39271be92ece6d2b3fd043367aa235f0b73366`](https://codeberg.org/Kruk2/vali/commit/fc39271be92ece6d2b3fd043367aa235f0b73366) in the public Kruk2 fork |
 | RF-DETR | [`1.8.3` / `3bd6bffbcb13cac3a5b1c37da5a0fd5453b50c86`](https://github.com/roboflow/rf-detr/commit/3bd6bffbcb13cac3a5b1c37da5a0fd5453b50c86) |
 | MMagic compatibility patch | [`patches/fix_loading_mmengine_weights_on_torch26_and_higher.diff`](patches/fix_loading_mmengine_weights_on_torch26_and_higher.diff) |
 
 The VALI fork contains the complete modified source, including Jasna's decode
-status, corrupt-packet handling, timestamp, and decoder-construction changes.
+status, corrupt-packet handling, timestamp, decoder-construction, and negative
+preroll seek changes.
 It is licensed under Apache-2.0.
 
 ## FFmpeg in the PyAV and VALI wheels
