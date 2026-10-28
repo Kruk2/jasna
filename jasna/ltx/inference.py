@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def protected_bundle(files: LtxModelFiles) -> bool:
-    sources = (files.transformer, files.vae, files.tuned_decoder)
+    sources = (files.transformer, files.vae, files.tuned_decoder, files.video_encoder)
     if all(isinstance(source, PlaceholderTensors) for source in sources):
         return False
     if any(isinstance(source, PlaceholderTensors) for source in sources):
@@ -99,7 +99,8 @@ class ModelRuntime:
 
             self._client = WorkerClient(
                 {"transformer": str(self.files.transformer.resolve()), "vae": str(self.files.vae.resolve()),
-                 "tuned_decoder": str(self.files.tuned_decoder.resolve()), "device": str(self.device)}, self.cancel
+                 "tuned_decoder": str(self.files.tuned_decoder.resolve()),
+                 "encoder": str(self.files.video_encoder.resolve()), "device": str(self.device)}, self.cancel
             )
         self._client.cancel = self.cancel
         from jasna.protection.ltx_worker import WorkerCancelled
@@ -118,7 +119,7 @@ class ModelRuntime:
                 self.request("load_encoder", {}, [])
                 self._encoder = WorkerEncoder(self)
             else:
-                self._encoder = load_video_encoder(self.files.vae, self.device)
+                self._encoder = load_video_encoder(self.files.vae, self.device, self.files.encoder)
         return self._encoder
 
     def unload_encoder(self) -> None:
@@ -220,7 +221,8 @@ class WorkerBackend:
 
     def __init__(self, config: dict) -> None:
         self.device = torch.device(config["device"])
-        self.files = LtxModelFiles(*(Path(config[key]) for key in ("transformer", "vae", "tuned_decoder")))
+        self.files = LtxModelFiles(*(Path(config[key]) for key in ("transformer", "vae", "tuned_decoder")),
+                                   None if config["encoder"] == config["vae"] else Path(config["encoder"]))
         self.encoder = None
         self.transformer = None
         self.decoder = None
@@ -258,7 +260,7 @@ class WorkerBackend:
     def _run(self, op: str, params: dict, tensors: list[torch.Tensor], advance: Callable[[int], None]):
         if op == "load_encoder":
             if self.encoder is None:
-                self.encoder = load_video_encoder(self.files.vae, self.device)
+                self.encoder = load_video_encoder(self.files.vae, self.device, self.files.encoder)
         elif op == "unload_encoder":
             self._unload_module("encoder")
         elif op == "encode":

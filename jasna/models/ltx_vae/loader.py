@@ -179,16 +179,35 @@ def _build(
         _clear_tensors(tensors, result)
 
 
-def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
+def _with_res_layers(blocks: list, state: Iterable[str]) -> list:
+    """``blocks`` with each ``res_x`` stage as deep as ``state`` has residual blocks for it (a distilled
+    encoder keeps fewer than the checkpoint)."""
+    depths: dict[int, set[str]] = {}
+    for name in state:
+        parts = name.split(".")
+        if parts[0] == "down_blocks" and parts[2] == "res_blocks":
+            depths.setdefault(int(parts[1]), set()).add(parts[3])
+    return [[kind, {**params, "num_layers": len(depths[index])} if kind == "res_x" else params]
+            for index, (kind, params) in enumerate(blocks)]
+
+
+def load_video_encoder(vae_path: Path, device: torch.device, encoder_path: Path | None = None) -> VideoEncoder:
     """Eval ``VideoEncoder`` in ``half_dtype(device)`` (before SM 8.0 fp16 with an fp32 tail; on
     AMD the full-resolution head in fp16 on comfy-kitchen's conv3d); call it on
-    ``(B, 3, 1+8k, H, W)`` pixels in [-1, 1] for bf16 latents."""
+    ``(B, 3, 1+8k, H, W)`` pixels in [-1, 1] for bf16 latents. ``encoder_path`` holds a distilled
+    encoder's tensors in place of the VAE's own; its residual blocks set each stage's depth."""
     checkpoint, encoder = {}, None
     try:
         with open_tensors(vae_path) as reader:
             kwargs = encoder_kwargs(read_vae_config(reader))
-            checkpoint = _read_tensors(reader, ("encoder.", "per_channel_statistics."))
-        encoder = _build(lambda: VideoEncoder(**kwargs), encoder_state_dict(checkpoint), device, torch.bfloat16)
+            if encoder_path is None:
+                checkpoint = _read_tensors(reader, ("encoder.", "per_channel_statistics."))
+        if encoder_path is not None:
+            with open_tensors(encoder_path) as reader:
+                checkpoint = _read_tensors(reader, ("encoder.", "per_channel_statistics."))
+        state = encoder_state_dict(checkpoint)
+        kwargs["encoder_blocks"] = _with_res_layers(kwargs["encoder_blocks"], state)
+        encoder = _build(lambda: VideoEncoder(**kwargs), state, device, torch.bfloat16)
         dtype = half_dtype(device)
         backend = kernel_backend(device)
         bf16_contiguous_weights = list(encoder.state_dict().values())

@@ -196,6 +196,29 @@ def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch):
     assert opened == [path]
 
 
+def test_a_distilled_encoder_file_sets_the_res_stage_depths_and_replaces_the_vaes_encoder(tmp_path, monkeypatch):
+    def tiny(res_layers: int) -> tuple[dict, VideoEncoder]:
+        config = {**TINY_ENCODER_CONFIG, "blocks": [["res_x", {"num_layers": res_layers}],
+                                                    *TINY_ENCODER_CONFIG["blocks"][1:]]}
+        return config, VideoEncoder(**encoder_kwargs(_vae_config(config, LTX25_DECODER_CONFIG)))
+
+    def tensors(encoder: VideoEncoder) -> dict:
+        return {k if k.startswith("per_channel") else f"encoder.{k}": v.bfloat16()
+                for k, v in encoder.state_dict().items()}
+
+    config, full = tiny(3)
+    _, distilled = tiny(1)
+    vae, encoder_file = tmp_path / "vae.safetensors", tmp_path / "vae-encoder-max.safetensors"
+    save_file(tensors(full), str(vae), metadata={"config": json.dumps({"vae": _vae_config(config, {})})})
+    save_file(tensors(distilled), str(encoder_file))
+    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
+
+    encoder = load_video_encoder(vae, torch.device("cpu"), encoder_file)
+
+    assert len(encoder.down_blocks[0].res_blocks) == 1
+    assert all(torch.equal(encoder.state_dict()[k], v.bfloat16()) for k, v in distilled.state_dict().items())
+
+
 def test_load_video_encoder_before_sm80_compiles_fp16_with_a_float32_tail(tmp_path, monkeypatch):
     source = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)))
     path = tmp_path / "vae.safetensors"

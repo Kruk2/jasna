@@ -102,7 +102,7 @@ def allocator(monkeypatch):
 
 
 def test_backend_rejects_inference_before_load_and_arbitrary_dispatch(allocator):
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
     for op in ("encode", "denoise_chain", "decode"):
         with pytest.raises(RuntimeError, match="is not loaded"):
             backend.dispatch(op, {}, [], lambda _n: None)
@@ -112,7 +112,7 @@ def test_backend_rejects_inference_before_load_and_arbitrary_dispatch(allocator)
 
 
 def test_backend_module_unload_wipes_parameters(monkeypatch, allocator):
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
     backend.encoder = torch.nn.Linear(2, 2)
     parameters = list(backend.encoder.parameters())
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
@@ -156,7 +156,7 @@ def test_runtime_reuses_transport_updates_cancel_and_translates_cancellation(mon
 
 
 def test_worker_peak_vram_counts_the_native_block_store(monkeypatch, allocator):
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
 
     class Transformer:
@@ -181,7 +181,7 @@ def test_worker_peak_vram_counts_the_native_block_store(monkeypatch, allocator):
 
 
 def test_worker_reports_denoise_progress_after_gpu_completion(monkeypatch, allocator):
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
     events = []
     monkeypatch.setattr(torch.cuda, "synchronize", lambda device: events.append(("synchronize", device)))
 
@@ -227,7 +227,7 @@ def test_worker_sizes_the_transformer_from_the_parents_device_wide_free_vram(mon
 
     monkeypatch.setattr(inference, "TransformerSource", lambda path: path)
     monkeypatch.setattr(inference, "LtxTransformer", Transformer)
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
     backend.dispatch("load_transformer", {"free_bytes": 14 * gib}, [], lambda _n: None)
     worker_view["free"] = 25 * gib
     assert readers[0](torch.device("cpu")) == 9 * gib
@@ -250,7 +250,7 @@ def test_worker_decode_returns_its_vram_before_the_parent_reads_the_next_budget(
     monkeypatch.setattr(
         inference, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.rand(1, 3, 33, 512, 512, device=device)
     )
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cuda"})
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cuda"})
     backend.decoder = object()
     torch.cuda.empty_cache()
     reserved = torch.cuda.memory_reserved(device)
@@ -288,7 +288,7 @@ def test_worker_opens_the_transformer_file_ahead_on_its_own_thread(monkeypatch, 
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
     monkeypatch.setattr(inference, "TransformerSource", Source)
     monkeypatch.setattr(inference, "LtxTransformer", Transformer)
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
     backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
     backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
     backend.dispatch("load_transformer", {"free_bytes": 8 << 30}, [], lambda _n: None)
@@ -306,10 +306,10 @@ def test_unused_transformer_file_opened_ahead_closes_with_the_worker_even_after_
 
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (8 << 30, 32 << 30))
     monkeypatch.setattr(inference, "TransformerSource", failing)
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
     backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
     backend.close()
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
     backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
     with pytest.raises(RuntimeError, match="synthetic license failure"):
         backend.dispatch("load_transformer", {"free_bytes": 8 << 30}, [], lambda _n: None)

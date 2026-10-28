@@ -105,7 +105,7 @@ If the download in Jasna keeps failing, get the files in your browser from
 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.1)
 (or [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.1)).
 For Jasna 0.11.3 or older, use the `main` branch instead.
-You need 3 files: one for the model you picked, plus the two VAE files.
+You need 4 files: one for the model you picked, plus the three VAE files.
 
 | You picked | Files |
 | --- | --- |
@@ -119,11 +119,16 @@ You need 3 files: one for the model you picked, plus the two VAE files.
 | High Quality + Fast mode | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
 | Top Quality | `ltx-restore-alpha1-int8.safetensors.enc` |
 | Top Quality + Fast mode | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
-| Always | `vae.safetensors.enc` and `vae-decoder.safetensors.enc` |
+| Always | `vae.safetensors.enc`, `vae-encoder-half.safetensors.enc` and `vae-decoder-max.safetensors.enc` |
 
-Put all 3 in `model_weights/ltx-restore` inside your Jasna folder (create the
+Put all 4 in `model_weights/ltx-restore` inside your Jasna folder (create the
 `ltx-restore` folder if it is missing). Keep the file names exactly as they are,
 including `.enc`. Start the LTX job again; Jasna will not ask to download.
+
+The VAE encoder and decoder are faster distilled copies of the full ones. To use others, set
+`JASNA_LTX_VAE_ENCODER=full|half|max` (`full` needs no extra file, `max` needs
+`vae-encoder-max.safetensors.enc`) or `JASNA_LTX_VAE_DECODER=half|max` (`half` needs
+`vae-decoder.safetensors.enc`) before starting Jasna.
 
 ### LTX options
 

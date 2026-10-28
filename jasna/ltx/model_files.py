@@ -1,7 +1,8 @@
 """LTX model bundle discovery, tensor access and download.
 
-A bundle is one transformer file (the model choice x the precision) plus the shared VAE
-and tuned decoder. Every file name is unique, so all variants can sit in one folder.
+A bundle is one transformer file (the model choice x the precision) plus the shared VAE,
+its video encoder and its decoder. Every file name is unique, so all variants can sit in one
+folder.
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import http.client
 import json
 import logging
 import math
+import os
 import ssl
 import stat
 import urllib.error
@@ -57,7 +59,16 @@ _TRANSFORMER_NAMES: dict[tuple[LtxModelName, bool], str] = {
     ("undistilled", False): "ltx-restore-alpha1-int8.safetensors",
     ("undistilled", True): "ltx-restore-alpha1-nvfp4.safetensors",
 }
-_SHARED_NAMES = ("vae.safetensors", "vae-decoder.safetensors")
+_VAE_NAME = "vae.safetensors"
+
+# Video encoders: the VAE's own, or one distilled from it with about half / a third of its residual
+# blocks (encode -45 % / -63 % on an RTX 5090).
+VAE_ENCODERS = {"full": _VAE_NAME, "half": "vae-encoder-half.safetensors", "max": "vae-encoder-max.safetensors"}
+# Decoders: 4 / 2 of the tuned decoder's 8 stage-5 blocks (decode -41 % / -61 %).
+VAE_DECODERS = {"half": "vae-decoder.safetensors", "max": "vae-decoder-max.safetensors"}
+VAE_ENCODER_ENV, VAE_DECODER_ENV = "JASNA_LTX_VAE_ENCODER", "JASNA_LTX_VAE_DECODER"
+# Close to the full VAE in human A/Bs on real clips, at 0.41 instead of 0.69 s per 512 window.
+DEFAULT_VAE_ENCODER, DEFAULT_VAE_DECODER = "half", "max"
 
 # The published files (``.enc`` in releases): size for the download prompt and sha256.
 LTX_DOWNLOADS: dict[str, DownloadableFile] = {
@@ -75,6 +86,9 @@ LTX_DOWNLOADS: dict[str, DownloadableFile] = {
         ("ltx-restore-alpha1-nvfp4.safetensors", 7_733_295_013, "71bbbccf96c25f8509fe16da00ef090195e600ad8f467040485bdf75da9aefbd"),
         ("vae.safetensors", 1_472_223_815, "b9252d5a799748d1932d4eed60a2d77461949a19f6feb57f2238dbffe08f5e25"),
         ("vae-decoder.safetensors", 29_768_681, "3ddd4022913caa825bc6b47aa90329a52e84bb8e33e2bbe8bec7ff4803d3872b"),
+        ("vae-decoder-max.safetensors", 25_293_713, "aa923a738dd366c2c9216f9987f9e7428f196bce69933c016f54db466fef5eb1"),
+        ("vae-encoder-half.safetensors", 329_975_931, "d71a672fbd04630a9731e55fb9ae63adedc915d133f0a4093f1eb86b9fd43e88"),
+        ("vae-encoder-max.safetensors", 292_811_931, "339ab2b4eee680113d4d93e9be0d3998e1df4343597226aeb30978122f717f2f"),
     )
 }
 
@@ -83,7 +97,7 @@ LTX_DOWNLOADS: dict[str, DownloadableFile] = {
 class PlaceholderTensors:
     """The trial's stand-in for one model file: the real tensor names, shapes and dtypes,
     filled with random values. ``part`` is ``int8``/``nvfp4`` (the transformer of
-    ``model``), ``vae`` or ``vae-decoder``."""
+    ``model``) or a VAE file's stem (``vae``, ``vae-decoder-max``, ...)."""
 
     part: str
     model: LtxModelName
@@ -168,7 +182,7 @@ class PlaceholderHandle:
         elif source.part == "vae":
             self._specs, self._metadata = dict(S.VAE), {"config": json.dumps(S.VAE_CONFIG)}
         else:
-            self._specs, self._metadata = dict(S.VAE_DECODER), {}
+            self._specs, self._metadata = dict(getattr(S, source.part.upper().replace("-", "_"))), {}
         self._pools: dict = {}
 
     def __enter__(self) -> PlaceholderHandle:
@@ -238,9 +252,20 @@ def open_tensors(path: Path | PlaceholderTensors):
     return open_ltx_tensors(path)
 
 
-def bundle_names(model: LtxModelName, *, fast: bool) -> tuple[str, str, str]:
-    """(transformer, vae, tuned decoder) file names of one model choice."""
-    return (_TRANSFORMER_NAMES[(model, fast)], *_SHARED_NAMES)
+def _vae_choice(env: str, choices: dict[str, str], default: str) -> str:
+    choice = os.environ.get(env, default)
+    if choice not in choices:
+        raise ValueError(f"{env}={choice!r} is not one of {', '.join(choices)}")
+    return choices[choice]
+
+
+def bundle_names(model: LtxModelName, *, fast: bool) -> tuple[str, ...]:
+    """(transformer, vae, decoder[, video encoder]) file names of one model choice; the encoder is
+    named only when it is not the VAE's own. ``JASNA_LTX_VAE_ENCODER`` (full / half / max) and
+    ``JASNA_LTX_VAE_DECODER`` (half / max) override the default encoder and decoder."""
+    encoder = _vae_choice(VAE_ENCODER_ENV, VAE_ENCODERS, DEFAULT_VAE_ENCODER)
+    decoder = _vae_choice(VAE_DECODER_ENV, VAE_DECODERS, DEFAULT_VAE_DECODER)
+    return (_TRANSFORMER_NAMES[(model, fast)], _VAE_NAME, decoder, *((encoder,) if encoder != _VAE_NAME else ()))
 
 
 def bundle_paths(directory: Path, model: LtxModelName, *, fast: bool) -> list[Path]:
@@ -269,6 +294,12 @@ class LtxModelFiles:
     transformer: Path | PlaceholderTensors
     vae: Path | PlaceholderTensors
     tuned_decoder: Path | PlaceholderTensors
+    encoder: Path | PlaceholderTensors | None = None
+    """The video encoder's file; ``None`` is the VAE's own."""
+
+    @property
+    def video_encoder(self) -> Path | PlaceholderTensors:
+        return self.vae if self.encoder is None else self.encoder
 
     @property
     def transformer_name(self) -> str:
@@ -284,8 +315,7 @@ class LtxModelFiles:
         full cost with no model files and no license, and restores nothing."""
         return cls(
             PlaceholderTensors("nvfp4" if fast else "int8", model),
-            PlaceholderTensors("vae", model),
-            PlaceholderTensors("vae-decoder", model),
+            *(PlaceholderTensors(name.removesuffix(".safetensors"), model) for name in bundle_names(model, fast=fast)[1:]),
         )
 
     @classmethod
