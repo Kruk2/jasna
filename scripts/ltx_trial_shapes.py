@@ -15,7 +15,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from jasna.ltx.model_files import LTX_MODELS, bundle_names  # noqa: E402
+from jasna.ltx.model_files import LTX_MODELS, VAE_DECODERS, VAE_ENCODERS, bundle_names  # noqa: E402
 
 OUTPUT = REPO / "jasna" / "ltx" / "trial_shapes.py"
 
@@ -56,9 +56,9 @@ def main() -> None:
             sampler = (len(json.loads(metadata["sigmas"])) - 1, float(metadata["stg_scale"]) > 0)
             if steps.setdefault(model, sampler) != sampler:
                 raise ValueError(f"{model}: int8 and nvfp4 sample differently")
-    _, vae_name, decoder_name = bundle_names(LTX_MODELS[0], fast=False)
-    vae, vae_metadata = read_header(directory / vae_name)
-    decoder, _ = read_header(directory / decoder_name)
+    vae_names = sorted({*VAE_ENCODERS.values(), *VAE_DECODERS.values()})
+    vae_files = {name: read_header(directory / name) for name in vae_names}
+    vae_metadata = vae_files["vae.safetensors"][1]
 
     lines = [
         '"""Tensor names, shapes and dtypes of the LTX model files, for the trial\'s placeholder',
@@ -81,7 +81,8 @@ def main() -> None:
             lines.append("        },")
         lines.append("    },")
     lines.append("}")
-    for name, specs in (("VAE", vae), ("VAE_DECODER", decoder)):
+    for file_name in vae_names:
+        name, specs = file_name.removesuffix(".safetensors").upper().replace("-", "_"), vae_files[file_name][0]
         lines += ["", f"{name} = {{"]
         lines += [f"    {tensor!r}: {spec!r}," for tensor, spec in specs.items()]
         lines.append("}")

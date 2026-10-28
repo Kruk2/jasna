@@ -48,6 +48,28 @@ def test_every_model_choice_has_its_own_transformer_file():
     assert bundle_names("undistilled", fast=True)[1:] == bundle_names("distilled", fast=False)[1:]
 
 
+def test_the_vae_encoder_and_decoder_default_to_the_distilled_ones_and_env_overrides_them(monkeypatch):
+    transformer = bundle_names("distilled1", fast=False)[0]
+    assert bundle_names("distilled1", fast=False) == (
+        transformer, "vae.safetensors", "vae-decoder-max.safetensors", "vae-encoder-half.safetensors")
+
+    monkeypatch.setenv("JASNA_LTX_VAE_ENCODER", "full")
+    monkeypatch.setenv("JASNA_LTX_VAE_DECODER", "half")
+    assert bundle_names("distilled1", fast=False) == (transformer, "vae.safetensors", "vae-decoder.safetensors")
+    monkeypatch.setenv("JASNA_LTX_VAE_ENCODER", "max")
+    assert bundle_names("distilled1", fast=False)[3] == "vae-encoder-max.safetensors"
+    assert LtxModelFiles(*map(Path, bundle_names("distilled1", fast=False))).video_encoder.name == (
+        "vae-encoder-max.safetensors")
+    monkeypatch.setenv("JASNA_LTX_VAE_DECODER", "quarter")
+    with pytest.raises(ValueError, match="JASNA_LTX_VAE_DECODER='quarter' is not one of half, max"):
+        bundle_names("distilled1", fast=False)
+
+
+def test_every_vae_choice_is_a_published_download():
+    for name in (*model_files.VAE_ENCODERS.values(), *model_files.VAE_DECODERS.values()):
+        assert name in model_files.LTX_DOWNLOADS
+
+
 def test_installed_checks_the_chosen_model_only(tmp_path):
     for name in bundle_names("undistilled", fast=True):
         (tmp_path / name).touch()
@@ -247,7 +269,7 @@ def test_cli_offers_only_the_fast_models_files(tmp_path, monkeypatch, nvidia_ven
         main._ensure_ltx_model(fast, None)
 
     assert "ltx-restore-alpha1-distill8-nvfp4" in asked[0] and "int8" not in asked[0]
-    assert "9.2 GB" in asked[0]
+    assert "9.6 GB" in asked[0]
 
 
 @pytest.mark.parametrize("interactive", [False, True])

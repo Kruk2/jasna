@@ -36,7 +36,7 @@ def test_placeholders_match_the_real_files(model, fast):
     if not all((DEV_FILES / name).is_file() for name in names):
         pytest.skip("raw LTX model files not present")
     files = LtxModelFiles.placeholder(model, fast=fast)
-    for source, name in zip((files.transformer, files.vae, files.tuned_decoder), names):
+    for source, name in zip((files.transformer, files.vae, files.tuned_decoder, files.encoder), names):
         assert _placeholder_specs(source) == _header(DEV_FILES / name)
 
 
@@ -60,9 +60,12 @@ def test_placeholders_are_deterministic_and_finite():
         assert (first.get_tensor("blocks.0.ff.net.2.weight_scale").float() > 0).all()
 
 
-def test_placeholder_vae_loads_into_the_encoder_and_decoder():
+@pytest.mark.parametrize("encoder_choice,decoder_choice", [("half", "max"), ("max", "half"), ("full", "max")])
+def test_placeholder_vae_loads_into_the_encoder_and_decoder(monkeypatch, encoder_choice, decoder_choice):
+    monkeypatch.setenv("JASNA_LTX_VAE_ENCODER", encoder_choice)
+    monkeypatch.setenv("JASNA_LTX_VAE_DECODER", decoder_choice)
     files = LtxModelFiles.placeholder("distilled", fast=False)
-    encoder = load_video_encoder(files.vae, torch.device("cpu"))
+    encoder = load_video_encoder(files.vae, torch.device("cpu"), files.encoder)
     decoder = load_video_decoder(files.vae, files.tuned_decoder, torch.device("cpu"))
     with torch.no_grad():
         latents = encoder(torch.zeros(1, 3, 9, 64, 64, dtype=torch.bfloat16))
