@@ -323,6 +323,7 @@ def test_a_release_whose_shipped_native_block_fails_to_load_is_broken(monkeypatc
 
 
 def test_native_block_can_be_turned_off(monkeypatch):
+    monkeypatch.setattr(native, "compiles", lambda device, dtype: False)
     monkeypatch.setenv("JASNA_LTX_NATIVE", "0")
     assert native.load(torch.device("cuda"), _block_specs("int8")) is None
     monkeypatch.delenv("JASNA_LTX_NATIVE")
@@ -440,7 +441,8 @@ def test_shipped_kernels_must_fit_the_models_widths_and_gpu(monkeypatch, tmp_pat
 @pytest.mark.parametrize("frozen,windows,expected", [
     (False, False, native._HERE / "prebuilt"),
     (True, True, native._HERE / "prebuilt"),
-    (True, False, Path("/opt/dist/ltx/native/prebuilt")),
+    pytest.param(True, False, Path("/opt/dist/ltx/native/prebuilt"),
+                 marks=pytest.mark.skipif(sys.platform == "win32", reason="resolves a POSIX executable path")),
 ])
 def test_frozen_linux_release_ships_the_prebuilt_block_beside_its_executable(monkeypatch, frozen, windows, expected):
     monkeypatch.setattr(native, "is_frozen", lambda: frozen)
