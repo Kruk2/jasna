@@ -42,7 +42,6 @@ from jasna.ltx.model_files import LtxModelFiles
 from jasna.ltx.inference import ModelRuntime, WorkerDecoder, WorkerEncoder, WorkerTransformer
 from jasna.ltx.plan import (
     LARGE_CANVAS,
-    MAX_GAP,
     WINDOW_HOP,
     Region,
     TrackPlan,
@@ -530,7 +529,7 @@ def scan_span(
     window_hop: int,
     bar: _StageBar,
     cancel: threading.Event,
-    max_gap: int = MAX_GAP,
+    max_gap: int,
 ) -> list[list[TrackPlan]]:
     """The track plans of each segment, frame indices counted from the segment's first frame."""
     regions: list[list[list[Region]]] = [[] for _ in segments]
@@ -891,7 +890,7 @@ class LtxRender:
     budget_name: str
     device: torch.device
     speed_profile: Path
-    max_gap: int = MAX_GAP
+    max_gap: int
 
 
 @dataclass(frozen=True)
@@ -1276,7 +1275,7 @@ def restore_video(
     progress: Progress,
     resume_dir: Path,
     cancel: threading.Event,
-    max_gap: int = MAX_GAP,
+    max_gap: int,
 ) -> None:
     """Restore every mosaic of the video ``frames`` yields as one segment; the 768 px
     decision and the decode tiles follow the VRAM free when they are made."""
