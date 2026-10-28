@@ -124,9 +124,10 @@ Jasna 0.11.3 以前では `main` ブランチを使ってください。
 LTX のジョブをもう一度始めると、ダウンロードの確認は出ません。
 
 VAE のエンコーダーとデコーダーは、元のものを蒸留した高速版です。別のものを使うには、Jasna を起動する前に
-`JASNA_LTX_VAE_ENCODER=full|half|max`（`full` は追加ファイル不要、`max` は
-`vae-encoder-max.safetensors.enc` が必要）または `JASNA_LTX_VAE_DECODER=half|max`（`half` は
-`vae-decoder.safetensors.enc` が必要）を設定してください。
+`JASNA_LTX_VAE_ENCODER=full|half|max` または `JASNA_LTX_VAE_DECODER=full|half|max` を設定してください。
+エンコーダー `half` / `max` には `vae-encoder-half.safetensors.enc` / `vae-encoder-max.safetensors.enc` が必要です
+（`full` は `vae.safetensors.enc` に含まれます）。デコーダー `full` / `half` / `max` には
+`vae-decoder-full.safetensors.enc` / `vae-decoder-half.safetensors.enc` / `vae-decoder-max.safetensors.enc` が必要です。
 
 ### LTX のオプション
 

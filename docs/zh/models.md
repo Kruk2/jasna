@@ -112,9 +112,10 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
 任务，Jasna 就不会再要求下载。
 
 VAE 编码器和解码器是从完整版蒸馏出的更快版本。要换用其他版本，请在启动 Jasna 前设置
-`JASNA_LTX_VAE_ENCODER=full|half|max`（`full` 不需要额外文件，`max` 需要
-`vae-encoder-max.safetensors.enc`）或 `JASNA_LTX_VAE_DECODER=half|max`（`half` 需要
-`vae-decoder.safetensors.enc`）。
+`JASNA_LTX_VAE_ENCODER=full|half|max` 或 `JASNA_LTX_VAE_DECODER=full|half|max`。
+编码器 `half` / `max` 需要 `vae-encoder-half.safetensors.enc` / `vae-encoder-max.safetensors.enc`
+（`full` 包含在 `vae.safetensors.enc` 中）；解码器 `full` / `half` / `max` 需要
+`vae-decoder-full.safetensors.enc` / `vae-decoder-half.safetensors.enc` / `vae-decoder-max.safetensors.enc`。
 
 ### LTX 选项
 

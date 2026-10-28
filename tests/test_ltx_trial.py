@@ -60,7 +60,7 @@ def test_placeholders_are_deterministic_and_finite():
         assert (first.get_tensor("blocks.0.ff.net.2.weight_scale").float() > 0).all()
 
 
-@pytest.mark.parametrize("encoder_choice,decoder_choice", [("half", "max"), ("max", "half"), ("full", "max")])
+@pytest.mark.parametrize("encoder_choice,decoder_choice", [("half", "max"), ("max", "half"), ("full", "full")])
 def test_placeholder_vae_loads_into_the_encoder_and_decoder(monkeypatch, encoder_choice, decoder_choice):
     monkeypatch.setenv("JASNA_LTX_VAE_ENCODER", encoder_choice)
     monkeypatch.setenv("JASNA_LTX_VAE_DECODER", decoder_choice)

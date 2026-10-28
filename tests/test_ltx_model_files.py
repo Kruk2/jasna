@@ -55,13 +55,13 @@ def test_the_vae_encoder_and_decoder_default_to_the_distilled_ones_and_env_overr
 
     monkeypatch.setenv("JASNA_LTX_VAE_ENCODER", "full")
     monkeypatch.setenv("JASNA_LTX_VAE_DECODER", "half")
-    assert bundle_names("distilled1", fast=False) == (transformer, "vae.safetensors", "vae-decoder.safetensors")
+    assert bundle_names("distilled1", fast=False) == (transformer, "vae.safetensors", "vae-decoder-half.safetensors")
     monkeypatch.setenv("JASNA_LTX_VAE_ENCODER", "max")
     assert bundle_names("distilled1", fast=False)[3] == "vae-encoder-max.safetensors"
     assert LtxModelFiles(*map(Path, bundle_names("distilled1", fast=False))).video_encoder.name == (
         "vae-encoder-max.safetensors")
     monkeypatch.setenv("JASNA_LTX_VAE_DECODER", "quarter")
-    with pytest.raises(ValueError, match="JASNA_LTX_VAE_DECODER='quarter' is not one of half, max"):
+    with pytest.raises(ValueError, match="JASNA_LTX_VAE_DECODER='quarter' is not one of full, half, max"):
         bundle_names("distilled1", fast=False)
 
 
