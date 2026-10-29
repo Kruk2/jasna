@@ -502,6 +502,21 @@ def test_mount_source_is_the_innermost_mount_holding_the_path() -> None:
     assert os_utils.mount_source(mountinfo, Path("/mnt/pool/jasna")) == "pool"
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux mounts")
+def test_a_mount_device_missing_in_a_container_leaves_the_btrfs_device(monkeypatch, tmp_path) -> None:
+    anonymous = os.makedev(0, 79)
+    real_stat = os.stat
+
+    def stat(path, **kwargs):
+        if Path(path) == tmp_path:
+            return os.stat_result((0o40755, 1, anonymous, 1, 0, 0, 0, 0, 0, 0))
+        return real_stat(path, **kwargs)
+
+    monkeypatch.setattr(os_utils.os, "stat", stat)
+    monkeypatch.setattr(os_utils, "mount_source", lambda mountinfo, path: "/dev/mapper/luks-not-in-this-container")
+    assert os_utils._linux_block_device(tmp_path) == anonymous
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows storage query")
 def test_windows_seek_penalty_query_answers_for_a_drive_and_skips_network_paths() -> None:
     assert isinstance(os_utils._windows_drive_has_seek_penalty(Path(os.environ["SystemDrive"] + "\\")), bool)

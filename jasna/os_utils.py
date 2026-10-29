@@ -481,12 +481,13 @@ def install_on_hard_disk() -> bool:
 
 def _linux_block_device(path: Path) -> int:
     """The block device holding ``path``. Btrfs reports an anonymous device (major 0), so then
-    the source device of the mount holding ``path`` is used."""
+    the source device of the mount holding ``path`` is used, when it exists here (a container
+    sees the host's mount source without its device node)."""
     device = os.stat(path).st_dev
     if os.major(device):
         return device
     source = mount_source(Path("/proc/self/mountinfo").read_text(), path.resolve())
-    return os.stat(source).st_rdev if source.startswith("/dev/") else device
+    return os.stat(source).st_rdev if source.startswith("/dev/") and os.path.exists(source) else device
 
 
 def mount_source(mountinfo: str, path: Path) -> str:

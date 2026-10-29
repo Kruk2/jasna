@@ -43,6 +43,7 @@ def patch_frozen_torch() -> None:
     _patched = True
     if is_frozen():
         ignore_triton_cuda_toolkit_lookup_warning()
+        name_a_nameless_user()
         if os.environ.get("TORCH_COMPILE_DISABLE") != "1":
             _import_bundled_triton()
 
@@ -133,6 +134,17 @@ def _normalized_distribution_name(name: str) -> str:
 
 def match_bundled_distribution_names_like_pip() -> None:
     sys.meta_path.append(NormalizedDistributionNameFinder)
+
+
+def name_a_nameless_user() -> None:
+    """Containers often run as a user ID with no account name; Torch names its cache folders after the
+    user at import time and fails without one."""
+    import getpass
+
+    try:
+        getpass.getuser()
+    except OSError:
+        os.environ["USER"] = "jasna"
 
 
 def ignore_triton_cuda_toolkit_lookup_warning() -> None:
