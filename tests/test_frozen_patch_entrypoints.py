@@ -175,6 +175,23 @@ def test_every_runtime_triton_kernel_module_ships_its_source():
     assert kernel_modules - amd_build_only <= set(LTX_TRACED_MODULES)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX user accounts")
+def test_torch_compile_imports_for_a_user_id_without_an_account_name():
+    code = """
+import os
+import pwd
+for name in ('LOGNAME', 'USER', 'LNAME', 'USERNAME'):
+    os.environ.pop(name, None)
+def unknown(uid):
+    raise KeyError(uid)
+pwd.getpwuid = unknown
+from jasna import _frozen
+_frozen.name_a_nameless_user()
+from torch._inductor import codecache
+"""
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=120)
+
+
 def test_bundled_triton_import_needs_no_external_sdk_command():
     pytest.importorskip("triton")
     code = """
