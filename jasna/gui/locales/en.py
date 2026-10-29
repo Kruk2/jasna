@@ -524,7 +524,7 @@ EN = {
         "tip_ltx_seed": "Different seeds give slightly different results.\nUse the same seed to get the same result again.",
         "tip_ltx_new_seed": "Random seed",
         "tip_ltx_fast": "About 1.4x faster, slightly less detail.\nRTX 50-series only.",
-        "tip_ltx_large_canvas": "More detail on large mosaics, about 3x slower on those.\nNeeds 12 GB of free VRAM.",
+        "tip_ltx_large_canvas": "More detail on large mosaics. Most videos have some, so a whole video can take up to about 3x longer.\nNeeds 12 GB of free VRAM.",
         "tip_ltx_less_overlap": "About 13% faster when a mosaic stays on screen for more than 4 seconds.\nTurn it off for the older mode with more overlap.",
         "tip_ltx_auto_split": "Restores big mosaics with LTX and smaller ones with the faster BasicVSR++. A mosaic is big when its longest side is at least this share of the video height. Parts without mosaics are copied (encoded again with a Color LUT or Sharpening), so the output keeps the source codec. If another codec is chosen in Encoding, its CQ and custom settings are not used.\nRanges set in the Segment Editor are used as they are.",
         "tip_ltx_trial": "Runs LTX without the model files to test speed.\nOutput is not restored.",

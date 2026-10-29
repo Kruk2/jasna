@@ -56,7 +56,7 @@ Jasna は `TMP`、次に `TEMP` を使います。`TMPDIR` は使いません。
 | `--restoration-model-name` | `basicvsrpp` | 動画復元モデル：`basicvsrpp`（高速）、`ltx-basic`（基本画質の LTX：`ltx` より約 1.3 倍速く、少しやわらかい）、`ltx`（標準画質の LTX：より精細、かなり遅い。おすすめ）、`ltx-4step`（良好画質：`ltx` より少し精細で約 1.5 倍遅い）、`ltx-8step`（高画質：`ltx` より精細で約 2.5 倍遅い）、`ltx-undistilled`（最高画質：少し良く、`ltx` より約 5 倍遅い）。[モデルの選び方](models.md#復元モデル)を参照。 |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth`、LTX では `model_weights/ltx-restore` | 復元モデルの重み（LTX はフォルダー）。 |
 | `--ltx-fast` / `--no-ltx-fast` | オフ | LTX：約 1.4 倍高速、ディテールはわずかに減ります。RTX 50 シリーズのみ。他の GPU ではエラーで止まります。 |
-| `--ltx-large-canvas` / `--no-ltx-large-canvas` | オフ | LTX：大きなモザイクをより精細に。その部分は約 3 倍遅くなります。空き VRAM が約 12 GB 必要です。足りない場合、そのモザイクは通常どおり復元します。 |
+| `--ltx-large-canvas` / `--no-ltx-large-canvas` | オフ | LTX：大きなモザイクをより精細に。ほとんどの動画に大きなモザイクがあるため、動画全体で最大約 3 倍時間がかかります。空き VRAM が約 12 GB 必要です。足りない場合、そのモザイクは通常どおり復元します。 |
 | `--experimental-ltx-less-overlap` / `--no-experimental-ltx-less-overlap` | オン | LTX（実験的）：モザイクが 4 秒以上続く場面で約 13% 速くなります。オフにすると、重なりの多い従来のモードになります。 |
 | `--ltx-seed` | `20260923` | LTX：シードを変えると結果が少し変わります。同じシードなら同じ結果になります。 |
 | `--ltx-trial` / `--no-ltx-trial` | オフ | LTX：モデルやライセンスなしで速度を試します。動画は復元されません。 |

@@ -36,8 +36,9 @@ CLI_HELP: dict[str, str] = {
         "that can't be split is restored whole with LTX."
     ),
     "ltx_large_canvas": (
-        "ltx: restore large mosaics at 768 px instead of 512 px. More detail, about 3x slower on "
-        "those; needs 12 GB of free VRAM (ignored otherwise). (default: %(default)s)"
+        "ltx: restore large mosaics at 768 px instead of 512 px. More detail; most videos have some, "
+        "so a whole run can take up to about 3x longer; needs 12 GB of free VRAM (ignored otherwise). "
+        "(default: %(default)s)"
     ),
     "experimental_ltx_less_overlap": (
         "ltx: experimental. Fewer frames shared between the chunks LTX restores, about 13%% "

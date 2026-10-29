@@ -53,7 +53,7 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 | `--restoration-model-name` | `basicvsrpp` | 视频修复模型：`basicvsrpp`（快）、`ltx-basic`（基础画质 LTX：比 `ltx` 快约 1.3 倍，画面稍柔和）、`ltx`（标准画质 LTX：细节更多，慢很多；推荐）、`ltx-4step`（良好画质：细节比 `ltx` 稍多，慢约 1.5 倍）、`ltx-8step`（高画质：细节比 `ltx` 更多，慢约 2.5 倍）或 `ltx-undistilled`（顶级画质：稍好，比 `ltx` 慢约 5 倍）。见[选择模型](models.md#修复模型)。 |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth`，LTX 为 `model_weights/ltx-restore` | 修复模型权重（LTX 为文件夹）。 |
 | `--ltx-fast` / `--no-ltx-fast` | 关闭 | LTX：快约 1.4 倍，细节略少。仅限 RTX 50 系列；其他 GPU 会报错停止。 |
-| `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多，这部分约慢 3 倍。需要约 12 GB 空闲显存；不够时，这些马赛克按普通方式修复。 |
+| `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多。大多数视频都有大马赛克，整个视频可能慢到约 3 倍。需要约 12 GB 空闲显存；不够时，这些马赛克按普通方式修复。 |
 | `--experimental-ltx-less-overlap` / `--no-experimental-ltx-less-overlap` | 开启 | LTX（实验性）：马赛克持续超过 4 秒的场景约快 13%。关闭后使用重叠更多的旧模式。 |
 | `--ltx-seed` | `20260923` | LTX：换一个种子，结果会略有不同；同一个种子会重复同样的结果。 |
 | `--ltx-trial` / `--no-ltx-trial` | 关闭 | LTX：不需要模型和许可证即可测试速度。视频不会被修复。 |
