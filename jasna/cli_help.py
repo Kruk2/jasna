@@ -50,7 +50,7 @@ CLI_HELP: dict[str, str] = {
     "enable_crossfade": "Cross-fade between clip boundaries to reduce flickering at seams. Uses frames that are already processed but otherwise discarded, so no extra GPU cost. (default: %(default)s)",
     "denoise": "Spatial denoising strength applied to restored crops. Reduces noise artifacts. (default: %(default)s)",
     "denoise_step": "When to apply denoising: after_primary (before secondary) or after_secondary (right before blend). (default: %(default)s)",
-    "secondary_restoration": "Optional second pass that makes restored areas sharper. UNet 4x works on NVIDIA and AMD and needs activation; TVAI and RTX Super Res require NVIDIA. (default: %(default)s)",
+    "secondary_restoration": "Optional second pass that makes restored areas sharper. UNet 4x works on NVIDIA and AMD and needs activation; TVAI and RTX Super Res require NVIDIA. With LTX only RTX Super Res works (others need --ltx-auto-split); it sharpens large mosaics. (default: %(default)s)",
     "vr_mode": (
         "Side-by-side VR180 video: auto turns on by itself for VR videos; off treats every "
         "video as normal; sbs treats every video as VR; sbs-fisheye is like sbs but restores "

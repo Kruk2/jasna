@@ -22,7 +22,14 @@ from jasna.os_utils import (
     gpu_check_error,
     install_on_hard_disk,
 )
-from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED, LtxModelName, RestorationModelName, SessionConfig
+from jasna.session_config import (
+    LTX_DEFAULT_MODEL,
+    LTX_DEFAULT_SEED,
+    LTX_SECONDARY_RESTORATIONS,
+    LtxModelName,
+    RestorationModelName,
+    SessionConfig,
+)
 
 if TYPE_CHECKING:
     from jasna.session_factory import SegmentJob
@@ -385,7 +392,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=4,
         choices=[2, 4],
-        help="RTX Super Res upscale factor (default: %(default)s)",
+        help="RTX Super Res upscale factor for BasicVSR++; LTX always upscales 2x (default: %(default)s)",
     )
     rtx.add_argument(
         "--rtx-quality",
@@ -999,8 +1006,11 @@ def main() -> None:
             model_option = f"--restoration-model-name {args.restoration_model_name}"
             if is_streaming:
                 parser.error(f"{model_option} does not support --stream")
-            if args.ltx_auto_split is None and args.secondary_restoration != "none":
-                parser.error(f"{model_option} supports --secondary-restoration only with --ltx-auto-split")
+            if args.ltx_auto_split is None and args.secondary_restoration not in LTX_SECONDARY_RESTORATIONS:
+                parser.error(
+                    f"{model_option} supports --secondary-restoration {args.secondary_restoration} "
+                    "only with --ltx-auto-split"
+                )
             if args.ltx_auto_split is None and args.denoise != "none":
                 parser.error(f"{model_option} supports --denoise only with --ltx-auto-split")
         _reject_options_of_other_restoration_backend(parser, args, restoration_backend)

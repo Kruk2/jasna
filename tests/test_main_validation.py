@@ -97,6 +97,15 @@ def test_ltx_auto_split_passes_secondary_restoration_for_the_basicvsrpp_parts(tm
     assert (config.secondary_restoration, config.denoise_strength) == ("rtx-super-res", "low")
 
 
+def test_ltx_passes_rtx_super_res_without_auto_split(tmp_path):
+    with _ltx_installed():
+        pipeline_cls = run_cli(cli_args(
+            tmp_path, "--restoration-model-name", "ltx", "--secondary-restoration", "rtx-super-res",
+        ))
+
+    assert pipeline_cls.call_args.kwargs["config"].secondary_restoration == "rtx-super-res"
+
+
 def test_ltx_trial_needs_no_model_files_or_download(tmp_path, capsys):
     with (
         patch("jasna.accelerator.is_nvidia_device", return_value=True),
@@ -186,6 +195,8 @@ def test_usage_error_is_one_short_message(tmp_path, capsys):
     [
         (["--restoration-model-name", "ltx-undistilled", "--denoise", "low"], (),
          "--restoration-model-name ltx-undistilled supports --denoise only with --ltx-auto-split"),
+        (["--restoration-model-name", "ltx", "--secondary-restoration", "unet-4x"], (),
+         "--restoration-model-name ltx supports --secondary-restoration unet-4x only with --ltx-auto-split"),
         ([], ("--input",), "input not found"),
     ],
 )

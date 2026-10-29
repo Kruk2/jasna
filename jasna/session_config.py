@@ -18,6 +18,8 @@ LTX_DEFAULT_MODEL: LtxModelName = "distilled2"
 LTX_DEFAULT_SEED = 20260923
 LTX_AUTO_DEFAULT_PERCENT = 12
 SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res"]
+LTX_SECONDARY_RESTORATIONS: tuple[SecondaryRestorationName, ...] = ("none", "rtx-super-res")
+"""What LTX restoration supports without auto split; the others need BasicVSR++ parts."""
 DenoiseStrengthName = Literal["none", "low", "medium", "high"]
 DenoiseStepName = Literal["after_primary", "after_secondary"]
 VrModeName = Literal["auto", "off", "sbs", "sbs-fisheye"]

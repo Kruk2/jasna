@@ -84,7 +84,7 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
 | `--secondary-restoration` | `none` | `unet-4x`（NVIDIA 或 AMD）、`tvai` 或 `rtx-super-res`（NVIDIA）。见[模型](models.md)。 |
-| `--rtx-scale` | `4` | RTX Super Res 放大倍数（`2` 或 `4`）。 |
+| `--rtx-scale` | `4` | RTX Super Res 放大倍数（`2` 或 `4`）。LTX 始终使用 `2`。 |
 | `--rtx-quality` | `high` | `low`、`medium`、`high`、`ultra`。 |
 | `--rtx-denoise` | `medium` | `none`、`low`、`medium`、`high`、`ultra`。 |
 | `--rtx-deblur` | `none` | `none`、`low`、`medium`、`high`、`ultra`。 |

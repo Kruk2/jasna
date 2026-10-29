@@ -71,7 +71,7 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
     span = restore.LtxSpan(frames, (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 0),), Writer)
     restore.compose_span(
         span, [[plan]], None, [SimpleNamespace(get=lambda index: index)], frame_h=64, batch_size=6,
-        budget=lambda canvas: 0, device=device, bar=bar, cancel=threading.Event(),
+        budget=lambda canvas: 0, device=device, bar=bar, cancel=threading.Event(), super_res=None,
     )
     assert decodes == [(False, 0)]
     assert len(writes) == 6 and all(priority < 0 for priority in writes)
@@ -108,7 +108,7 @@ def test_decoded_windows_wait_in_host_memory_and_composite_on_the_gpu(monkeypatc
     try:
         composer = restore._SegmentComposer(
             [plan], None, SimpleNamespace(get=lambda index: torch.zeros(1)), seed=0, feather=1,
-            budget=lambda canvas: 1, device=device, bar=bar, decodes=decodes, stream=torch.cuda.Stream(device),
+            budget=lambda canvas: 1, device=device, bar=bar, decodes=decodes, stream=torch.cuda.Stream(device), super_res=None,
         )
         for _ in range(6):
             composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))

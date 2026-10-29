@@ -153,6 +153,7 @@ class Pipeline:
         self.detection_model = session.detection_model_for(config)
         self.restoration_pipeline = session.restoration_pipeline
         self.ltx_files = session.ltx_files
+        self.ltx_super_res = session.ltx_super_res if config.secondary_restoration == "rtx-super-res" else None
         self.restoration_model_name = config.restoration_model_name
         self.ltx_large_canvas = config.ltx_large_canvas
         self.ltx_window_hop = config.ltx_window_hop
@@ -380,6 +381,7 @@ class Pipeline:
                 cancel=self._cancel_event,
                 max_gap=track_max_gap(self.max_detection_gap),
                 min_duration=self.min_detection_duration,
+                super_res=self.ltx_super_res,
             )
         except Cancelled:
             log.info("LTX restoration cancelled")
@@ -411,6 +413,7 @@ class Pipeline:
             speed_profile=profile_path(),
             max_gap=track_max_gap(self.max_detection_gap),
             min_duration=self.min_detection_duration,
+            super_res=self.ltx_super_res,
         )
 
     def ltx_span(

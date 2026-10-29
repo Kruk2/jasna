@@ -170,7 +170,7 @@ def _render(tmp_path):
         budget_name="segment",
         device=torch.device("cpu"),
         speed_profile=tmp_path / "speed.json",
-        max_gap=MAX_GAP, min_duration=0,
+        max_gap=MAX_GAP, min_duration=0, super_res=None,
     )
 
 
@@ -310,7 +310,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         speed_profile=tmp_path / "speed.json",
         progress=restore.Progress(12, disable=True, report=None),
         cancel=threading.Event(),
-        max_gap=MAX_GAP, min_duration=0,
+        max_gap=MAX_GAP, min_duration=0, super_res=None,
     )
     assert budgets == [123 << 20]
     assert _Transformer.seeds == [[5]]
@@ -335,7 +335,7 @@ def _two_window_composer(monkeypatch, decode, composite):
     decodes = ThreadPoolExecutor(max_workers=1)
     composer = restore._SegmentComposer(
         [plan], None, SimpleNamespace(get=lambda index: index), seed=0, feather=1, budget=lambda canvas: 0,
-        device=torch.device("cpu"), bar=_Bar(), decodes=decodes, stream=None,
+        device=torch.device("cpu"), bar=_Bar(), decodes=decodes, stream=None, super_res=None,
     )
     return composer, decodes
 
@@ -782,7 +782,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
         speed_profile=tmp_path / "speed.json",
         progress=restore.Progress(0, disable=True, report=None),
         cancel=threading.Event(),
-        max_gap=MAX_GAP, min_duration=0,
+        max_gap=MAX_GAP, min_duration=0, super_res=None,
     )
     assert list(json.loads((tmp_path / "speed.json").read_text())) == [
         restore.speed.profile_key("Test GPU", "t", "free VRAM")
@@ -1195,7 +1195,7 @@ def test_resume_replays_whole_video_canvas_decision(fakes, monkeypatch, tmp_path
     kwargs = dict(
         detector=_Detector(), files=FILES, frame_h=64, frame_w=64, batch_size=4,
         window_hop=88, seed=7, device=torch.device("cpu"), work_dir=tmp_path,
-        speed_profile=tmp_path / "speed.json", resume_dir=tmp_path / "saved", max_gap=MAX_GAP, min_duration=0,
+        speed_profile=tmp_path / "speed.json", resume_dir=tmp_path / "saved", max_gap=MAX_GAP, min_duration=0, super_res=None,
     )
     def run():
         restore.restore_video(
@@ -1223,7 +1223,7 @@ def test_resume_of_saved_768_px_windows_fails_plainly_when_vram_is_short(fakes, 
             span.frames, _Writer(), detector=_Detector(), files=FILES, frame_h=720, frame_w=1280, batch_size=4,
             large_canvas=True, window_hop=88, seed=7, device=torch.device("cpu"), work_dir=tmp_path,
             speed_profile=tmp_path / "speed.json", progress=restore.Progress(12, disable=True, report=None),
-            resume_dir=resume_dir, cancel=threading.Event(), max_gap=MAX_GAP, min_duration=0,
+            resume_dir=resume_dir, cancel=threading.Event(), max_gap=MAX_GAP, min_duration=0, super_res=None,
         )
 
 
