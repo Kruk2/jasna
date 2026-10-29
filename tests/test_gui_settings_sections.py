@@ -273,6 +273,8 @@ def test_ltx_hides_standard_only_settings_and_restores_them(panel_factory) -> No
     assert not panel._widgets["compile_basicvsrpp"].master.winfo_manager()
     assert not overlap_row.winfo_manager()
     assert panel._widgets["vr_mode"].master.winfo_manager()
+    assert panel._widgets["max_detection_gap"].master.winfo_manager()
+    assert panel._widgets["min_detection_duration"].master.winfo_manager()
     assert not secondary._section.winfo_manager()
     assert panel._model_section._ltx_options.winfo_manager()
 

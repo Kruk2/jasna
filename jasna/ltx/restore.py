@@ -530,6 +530,7 @@ def scan_span(
     bar: _StageBar,
     cancel: threading.Event,
     max_gap: int,
+    min_duration: int,
 ) -> list[list[TrackPlan]]:
     """The track plans of each segment, frame indices counted from the segment's first frame."""
     regions: list[list[list[Region]]] = [[] for _ in segments]
@@ -551,6 +552,7 @@ def scan_span(
             large_canvas=large_canvas,
             window_hop=window_hop,
             max_gap=max_gap,
+            min_duration=min_duration,
         )
         logger.info(
             "LTX plan: %d frames, %d scene cuts, %d tracks, %d windows",
@@ -876,8 +878,8 @@ class LtxRender:
     """What every pass needs besides the spans: the detector, the model files, the frame
     size, detection batch size, the 768 px decision, the frames between window starts, the
     decode budget per canvas and its name (decode tiling follows the budget, so it keys the
-    speed profile), the GPU, the speed profile file (``speed.py``) and the max detection gap
-    a track bridges (``track_max_gap``)."""
+    speed profile), the GPU, the speed profile file (``speed.py``), the max detection gap
+    a track bridges (``track_max_gap``) and the fewest frames a kept track spans."""
 
     detector: Callable
     files: LtxModelFiles
@@ -891,6 +893,7 @@ class LtxRender:
     device: torch.device
     speed_profile: Path
     max_gap: int
+    min_duration: int
 
 
 @dataclass(frozen=True)
@@ -1021,7 +1024,7 @@ def _scan_spans(
                     counted_frames, span.segments, render.detector,
                     batch_size=render.batch_size, frame_h=render.frame_h, frame_w=render.frame_w,
                     large_canvas=render.large_canvas, window_hop=render.window_hop, bar=bar, cancel=cancel,
-                    max_gap=render.max_gap,
+                    max_gap=render.max_gap, min_duration=render.min_duration,
                 )
                 _check(cancel)
                 with atomic_write(_plan_path(span, directory), "wb") as stream:
@@ -1280,6 +1283,7 @@ def restore_video(
     resume_dir: Path,
     cancel: threading.Event,
     max_gap: int,
+    min_duration: int,
 ) -> None:
     """Restore every mosaic of the video ``frames`` yields as one segment; the 768 px
     decision and the decode tiles follow the VRAM free when they are made."""
@@ -1311,6 +1315,7 @@ def restore_video(
             device=device,
             speed_profile=speed_profile,
             max_gap=max_gap,
+            min_duration=min_duration,
         ),
         work_dir=work_dir,
         progress=progress,

@@ -195,11 +195,11 @@ class AdvancedSection:
             (row1, row_gap), (gap_row, row_gap), (mindur_row, row_gap), (scene_row, row_gap),
             (row2, row_gap), (row_vr, row_gap), (row3, row_gap), (row4, dict(fill="x")),
         ]
-        self._vr_row = row_vr
+        self._ltx_rows = (gap_row, mindur_row, row_vr)
         self.set_model("basicvsrpp")
 
     def set_model(self, model: str) -> None:
-        hidden = tuple(row for row, _options in self._rows if row is not self._vr_row) if model == "ltx" else ()
+        hidden = tuple(row for row, _options in self._rows if row not in self._ltx_rows) if model == "ltx" else ()
         pack_rows(self._rows, hidden)
 
     def _on_slider_change(self, key: str, value: int):

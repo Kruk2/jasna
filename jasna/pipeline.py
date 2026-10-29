@@ -379,6 +379,7 @@ class Pipeline:
                 ),
                 cancel=self._cancel_event,
                 max_gap=track_max_gap(self.max_detection_gap),
+                min_duration=self.min_detection_duration,
             )
         except Cancelled:
             log.info("LTX restoration cancelled")
@@ -409,6 +410,7 @@ class Pipeline:
             device=self.device,
             speed_profile=profile_path(),
             max_gap=track_max_gap(self.max_detection_gap),
+            min_duration=self.min_detection_duration,
         )
 
     def ltx_span(

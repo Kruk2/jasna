@@ -27,7 +27,8 @@ is not needed.
   N frames when the mosaic comes back at the same place. LTX always fills gaps
   of up to 3 frames; values above 3 apply to LTX too.
 - **Min Detection Duration** (`--min-detection-duration`, default `2`): drops
-  detections shorter than N frames. Those frames stay as they are.
+  detections shorter than N frames. Those frames stay as they are. Works the
+  same with LTX.
 
 Keep both small, so real short mosaics are not affected. `0` turns either one
 off (for LTX, `0` still fills gaps of up to 3 frames).
