@@ -150,6 +150,31 @@ assert 'torch._inductor' not in sys.modules
     subprocess.run([sys.executable, "-c", code], check=True, timeout=30)
 
 
+def test_every_runtime_triton_kernel_module_ships_its_source():
+    """Triton compiles a kernel from its Python source, so the frozen build must ship every module that
+    defines one; modules only the AMD build scripts compile ahead of time are exempt."""
+    pytest.importorskip("triton")
+    import pkgutil
+
+    from triton.runtime.autotuner import Autotuner, Heuristics
+    from triton.runtime.jit import JITCallable
+
+    import jasna.ltx
+    import jasna.models
+    from jasna._frozen import LTX_TRACED_MODULES
+
+    amd_build_only = {"jasna.models.ltx_vae.layout_triton"}
+    kernel_modules = set()
+    for package in (jasna.ltx, jasna.models):
+        for info in pkgutil.walk_packages(package.__path__, package.__name__ + "."):
+            module = importlib.import_module(info.name)
+            if any(isinstance(value, (JITCallable, Autotuner, Heuristics))
+                   and getattr(value, "fn", value).__module__ == info.name for value in vars(module).values()):
+                kernel_modules.add(info.name)
+    assert "jasna.ltx.kernels" in kernel_modules
+    assert kernel_modules - amd_build_only <= set(LTX_TRACED_MODULES)
+
+
 def test_bundled_triton_import_needs_no_external_sdk_command():
     pytest.importorskip("triton")
     code = """
