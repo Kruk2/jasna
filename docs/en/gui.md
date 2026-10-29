@@ -130,7 +130,7 @@ your license by itself:
 - **Other PCs and rented GPUs**: Jasna checks your license online while it uses
   supporter models, so keep the PC connected. If the connection drops, the
   video that is running finishes; the queue stops if Jasna can't reach the
-  check for about an hour. Start it again once you are back online.
+  check for about 15 minutes. Start it again once you are back online.
 
 Good to know:
 
