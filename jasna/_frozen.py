@@ -20,7 +20,8 @@ import sys
 _patched = False
 
 LTX_TRACED_MODULES = ("jasna.ltx.transformer", "jasna.ltx.kernels",
-                      "jasna.models.ltx_vae.na_triton", "jasna.models.ltx_vae.transformer",
+                      "jasna.models.ltx_vae.na_triton", "jasna.models.ltx_vae.diffusion_triton",
+                      "jasna.models.ltx_vae.transformer",
                       "jasna.models.ltx_vae.video_encoder", "jasna.models.ltx_vae.ops",
                       "jasna.models.unet4x")
 
