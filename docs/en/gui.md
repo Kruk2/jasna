@@ -128,9 +128,9 @@ your license by itself:
   is a one-time license check for offline use. If you decline it, Jasna checks
   online instead; enter your License code again to switch to offline.
 - **Other PCs and rented GPUs**: Jasna checks your license online while it uses
-  supporter models, so keep the PC connected. A short drop is fine. If Jasna
-  can't reach the check for about 15 minutes, it stops, sometimes in the middle
-  of a video. Start it again once you are back online.
+  supporter models, so keep the PC connected. If the connection drops, the
+  video that is running finishes; the queue stops if Jasna can't reach the
+  check for about 15 minutes. Start it again once you are back online.
 
 Good to know:
 
