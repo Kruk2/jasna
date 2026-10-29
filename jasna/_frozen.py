@@ -137,14 +137,19 @@ def match_bundled_distribution_names_like_pip() -> None:
 
 
 def name_a_nameless_user() -> None:
-    """Containers often run as a user ID with no account name; Torch names its cache folders after the
-    user at import time and fails without one."""
-    import getpass
+    """Containers often run as a user ID with no account; Torch and Torch-TensorRT look its name up at import
+    time and fail without one."""
+    if sys.platform == "win32":
+        return
+    import pwd
 
+    uid = os.getuid()
     try:
-        getpass.getuser()
-    except OSError:
-        os.environ["USER"] = "jasna"
+        pwd.getpwuid(uid)
+    except KeyError:
+        lookup = pwd.getpwuid
+        nameless = pwd.struct_passwd(("jasna", "x", uid, os.getgid(), "", os.environ.get("HOME", "/"), "/bin/sh"))
+        pwd.getpwuid = lambda queried: nameless if queried == uid else lookup(queried)
 
 
 def ignore_triton_cuda_toolkit_lookup_warning() -> None:

@@ -1,4 +1,5 @@
 import importlib
+import importlib.util
 import logging
 import inspect
 import linecache
@@ -176,8 +177,15 @@ def test_every_runtime_triton_kernel_module_ships_its_source():
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX user accounts")
-def test_torch_compile_imports_for_a_user_id_without_an_account_name():
-    code = """
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no numeric user IDs")
+@pytest.mark.parametrize("module", (
+    "torch._inductor.codecache",
+    pytest.param("torch_tensorrt.dynamo._defaults", marks=pytest.mark.skipif(
+        importlib.util.find_spec("torch_tensorrt") is None, reason="Torch-TensorRT is not installed")),
+))
+def test_torch_imports_for_a_user_id_without_an_account_name(module):
+    code = f"""
+import importlib
 import os
 import pwd
 for name in ('LOGNAME', 'USER', 'LNAME', 'USERNAME'):
@@ -187,9 +195,9 @@ def unknown(uid):
 pwd.getpwuid = unknown
 from jasna import _frozen
 _frozen.name_a_nameless_user()
-from torch._inductor import codecache
+importlib.import_module({module!r})
 """
-    subprocess.run([sys.executable, "-c", code], check=True, timeout=120)
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=300)
 
 
 def test_bundled_triton_import_needs_no_external_sdk_command():
