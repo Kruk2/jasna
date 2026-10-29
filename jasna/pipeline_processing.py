@@ -11,7 +11,7 @@ from jasna.crop_buffer import CropBuffer, RawCrop, extract_crop
 from jasna.mosaic.detections import Detections
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta
 from jasna.pipeline_overlap import compute_crossfade_weights, compute_keep_range, compute_overlap_and_tail_indices, compute_parent_crossfade_weights
-from jasna.tracking.clip_tracker import ClipTracker, EndedClip
+from jasna.tracking.clip_tracker import ClipTracker, EndedClip, shorter_than_min_duration
 from jasna.tracking.scene_detector import SceneCutDetector
 
 logger = logging.getLogger(__name__)
@@ -51,8 +51,7 @@ def _process_ended_clips(
             blend_buffer.remove_pending_clip(list(ended_clip.trimmed_frame_indices), clip.track_id)
 
         if (
-            min_detection_duration > 1
-            and clip.frame_count < min_detection_duration
+            shorter_than_min_duration(clip.frame_count, min_detection_duration)
             and not ended_clip.split_due_to_max_size
             and not clip.is_continuation
         ):

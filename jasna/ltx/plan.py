@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES, Box, CropFrame, lada_crop_boxes, letterbox, track_camera
-from jasna.tracking.clip_tracker import compute_iou_matrix
+from jasna.tracking.clip_tracker import compute_iou_matrix, shorter_than_min_duration
 
 Polygon = np.ndarray
 
@@ -601,9 +601,12 @@ def plan_video(
     large_canvas: bool,
     window_hop: int,
     max_gap: int,
+    min_duration: int,
 ) -> list[TrackPlan]:
     """Every mosaic track of a video with its windows, in window-index order.
-    Tracks bridge detection gaps up to ``max_gap`` frames (``track_max_gap``)."""
+    Tracks bridge detection gaps up to ``max_gap`` frames (``track_max_gap``); a track
+    spanning fewer than ``min_duration`` frames is dropped before size-run cuts, so a short
+    piece of a longer track is never dropped."""
     groups = [group_regions(regions) for regions in regions_per_frame]
     tracks = rejoin_across_cover(
         merge_continuations(
@@ -611,6 +614,7 @@ def plan_video(
         ),
         cuts,
     )
+    tracks = [track for track in tracks if not shorter_than_min_duration(track.last - track.first + 1, min_duration)]
     tracks = [
         Track(track_id, track.frames)
         for track_id, track in enumerate(restart_cameras(tracks, frame_w=frame_w, frame_h=frame_h))

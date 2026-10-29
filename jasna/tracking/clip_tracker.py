@@ -28,6 +28,11 @@ class TrackedClip:
         return list(range(self.start_frame, self.start_frame + len(self.bboxes)))
 
 
+def shorter_than_min_duration(frame_count: int, min_detection_duration: int) -> bool:
+    """A mosaic seen for fewer than ``--min-detection-duration`` frames: a likely false positive."""
+    return min_detection_duration > 1 and frame_count < min_detection_duration
+
+
 def compute_iou_matrix(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
     """
     boxes1: (N, 4) xyxy, CPU
