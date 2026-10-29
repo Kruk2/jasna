@@ -41,6 +41,19 @@ def read_unet4x_onnx() -> bytes:
     return protected_model.decrypt_model_bytes(UNET4X_MODEL_ID, UNET4X_ONNX_ENC_PATH)
 
 
+def decrypt_unet4x_engine(engine_path: Path) -> bytes | None:
+    """The cached engine's bytes, or None when the engine is stale. A license check that cannot run now (no network,
+    no activation) raises instead, so a good engine is never discarded."""
+    from jasna.protection import LicenseError, ProtectionError, protected_model
+
+    try:
+        return protected_model.decrypt_engine_bytes(UNET4X_MODEL_ID, engine_path.read_bytes())
+    except LicenseError:
+        raise
+    except ProtectionError:
+        return None
+
+
 def compile_unet4x_engine(
     device: torch.device,
     fp16: bool = True,
@@ -52,18 +65,14 @@ def compile_unet4x_engine(
         )
 
     require_protection()
-    from jasna.protection import ProtectionError, protected_model
     from jasna.trt import compile_onnx_bytes_to_encrypted_engine
 
     engine_path = get_unet4x_encrypted_engine_path(fp16=bool(fp16))
     if engine_path.exists():
-        try:
-            protected_model.decrypt_engine_bytes(UNET4X_MODEL_ID, engine_path.read_bytes())
-        except ProtectionError:
-            logger.warning("Discarding stale encrypted Unet4x engine: %s", engine_path)
-            engine_path.unlink(missing_ok=True)
-        else:
+        if decrypt_unet4x_engine(engine_path) is not None:
             return engine_path
+        logger.warning("Discarding stale encrypted Unet4x engine: %s", engine_path)
+        engine_path.unlink(missing_ok=True)
 
     onnx_bytes = read_unet4x_onnx()
     try:
@@ -139,10 +148,9 @@ class Unet4xSecondaryRestorer:
                     f"Unet4x engine not found: {self.engine_path}. "
                     "Run engine compilation first via ensure_engines_compiled()."
                 )
-            from jasna.protection import ProtectionError, protected_model
-            try:
-                engine_bytes = protected_model.decrypt_engine_bytes(UNET4X_MODEL_ID, self.engine_path.read_bytes())
-            except ProtectionError:
+            from jasna.protection import protected_model
+            engine_bytes = decrypt_unet4x_engine(self.engine_path)
+            if engine_bytes is None:
                 logger.warning("Encrypted Unet4x engine is stale; recompiling: %s", self.engine_path)
                 self.engine_path.unlink(missing_ok=True)
                 self.engine_path = compile_unet4x_engine(self.device, fp16=self.fp16)

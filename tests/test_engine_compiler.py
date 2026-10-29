@@ -341,3 +341,38 @@ def test_unet4x_engine_exists_encrypted(monkeypatch, tmp_path: Path) -> None:
     assert _unet4x_engine_exists(fp16=True) is False
     enc_engine.write_text("x")
     assert _unet4x_engine_exists(fp16=True) is True
+
+
+def test_a_stale_encrypted_unet4x_engine_counts_as_missing(monkeypatch, tmp_path: Path) -> None:
+    from jasna.protection import ProtectionError
+
+    def stale(model_id, data):
+        raise ProtectionError("protection core op failed (rc=-8)")
+
+    enc_engine = tmp_path / "unet-4x.fp16.linux.engine.enc"
+    enc_engine.write_text("x")
+    monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", tmp_path / "unet-4x.onnx")
+    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda fp16=True: enc_engine)
+    monkeypatch.setattr("jasna.protection.protected_model.decrypt_engine_bytes", stale)
+    assert _unet4x_engine_exists(fp16=True) is False
+
+
+def test_an_offline_license_check_keeps_the_encrypted_unet4x_engine(monkeypatch, tmp_path: Path) -> None:
+    from jasna.protection.lease import LeaseError
+    from jasna.restorer import unet4x_secondary_restorer
+
+    def offline(model_id, data):
+        raise LeaseError("offline")
+
+    enc_engine = tmp_path / "unet-4x.fp16.linux.engine.enc"
+    enc_engine.write_text("x")
+    monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", tmp_path / "unet-4x.onnx")
+    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda fp16=True: enc_engine)
+    monkeypatch.setattr(unet4x_secondary_restorer, "UNET4X_ONNX_PATH", tmp_path / "unet-4x.onnx")
+    monkeypatch.setattr(unet4x_secondary_restorer, "get_unet4x_encrypted_engine_path", lambda fp16=True: enc_engine)
+    monkeypatch.setattr("jasna.protection.protected_model.decrypt_engine_bytes", offline)
+    with pytest.raises(LeaseError):
+        _unet4x_engine_exists(fp16=True)
+    with pytest.raises(LeaseError):
+        unet4x_secondary_restorer.compile_unet4x_engine("cpu")
+    assert enc_engine.exists()

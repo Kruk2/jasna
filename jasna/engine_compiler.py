@@ -102,12 +102,8 @@ def _unet4x_engine_exists(fp16: bool) -> bool:
         return False
 
     require_protection()
-    from jasna.protection import ProtectionError, protected_model
-    try:
-        protected_model.decrypt_engine_bytes("unet-4x", engine_path.read_bytes())
-    except ProtectionError:
-        return False
-    return True
+    from jasna.restorer.unet4x_secondary_restorer import decrypt_unet4x_engine
+    return decrypt_unet4x_engine(engine_path) is not None
 
 
 class _MissingEngines(typing.NamedTuple):
