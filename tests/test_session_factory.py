@@ -116,6 +116,16 @@ def test_ltx_allows_secondary_restoration_only_with_auto_split() -> None:
     session, *_ = _build_session(replace(ltx, ltx_auto_split_percent=12.0))
 
     assert session.ltx_files is not None
+    assert session.ltx_super_res is None
+
+
+def test_ltx_runs_rtx_super_res_without_auto_split() -> None:
+    session, *_ = _build_session(
+        session_config(restoration_model_name="ltx", ltx_trial=True, secondary_restoration="rtx-super-res")
+    )
+
+    assert session.ltx_super_res is not None
+    assert session.restoration_pipeline is None
 
 
 @pytest.mark.parametrize("secondary", ["tvai", "rtx-super-res"])

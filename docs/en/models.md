@@ -79,10 +79,10 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   hf-mirror.com automatically. Download still fails? See
   [Downloading LTX yourself](#downloading-ltx-yourself).
 
-LTX does not work with VR180 side-by-side videos or streaming. Secondary
-restoration and denoising are turned off with LTX. With **LTX only for big
-mosaics** (`--ltx-auto-split`), the smaller mosaics restored by BasicVSR++ still
-use secondary restoration.
+LTX does not work with VR180 side-by-side videos or streaming. Denoising is
+turned off with LTX, and of the secondary restorations only RTX Super Res works.
+With **LTX only for big mosaics** (`--ltx-auto-split`), the smaller mosaics
+restored by BasicVSR++ still use any secondary restoration and denoising.
 
 Using ESET? If LTX won't start and the message names `ebehmonl.dll` or
 `ebehmoni.dll`, add the Jasna folder to ESET's Deep Behavioral Inspection
@@ -209,7 +209,9 @@ require NVIDIA.
   [Topaz Video](https://www.topazlabs.com/topaz-video), which is paid and
   Windows only. Use the `iris-2` model.
 
-Not used with LTX.
+With LTX only RTX Super Res works. It sharpens mosaics too big for LTX's
+picture, at 2x, and leaves smaller ones alone. Example:
+`jasna --input input.mp4 --output output.mkv --restoration-model-name ltx --secondary-restoration rtx-super-res`
 
 ```bash
 jasna --input input.mp4 --output output.mkv --secondary-restoration unet-4x

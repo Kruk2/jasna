@@ -170,3 +170,29 @@ def test_handover_shares_the_child_area_by_presence():
         assert abs(int(half[0, y, x]) - (int(start[0, y, x]) + int(done[0, y, x])) / 2) <= 1
     assert torch.equal(half[:, parent_only[0], parent_only[1]], start[:, parent_only[0], parent_only[1]])
     assert done[0, edge[0], edge[1]] > start[0, edge[0], edge[1]]
+
+
+def test_only_windows_compose_enlarges_get_super_resolution():
+    from jasna.ltx.plan import Window
+    from jasna.ltx.super_res import enlarged_windows
+
+    fits = letterbox((0, 0, 400, 400), 512)
+    shrunk = Window(index=0, track_id=0, start=0, real_frames=2, crops=(fits, fits))
+    enlarged = Window(index=1, track_id=0, start=1, real_frames=2, crops=(fits, letterbox((0, 0, 700, 700), 512)))
+    assert enlarged_windows([shrunk, enlarged]) == {1}
+
+
+def test_a_2x_canvas_maps_back_onto_the_same_crop():
+    from jasna.ltx.super_res import upscaled_crop
+
+    crop = letterbox((100, 50, 1000, 650), 512)
+    ramp = torch.linspace(0, 255, 512)
+    canvas = torch.stack([ramp[None, :].expand(512, 512), ramp[:, None].expand(512, 512), torch.full((512, 512), 90.0)])
+    canvas = canvas.round().to(torch.uint8)
+    doubled = torch.nn.functional.interpolate(canvas[None].float(), scale_factor=2, mode="bilinear")[0]
+
+    direct = canvas_to_source(canvas, crop)
+    upscaled = canvas_to_source(doubled.round().to(torch.uint8), upscaled_crop(crop))
+
+    assert upscaled.shape == direct.shape == (3, 600, 900)
+    assert (upscaled - direct).abs().mean() < 1.0

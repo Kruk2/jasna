@@ -251,7 +251,7 @@ class SettingsPanel(ctk.CTkFrame):
     def _on_restoration_model_changed(self, model: str, auto_split: bool):
         for section in self._model_aware_sections:
             section.set_model(model)
-        self._secondary_section.set_visible(model != "ltx" or auto_split)
+        self._secondary_section.set_ltx_only(model == "ltx" and not auto_split)
 
     def ltx_unavailable_reason(self) -> str | None:
         """Locale key saying why the chosen LTX model cannot run now, or None when it can."""

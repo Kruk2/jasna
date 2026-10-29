@@ -275,28 +275,25 @@ def test_ltx_hides_standard_only_settings_and_restores_them(panel_factory) -> No
     assert panel._widgets["vr_mode"].master.winfo_manager()
     assert panel._widgets["max_detection_gap"].master.winfo_manager()
     assert panel._widgets["min_detection_duration"].master.winfo_manager()
-    assert not secondary._section.winfo_manager()
     assert panel._model_section._ltx_options.winfo_manager()
 
     panel._model_section._cards["basicvsrpp"].radio.invoke()
 
     assert clip_row.winfo_manager() and overlap_row.winfo_manager()
-    assert secondary._section.winfo_manager()
     assert not panel._model_section._ltx_options.winfo_manager()
-    order = panel._scroll.pack_slaves()
-    assert order.index(secondary._section) == order.index(secondary._previous_section) + 1
 
 
-def test_ltx_auto_split_shows_secondary_restoration_for_the_basicvsrpp_parts(panel_factory) -> None:
+def test_ltx_offers_only_rtx_super_res_unless_auto_split(panel_factory) -> None:
     panel = panel_factory(True)
-    secondary = panel._secondary_section._section
+    radios = panel._secondary_section._engine_radios
     _select_ltx(panel)
 
-    panel._widgets["ltx_auto_split"]._toggle()
-    assert secondary.winfo_manager()
+    assert panel._secondary_section._section.winfo_manager()
+    assert radios["tvai"].cget("state") == panel._widgets["rtx_scale"].cget("state") == "disabled"
+    assert radios["rtx-super-res"].cget("state") == "normal"
 
     panel._widgets["ltx_auto_split"]._toggle()
-    assert not secondary.winfo_manager()
+    assert radios["tvai"].cget("state") == panel._widgets["rtx_scale"].cget("state") == "normal"
 
 
 def test_amd_secondary_choices_and_busy_state(panel_factory, monkeypatch, tmp_path) -> None:

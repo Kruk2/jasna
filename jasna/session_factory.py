@@ -15,12 +15,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from jasna.session_config import RestorationModelName, SessionConfig
+from jasna.session_config import LTX_SECONDARY_RESTORATIONS, RestorationModelName, SessionConfig
 
 if TYPE_CHECKING:
     import torch
 
     from jasna.ltx.model_files import LtxModelFiles
+    from jasna.ltx.super_res import LtxSuperRes
     from jasna.media.probe import VideoMetadata
     from jasna.media.splice import KeyframeIndex, SplicePlan
     from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
@@ -41,6 +42,7 @@ class RestorationSession:
     device: "torch.device"
     restoration_pipeline: "RestorationPipeline | None"
     ltx_files: "LtxModelFiles | None" = None
+    ltx_super_res: "LtxSuperRes | None" = None
     _detection_key: tuple | None = None
     _detection_model: "DetectionModel | None" = None
 
@@ -73,6 +75,9 @@ class RestorationSession:
         if self._detection_model is not None:
             self._detection_model.close()
             self._detection_model = None
+        if self.ltx_super_res is not None:
+            self.ltx_super_res.close()
+            self.ltx_super_res = None
         if self.restoration_pipeline is not None:
             self.restoration_pipeline.restorer.close()
             if self.restoration_pipeline.secondary_restorer is not None:
@@ -166,10 +171,10 @@ def build_restoration_session(
     if (
         config.restoration_model_name == "ltx"
         and config.ltx_auto_split_percent is None
-        and (config.secondary_restoration != "none" or config.denoise_strength != "none")
+        and (config.secondary_restoration not in LTX_SECONDARY_RESTORATIONS or config.denoise_strength != "none")
     ):
         raise ValueError(
-            "LTX restoration supports secondary restoration or denoise only with LTX auto split, "
+            "LTX restoration supports Unet 4x, TVAI or denoise only with LTX auto split, "
             "where they apply to the BasicVSR++ parts"
         )
     session = RestorationSession(device=device, restoration_pipeline=None)
@@ -191,6 +196,12 @@ def provide_restoration_models(
         session.restoration_pipeline = _build_basicvsrpp_pipeline(config, session.device, log_callback=log_callback)
     if "ltx" in models and session.ltx_files is None:
         session.ltx_files = _ltx_model_files(config, session.device, log_callback=log_callback)
+    if "ltx" in models and config.secondary_restoration == "rtx-super-res" and session.ltx_super_res is None:
+        from jasna.ltx.super_res import LtxSuperRes
+
+        session.ltx_super_res = LtxSuperRes(
+            device=session.device, quality=config.rtx_quality, denoise=config.rtx_denoise, deblur=config.rtx_deblur
+        )
 
 
 def _build_basicvsrpp_pipeline(

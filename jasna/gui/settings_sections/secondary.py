@@ -9,6 +9,7 @@ from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import add_setting_label, create_slider_value_label, get_tooltip
 from jasna.gui.theme import Colors, Fonts, Sizing
+from jasna.session_config import LTX_SECONDARY_RESTORATIONS
 
 
 class SecondarySection:
@@ -16,8 +17,8 @@ class SecondarySection:
         self._widgets = widgets
         self._vendor = AcceleratorVendor.NVIDIA
         self._enabled = True
+        self._ltx_only = False
 
-        self._previous_section = parent.pack_slaves()[-1]
         section = CollapsibleSection(parent, t("section_secondary"), expanded=False)
         section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         self._section = section
@@ -262,12 +263,6 @@ class SecondarySection:
         elif secondary == "rtx-super-res":
             self._rtx_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
 
-    def set_visible(self, visible: bool) -> None:
-        if visible:
-            self._section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL), after=self._previous_section)
-        else:
-            self._section.pack_forget()
-
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
         state = "normal" if enabled else "disabled"
@@ -277,11 +272,19 @@ class SecondarySection:
                 unavailable |= value in ("tvai", "rtx-super-res")
             if self._vendor is AcceleratorVendor.CPU:
                 unavailable |= value == "unet-4x"
+            if self._ltx_only:
+                unavailable |= value not in LTX_SECONDARY_RESTORATIONS
             radio.configure(state="disabled" if unavailable else state)
         self._tvai_denoise_switch.configure(state=state)
+        self._widgets["rtx_scale"].configure(state="disabled" if self._ltx_only else state)
 
     def set_gpu_support(self, vendor: AcceleratorVendor) -> None:
         self._vendor = vendor
+        self.set_enabled(self._enabled)
+
+    def set_ltx_only(self, ltx_only: bool) -> None:
+        """LTX without auto split: only RTX Super Res, always 2x."""
+        self._ltx_only = ltx_only
         self.set_enabled(self._enabled)
 
     def apply(self, preset):

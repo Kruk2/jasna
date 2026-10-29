@@ -70,7 +70,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   如果无法访问 Hugging Face（例如在中国），Jasna 会自动使用 hf-mirror.com。
   仍然下载失败？见[手动下载 LTX](#手动下载-ltx)。
 
-LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时，二次修复和降噪会关闭。使用**仅大马赛克用 LTX**（`--ltx-auto-split`）时，由 BasicVSR++ 修复的较小马赛克仍会使用二次修复。
+LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时降噪会关闭，二次修复只能用 RTX Super Res。使用**仅大马赛克用 LTX**（`--ltx-auto-split`）时，由 BasicVSR++ 修复的较小马赛克仍会使用所有二次修复和降噪。
 
 使用 ESET？如果 LTX 启动不了，并且消息里提到 `ebehmonl.dll` 或 `ebehmoni.dll`，
 请在 ESET 的深度行为检查（Deep Behavioral Inspection）排除项里加入 Jasna
@@ -178,7 +178,8 @@ UNet 4x 支持 NVIDIA 和兼容的 AMD 显卡。RTX Super Res 和 Topaz TVAI 需
   [Topaz Video](https://www.topazlabs.com/topaz-video)，它是付费软件，且仅支持
   Windows。请使用 `iris-2` 模型。
 
-使用 LTX 时不会用到。
+使用 LTX 时只能用 RTX Super Res。它以 2x 让比 LTX 画面更大的马赛克更清晰，较小的马赛克不处理。示例：
+`jasna --input input.mp4 --output output.mkv --restoration-model-name ltx --secondary-restoration rtx-super-res`
 
 ```bash
 jasna --input input.mp4 --output output.mkv --secondary-restoration unet-4x

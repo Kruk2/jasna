@@ -54,6 +54,7 @@ from jasna.ltx.plan import (
 )
 from jasna.ltx.regions import regions_per_frame
 from jasna.ltx.sampler import LtxTransformer
+from jasna.ltx.super_res import LtxSuperRes, enlarged_windows, upscaled_crop
 from jasna.models.ltx_vae import decode_latent
 from jasna.mosaic.detections import Detections
 from jasna.progressbar import StageProgress
@@ -725,6 +726,7 @@ class _SegmentComposer:
         bar: _StageBar,
         decodes: ThreadPoolExecutor,
         stream: torch.cuda.Stream | None,
+        super_res: LtxSuperRes | None,
     ) -> None:
         self._weights: dict[int, torch.Tensor] = {}
         self._tracks: dict[int, TrackPlan] = {}
@@ -733,6 +735,8 @@ class _SegmentComposer:
                 self._weights[window.index] = weight
                 self._tracks[window.index] = plan
         windows = sorted((w for plan in plans for w in plan.windows), key=lambda w: w.start)
+        self._super_res = super_res
+        self._upscaled = enlarged_windows(windows) if super_res is not None else set()
         self._pending = iter(windows)
         self._upcoming = next(self._pending, None)
         self._covering: list[Window] = []
@@ -794,10 +798,13 @@ class _SegmentComposer:
                 self._decoded[window.index] = self._decoded_window(window)
             local = frame_idx - window.start
             track = self._tracks[window.index]
+            canvas, crop = self._decoded[window.index][local].to(self._device), window.crops[local]
+            if window.index in self._upscaled:
+                canvas, crop = self._super_res.upscale(canvas), upscaled_crop(crop)
             candidates.append(
                 Candidate(
-                    canvas=self._decoded[window.index][local].to(self._device),
-                    crop=window.crops[local],
+                    canvas=canvas,
+                    crop=crop,
                     weight=float(self._weights[window.index][local]),
                     track=track.track_id,
                     polygons=track.polygons[frame_idx - track.start],
@@ -822,6 +829,7 @@ def compose_span(
     device: torch.device,
     bar: _StageBar,
     cancel: threading.Event,
+    super_res: LtxSuperRes | None,
 ) -> None:
     """Write every frame of ``span``: segment frames composited, the rest unchanged. Windows
     decode one ahead on a thread; on CUDA on a stream of their own, below the priority of the
@@ -834,7 +842,7 @@ def compose_span(
         composers = [
             _SegmentComposer(
                 p, decoder, store, seed=segment.seed, feather=feather, budget=budget, device=device, bar=bar,
-                decodes=decodes, stream=decode_stream,
+                decodes=decodes, stream=decode_stream, super_res=super_res,
             )
             for p, store, segment in zip(plans, finals, span.segments)
         ]
@@ -879,7 +887,8 @@ class LtxRender:
     size, detection batch size, the 768 px decision, the frames between window starts, the
     decode budget per canvas and its name (decode tiling follows the budget, so it keys the
     speed profile), the GPU, the speed profile file (``speed.py``), the max detection gap
-    a track bridges (``track_max_gap``) and the fewest frames a kept track spans."""
+    a track bridges (``track_max_gap``), the fewest frames a kept track spans and the
+    super resolution of windows compose enlarges (``super_res.py``), if any."""
 
     detector: Callable
     files: LtxModelFiles
@@ -894,6 +903,7 @@ class LtxRender:
     speed_profile: Path
     max_gap: int
     min_duration: int
+    super_res: LtxSuperRes | None
 
 
 @dataclass(frozen=True)
@@ -1149,6 +1159,7 @@ def compose_spans(
                 device=render.device,
                 bar=bar,
                 cancel=cancel,
+                super_res=render.super_res,
             )
 
 
@@ -1284,6 +1295,7 @@ def restore_video(
     cancel: threading.Event,
     max_gap: int,
     min_duration: int,
+    super_res: LtxSuperRes | None,
 ) -> None:
     """Restore every mosaic of the video ``frames`` yields as one segment; the 768 px
     decision and the decode tiles follow the VRAM free when they are made."""
@@ -1316,6 +1328,7 @@ def restore_video(
             speed_profile=speed_profile,
             max_gap=max_gap,
             min_duration=min_duration,
+            super_res=super_res,
         ),
         work_dir=work_dir,
         progress=progress,

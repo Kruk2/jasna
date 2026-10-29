@@ -186,6 +186,17 @@ def test_gui_config_maps_settings_fields() -> None:
     assert config.disable_progress is True
 
 
+@pytest.mark.parametrize(("secondary", "auto_split", "expected"), [
+    ("rtx-super-res", False, "rtx-super-res"),
+    ("unet-4x", False, "none"),
+    ("tvai", False, "none"),
+    ("unet-4x", True, "unet-4x"),
+])
+def test_gui_ltx_keeps_only_the_secondary_restoration_it_supports(secondary, auto_split, expected) -> None:
+    settings = AppSettings(restoration_model="ltx", secondary_restoration=secondary, ltx_auto_split=auto_split)
+    assert _gui_config(settings).secondary_restoration == expected
+
+
 def test_gui_image_session_requires_installed_sd15_bundle(monkeypatch) -> None:
     from jasna.gui.locales import t
     from jasna.restorer import sd15_download

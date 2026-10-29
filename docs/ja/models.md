@@ -78,8 +78,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   [LTX を手動でダウンロードする](#ltx-を手動でダウンロードする)を見てください。
 
 LTX は VR180 サイドバイサイド動画とストリーミングでは使えません。LTX では
-二次復元とノイズ除去はオフになります。**大きなモザイクだけ LTX**
-（`--ltx-auto-split`）では、BasicVSR++ で復元する小さなモザイクに二次復元が使われます。
+ノイズ除去はオフになり、二次復元は RTX Super Res だけが使えます。**大きなモザイクだけ LTX**
+（`--ltx-auto-split`）では、BasicVSR++ で復元する小さなモザイクにすべての二次復元とノイズ除去が使われます。
 
 ESET をお使いの場合: LTX が起動せず、メッセージに `ebehmonl.dll` または
 `ebehmoni.dll` が出るときは、ESET のディープビヘイビアインスペクション
@@ -207,7 +207,9 @@ NVIDIA が必要です。
   [Topaz Video](https://www.topazlabs.com/topaz-video) が必要です（有料、
   Windows のみ）。`iris-2` モデルを使ってください。
 
-LTX では使われません。
+LTX では RTX Super Res だけが使えます。LTX の画像より大きいモザイクを 2x で
+シャープにし、小さいモザイクには使いません。例:
+`jasna --input input.mp4 --output output.mkv --restoration-model-name ltx --secondary-restoration rtx-super-res`
 
 ```bash
 jasna --input input.mp4 --output output.mkv --secondary-restoration unet-4x

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Mapping
 
 from jasna.gui.models import AppSettings
-from jasna.session_config import SessionConfig
+from jasna.session_config import LTX_SECONDARY_RESTORATIONS, SessionConfig
 from jasna.session_factory import RestorationSession
 
 if TYPE_CHECKING:
@@ -65,7 +65,11 @@ def video_session_config(
     det_name = coerce_detection_model_name(str(settings.detection_model))
     standard_model = settings.restoration_model == "basicvsrpp"
     basicvsrpp_parts = standard_model or settings.ltx_auto_split
-    secondary_restoration = settings.secondary_restoration if basicvsrpp_parts else "none"
+    secondary_restoration = (
+        settings.secondary_restoration
+        if basicvsrpp_parts or settings.secondary_restoration in LTX_SECONDARY_RESTORATIONS
+        else "none"
+    )
     return SessionConfig(
         device="cuda:0",
         fp16=bool(settings.fp16_mode),
