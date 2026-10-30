@@ -75,21 +75,32 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 
 更改最大片段大小不会重新开始编译。
 
-## AMD 出现 GPU 错误时
+## 高级环境变量
 
-在 AMD 上，Jasna 默认使用两种更快的模式。遇到 GPU 错误或显存不足时，按以下方式关闭它们：
+这些用于排查问题和测试。大多数人用默认值就是最好的。
 
-Windows（在 Jasna 文件夹中打开 PowerShell）：
+| 变量 | 取值 | 作用 |
+| --- | --- | --- |
+| `JASNA_LTX_VAE_ENCODER` | `full`、`half`、`max` | 选择 LTX 视频编码器：`half` 和 `max` 更快，画面稍柔和。默认：基础画质和标准画质用 `half`，其他用 `full`。 |
+| `JASNA_LTX_VAE_DECODER` | `full`、`half`、`max` | 选择 LTX 视频解码器：`half` 和 `max` 更快，画面稍柔和。默认：基础画质和标准画质用 `max`，其他用 `full`。 |
+| `JASNA_DECODE_BACKEND` | `auto`（默认）、`vali`、`pyav-hw`、`pyav-sw` | 选择 Jasna 读取输入视频的方式。视频打不开或画面损坏时，试试 `pyav-sw`（更慢）。`vali` 仅限 NVIDIA。 |
+| `JASNA_TRT_CUDAGRAPHS` | `1`（默认）、`0` | NVIDIA：`0` 关闭已编译 BasicVSR++ 的一项加速。遇到 GPU 错误时可以试试。 |
+| `JASNA_AMD_GRAPHS` | `1`（默认）、`0` | AMD：`0` 关闭 BasicVSR++ 的一项加速。遇到 GPU 错误或显存不足时可以试试。 |
+| `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL` | `1`（默认）、`0` | AMD：`0` 关闭一种更快的注意力模式。遇到 GPU 错误时，和 `JASNA_AMD_GRAPHS=0` 一起试试。 |
+| `TVAI_MODEL_DATA_DIR`、`TVAI_MODEL_DIR` | 文件夹路径 | Topaz Video 的模型文件夹，TVAI 需要（见[二次修复](models.md#二次修复)）。 |
 
-```powershell
-$env:JASNA_AMD_GRAPHS = "0"; $env:TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "0"
-.\jasna.exe
+Windows：在 Jasna 文件夹中打开命令提示符，设置变量后在同一个窗口里启动 Jasna
+（也可以把这两行存成该文件夹里的 `.bat` 文件）：
+
+```bat
+set JASNA_LTX_VAE_DECODER=full
+jasna.exe
 ```
 
-Linux：
+Linux（AMD 上用 `./run_jasna_amd.sh` 代替 `./jasna`）：
 
 ```bash
-JASNA_AMD_GRAPHS=0 TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
+JASNA_LTX_VAE_DECODER=full ./jasna
 ```
 
-此设置在关闭该终端前有效。
+此设置在关闭该窗口前有效。

@@ -85,22 +85,32 @@ Same 1080p video, clip size 180:
 
 Changing max clip size does not start the compilation again.
 
-## AMD: GPU errors
+## Environment variables (advanced)
 
-On AMD, Jasna uses two faster modes by default. If you get GPU errors or run
-out of VRAM, turn them off:
+These are for troubleshooting and testing. The defaults are best for most people.
 
-Windows (PowerShell, in the Jasna folder):
+| Variable | Values | What it does |
+| --- | --- | --- |
+| `JASNA_LTX_VAE_ENCODER` | `full`, `half`, `max` | Picks the LTX video encoder: `half` and `max` are faster and a little softer. Default: `half` for Basic and Standard Quality, `full` for the others. |
+| `JASNA_LTX_VAE_DECODER` | `full`, `half`, `max` | Picks the LTX video decoder: `half` and `max` are faster and a little softer. Default: `max` for Basic and Standard Quality, `full` for the others. |
+| `JASNA_DECODE_BACKEND` | `auto` (default), `vali`, `pyav-hw`, `pyav-sw` | Picks how Jasna reads the input video. Try `pyav-sw` (slower) if a video fails to open or shows broken frames. `vali` is NVIDIA only. |
+| `JASNA_TRT_CUDAGRAPHS` | `1` (default), `0` | NVIDIA: `0` turns off a speed-up of compiled BasicVSR++. Try it if you get GPU errors. |
+| `JASNA_AMD_GRAPHS` | `1` (default), `0` | AMD: `0` turns off a BasicVSR++ speed-up. Try it if you get GPU errors or run out of VRAM. |
+| `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL` | `1` (default), `0` | AMD: `0` turns off a faster attention mode. Try it together with `JASNA_AMD_GRAPHS=0` if you get GPU errors. |
+| `TVAI_MODEL_DATA_DIR`, `TVAI_MODEL_DIR` | folder paths | Your Topaz Video model folders, needed for TVAI (see [Secondary restoration](models.md#secondary-restoration)). |
 
-```powershell
-$env:JASNA_AMD_GRAPHS = "0"; $env:TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "0"
-.\jasna.exe
+Windows: open Command Prompt in the Jasna folder, set the variable and start
+Jasna in the same window (or save both lines as a `.bat` file there):
+
+```bat
+set JASNA_LTX_VAE_DECODER=full
+jasna.exe
 ```
 
-Linux:
+Linux (on AMD start `./run_jasna_amd.sh` instead of `./jasna`):
 
 ```bash
-JASNA_AMD_GRAPHS=0 TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
+JASNA_LTX_VAE_DECODER=full ./jasna
 ```
 
-This lasts until you close that terminal.
+The setting lasts until you close that window.
