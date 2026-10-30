@@ -1,5 +1,6 @@
 import logging
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -390,11 +391,15 @@ def _check_amd_driver_version() -> tuple[bool | None, str]:
             return None, f"{info} (older than {minimum}; if processing fails, install AMD's ROCm 10.1 driver and reboot)"
         return True, info
 
+    amdgpu_module = Path("/sys/module/amdgpu")
     try:
-        version = Path("/sys/module/amdgpu/version").read_text().strip()
+        version = (amdgpu_module / "version").read_text().strip()
     except OSError as error:
+        # Only AMD's dkms driver publishes a version; the in-kernel driver is checked by GPU availability.
+        if amdgpu_module.is_dir():
+            return True, f"in-kernel amdgpu (Linux {platform.release()})"
         logger.warning("Could not read the loaded AMD driver version: %s", error)
-        return None, "AMD driver version could not be checked (distribution kernel or hidden sysfs)"
+        return None, "AMD driver version could not be checked (hidden sysfs)"
     # In-kernel drivers have no AMD release number; kernel versions are not comparable.
     match = re.fullmatch(r"\d+\.\d+\.\d+\.(\d{5}|\d{8})", version)
     if not match:

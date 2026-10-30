@@ -71,10 +71,9 @@ def test_failed_windows_query_does_not_trust_partial_output(monkeypatch):
     ],
 )
 def test_linux_checks_the_loaded_driver_release_and_only_warns(monkeypatch, tmp_path, version, status, text):
-    driver_version = tmp_path / "version"
-    driver_version.write_text(version + "\n")
+    (tmp_path / "version").write_text(version + "\n")
     monkeypatch.setattr(os_utils.sys, "platform", "linux")
-    monkeypatch.setattr(os_utils, "Path", lambda _: driver_version)
+    monkeypatch.setattr(os_utils, "Path", lambda _: tmp_path)
 
     ok, info = os_utils.check_gpu_driver_version()
 
@@ -82,14 +81,20 @@ def test_linux_checks_the_loaded_driver_release_and_only_warns(monkeypatch, tmp_
     assert text in info
 
 
-def test_linux_without_module_version_warns_instead_of_rejecting_the_kernel(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "module_loaded,status,text",
+    [(True, True, "in-kernel amdgpu"), (False, None, "could not be checked (hidden sysfs)")],
+)
+def test_linux_without_module_version_trusts_the_in_kernel_driver(monkeypatch, tmp_path, module_loaded, status, text):
+    if module_loaded:
+        (tmp_path / "amdgpu").mkdir()
     monkeypatch.setattr(os_utils.sys, "platform", "linux")
-    monkeypatch.setattr(os_utils, "Path", lambda _: tmp_path / "missing")
+    monkeypatch.setattr(os_utils, "Path", lambda _: tmp_path / "amdgpu")
 
     ok, info = os_utils.check_gpu_driver_version()
 
-    assert ok is None
-    assert "distribution kernel or hidden sysfs" in info
+    assert ok is status
+    assert text in info
 
 
 def test_a_current_driver_does_not_hide_a_missing_gpu(monkeypatch):
