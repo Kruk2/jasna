@@ -82,6 +82,7 @@ def test_linux_amd_filters_by_gpu_uuid_without_using_agent_order(rocm_probe, out
         (True, {"GPU_DEVICE_ORDINAL": "1"}, []),
         (True, {}, ["--device", "cuda:1"]),
         (True, {}, ["--device=cuda:1"]),
+        (True, {}, ["--ltx-worker", "1", "2", "3", "4"]),
     ],
 )
 def test_explicit_device_choices_and_source_runs_are_preserved(rocm_probe, monkeypatch, platform, frozen, selection, arguments):

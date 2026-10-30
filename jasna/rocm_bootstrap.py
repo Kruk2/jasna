@@ -26,6 +26,9 @@ def configure_rocm_devices() -> None:
         return
     if any(arg == "--device" or arg.startswith("--device=") for arg in sys.argv[1:]):
         return
+    # The LTX worker inherits the app's adapter selection.
+    if sys.argv[1:2] == ["--ltx-worker"]:
+        return
 
     from jasna.os_utils import get_application_executable
 
