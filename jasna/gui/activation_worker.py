@@ -60,7 +60,7 @@ def start_unofficial_notice_check(on_done) -> threading.Thread:
 
 
 def start_lease_activation(code: str, on_done) -> threading.Thread:
-    """Calls ``on_done(Activated, error)``: offline on a certified TPM, else online leases."""
+    """Calls ``on_done(Activated, error)``: works offline on PCs with a TPM, otherwise checks online."""
 
     def activate():
         require_protection()

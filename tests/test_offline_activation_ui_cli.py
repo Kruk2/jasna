@@ -8,7 +8,7 @@ import pytest
 
 @pytest.fixture
 def lease_api(monkeypatch, gui_language):
-    """Activation with the License code alone; offline on a certified TPM, else checked online while supporter models run."""
+    """Activation with the License code alone; works offline on PCs with a TPM, otherwise checks online while supporter models run."""
     pytest.importorskip("jasna.protection.license_store")
     from jasna.protection import lease, license_store
 
