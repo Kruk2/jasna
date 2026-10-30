@@ -12,15 +12,15 @@ pytestmark = pytest.mark.usefixtures("amd_driver_environment")
 @pytest.mark.parametrize(
     "output,status",
     [
-        ("32.0.31041.5004\n", False),
+        ("32.0.21017.2051\n", False),
+        ("32.0.21017.2052\n", True),
+        ("32.0.21017.2053\n", True),
         ("32.0.31041.5005\n", True),
-        ("32.0.31041.5006\n", True),
-        ("32.0.31042.1\n", True),
-        ("32.0.31041.5005\n32.0.31041.5005\n", True),
-        ("32.0.21001.1\n32.0.31041.5005\n", None),
+        ("32.0.21017.2052\n32.0.21017.2052\n", True),
+        ("32.0.21001.1\n32.0.21017.2052\n", None),
         ("", None),
         ("not a version", None),
-        ("32.0.31041.5005\ninvalid", None),
+        ("32.0.21017.2052\ninvalid", None),
     ],
 )
 def test_windows_amd_driver_minimum(monkeypatch, output, status):
@@ -31,7 +31,7 @@ def test_windows_amd_driver_minimum(monkeypatch, output, status):
 
     assert ok is status
     if status is False:
-        assert "32.0.31041.5005+" in info
+        assert "32.0.21017.2052+" in info
         assert "reboot" in info
     elif status is None:
         assert "could not be checked" in info
