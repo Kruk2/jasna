@@ -46,9 +46,9 @@ files are added when they are.
 
 - Jasna model name: `rfdetr-v6`
 - NVIDIA file: `rfdetr-v6.onnx`
-- NVIDIA SHA-256: `b6555cfce325d1d8bc413422cd46f3a453511a246c6f29ce652382998049d825`
+- NVIDIA SHA-256: `59e5b2f5b7b7a5713d0f102fbe409cca3f4243377bd17b30e3d6169b2a366af6`
 - AMD file: `rfdetr-v6.pt`
-- AMD SHA-256: `f10bedc4d105c2721e4259b8680203d51f344f73e55e85710d915619f5731b55`
+- AMD SHA-256: `a92ccba2f4fe4eb7e7bcdb567c1bacbe01c630ea0278a25e5138988725b98243`
 - Architecture/source: [RF-DETR 1.8.3](https://github.com/roboflow/rf-detr/tree/3bd6bffbcb13cac3a5b1c37da5a0fd5453b50c86)
 - License: Apache-2.0
 - Copyright: 2026 Kruk2
@@ -61,9 +61,9 @@ formats of the same trained model.
 
 - Jasna model name: `rfdetr-vr-v1`
 - NVIDIA file: `rfdetr-vr-v1.onnx`
-- NVIDIA SHA-256: `6e2ed2043851dccb97f21deda38dc20ea2b8e265e682359752e815c600030a40`
+- NVIDIA SHA-256: `9a4cfb97a953e9f76eb0e653b8623d93c276c34db28f6efd8bbc88daa32ec24c`
 - AMD file: `rfdetr-vr-v1.pt`
-- AMD SHA-256: `55543c83911921ef79cd8cae8540bd25e34c7daf488e77f79d233d6926973a2e`
+- AMD SHA-256: `b380e3b30d65210fd2f61fef654996c3592f5c2e4ec8df3d4873ee9514bf3b3f`
 - Architecture/source: [RF-DETR 1.8.3](https://github.com/roboflow/rf-detr/tree/3bd6bffbcb13cac3a5b1c37da5a0fd5453b50c86)
 - License: Apache-2.0
 - Copyright: 2026 Kruk2
