@@ -367,6 +367,7 @@ class LicenseDialog(ctk.CTkToplevel):
 
     def _lease_activation_done(self, result, error):
         from jasna.protection.activation import ActivationServiceError
+        from jasna.protection.lease import activated_message
 
         self._set_busy(False)
         if isinstance(error, ActivationServiceError):
@@ -377,12 +378,7 @@ class LicenseDialog(ctk.CTkToplevel):
             self._show_error(str(error))
             return
         self._code.delete(0, "end")
-        text = t("license_offline_active" if result.offline else "license_lease_active")
-        if result.tpm_needs_group:
-            text += "\n" + t("license_tss_hint")
-        if result.offline_declined:
-            text += "\n" + t("license_offline_retry")
-        self._status.configure(text=text, text_color=Colors.STATUS_COMPLETED)
+        self._status.configure(text=activated_message(result.online_reason), text_color=Colors.STATUS_COMPLETED)
         self._resize()
         self._on_activated()
 

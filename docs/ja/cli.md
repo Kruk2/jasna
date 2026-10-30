@@ -298,7 +298,7 @@ jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
 ```
 
-- Linux で `sudo usermod -aG tss $USER` が必要なときは、Jasna が知らせます。
+- オンラインで動く場合は、メッセージに理由が表示されます。Linux で `sudo usermod -aG tss $USER` が必要なときは、Jasna が知らせます。
 - レンタル GPU（RunPod、Vast）: `XDG_CONFIG_HOME` を残しておく非公開の
   フォルダーに設定します。このフォルダーに有効化の情報が入るので、毎回同じ
   フォルダーを使ってください:

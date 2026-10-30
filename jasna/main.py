@@ -677,12 +677,13 @@ def _check_system(args: argparse.Namespace) -> None:
               "Move the Jasna folder to an SSD.")
 
 
+def _configure_logging(level: int) -> None:
+    logging.basicConfig(format="%(asctime)s %(name)s %(levelname)s: %(message)s", datefmt="%H:%M:%S")
+    logging.getLogger().setLevel(level)
+
+
 def _configure_runtime(args: argparse.Namespace) -> None:
-    logging.basicConfig(
-        level=getattr(logging, args.log_level.upper()),
-        format="%(asctime)s %(name)s %(levelname)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    _configure_logging(getattr(logging, args.log_level.upper()))
 
     from jasna._suppress_noise import install as _install_noise_filters
     _install_noise_filters()
@@ -922,17 +923,13 @@ def main() -> None:
         from jasna.protection import ProtectionError, lease
         if sys.platform == "win32":
             print("Windows may ask for permission once. This is a one-time license check for offline use.")
+        # Activation warnings always show, as they did before logging was configured; --log-level can add more.
+        _configure_logging(min(getattr(logging, args.log_level.upper()), logging.WARNING))
         try:
             result = lease.activate_license_code(args.license_code)
         except (ProtectionError, OSError) as exc:
             parser.exit(1, f"Activation error: {exc}\n")
-        activated = ("Jasna activated. It works offline on this computer." if result.offline else
-                     "Jasna activated. It checks your license online while it uses supporter models.")
-        if result.tpm_needs_group:
-            activated += "\nFor offline use run `sudo usermod -aG tss $USER` and log in again."
-        if result.offline_declined:
-            activated += "\nTo use Jasna offline, run this again and allow the Windows prompt."
-        print(activated)
+        print(lease.activated_message(result.online_reason))
         if args.input is None and not args.stream and not args.benchmark:
             return
     codec_was_explicit = any(

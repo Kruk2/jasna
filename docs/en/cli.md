@@ -296,7 +296,8 @@ jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
 ```
 
-- Linux tells you when you need `sudo usermod -aG tss $USER` for offline use.
+- If Jasna works online, the message says why. On Linux it tells you when you
+  need `sudo usermod -aG tss $USER` for offline use.
 - Rented GPUs (RunPod, Vast): set `XDG_CONFIG_HOME` to a private folder that
   you keep. It holds your activation, so use the same folder every run:
 

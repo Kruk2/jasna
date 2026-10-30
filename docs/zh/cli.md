@@ -285,7 +285,7 @@ jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
 ```
 
-- 在 Linux 上需要运行 `sudo usermod -aG tss $USER` 时，Jasna 会提示。
+- 在线使用时，提示会说明原因。在 Linux 上需要运行 `sudo usermod -aG tss $USER` 时，Jasna 会提示。
 - 租用的 GPU（RunPod、Vast）：把 `XDG_CONFIG_HOME` 设为一个你会保留的私有文件夹。
   它保存你的激活，所以每次运行都要用同一个文件夹：
 
