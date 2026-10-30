@@ -275,6 +275,9 @@ class SecondarySection:
             if self._ltx_only:
                 unavailable |= value not in LTX_SECONDARY_RESTORATIONS
             radio.configure(state="disabled" if unavailable else state)
+            if unavailable and self._widgets["secondary_var"].get() == value:
+                self._widgets["secondary_var"].set("none")
+                self._on_secondary_changed()
         self._tvai_denoise_switch.configure(state=state)
         self._widgets["rtx_scale"].configure(state="disabled" if self._ltx_only else state)
 
@@ -304,6 +307,7 @@ class SecondarySection:
         self._widgets["rtx_deblur"].set(preset.rtx_deblur.capitalize())
 
         self._on_secondary_changed()
+        self.set_enabled(self._enabled)
 
     def collect(self) -> dict:
         return {

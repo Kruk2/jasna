@@ -296,6 +296,36 @@ def test_ltx_offers_only_rtx_super_res_unless_auto_split(panel_factory) -> None:
     assert radios["tvai"].cget("state") == panel._widgets["rtx_scale"].cget("state") == "normal"
 
 
+@pytest.mark.parametrize("auto_split,expected", [(False, "none"), (True, "unet-4x")])
+def test_ltx_clears_an_unavailable_secondary_restorer(panel_factory, monkeypatch, tmp_path, auto_split, expected) -> None:
+    from jasna import engine_paths
+
+    model = tmp_path / "unet-4x.onnx"
+    model.touch()
+    monkeypatch.setattr(engine_paths, "UNET4X_ONNX_PATH", model)
+    panel = panel_factory(True)
+    if auto_split:
+        panel._widgets["ltx_auto_split"]._toggle()
+    panel._secondary_section._engine_radios["unet-4x"].invoke()
+
+    _select_ltx(panel)
+
+    assert panel.get_settings().secondary_restoration == expected
+
+
+def test_applying_ltx_with_an_unavailable_secondary_restorer_clears_it(panel_factory, monkeypatch, tmp_path) -> None:
+    from jasna import engine_paths
+
+    model = tmp_path / "unet-4x.onnx"
+    model.touch()
+    monkeypatch.setattr(engine_paths, "UNET4X_ONNX_PATH", model)
+    panel = panel_factory(True)
+
+    _apply(panel, AppSettings(restoration_model="ltx", secondary_restoration="unet-4x"))
+
+    assert panel.get_settings().secondary_restoration == "none"
+
+
 def test_amd_secondary_choices_and_busy_state(panel_factory, monkeypatch, tmp_path) -> None:
     from jasna import engine_paths
 
