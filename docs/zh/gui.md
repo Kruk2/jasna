@@ -112,7 +112,12 @@
   Jasna，再重新开始。
 - 有安全芯片的电脑仍在线使用时，激活提示会说明原因。
 - 有安全芯片的 Linux：Jasna 会提示运行 `sudo usermod -aG tss $USER`。重新登录后再激活一次，
-  即可离线使用。
+  即可离线使用。NixOS 需先在 `configuration.nix` 中加入 `security.tpm2.enable = true;`，并把用户加入 `tss` 组。
+- 在 distrobox 或 toolbox 里使用 Linux：容器必须能使用主机的 TPM 组。在容器内运行
+  `ls -ln /dev/tpmrm0` 可看到组号；如果 `id` 里没有这个组号，请加上
+  `--additional-flags "--group-add <组号>"` 重新创建容器，然后再激活一次。
+- AMD 电脑提示"没有厂商证书"：请更新 BIOS。较旧的 AMD 安全芯片固件常常没有证书。
+  如果仍不行，Jasna 会在线使用。
 - 从旧版 Jasna 升级？第一次处理时激活会自动沿用。如果提示激活已转移，请重新输入许可证码。
   同一台电脑上的 Jasna 0.11 仍可继续使用。
 - 有 Jasna 0.10 的邮箱和密钥？旧密钥已不能使用，请向购买的地方申请新的许可证码。

@@ -141,7 +141,14 @@ Good to know:
   says why.
 - Linux with a security chip: Jasna asks you to run
   `sudo usermod -aG tss $USER`. Log in again and activate again to work
-  offline.
+  offline. On NixOS, first add `security.tpm2.enable = true;` and put your
+  user in the `tss` group in `configuration.nix`.
+- Linux in distrobox or toolbox: the container must use the host's TPM group.
+  Inside it, `ls -ln /dev/tpmrm0` shows the group number; if `id` does not list
+  that number, create the container again with
+  `--additional-flags "--group-add <number>"`, then activate again.
+- "No maker certificate" on an AMD PC: update the BIOS. Older AMD security chip
+  firmware often has no certificate. If that does not help, Jasna works online.
 - Moved from an older Jasna? Your activation carries over on the first job. If
   it says the activation moved, enter your License code again. Jasna 0.11 keeps
   working on the same PC.
