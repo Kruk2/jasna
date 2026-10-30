@@ -43,6 +43,7 @@ class ProgressUpdate:
     message: str = ""
     stage: StageProgress | None = None
     resumable: bool | None = None
+    license_problem: str = ""
 
 
 class ProgressGate:
@@ -325,6 +326,7 @@ class Processor:
                 job_id=job.id,
                 status=JobStatus.ERROR,
                 message=t(f"license_problem_{e.code}"),
+                license_problem=e.code,
             ))
             self._log("ERROR", f"Failed to process {job.filename}: {e}")
 

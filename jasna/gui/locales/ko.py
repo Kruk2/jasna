@@ -416,6 +416,7 @@ KO = {
         "license_problem_already_converted": "이 활성화는 다른 Jasna로 옮겨졌습니다. Jasna 활성화를 열고 라이선스 코드를 입력하세요.",
         "license_problem_no_activation": "후원자 모델을 사용하려면 라이선스 코드로 Jasna를 활성화하세요.",
         "license_problem_offline_check": "이 컴퓨터가 오프라인 활성화와 더 이상 일치하지 않아 대기열이 멈췄습니다. Jasna 활성화를 열고 라이선스 코드를 다시 입력하세요.",
+        "license_problem_unofficial_key": "This activation did not come from an official seller. Get a License code from an official seller to use supporter models.",
         "ctx_cut": "잘라내기",
         "ctx_copy": "복사",
         "ctx_paste": "붙여넣기",
@@ -510,6 +511,8 @@ KO = {
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "Xianyu(闲鱼)에서 구매",
         "xianyu_scan_hint": "중국 사용자는 Xianyu(闲鱼)로 이 QR 코드를 스캔해 구매하세요.",
+        "unofficial_notice_title": "About the activation on this computer",
+        "unofficial_notice_text": "This copy of Jasna was activated without an official License code. Many buyers do not know this.\n\nScan the QR code to get an official License code. If you paid for the copy, you can ask your seller for a refund.",
 
         # Tooltips
         "tip_max_clip_size": "함께 복원하는 프레임 수입니다. 클수록 결과가 안정적이고 빠르지만 VRAM을 더 사용합니다.\n\nVRAM에 맞는 가장 큰 값을 사용하세요. 1080p에서 90은 약 4GB, 180은 약 5GB가 필요합니다. 4K는 약 1.5배 더 필요합니다.\nVRAM이 부족하면 이 값부터 낮추세요.\n기본값: 90",

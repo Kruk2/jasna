@@ -416,6 +416,7 @@ EN = {
         "license_problem_already_converted": "This activation moved to another copy of Jasna. Open Activate Jasna and enter your License code.",
         "license_problem_no_activation": "Activate Jasna with your License code to use supporter models.",
         "license_problem_offline_check": "This computer no longer matches its offline activation, so the queue stopped. Open Activate Jasna and enter your License code again.",
+        "license_problem_unofficial_key": "This activation did not come from an official seller. Get a License code from an official seller to use supporter models.",
         "ctx_cut": "Cut",
         "ctx_copy": "Copy",
         "ctx_paste": "Paste",
@@ -510,6 +511,8 @@ EN = {
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "Buy on Xianyu",
         "xianyu_scan_hint": "Users in China: scan this QR code with Xianyu to buy.",
+        "unofficial_notice_title": "About the activation on this computer",
+        "unofficial_notice_text": "This copy of Jasna was activated without an official License code. Many buyers do not know this.\n\nScan the QR code to get an official License code. If you paid for the copy, you can ask your seller for a refund.",
         
         # Tooltips
         "tip_max_clip_size": "How many frames are restored together. Bigger clips give a steadier result and are faster, but use more VRAM.\n\nUse the biggest size that fits in your VRAM. At 1080p, 90 needs about 4 GB and 180 about 5 GB. 4K needs about 1.5x more.\nOut of VRAM? Lower this first.\nDefault: 90",

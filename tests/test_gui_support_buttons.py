@@ -22,6 +22,18 @@ def test_xianyu_button_shows_the_qr_code(tk_root):
     assert dialogs[0].qr_label.cget("image") is not None
 
 
+def test_the_unofficial_copy_note_sits_above_the_same_qr_code(tk_root):
+    from jasna.gui.locales import t
+
+    def texts(dialog):
+        return [child.cget("text") for child in dialog.winfo_children()[0].winfo_children()]
+
+    plain, note = XianyuQrDialog(tk_root), XianyuQrDialog(tk_root, unofficial_notice=True)
+    assert (plain.title(), note.title()) == (t("xianyu_dialog_title"), t("unofficial_notice_title"))
+    assert texts(note)[0] == t("unofficial_notice_text") and t("unofficial_notice_text") not in texts(plain)
+    assert note.qr_label.cget("image") is not None
+
+
 def test_xianyu_seller_shown_only_in_chinese():
     assert shows_xianyu_seller("zh")
     assert not any(shows_xianyu_seller(lang) for lang in ("en", "ja", "ko", "th"))

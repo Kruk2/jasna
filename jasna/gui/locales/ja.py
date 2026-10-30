@@ -416,6 +416,7 @@ JA = {
         "license_problem_already_converted": "この有効化は別の Jasna に移されました。「Jasna を有効化」を開き、ライセンスコードを入力してください。",
         "license_problem_no_activation": "支援者向けモデルを使うには、ライセンスコードで Jasna を有効化してください。",
         "license_problem_offline_check": "このPCがオフライン有効化と一致しなくなったため、キューを停止しました。「Jasna を有効化」を開き、ライセンスコードをもう一度入力してください。",
+        "license_problem_unofficial_key": "This activation did not come from an official seller. Get a License code from an official seller to use supporter models.",
         "ctx_cut": "切り取り",
         "ctx_copy": "コピー",
         "ctx_paste": "貼り付け",
@@ -510,6 +511,8 @@ JA = {
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "闲鱼で購入",
         "xianyu_scan_hint": "中国のユーザーは「闲鱼」でこの QR コードをスキャンして購入してください。",
+        "unofficial_notice_title": "About the activation on this computer",
+        "unofficial_notice_text": "This copy of Jasna was activated without an official License code. Many buyers do not know this.\n\nScan the QR code to get an official License code. If you paid for the copy, you can ask your seller for a refund.",
 
         # Tooltips
         "tip_max_clip_size": "一度に復元するフレーム数です。大きいほど安定した結果になり速くなりますが、VRAM を多く使います。\n\nVRAM に収まる最大のサイズを使ってください。1080p では 90 で約 4 GB、180 で約 5 GB です。4K では約 1.5 倍必要です。\nVRAM が足りないときは、まずこれを下げてください。\nデフォルト：90",

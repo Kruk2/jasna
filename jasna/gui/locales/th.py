@@ -416,6 +416,7 @@ TH = {
         "license_problem_already_converted": "การเปิดใช้งานนี้ย้ายไปยัง Jasna อีกชุดแล้ว เปิดหน้าต่างเปิดใช้งาน Jasna แล้วใส่รหัสสิทธิ์",
         "license_problem_no_activation": "เปิดใช้งาน Jasna ด้วยรหัสสิทธิ์ก่อนใช้โมเดลสำหรับผู้สนับสนุน",
         "license_problem_offline_check": "คอมพิวเตอร์เครื่องนี้ไม่ตรงกับการเปิดใช้งานแบบออฟไลน์อีกต่อไป จึงหยุดคิวแล้ว เปิดหน้าต่างเปิดใช้งาน Jasna แล้วใส่รหัสสิทธิ์อีกครั้ง",
+        "license_problem_unofficial_key": "This activation did not come from an official seller. Get a License code from an official seller to use supporter models.",
         "ctx_cut": "ตัด",
         "ctx_copy": "คัดลอก",
         "ctx_paste": "วาง",
@@ -510,6 +511,8 @@ TH = {
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "ซื้อบน Xianyu",
         "xianyu_scan_hint": "ผู้ใช้ในจีน: สแกนคิวอาร์โค้ดนี้ด้วย Xianyu (闲鱼) เพื่อซื้อ",
+        "unofficial_notice_title": "About the activation on this computer",
+        "unofficial_notice_text": "This copy of Jasna was activated without an official License code. Many buyers do not know this.\n\nScan the QR code to get an official License code. If you paid for the copy, you can ask your seller for a refund.",
 
         # Tooltips
         "tip_max_clip_size": "จำนวนเฟรมที่ฟื้นฟูพร้อมกัน คลิปใหญ่ขึ้นให้ผลนิ่งกว่าและเร็วกว่า แต่ใช้ VRAM มากขึ้น\n\nใช้ขนาดใหญ่ที่สุดที่ VRAM รองรับ ที่ 1080p ค่า 90 ใช้ประมาณ 4 GB และ 180 ประมาณ 5 GB วิดีโอ 4K ใช้มากกว่าประมาณ 1.5 เท่า\nVRAM ไม่พอ? ลดค่านี้ก่อน\nค่าเริ่มต้น: 90",

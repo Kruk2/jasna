@@ -46,6 +46,19 @@ def start_license_info(on_done) -> threading.Thread:
     return _start(read_license_info, on_done)
 
 
+def read_unofficial_notice_due() -> bool:
+    """Whether this launch shows the note for buyers of an unofficial copy; only the Chinese UI asks."""
+    if not protection_available():
+        return False
+    from jasna.protection import notice
+
+    return notice.due()
+
+
+def start_unofficial_notice_check(on_done) -> threading.Thread:
+    return _start(read_unofficial_notice_due, on_done)
+
+
 def start_lease_activation(code: str, on_done) -> threading.Thread:
     """Calls ``on_done(Activated, error)``: offline on a certified TPM, else online leases."""
 

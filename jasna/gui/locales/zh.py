@@ -416,6 +416,7 @@ ZH = {
         "license_problem_already_converted": "此激活已转移到另一份 Jasna。请打开“激活 Jasna”并输入许可证码。",
         "license_problem_no_activation": "请先用许可证码激活 Jasna，才能使用支持者模型。",
         "license_problem_offline_check": "这台电脑已与其离线激活不符，队列已停止。请打开“激活 Jasna”并重新输入许可证码。",
+        "license_problem_unofficial_key": "这台电脑上的激活不是 Jasna 官方发放的，无法使用支持者模型。可以从官方闲鱼卖家购买许可证码。",
         "ctx_cut": "剪切",
         "ctx_copy": "复制",
         "ctx_paste": "粘贴",
@@ -510,6 +511,8 @@ ZH = {
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "在闲鱼购买",
         "xianyu_scan_hint": "中国用户请使用“闲鱼”扫描此二维码购买",
+        "unofficial_notice_title": "关于这台电脑上的激活",
+        "unofficial_notice_text": "你好！这台电脑上使用过的 Jasna 激活不是官方版本，可能来自非官方卖家。很多人购买时并不知道这一点。\n\n非官方版本收不到新模型和更新。用闲鱼扫描下方二维码，就能从官方卖家购买正版许可证码。\n\n如果你为它付过钱，可以联系卖家申请退款。",
         
         # Tooltips
         "tip_max_clip_size": "一起修复的帧数。片段越大，效果越稳定、速度越快，但占用更多显存。\n\n在显存允许的范围内用最大的值。1080p 下，90 约需 4 GB，180 约需 5 GB。4K 约需 1.5 倍。\n显存不足？先降低这个值。\n默认值：90",

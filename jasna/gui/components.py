@@ -199,15 +199,26 @@ class XianyuButton(_SupportButton):
 
 
 class XianyuQrDialog(ctk.CTkToplevel):
-    def __init__(self, master):
+    """The official Xianyu listing's QR code; ``unofficial_notice`` puts the note for buyers of an unofficial copy above it."""
+
+    def __init__(self, master, unofficial_notice: bool = False):
         super().__init__(master)
-        self.title(t("xianyu_dialog_title"))
+        self.title(t("unofficial_notice_title" if unofficial_notice else "xianyu_dialog_title"))
         self.configure(fg_color=Colors.BG_MAIN)
         self.resizable(False, False)
         self.transient(master)
 
         content = ctk.CTkFrame(self, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=20, pady=20)
+        if unofficial_notice:
+            ctk.CTkLabel(
+                content,
+                text=t("unofficial_notice_text"),
+                font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+                text_color=Colors.TEXT_PRIMARY,
+                wraplength=360,
+                justify="left",
+            ).pack(pady=(0, 12))
         self.qr_label = ctk.CTkLabel(content, text="", image=create_xianyu_qr_image())
         self.qr_label.pack(pady=(0, 12))
         ctk.CTkLabel(
