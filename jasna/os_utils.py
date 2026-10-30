@@ -359,7 +359,7 @@ def windows_module_loaded(name: str) -> bool:
 
 
 def _check_amd_driver_version() -> tuple[bool | None, str]:
-    """None means the OS cannot identify a comparable driver version."""
+    """None is a warning: the driver is older than tested, or its version cannot be compared."""
     if sys.platform == "win32":
         powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
         command = (
@@ -387,7 +387,7 @@ def _check_amd_driver_version() -> tuple[bool | None, str]:
             return None, f"{info}; mixed driver versions, compatibility could not be checked"
         if False in supported:
             minimum = ".".join(map(str, MIN_AMD_WINDOWS_DRIVER))
-            return False, f"{info} (requires {minimum}+; install AMD's ROCm 10.1 driver and reboot)"
+            return None, f"{info} (older than {minimum}; if processing fails, install AMD's ROCm 10.1 driver and reboot)"
         return True, info
 
     try:
@@ -400,7 +400,7 @@ def _check_amd_driver_version() -> tuple[bool | None, str]:
     if not match:
         return None, f"amdgpu {version}; compatibility could not be checked"
     if int(match[1]) < MIN_AMD_LINUX_DRIVER_RELEASE:
-        return False, f"amdgpu {version} (requires AMD driver 30.10.2+ for ROCm 10.1; update the host driver and reboot)"
+        return None, f"amdgpu {version} (older than AMD driver 30.10.2 for ROCm 10.1; if processing fails, update the host driver and reboot)"
     return True, f"amdgpu {version}"
 
 
@@ -411,8 +411,6 @@ def check_gpu_driver_version() -> tuple[bool | None, str]:
     hip_version = torch.version.hip
     if hip_version:
         driver_ok, driver_info = _check_amd_driver_version()
-        if driver_ok is False:
-            return False, f"ROCm {hip_version}; {driver_info}"
         if not torch.cuda.is_available():
             return False, f"ROCm {hip_version} is installed but no AMD GPU is available"
         return driver_ok, f"ROCm {hip_version}; {driver_info}"
