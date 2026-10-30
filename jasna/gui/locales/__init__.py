@@ -4,7 +4,7 @@ import json
 import locale as _locale
 import logging
 
-from jasna.gui.paths import get_settings_path
+from jasna.gui.paths import get_settings_path, update_settings
 
 from jasna.gui.locales.en import EN
 from jasna.gui.locales.zh import ZH
@@ -66,24 +66,7 @@ class LocaleManager:
                 logger.debug("System locale autodetection failed; using 'en'", exc_info=True)
 
     def _save(self):
-        """Save language preference to settings."""
-        path = get_settings_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data = {}
-        if path.exists():
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning("Could not read settings from %s, rewriting it: %s", path, e)
-
-        data["language"] = self._current_lang
-
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-        except OSError as e:
-            logger.warning("Could not save the language setting to %s: %s", path, e)
+        update_settings(language=self._current_lang)
 
     @property
     def current_language(self) -> str:

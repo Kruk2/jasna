@@ -311,4 +311,5 @@ def test_a_failed_license_check_fails_that_job_and_stops_the_queue(tmp_path):
     assert runs == [job.id]
     assert job.status is JobStatus.ERROR and later.status is JobStatus.PENDING
     assert updates[-1].message == t("license_problem_expired")
+    assert updates[-1].license_problem == "expired"
     assert completions == [False]

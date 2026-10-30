@@ -22,7 +22,7 @@ from jasna.gui.branding import (
 from jasna.gui import scaling
 from jasna.gui import activation_worker
 from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
-from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, XianyuButton, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, CloseWhileProcessingDialog, grab_modal
+from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, XianyuButton, XianyuQrDialog, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, CloseWhileProcessingDialog, grab_modal
 from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
@@ -277,6 +277,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         )
         self._license_chip.pack(side="left", padx=(0, 12))
         self._refresh_license_chip()
+        if show_xianyu:
+            activation_worker.start_unofficial_notice_check(
+                lambda due, error: self._main_thread.post(lambda: self._unofficial_notice_ready(due, error))
+            )
 
         self._system_check_btn = ctk.CTkButton(
             right,
@@ -525,6 +529,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             text=text,
             text_color=Colors.STATUS_COMPLETED if licensed else Colors.STATUS_WARNING,
         )
+
+    def _unofficial_notice_ready(self, due, error):
+        if error is not None:
+            logger.warning("Could not check the activation note: %s", error)
+        elif due:
+            XianyuQrDialog(self, unofficial_notice=True)
 
     def _open_license_dialog(self):
         LicenseDialog(self, on_activated=self._refresh_license_chip)
@@ -789,6 +799,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._main_thread.post(lambda: self._handle_progress(update))
         
     def _handle_progress(self, update: ProgressUpdate):
+        if update.license_problem == "unofficial_key":
+            XianyuQrDialog(self, unofficial_notice=True)
         jobs = self._queue_panel.get_jobs()
         job_id = update.job_id
         

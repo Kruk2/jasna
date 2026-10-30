@@ -271,3 +271,48 @@ def test_license_chip_names_how_jasna_checks_the_license(jasna_app, info, error,
 
     jasna_app._license_chip_ready(info, error)
     assert jasna_app._license_chip.cget("text") == t(key)
+
+
+@pytest.fixture
+def notice_checks(monkeypatch):
+    """Record each startup check for the unofficial-copy note instead of running it."""
+    from jasna.gui import activation_worker
+
+    started = []
+    monkeypatch.setattr(activation_worker, "start_unofficial_notice_check", started.append)
+    return started
+
+
+def unofficial_notices(window):
+    from jasna.gui.components import XianyuQrDialog
+
+    return [child for child in window.winfo_children() if isinstance(child, XianyuQrDialog)]
+
+
+@pytest.fixture
+def ui_language(request, gui_language):
+    """The GUI language (``request.param``) chosen before the window is built."""
+    gui_language(request.param)
+
+
+@pytest.mark.parametrize(("ui_language", "checks"), [("zh", 1), ("en", 0), ("ja", 0)], indirect=["ui_language"])
+def test_only_the_chinese_ui_checks_for_the_unofficial_copy_note_at_startup(ui_language, notice_checks, jasna_app, checks):
+    assert len(notice_checks) == checks
+
+
+@pytest.mark.parametrize("ui_language", ["zh"], indirect=True)
+@pytest.mark.parametrize(("due", "error", "shown"), [(True, None, 1), (False, None, 0), (None, OSError("unreadable"), 0)])
+def test_the_startup_check_shows_the_note_only_when_it_is_due(ui_language, notice_checks, jasna_app, due, error, shown):
+    notice_checks[0](due, error)
+    jasna_app._main_thread._run_pending()
+    assert len(unofficial_notices(jasna_app)) == shown
+
+
+def test_a_job_refused_for_an_unofficial_activation_shows_the_note(jasna_app):
+    from jasna.gui.models import JobStatus
+    from jasna.gui.processor import ProgressUpdate
+
+    jasna_app._handle_progress(ProgressUpdate(job_id=1, status=JobStatus.ERROR, message="", license_problem="expired"))
+    assert unofficial_notices(jasna_app) == []
+    jasna_app._handle_progress(ProgressUpdate(job_id=1, status=JobStatus.ERROR, message="", license_problem="unofficial_key"))
+    assert len(unofficial_notices(jasna_app)) == 1

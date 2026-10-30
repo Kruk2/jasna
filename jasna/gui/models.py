@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, fields, asdict
 from enum import Enum
 from pathlib import Path
 
-from jasna.gui.paths import get_settings_path
+from jasna.gui.paths import get_settings_path, update_settings
 from jasna.segments import SegmentRange
 from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
 
@@ -271,22 +271,7 @@ class PresetManager:
             logger.warning("Could not read settings from %s: %s", path, e)
 
     def _save(self, **values) -> None:
-        """Write only the given keys, so keys changed by other writers survive."""
-        path = get_settings_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data = {}
-        if path.exists():
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning("Could not read settings from %s, rewriting it: %s", path, e)
-        data.update(values)
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        except OSError as e:
-            logger.warning("Could not save settings to %s: %s", path, e)
+        update_settings(**values)
 
     def _save_user_presets(self) -> None:
         self._save(user_presets={name: asdict(preset) for name, preset in self._user_presets.items()})
