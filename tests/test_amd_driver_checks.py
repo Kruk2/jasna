@@ -10,33 +10,27 @@ pytestmark = pytest.mark.usefixtures("amd_driver_environment")
 
 
 @pytest.mark.parametrize(
-    "output,status",
+    "output,status,text",
     [
-        ("32.0.21017.2051\n", False),
-        ("32.0.21017.2052\n", True),
-        ("32.0.21017.2053\n", True),
-        ("32.0.31041.5005\n", True),
-        ("32.0.21017.2052\n32.0.21017.2052\n", True),
-        ("32.0.21001.1\n32.0.21017.2052\n", None),
-        ("", None),
-        ("not a version", None),
-        ("32.0.21017.2052\ninvalid", None),
+        ("32.0.21017.2051\n", None, "older than 32.0.21017.2052"),
+        ("32.0.21017.2052\n", True, "32.0.21017.2052"),
+        ("32.0.21017.2053\n", True, "32.0.21017.2053"),
+        ("32.0.31041.5005\n", True, "32.0.31041.5005"),
+        ("32.0.21017.2052\n32.0.21017.2052\n", True, "32.0.21017.2052"),
+        ("32.0.21001.1\n32.0.21017.2052\n", None, "could not be checked"),
+        ("", None, "could not be checked"),
+        ("not a version", None, "could not be checked"),
+        ("32.0.21017.2052\ninvalid", None, "could not be checked"),
     ],
 )
-def test_windows_amd_driver_minimum(monkeypatch, output, status):
+def test_windows_amd_driver_minimum_only_warns(monkeypatch, output, status, text):
     monkeypatch.setattr(os_utils.sys, "platform", "win32")
     monkeypatch.setattr(os_utils.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, output, ""))
 
     ok, info = os_utils.check_gpu_driver_version()
 
     assert ok is status
-    if status is False:
-        assert "32.0.21017.2052+" in info
-        assert "reboot" in info
-    elif status is None:
-        assert "could not be checked" in info
-    else:
-        assert "32.0." in info
+    assert text in info
 
 
 @pytest.mark.parametrize(
@@ -64,19 +58,19 @@ def test_failed_windows_query_does_not_trust_partial_output(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "version,status",
+    "version,status,text",
     [
-        ("6.12.12.60404", False),
-        ("6.14.14.30100100", False),
-        ("6.14.14.30100200", True),
-        ("6.14.14.30200000", True),
-        ("7.1.9.31600000", True),
-        ("6.14.14", None),
-        ("", None),
-        ("invalid", None),
+        ("6.12.12.60404", None, "older than AMD driver 30.10.2"),
+        ("6.14.14.30100100", None, "older than AMD driver 30.10.2"),
+        ("6.14.14.30100200", True, "6.14.14.30100200"),
+        ("6.14.14.30200000", True, "6.14.14.30200000"),
+        ("7.1.9.31600000", True, "7.1.9.31600000"),
+        ("6.14.14", None, "could not be checked"),
+        ("", None, "could not be checked"),
+        ("invalid", None, "could not be checked"),
     ],
 )
-def test_linux_checks_the_loaded_driver_release(monkeypatch, tmp_path, version, status):
+def test_linux_checks_the_loaded_driver_release_and_only_warns(monkeypatch, tmp_path, version, status, text):
     driver_version = tmp_path / "version"
     driver_version.write_text(version + "\n")
     monkeypatch.setattr(os_utils.sys, "platform", "linux")
@@ -85,13 +79,7 @@ def test_linux_checks_the_loaded_driver_release(monkeypatch, tmp_path, version, 
     ok, info = os_utils.check_gpu_driver_version()
 
     assert ok is status
-    if status is False:
-        assert "30.10.2+" in info
-        assert "host driver" in info
-    elif status is None:
-        assert "could not be checked" in info
-    else:
-        assert version in info
+    assert text in info
 
 
 def test_linux_without_module_version_warns_instead_of_rejecting_the_kernel(monkeypatch, tmp_path):
@@ -102,16 +90,6 @@ def test_linux_without_module_version_warns_instead_of_rejecting_the_kernel(monk
 
     assert ok is None
     assert "distribution kernel or hidden sysfs" in info
-
-
-def test_old_driver_is_rejected_before_initializing_hip(monkeypatch):
-    monkeypatch.setattr(os_utils, "_check_amd_driver_version", lambda: (False, "driver too old"))
-    monkeypatch.setattr(torch.cuda, "is_available", Mock(side_effect=AssertionError("initialized HIP")))
-
-    ok, info = os_utils.check_gpu_driver_version()
-
-    assert ok is False
-    assert "driver too old" in info
 
 
 def test_a_current_driver_does_not_hide_a_missing_gpu(monkeypatch):
