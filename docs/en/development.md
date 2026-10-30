@@ -79,9 +79,10 @@ The shared startup driver check reads Windows display-driver versions through
 `Win32_VideoController` (minimum 32.0.21017.2052, the Azure V710 cloud driver). On Linux it checks the loaded
 `/sys/module/amdgpu/version` release identifier against AMD driver 30.10.2,
 the oldest driver supported by [AMD's compatibility matrix](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/compatibility/compatibility-matrix.html).
-Older, missing or unrecognized versions and mixed Windows driver support produce a
-warning; processing still runs. Distribution kernel versions
-and installed package versions cannot reliably identify the loaded AMD driver.
+Older or unrecognized versions and mixed Windows driver support produce a
+warning; processing still runs. The in-kernel `amdgpu` driver of distribution
+kernels has no version file and passes when PyTorch can use the GPU; a hidden
+`/sys/module/amdgpu` (some containers) produces a warning.
 
 For source development, install the matching PyTorch builds and GPU kernel
 packs from AMD's index:

@@ -55,17 +55,20 @@ class FirstRunWizard(ctk.CTkToplevel):
         # Build UI immediately with loading state
         self._build_ui_loading()
 
-        # Let geometry settle, then size to content and center on parent
+        self._fit_to_content()
+
+        self.after(50, self._start_checks_in_background)
+
+    def _fit_to_content(self) -> None:
+        """Let geometry settle, then size to content and center on the parent."""
         self.update_idletasks()
         minimum_width, _ = scaling.to_physical(self, _WINDOW_WIDTH, 0)
         scaling.place_centered_on_parent(
             self,
-            master,
+            self.master,
             max(minimum_width, self.winfo_reqwidth()),
             self.winfo_reqheight(),
         )
-
-        self.after(50, self._start_checks_in_background)
         
     def _build_ui_loading(self):
         """Build UI with loading/checking state shown immediately."""
@@ -144,6 +147,7 @@ class FirstRunWizard(ctk.CTkToplevel):
                 text_color=Colors.TEXT_PRIMARY,
                 justify="right",
                 anchor="e",
+                wraplength=360,
             )
             info_label.pack(side="right", fill="x", expand=True)
 
@@ -260,6 +264,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             self._continue_btn.configure(text=t("btn_exit"), state="normal", command=self._on_exit)
         else:
             self._continue_btn.configure(text=t("btn_get_started"), state="normal")
+        self._fit_to_content()
         
     def _on_exit(self):
         self.grab_release()

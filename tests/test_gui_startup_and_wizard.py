@@ -230,6 +230,28 @@ def test_wizard_distinguishes_an_unverified_driver_from_an_old_one(wizard_factor
     assert completed == [(can_continue, False)]
 
 
+def test_wizard_fits_a_long_check_result(wizard_factory, monkeypatch) -> None:
+    from jasna import accelerator
+
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda: True)
+    long_info = "ROCm 7.1.52802-26aae437f6; in-kernel amdgpu (Linux 6.17.0-1012-generic-64k-and-a-long-suffix)"
+
+    def checks(results):
+        results.update({key: (True, "ok") for key in ("ascii_path", "ffprobe", "gpu", "cuda", "sysmem", "amf")})
+        results["driver"] = True, long_info
+
+    wizard = wizard_factory(checks=checks)
+    wizard._start_checks_in_background()
+    wizard._checks_thread.join()
+    wizard._poll_checks_thread()
+    wizard.update_idletasks()
+
+    info_label = wizard._check_labels["driver"][1]
+    assert info_label.winfo_width() >= info_label.winfo_reqwidth()
+    amf_row = wizard._check_labels["amf"][0].master
+    assert amf_row.winfo_rooty() + amf_row.winfo_height() <= wizard.winfo_rooty() + wizard.winfo_height()
+
+
 def test_wizard_close_button_releases_the_user(wizard_factory) -> None:
     completed: list[tuple[bool, bool]] = []
     wizard = wizard_factory(on_complete=lambda can_continue, all_passed: completed.append((can_continue, all_passed)))
