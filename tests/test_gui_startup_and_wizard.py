@@ -330,7 +330,16 @@ def test_the_startup_check_shows_the_note_only_when_it_is_due(ui_language, notic
     assert len(unofficial_notices(jasna_app)) == shown
 
 
-def test_a_job_refused_for_an_unofficial_activation_shows_the_note(jasna_app):
+@pytest.fixture
+def shown_errors(monkeypatch):
+    from tkinter import messagebox
+
+    errors = []
+    monkeypatch.setattr(messagebox, "showerror", lambda title, message, **_kwargs: errors.append((title, message)))
+    return errors
+
+
+def test_a_job_refused_for_an_unofficial_activation_shows_the_note(jasna_app, shown_errors):
     from jasna.gui.models import JobStatus
     from jasna.gui.processor import ProgressUpdate
 
@@ -338,3 +347,14 @@ def test_a_job_refused_for_an_unofficial_activation_shows_the_note(jasna_app):
     assert unofficial_notices(jasna_app) == []
     jasna_app._handle_progress(ProgressUpdate(job_id=1, status=JobStatus.ERROR, message="", license_problem="unofficial_key"))
     assert len(unofficial_notices(jasna_app)) == 1
+
+
+def test_a_failed_license_check_tells_the_user_why(jasna_app, shown_errors):
+    from jasna.gui.locales import t
+    from jasna.gui.models import JobStatus
+    from jasna.gui.processor import ProgressUpdate
+
+    jasna_app._handle_progress(ProgressUpdate(
+        job_id=1, status=JobStatus.ERROR, message=t("license_problem_offline"), license_problem="offline",
+    ))
+    assert shown_errors == [(t("license_problem_title"), t("license_problem_offline"))]

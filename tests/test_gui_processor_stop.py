@@ -287,7 +287,7 @@ def test_only_a_finished_queue_is_reported_as_completed(jasna_app, queue_finishe
     assert ("All jobs completed" in [message for _, _, message in jasna_app._log_panel._entries]) is queue_finished
 
 
-def test_a_failed_license_check_fails_that_job_and_stops_the_queue(tmp_path):
+def test_a_failed_license_check_fails_that_job_and_stops_the_queue(tmp_path, caplog):
     from jasna.gui.locales import t
     from jasna.license_api import LicenseCheckStopped
 
@@ -313,3 +313,6 @@ def test_a_failed_license_check_fails_that_job_and_stops_the_queue(tmp_path):
     assert updates[-1].message == t("license_problem_expired")
     assert updates[-1].license_problem == "expired"
     assert completions == [False]
+    assert [(record.levelname, record.getMessage()) for record in caplog.records if record.name == "jasna.gui.processor"] == [
+        ("WARNING", "Failed to process clip.mp4: lost the connection")
+    ]
