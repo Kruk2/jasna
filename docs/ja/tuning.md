@@ -86,22 +86,32 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 
 最大クリップサイズを変えても、コンパイルはやり直しになりません。
 
-## AMD で GPU エラーが出る場合
+## 上級者向けの環境変数
 
-AMD では、Jasna は既定で 2 つの高速なモードを使います。GPU エラーが出る場合や
-VRAM が足りない場合は、次のように無効にします。
+トラブルシューティングやテスト用です。ほとんどの人はデフォルトのままが最適です。
 
-Windows（Jasna フォルダーで PowerShell を開く）:
+| 変数 | 値 | 内容 |
+| --- | --- | --- |
+| `JASNA_LTX_VAE_ENCODER` | `full`、`half`、`max` | LTX の動画エンコーダーを選びます。`half` と `max` は速く、少しやわらかい仕上がりです。デフォルト: 基本画質・標準画質は `half`、それ以外は `full`。 |
+| `JASNA_LTX_VAE_DECODER` | `full`、`half`、`max` | LTX の動画デコーダーを選びます。`half` と `max` は速く、少しやわらかい仕上がりです。デフォルト: 基本画質・標準画質は `max`、それ以外は `full`。 |
+| `JASNA_DECODE_BACKEND` | `auto`（デフォルト）、`vali`、`pyav-hw`、`pyav-sw` | 入力動画の読み込み方法を選びます。動画が開けない、またはフレームが壊れる場合は `pyav-sw`（低速）を試してください。`vali` は NVIDIA のみです。 |
+| `JASNA_TRT_CUDAGRAPHS` | `1`（デフォルト）、`0` | NVIDIA: `0` でコンパイル済み BasicVSR++ の高速化をオフにします。GPU エラーが出る場合に試してください。 |
+| `JASNA_AMD_GRAPHS` | `1`（デフォルト）、`0` | AMD: `0` で BasicVSR++ の高速化をオフにします。GPU エラーが出る場合や VRAM が足りない場合に試してください。 |
+| `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL` | `1`（デフォルト）、`0` | AMD: `0` で高速なアテンションモードをオフにします。GPU エラーが出る場合は `JASNA_AMD_GRAPHS=0` と一緒に試してください。 |
+| `TVAI_MODEL_DATA_DIR`、`TVAI_MODEL_DIR` | フォルダーのパス | Topaz Video のモデルフォルダー。TVAI に必要です（[二次復元](models.md#二次復元)を参照）。 |
 
-```powershell
-$env:JASNA_AMD_GRAPHS = "0"; $env:TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "0"
-.\jasna.exe
+Windows: Jasna フォルダーでコマンドプロンプトを開き、変数を設定して同じウィンドウで
+Jasna を起動します（2 行を `.bat` ファイルとしてそこに保存しても構いません）。
+
+```bat
+set JASNA_LTX_VAE_DECODER=full
+jasna.exe
 ```
 
-Linux:
+Linux（AMD では `./jasna` の代わりに `./run_jasna_amd.sh` を起動）:
 
 ```bash
-JASNA_AMD_GRAPHS=0 TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
+JASNA_LTX_VAE_DECODER=full ./jasna
 ```
 
-この設定は、そのターミナルを閉じるまで有効です。
+この設定は、そのウィンドウを閉じるまで有効です。

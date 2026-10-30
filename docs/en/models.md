@@ -152,6 +152,8 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
 - **LTX only for big mosaics**: big mosaics get LTX, the rest the faster
   BasicVSR++. Saves a lot of time on long videos. See
   [Restoring only parts of a video](segments.md#cli---ltx-auto-split).
+- **VAE** (advanced): Basic and Standard Quality use smaller, faster VAE files; the others use the
+  full ones. To change this, see [environment variables](tuning.md#environment-variables-advanced).
 
 To preview LTX, open the [Segment Editor](segments.md), select a range,
 choose LTX and turn on **Restore preview**. The Video Player always uses

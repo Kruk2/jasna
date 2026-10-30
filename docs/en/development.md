@@ -4,7 +4,7 @@ This page is for developers. To just use Jasna, download a release package: it
 bundles its own Python/Tk runtime, `ffmpeg` and `ffprobe`.
 
 The public checkout runs the GUI, CLI and free **BasicVSR++** without the private
-protection module. Activation and encrypted **unet-4x**, **SD 1.5** and **LTX**
+protection module. Activation and the licensed **unet-4x**, **SD 1.5** and **LTX**
 models require the official release. LTX trial mode uses random weights and
 does not restore videos. A missing private module disables activation; errors
 inside an installed module still report a failure.
@@ -16,9 +16,10 @@ Each app release pins its model branch and expected file hashes in
 Hugging Face and its mirror use that branch. Released 0.11.3 and older keep
 their original `main` URLs.
 
-When publishing new model files, create the version branch, verify its encrypted
-checkpoints and public signatures, then register it with the matching sizes and
-hashes before building the app. Retain earlier branch contents for their shipped
+When publishing new model files, create the version branch, check that its files
+download and load, then register it with the matching sizes and hashes before
+building the app. Release builds use these downloaded model files; source
+checkouts use plaintext models. Retain earlier branch contents for their shipped
 releases. This release mapping is shared by NVIDIA and AMD.
 
 ## Requirements
@@ -53,12 +54,12 @@ Ubuntu 22.04 has no Python 3.13 package; build one against `tk-dev` and
 On Windows (NVIDIA), run the same `uv pip install` line in a Python 3.13 venv.
 
 Release builders must install the project's required `ultralytics>=8.4.96,<8.5` before
-freezing. Older versions fail to load YOLO checkpoints under the release's
-restricted loading policy, even when the same checkpoint works in development.
+freezing. Older versions fail to load YOLO checkpoints in release builds, even when the
+same checkpoint works in development.
 YOLO ONNX export needs neither onnxruntime nor onnxslim (releases bundle
 neither).
-The NVIDIA extras also install SciPy directly for the LTX worker; the release
-bundler copies its Python modules, native extensions and bundled BLAS libraries.
+The NVIDIA extras also install SciPy, which LTX needs; release builds must
+include it.
 
 ## AMD (ROCm 10.1)
 
@@ -195,8 +196,8 @@ scripts/build_hipfbs.sh cas
 
 `build_hipfbs.sh` reads the AMD targets from
 `accelerator.HIP_KERNEL_ARCHITECTURES` (`PYTHON=` picks an interpreter with Torch;
-`tests/test_cuda_kernel.py` checks the committed bundles). Keep the release
-kernel inventory in sync when adding kernels.
+`tests/test_cuda_kernel.py` checks the committed bundles). Release builds must
+ship every new kernel.
 Every
 kernel needs a Torch equivalent: AMD GPUs outside the bundle and CPU use it, and
 the tests use it as the reference. The GPU parity tests run on whichever vendor
@@ -222,8 +223,7 @@ are fixed (RF-DETR: 144² and 192² mask features, 256 channels); `--tune` times
 tile candidates on the local GPU (current tiles were picked on a gfx1201).
 Other GPUs and fp32 run the torch modules, which are the reference for the
 parity tests in `tests/test_basicvsrpp_fused_body.py` and
-`tests/test_rfdetr_fused_head.py`. The bundles are AMD-only
-(`AMD_GPU_KERNEL_MODULES` in `build_nuitka.py`).
+`tests/test_rfdetr_fused_head.py`. The bundles are AMD-only.
 
 ```bash
 python scripts/build_basicvsrpp_hipfbs.py          # ~1 min, all targets
