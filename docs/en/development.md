@@ -75,7 +75,7 @@ Windows: use Python 3.12 and [AMD's driver for ROCm 10.1](https://www.amd.com/en
 Release users only install the driver: Jasna bundles ROCm 10.1.
 
 The shared startup driver check reads Windows display-driver versions through
-`Win32_VideoController` (minimum 32.0.31041.5005). On Linux it checks the loaded
+`Win32_VideoController` (minimum 32.0.21017.2052, the Azure V710 cloud driver). On Linux it checks the loaded
 `/sys/module/amdgpu/version` release identifier against AMD driver 30.10.2,
 the oldest driver supported by [AMD's compatibility matrix](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/compatibility/compatibility-matrix.html).
 Missing or unrecognized versions and mixed Windows driver support produce a

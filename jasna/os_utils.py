@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 MIN_GPU_COMPUTE = (7, 5)
 MIN_DRIVER_VERSION = 580 if sys.platform == "linux" else 610
-MIN_AMD_WINDOWS_DRIVER = (32, 0, 31041, 5005)
+MIN_AMD_WINDOWS_DRIVER = (32, 0, 21017, 2052)
 # AMD's loaded module version ends in the driver release: 30100200 = 30.10.2.
 MIN_AMD_LINUX_DRIVER_RELEASE = 30100200
 
@@ -386,7 +386,8 @@ def _check_amd_driver_version() -> tuple[bool | None, str]:
         if len(supported) != 1:
             return None, f"{info}; mixed driver versions, compatibility could not be checked"
         if False in supported:
-            return False, f"{info} (requires 32.0.31041.5005+; install AMD's ROCm 10.1 driver and reboot)"
+            minimum = ".".join(map(str, MIN_AMD_WINDOWS_DRIVER))
+            return False, f"{info} (requires {minimum}+; install AMD's ROCm 10.1 driver and reboot)"
         return True, info
 
     try:
