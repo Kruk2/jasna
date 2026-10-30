@@ -801,6 +801,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _handle_progress(self, update: ProgressUpdate):
         if update.license_problem == "unofficial_key":
             XianyuQrDialog(self, unofficial_notice=True)
+        elif update.license_problem:
+            from tkinter import messagebox
+
+            messagebox.showerror(t("license_problem_title"), update.message, parent=self)
         jobs = self._queue_panel.get_jobs()
         job_id = update.job_id
         
@@ -994,6 +998,17 @@ class GUILogHandler(logging.Handler):
             self.handleError(record)
 
 
+def route_gui_logs(gui_handler: logging.Handler) -> None:
+    """Every log goes to the log panel; warnings and errors also go to the terminal Jasna was started from."""
+    console = logging.StreamHandler()
+    console.setLevel(logging.WARNING)
+    console.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    logging.getLogger().handlers = [gui_handler, console]
+    jasna_logger = logging.getLogger("jasna")
+    jasna_logger.handlers = [gui_handler, console]
+    jasna_logger.propagate = False
+
+
 def run_gui():
     """Entry point to run the GUI application."""
     from jasna._frozen import patch_frozen_torch
@@ -1028,18 +1043,11 @@ def run_gui():
         print(error, file=sys.stderr)
         return
     
-    # Replace console handler with GUI handler for all jasna loggers
     gui_handler = GUILogHandler(app._main_thread, app._log_panel)
     gui_handler.setFormatter(logging.Formatter('%(message)s'))
-    
-    # Set up root logger to capture all logs
+    route_gui_logs(gui_handler)
     root_logger = logging.getLogger()
-    root_logger.handlers = [gui_handler]
-    
-    # Also capture jasna-specific logger
     jasna_logger = logging.getLogger("jasna")
-    jasna_logger.handlers = [gui_handler]
-    jasna_logger.propagate = False
 
     def _apply_runtime_log_level(filter_level: str) -> None:
         runtime_level = runtime_log_level_for_filter(filter_level=filter_level)

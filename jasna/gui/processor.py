@@ -328,7 +328,7 @@ class Processor:
                 message=t(f"license_problem_{e.code}"),
                 license_problem=e.code,
             ))
-            self._log("ERROR", f"Failed to process {job.filename}: {e}")
+            logger.warning("Failed to process %s: %s", job.filename, e)
 
         except UnsupportedVideoError as e:
             e.__traceback__ = None
