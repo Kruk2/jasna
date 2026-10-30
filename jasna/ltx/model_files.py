@@ -84,22 +84,22 @@ DEFAULT_VAES: dict[LtxModelName, tuple[str, str]] = {
 LTX_DOWNLOADS: dict[str, DownloadableFile] = {
     name: DownloadableFile(name, size, checksum)
     for name, size, checksum in (
-        ("ltx-restore-alpha1-distill1-int8.safetensors", 13_368_048_765, "4274078051d63a058fa7a53fb9a8825f37dc10ceb12fb78a81df93684cc91a5e"),
-        ("ltx-restore-alpha1-distill1-nvfp4.safetensors", 7_733_295_013, "ca614026abdbaea1921f6a1ac26f3438d49ef85a5f08de7e1c80f3a79ed7a93d"),
-        ("ltx-restore-alpha1-distill2-int8.safetensors", 13_368_048_765, "84ef795457d34dae31cac8adeccc9ce0bab68ae8462843aae36ef2df7ee96be1"),
-        ("ltx-restore-alpha1-distill2-nvfp4.safetensors", 7_733_295_013, "78ec351e5570984b8c1d851e8d1d2fbc26f6bdefb24cfc6678c8a0ad1c8968bb"),
-        ("ltx-restore-alpha1-distill4-int8.safetensors", 13_368_048_765, "d4aaf55e40bcb6af395b8909e5e2232a1573c8f16a78340b5edb1357bb16b158"),
-        ("ltx-restore-alpha1-distill4-nvfp4.safetensors", 7_733_295_013, "f7a1a879bb5904649de614c535e0ecd7940c16c014edc6496ed49a5e6211df01"),
-        ("ltx-restore-alpha1-distill8-int8.safetensors", 13_368_048_765, "93677e283ec81b0d713581d7a75ffcd35769df8105214b458be3713d9a145c9f"),
-        ("ltx-restore-alpha1-distill8-nvfp4.safetensors", 7_733_295_013, "43b8a1cee700dff80a69e2c69caf68a9b47c177ce161fbc8c5f9a0ab42bf82db"),
-        ("ltx-restore-alpha1-int8.safetensors", 13_368_048_765, "2892db743471ef1574f4dc47412a1b901a0e02accdc8cbda31c65dbe3c4b06a6"),
-        ("ltx-restore-alpha1-nvfp4.safetensors", 7_733_295_013, "71bbbccf96c25f8509fe16da00ef090195e600ad8f467040485bdf75da9aefbd"),
-        ("vae.safetensors", 1_472_223_815, "b9252d5a799748d1932d4eed60a2d77461949a19f6feb57f2238dbffe08f5e25"),
-        ("vae-decoder-full.safetensors", 38_718_609, "c60c3572871203bd364d6bb2390225fa4c347f7ea5c64fe468256c900caeea2d"),
-        ("vae-decoder-half.safetensors", 29_768_681, "3ddd4022913caa825bc6b47aa90329a52e84bb8e33e2bbe8bec7ff4803d3872b"),
-        ("vae-decoder-max.safetensors", 25_293_713, "aa923a738dd366c2c9216f9987f9e7428f196bce69933c016f54db466fef5eb1"),
-        ("vae-encoder-half.safetensors", 329_975_931, "d71a672fbd04630a9731e55fb9ae63adedc915d133f0a4093f1eb86b9fd43e88"),
-        ("vae-encoder-max.safetensors", 292_811_931, "339ab2b4eee680113d4d93e9be0d3998e1df4343597226aeb30978122f717f2f"),
+        ("ltx-restore-alpha1-distill1-int8.safetensors", 13_368_048_765, "440c591479d052916d1d23018477b95f4ccc172e0ac58fc2d7eccc0e4c484a3b"),
+        ("ltx-restore-alpha1-distill1-nvfp4.safetensors", 7_733_295_013, "cc8ceb39fe642cf00a492fd25e658b59b020a2bd3ed3bcad6cf5a077bc176919"),
+        ("ltx-restore-alpha1-distill2-int8.safetensors", 13_368_048_765, "e7ed596b067efcc23f8442e60a8619b69d97544e577979cc81e5b0c28767f0bc"),
+        ("ltx-restore-alpha1-distill2-nvfp4.safetensors", 7_733_295_013, "3facccfc19bade4d6ffe73fa56ae9251152a8495ce2415ca7a5face5543efc9d"),
+        ("ltx-restore-alpha1-distill4-int8.safetensors", 13_368_048_765, "61f421368e2087c64efde578c88b083c665513f12ffeea687e42de72b64324de"),
+        ("ltx-restore-alpha1-distill4-nvfp4.safetensors", 7_733_295_013, "47f7d2a2de8e4a424de3ad1b2f5d47bd75bbd287bacd4b481dbca3bf82f9fc6e"),
+        ("ltx-restore-alpha1-distill8-int8.safetensors", 13_368_048_765, "1bc678374fc0eed0b1cd0a66c6989889f18981a4c5f61ee1ebd20f6f3c63b52f"),
+        ("ltx-restore-alpha1-distill8-nvfp4.safetensors", 7_733_295_013, "1a12d93d9fd1e4b689d72f9dc3df6d687b7803c9140b66f6d2170841138a64af"),
+        ("ltx-restore-alpha1-int8.safetensors", 13_368_048_765, "09d19c35c3c8c65185b57453c5780c28d41c860ef9f126e15448ebfa46da8b94"),
+        ("ltx-restore-alpha1-nvfp4.safetensors", 7_733_295_013, "e2745e1cc7b9fe456838711c9d04584bbfc66b6cfb0235ddcc60bbe3f2f32618"),
+        ("vae.safetensors", 1_472_223_815, "491d9bc1dcec2c306f9dfba2ea4706f6edb56b2ca3ac76452b7229e9b8d10df0"),
+        ("vae-decoder-full.safetensors", 38_718_609, "df72fa3b8ab7df51694f6543a96b133d2ad02b27f72d5d66c74eb85f82608005"),
+        ("vae-decoder-half.safetensors", 29_768_681, "48bf7c7f92f9af7e39d00342116e5c7424db21e9a8dd283eeed460e1db580332"),
+        ("vae-decoder-max.safetensors", 25_293_713, "9e2d632987e7caf142fbd400e1aa4f77afe80ff1a7c1fae69e784bbad8181781"),
+        ("vae-encoder-half.safetensors", 329_975_931, "ecf1585fe65ce9aa643575031fb0e11e2a52b473df02b829b5d30f8964bc0197"),
+        ("vae-encoder-max.safetensors", 292_811_931, "580e5447d7bb686a5003488c2ab14c6d6cdedc5f2d19254f5e57d159f6a45393"),
     )
 }
 
