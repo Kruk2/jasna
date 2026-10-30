@@ -107,7 +107,7 @@ def test_gui_activation_keeps_exact_ltx_entitlements(lease_api, monkeypatch, tmp
     for name in model_files.bundle_names("distilled", fast=False):
         (tmp_path / (name + ".enc")).touch()
     monkeypatch.setattr(license_store, "is_licensed", lambda: True)
-    monkeypatch.setattr(lease, "saved_models", lambda: ["ltx-2.5-v2"])
+    monkeypatch.setattr(lease, "saved_models", lambda: ["ltx-2.5-v3"])
     assert not model_files.model_installed(tmp_path, "distilled", fast=False)
     assert not ltx_models.license_missing(tmp_path, "distilled", False)
     monkeypatch.setattr(lease, "saved_models", lambda: ["unet-4x"])
