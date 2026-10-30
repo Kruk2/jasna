@@ -137,6 +137,8 @@ Good to know:
   counts as a new PC. To free a slot, ask where you got your License code.
 - Online devices count only while Jasna runs. "In use on 3 devices"? Close
   Jasna on another device and start again.
+- If Jasna works online on a PC with a security chip, the activation message
+  says why.
 - Linux with a security chip: Jasna asks you to run
   `sudo usermod -aG tss $USER`. Log in again and activate again to work
   offline.
