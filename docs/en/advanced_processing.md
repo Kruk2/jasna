@@ -31,7 +31,7 @@ is not needed.
   same with LTX.
 
 Keep both small, so real short mosaics are not affected. `0` turns either one
-off (for LTX, `0` still fills gaps of up to 3 frames).
+off.
 
 ## Scene cut detection
 

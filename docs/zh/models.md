@@ -112,12 +112,6 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
 `ltx-restore` 文件夹就新建一个）。文件名保持原样，包括 `.enc`。重新开始 LTX
 任务，Jasna 就不会再要求下载。
 
-基础画质和标准画质使用蒸馏出的更快 VAE 编码器和解码器（完整版稍微清晰一些）。要换用其他版本，请在启动 Jasna 前设置
-`JASNA_LTX_VAE_ENCODER=full|half|max` 或 `JASNA_LTX_VAE_DECODER=full|half|max`。
-编码器 `half` / `max` 需要 `vae-encoder-half.safetensors.enc` / `vae-encoder-max.safetensors.enc`
-（`full` 包含在 `vae.safetensors.enc` 中）；解码器 `full` / `half` / `max` 需要
-`vae-decoder-full.safetensors.enc` / `vae-decoder-half.safetensors.enc` / `vae-decoder-max.safetensors.enc`。
-
 ### LTX 选项
 
 - **模型**：**基础画质**、**标准画质**（默认，推荐）、**良好画质**、**高画质**或**顶级画质**。基础画质比标准画质快约 1.3 倍，画面稍柔和；
@@ -178,7 +172,7 @@ UNet 4x 支持 NVIDIA 和兼容的 AMD 显卡。RTX Super Res 和 Topaz TVAI 需
   [Topaz Video](https://www.topazlabs.com/topaz-video)，它是付费软件，且仅支持
   Windows。请使用 `iris-2` 模型。
 
-使用 LTX 时只能用 RTX Super Res。它以 2x 让比 LTX 画面更大的马赛克更清晰，较小的马赛克不处理。示例：
+使用 LTX 时只能用 RTX Super Res，且只用于大马赛克。示例：
 `jasna --input input.mp4 --output output.mkv --restoration-model-name ltx --secondary-restoration rtx-super-res`
 
 ```bash

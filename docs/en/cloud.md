@@ -1,45 +1,37 @@
 # Cloud GPUs (RunPod, Vast, Docker)
 
-> Any License code works on a rented GPU. It counts as one of your 3 devices while Jasna runs on it.
-
-You can run Jasna on a rented GPU. Use the Linux NVIDIA version from the
-command line inside a supported container. GitHub source checkouts can't use
-supporter models.
+You can run Jasna on a rented GPU with the Linux NVIDIA version, from the
+command line. Your License code works there: the machine counts as one of your
+3 devices only while Jasna runs, and it needs internet while you use supporter
+models. GitHub source checkouts can't use supporter models.
 
 ## What you need
 
-- Internet on the machine: Jasna checks your license online while it uses
-  supporter models.
-- A normal container. Vast works. A Docker container started with
-  `--pid=host` doesn't.
-- LTX doesn't work on RunPod or on gVisor containers (for example Modal) for now;
-  BasicVSR++ does. For LTX use Vast.
-- An NVIDIA GPU with driver **580 or newer**.
-- At least **80 GB** of disk.
-- `NVIDIA_DRIVER_CAPABILITIES=all` in your template or instance settings.
-  Jasna can't read or save videos without it. On Vast, add
+- An NVIDIA GPU with driver **580 or newer**, and at least **80 GB** of disk.
+- `NVIDIA_DRIVER_CAPABILITIES=all` in your template or instance settings, or
+  Jasna can't read or save videos. On Vast, add
   `-e NVIDIA_DRIVER_CAPABILITIES=all` to the Docker options.
 - Log in as `root`. RunPod and Vast do this by default.
+- For LTX, use Vast. LTX doesn't work on RunPod or Modal for now; BasicVSR++
+  does.
+- Docker: don't start the container with `--pid=host`.
 
 ## Install
 
-Paste these lines into the terminal of your rented machine. If you use a
-newer Jasna, change `0.11.1` to your version.
+Paste these lines into the terminal of your rented machine. They download the
+newest Jasna into `/root`:
 
 ```bash
-apt-get update && apt-get install -y zstd wget libgl1 libglib2.0-0
+apt-get update && apt-get install -y curl zstd wget libgl1 libglib2.0-0
 
 cd /root
-for part in 000 001 002 003; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.1/jasna-linux-nvidia-0.11.1.tar.zst.part$part; done
-
-cat jasna-linux-nvidia-0.11.1.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
-cd jasna-linux-nvidia-0.11.1
+curl -s https://api.github.com/repos/Kruk2/jasna/releases/latest | grep -o 'https://[^"]*jasna-linux-nvidia-[^"]*part[0-9]*' | sort -u | xargs -n1 wget
+cat jasna-linux-nvidia-*.part* | zstd -dc | tar -xpf - --same-owner
+cd jasna-linux-nvidia-*/
 ```
 
-Unpack in `/root` like above, as the same user that runs Jasna. Keep Jasna on
-the machine's own disk (ext4, Btrfs, XFS, ZFS or the container's own
-filesystem). Jasna won't start from `/workspace` or a network drive, and LTX
-may refuse to load from a network share or network volume.
+Keep Jasna on the machine's own disk. It won't start from `/workspace`, a
+network drive or a network volume.
 
 ## Check the video encoder
 
@@ -63,13 +55,10 @@ export XDG_CONFIG_HOME=/root/jasna-config
 After `installation verified` it can look stuck for up to a minute. Just
 wait, don't press Ctrl+C.
 
-RunPod's `/workspace` can ignore private file permissions. Keep activation in
-`/root/jasna-config` as above. On other providers, you can use a persistent
-folder that preserves private permissions.
-
-Run the `export` line every time before starting Jasna. A rented GPU counts as
-one of your 3 devices only while Jasna runs on it. Keep `jasna-config` to skip
-entering the code next time; if you lose it, just activate again.
+Run the `export` line every time before starting Jasna. If `jasna-config` is
+gone (for example on a new machine), just activate again. Don't put it in
+RunPod's `/workspace`, and don't share it: anyone who has it can use your
+activation.
 
 ## Restore a video
 
@@ -105,6 +94,3 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 
 `Bit depth 10 ... not supported` is OK. Jasna reads that video a bit
 slower, that's all.
-
-Don't share your `jasna-config` folder. Anyone who has it can use your
-activation.

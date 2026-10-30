@@ -124,13 +124,6 @@ Jasna 0.11.3 以前では `main` ブランチを使ってください。
 フォルダーがなければ作成）。ファイル名は `.enc` を含めてそのままにしてください。
 LTX のジョブをもう一度始めると、ダウンロードの確認は出ません。
 
-基本画質・標準画質では VAE のエンコーダーとデコーダーに蒸留した高速版を使います（元のものの方がわずかに
-シャープです）。別のものを使うには、Jasna を起動する前に
-`JASNA_LTX_VAE_ENCODER=full|half|max` または `JASNA_LTX_VAE_DECODER=full|half|max` を設定してください。
-エンコーダー `half` / `max` には `vae-encoder-half.safetensors.enc` / `vae-encoder-max.safetensors.enc` が必要です
-（`full` は `vae.safetensors.enc` に含まれます）。デコーダー `full` / `half` / `max` には
-`vae-decoder-full.safetensors.enc` / `vae-decoder-half.safetensors.enc` / `vae-decoder-max.safetensors.enc` が必要です。
-
 ### LTX のオプション
 
 - **モデル**: **基本画質**、**標準画質**（デフォルト、おすすめ）、**良好画質**、**高画質**、**最高画質**。
@@ -207,8 +200,7 @@ NVIDIA が必要です。
   [Topaz Video](https://www.topazlabs.com/topaz-video) が必要です（有料、
   Windows のみ）。`iris-2` モデルを使ってください。
 
-LTX では RTX Super Res だけが使えます。LTX の画像より大きいモザイクを 2x で
-シャープにし、小さいモザイクには使いません。例:
+LTX では RTX Super Res だけが、大きなモザイクにだけ使えます。例:
 `jasna --input input.mp4 --output output.mkv --restoration-model-name ltx --secondary-restoration rtx-super-res`
 
 ```bash

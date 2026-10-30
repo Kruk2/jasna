@@ -86,44 +86,22 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 
 最大クリップサイズを変えても、コンパイルはやり直しになりません。
 
-## AMD の高速な復元
+## AMD で GPU エラーが出る場合
 
-AMD では、BasicVSR++ を既定で高速なモードで動かします。Radeon RX 7000 では、
-モザイクの多い動画が約 25% 速く終わります。新しいカードではあまり変わりません。
-VRAM を約 1 GB 多く使います。GPU エラーが出る場合や VRAM が足りない場合は、
-次のように無効にします。
+AMD では、Jasna は既定で 2 つの高速なモードを使います。GPU エラーが出る場合や
+VRAM が足りない場合は、次のように無効にします。
 
 Windows（Jasna フォルダーで PowerShell を開く）:
 
 ```powershell
-$env:JASNA_AMD_GRAPHS = "0"
+$env:JASNA_AMD_GRAPHS = "0"; $env:TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "0"
 .\jasna.exe
 ```
 
 Linux:
 
 ```bash
-JASNA_AMD_GRAPHS=0 ./run_jasna_amd.sh
-```
-
-この設定は、そのターミナルを閉じるまで有効です。
-
-## AMD の実験的アテンション
-
-AMD では、より速い実験的なアテンションを既定で使います。Windows では検出が約 3 倍
-速くなります。GPU エラーが出る場合は、次のように無効にします。
-
-Windows（Jasna フォルダーで PowerShell を開く）:
-
-```powershell
-$env:TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "0"
-.\jasna.exe
-```
-
-Linux:
-
-```bash
-TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
+JASNA_AMD_GRAPHS=0 TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
 ```
 
 この設定は、そのターミナルを閉じるまで有効です。

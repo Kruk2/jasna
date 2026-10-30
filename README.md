@@ -95,15 +95,12 @@ and a command line, and runs on your GPU.
      If using Distrobox, install AMF inside the same container as Jasna.
 4. Add a video, choose settings and click the **▶** button at the bottom.
 
-The system check blocks known old AMD drivers. If it cannot verify the driver
-version, it warns you and lets you continue; compatibility is not confirmed.
-
 **Your first job is slow.** On NVIDIA, Jasna first prepares the models for
 your exact GPU. This takes about **15–60 minutes**, only once. Close other
 apps and don't use the PC during this time. When you update Jasna, copy the
 `model_weights` folder to the new version, so you don't wait again. LTX may
-still ask to download its model again after an update.
-UNet 4x also needs preparation on its first use on AMD.
+still ask to download its model again after an update. On AMD, only UNet 4x
+needs this preparation, on its first use.
 
 Every setting has a tooltip: move the mouse over the ⓘ icon. Out of GPU
 memory (VRAM)? Lower **Max Clip Size**, for example from `90` to `60`. See
@@ -166,14 +163,12 @@ GitHub.
 
 One License code works on **3 devices at the same time**.
 
-- **PC with a TPM 2.0 security chip** (most Windows 11 PCs): after
-  activation, Jasna works offline and the PC keeps one of your 3 slots.
-  Windows may ask for permission once; that is a one-time license check.
-  Reinstalling the system or changing the GPU, disk or RAM keeps the slot. A
-  new motherboard or a security chip reset in the BIOS counts as a new PC.
-- **Other PCs and rented GPUs**: Jasna checks your license online while it
-  uses supporter models, so keep the PC connected. A device counts only while
-  Jasna runs; close it and another device can start. See
+- **PC with a TPM 2.0 security chip** (most Windows 11 PCs): after one online
+  activation, Jasna works offline. The PC keeps one of your 3 slots. Windows
+  may ask for permission once. A new motherboard or a security chip reset
+  counts as a new PC.
+- **Other PCs, rented GPUs and Docker**: Jasna needs internet while it uses
+  supporter models. A device counts only while Jasna runs. See
   [Cloud GPUs](docs/en/cloud.md).
 - Linux with a security chip: to use it offline, run
   `sudo usermod -aG tss $USER`, log in again and activate again.
@@ -205,14 +200,15 @@ Almost everything runs on the GPU, from reading the video to saving it.
    copied (encoded again only if the output format can't hold it).
 
 On NVIDIA, the first job prepares the models for steps 2 and 4 (and UNet 4x,
-if used) for your exact GPU. UNet 4x also prepares itself on AMD. The result is saved in
+if used) for your exact GPU; on AMD, only UNet 4x. The result is saved in
 `model_weights` and used again later. You can copy it to a newer Jasna
 version.
 
 LTX works differently. It goes over the video in 4 passes: find mosaics,
 prepare, restore with a diffusion model, save. It is slower but can add more
-real detail. Its quality choices: Standard (default, fastest), Good (about 1.5x
-slower), High (about 2.5x slower) and Top (about 5x slower). See
+real detail. Its quality choices: Basic (about 1.3x faster than Standard),
+Standard (default), Good (about 1.5x slower), High (about 2.5x slower) and Top
+(about 5x slower). See
 [Choosing models](docs/en/models.md#restoration-model).
 
 LTX jobs can pause and continue. See

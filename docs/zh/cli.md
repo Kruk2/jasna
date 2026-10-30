@@ -285,9 +285,7 @@ jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
 ```
 
-- 有 TPM 2.0 安全芯片时，激活后可离线使用。Windows 可能会请求一次权限，这是一次性的许可证检查。
-  在 Linux 上需要运行 `sudo usermod -aG tss $USER` 时，Jasna 会提示。
-- 否则 Jasna 使用支持者模型时会在线核验许可证。只有 Jasna 运行时才占用设备名额。
+- 在 Linux 上需要运行 `sudo usermod -aG tss $USER` 时，Jasna 会提示。
 - 租用的 GPU（RunPod、Vast）：把 `XDG_CONFIG_HOME` 设为一个你会保留的私有文件夹。
   它保存你的激活，所以每次运行都要用同一个文件夹：
 
@@ -296,8 +294,8 @@ jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
   ./jasna --license-code "YOUR_LICENSE_CODE"
   ```
 
-  不要使用 RunPod 的 `/workspace`，它会忽略私有文件权限。完整步骤：[云 GPU](cloud.md)。
-- 设备名额、隐私，以及激活失败时怎么办：[激活支持者模型](gui.md#激活支持者模型)。
+  不要使用 RunPod 的 `/workspace`。完整步骤：[云 GPU](cloud.md)。
+- 设备名额，以及激活失败时怎么办：[激活支持者模型](gui.md#激活支持者模型)。
 
 ## 基准测试
 
