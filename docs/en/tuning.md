@@ -85,44 +85,22 @@ Same 1080p video, clip size 180:
 
 Changing max clip size does not start the compilation again.
 
-## AMD faster restoration
+## AMD: GPU errors
 
-On AMD, Jasna runs BasicVSR++ in a faster mode by default. On Radeon RX 7000
-cards, videos with a lot of mosaic finish about 25% faster. Newer cards gain
-little. It uses about 1 GB more VRAM. If you get GPU errors or run out of VRAM,
-turn it off:
+On AMD, Jasna uses two faster modes by default. If you get GPU errors or run
+out of VRAM, turn them off:
 
 Windows (PowerShell, in the Jasna folder):
 
 ```powershell
-$env:JASNA_AMD_GRAPHS = "0"
+$env:JASNA_AMD_GRAPHS = "0"; $env:TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "0"
 .\jasna.exe
 ```
 
 Linux:
 
 ```bash
-JASNA_AMD_GRAPHS=0 ./run_jasna_amd.sh
-```
-
-This lasts until you close that terminal.
-
-## AMD experimental attention
-
-On AMD, Jasna uses a faster experimental attention by default. It makes
-detection about 3x faster on Windows. If you get GPU errors, turn it off:
-
-Windows (PowerShell, in the Jasna folder):
-
-```powershell
-$env:TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "0"
-.\jasna.exe
-```
-
-Linux:
-
-```bash
-TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
+JASNA_AMD_GRAPHS=0 TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
 ```
 
 This lasts until you close that terminal.

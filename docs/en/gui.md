@@ -97,14 +97,10 @@ On the first start of each version, Jasna checks FFprobe, the GPU, the driver
 and the install path. You can run it again from the header, for example after a driver
 update.
 
-On AMD it also checks AMD's AMF video runtime, which Jasna needs to read and
-write videos. To install the AMD driver and AMF, see
-[Quick start](../../README.md#quick-start).
-
-The AMD driver check stops setup when it detects an older driver: Windows needs
-32.0.31041.5005 or newer; AMD's Linux driver needs 30.10.2 or newer.
-If the version cannot be verified, including some Linux distribution drivers,
-Jasna shows a warning and lets you continue. This does not confirm compatibility.
+On AMD it also checks the AMD driver and AMD's AMF video runtime, which Jasna
+needs to read and write videos. If the driver is older than tested or its
+version can't be read, you get a warning and can still continue. If videos then
+fail, install the driver and AMF from [Quick start](../../README.md#quick-start).
 
 ## Other settings
 
@@ -127,10 +123,9 @@ your license by itself:
   offline from then on. On Windows, a permission prompt may appear once; this
   is a one-time license check for offline use. If you decline it, Jasna checks
   online instead; enter your License code again to switch to offline.
-- **Other PCs and rented GPUs**: Jasna checks your license online while it uses
-  supporter models, so keep the PC connected. If the connection drops, the
-  video that is running finishes; the queue stops if Jasna can't reach the
-  check for about 15 minutes. Start it again once you are back online.
+- **Other PCs, rented GPUs and Docker**: Jasna checks your license online while
+  it uses supporter models, so keep the PC connected. If the connection stays
+  down, the queue stops. Start it again once you are back online.
 
 Good to know:
 
@@ -148,8 +143,6 @@ Good to know:
 - Moved from an older Jasna? Your activation carries over on the first job. If
   it says the activation moved, enter your License code again. Jasna 0.11 keeps
   working on the same PC.
-- Activation sends only your License code and, for offline use, a one-time
-  check from the security chip.
 - Have an email and key from Jasna 0.10? That key no longer works. Get a new
   License code from where you bought it.
 

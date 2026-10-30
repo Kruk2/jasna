@@ -127,13 +127,6 @@ Put them all in `model_weights/ltx-restore` inside your Jasna folder (create the
 `ltx-restore` folder if it is missing). Keep the file names exactly as they are,
 including `.enc`. Start the LTX job again; Jasna will not ask to download.
 
-Basic and Standard Quality use faster distilled copies of the VAE encoder and decoder; the full ones are slightly
-sharper. To use others, set
-`JASNA_LTX_VAE_ENCODER=full|half|max` or `JASNA_LTX_VAE_DECODER=full|half|max` before starting Jasna.
-Encoder `half` / `max` needs `vae-encoder-half.safetensors.enc` / `vae-encoder-max.safetensors.enc`
-(`full` is inside `vae.safetensors.enc`); decoder `full` / `half` / `max` needs
-`vae-decoder-full.safetensors.enc` / `vae-decoder-half.safetensors.enc` / `vae-decoder-max.safetensors.enc`.
-
 ### LTX options
 
 - **Model**: **Basic Quality**, **Standard Quality** (default, recommended), **Good Quality**, **High Quality** or
@@ -209,8 +202,7 @@ require NVIDIA.
   [Topaz Video](https://www.topazlabs.com/topaz-video), which is paid and
   Windows only. Use the `iris-2` model.
 
-With LTX only RTX Super Res works. It sharpens mosaics too big for LTX's
-picture, at 2x, and leaves smaller ones alone. Example:
+With LTX, only RTX Super Res works, and only on large mosaics. Example:
 `jasna --input input.mp4 --output output.mkv --restoration-model-name ltx --secondary-restoration rtx-super-res`
 
 ```bash

@@ -298,11 +298,7 @@ jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
 ```
 
-- TPM 2.0 セキュリティチップがあれば、有効化後はオフラインで動きます。Windows では
-  一度だけ許可を求めることがあります。これは一度きりのライセンス確認です。Linux で
-  `sudo usermod -aG tss $USER` が必要なときは、Jasna が知らせます。
-- それ以外では、支援者向けモデルを使う間、ライセンスをオンラインで確認します。
-  台数に数えられるのは Jasna を動かしている間だけです。
+- Linux で `sudo usermod -aG tss $USER` が必要なときは、Jasna が知らせます。
 - レンタル GPU（RunPod、Vast）: `XDG_CONFIG_HOME` を残しておく非公開の
   フォルダーに設定します。このフォルダーに有効化の情報が入るので、毎回同じ
   フォルダーを使ってください:
@@ -312,9 +308,8 @@ jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
   ./jasna --license-code "YOUR_LICENSE_CODE"
   ```
 
-  RunPod の `/workspace` は使わないでください。非公開のファイル権限が無視されます。
-  詳しい手順: [クラウド GPU](cloud.md)。
-- 台数の枠、プライバシー、有効化に失敗したときの対処:
+  RunPod の `/workspace` は使わないでください。詳しい手順: [クラウド GPU](cloud.md)。
+- 台数の枠と、有効化に失敗したときの対処:
   [支援者向けモデルの有効化](gui.md#支援者向けモデルの有効化)。
 
 ## ベンチマーク

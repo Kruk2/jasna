@@ -296,11 +296,7 @@ jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
 ```
 
-- With a TPM 2.0 security chip, Jasna works offline after activation. On
-  Windows it may ask for permission once; that is a one-time license check.
-  Linux tells you when you need `sudo usermod -aG tss $USER` for offline use.
-- Otherwise Jasna checks the license online while it uses supporter models. A
-  device counts only while Jasna runs.
+- Linux tells you when you need `sudo usermod -aG tss $USER` for offline use.
 - Rented GPUs (RunPod, Vast): set `XDG_CONFIG_HOME` to a private folder that
   you keep. It holds your activation, so use the same folder every run:
 
@@ -309,9 +305,8 @@ jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
   ./jasna --license-code "YOUR_LICENSE_CODE"
   ```
 
-  Don't use RunPod's `/workspace`, which ignores private file permissions.
-  Full steps: [Cloud GPUs](cloud.md).
-- Device slots, privacy and what to do when activation fails:
+  Don't use RunPod's `/workspace`. Full steps: [Cloud GPUs](cloud.md).
+- Device slots and what to do when activation fails:
   [Activate supporter models](gui.md#activate-supporter-models).
 
 ## Benchmark

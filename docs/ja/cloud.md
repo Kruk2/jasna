@@ -1,46 +1,37 @@
 # クラウド GPU (RunPod、Vast、Docker)
 
-> どのライセンスコードでもレンタル GPU で使えます。Jasna を動かしている間、3 台の枠の 1 つに数えられます。
-
-レンタルした GPU でも Jasna を使えます。Linux NVIDIA 版をコマンドラインで
-対応するコンテナー内で使います。GitHub のソース版では支援者向けモデルを
-使えません。
+レンタルした GPU でも、Linux NVIDIA 版をコマンドラインで使えます。ライセンスコードも
+そのまま使えます。そのマシンが 3 台の枠の 1 つに数えられるのは Jasna を動かしている
+間だけで、支援者向けモデルを使う間はインターネット接続が必要です。GitHub のソース版
+では支援者向けモデルを使えません。
 
 ## 必要なもの
 
-- マシンのインターネット接続。Jasna は支援者向けモデルを使う間、ライセンスを
-  オンラインで確認します。
-- 普通のコンテナー。Vast は使えます。`--pid=host` で起動した
-  Docker コンテナーは使えません。
-- 今のところ RunPod と gVisor コンテナー（Modal など）では LTX が使えません
-  （BasicVSR++ は使えます）。LTX には Vast を使ってください。
-- ドライバー **580 以降**の NVIDIA GPU。
-- **80 GB** 以上のディスク。
+- ドライバー **580 以降**の NVIDIA GPU と、**80 GB** 以上のディスク。
 - テンプレートかインスタンスの設定に `NVIDIA_DRIVER_CAPABILITIES=all`。
   これがないと動画を読み込めず、保存もできません。Vast では Docker
   オプションに `-e NVIDIA_DRIVER_CAPABILITIES=all` を追加します。
 - `root` でログイン。RunPod と Vast は最初からそうなっています。
+- LTX には Vast を使ってください。今のところ RunPod と Modal では LTX が使えません
+  （BasicVSR++ は使えます）。
+- Docker: コンテナーを `--pid=host` で起動しないでください。
 
 ## インストール
 
-借りたマシンのターミナルに次の行を貼り付けます。新しい Jasna を使う場合は
-`0.11.1` をそのバージョンに変えてください。
+借りたマシンのターミナルに次の行を貼り付けます。最新の Jasna を `/root` に
+ダウンロードします:
 
 ```bash
-apt-get update && apt-get install -y zstd wget libgl1 libglib2.0-0
+apt-get update && apt-get install -y curl zstd wget libgl1 libglib2.0-0
 
 cd /root
-for part in 000 001 002 003; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.1/jasna-linux-nvidia-0.11.1.tar.zst.part$part; done
-
-cat jasna-linux-nvidia-0.11.1.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
-cd jasna-linux-nvidia-0.11.1
+curl -s https://api.github.com/repos/Kruk2/jasna/releases/latest | grep -o 'https://[^"]*jasna-linux-nvidia-[^"]*part[0-9]*' | sort -u | xargs -n1 wget
+cat jasna-linux-nvidia-*.part* | zstd -dc | tar -xpf - --same-owner
+cd jasna-linux-nvidia-*/
 ```
 
-上のとおり `/root` に、Jasna を実行するのと同じユーザーで展開してください。
-Jasna はマシン自身のディスク（ext4、Btrfs、XFS、ZFS、またはコンテナ自身の
-ファイルシステム）に置きます。`/workspace` やネットワークドライブからは起動
-できず、ネットワーク共有やネットワークボリュームでは LTX が読み込めない
-ことがあります。
+Jasna はマシン自身のディスクに置いてください。`/workspace`、ネットワークドライブ、
+ネットワークボリュームからは起動できません。
 
 ## 動画エンコーダーを確認
 
@@ -64,14 +55,9 @@ export XDG_CONFIG_HOME=/root/jasna-config
 `installation verified` の後、最大 1 分ほど止まって見えることがあります。
 Ctrl+C は押さずに待ってください。
 
-RunPod の `/workspace` ではファイルを非公開にする権限が反映されない場合が
-あります。有効化は上のとおり `/root/jasna-config` に保存してください。
-ほかのサービスでは、非公開の権限を保つ永続フォルダーも使えます。
-
-Jasna を起動する前に毎回 `export` を実行してください。レンタル GPU が 3 台の
-枠の 1 つに数えられるのは、そこで Jasna を動かしている間だけです。
-`jasna-config` を残しておけば、次回コードを入力し直す必要はありません。
-なくした場合は、もう一度有効化するだけです。
+Jasna を起動する前に毎回 `export` を実行してください。`jasna-config` がなくなった
+場合（新しいマシンなど）は、もう一度有効化するだけです。RunPod の `/workspace` には
+置かず、人にも渡さないでください。持っている人は誰でもあなたの有効化を使えてしまいます。
 
 ## 動画を復元する
 
@@ -107,6 +93,3 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 
 `Bit depth 10 ... not supported` は大丈夫です。その動画の読み込みが少し遅く
 なるだけです。
-
-`jasna-config` フォルダーは人に渡さないでください。持っている人は誰でも
-あなたの有効化を使えてしまいます。
