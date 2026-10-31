@@ -372,7 +372,7 @@ def _check_amd_driver_version() -> tuple[bool | None, str]:
         try:
             result = subprocess.run(
                 [str(powershell), "-NoProfile", "-NonInteractive", "-Command", command],
-                capture_output=True, text=True, check=False, timeout=10,
+                capture_output=True, text=True, errors="replace", check=False, timeout=10,
                 **subprocess_no_window_kwargs(),
             )
         except (OSError, subprocess.TimeoutExpired) as error:
