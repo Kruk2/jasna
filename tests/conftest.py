@@ -1,5 +1,6 @@
 """Load NVIDIA TensorRT DLLs first when the active environment provides them."""
 import gc
+import hashlib
 import sys
 import time
 from importlib.util import find_spec
@@ -253,3 +254,12 @@ def amd_driver_environment(monkeypatch, amd_gpu):
 
     amd_gpu()
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+
+
+@pytest.fixture
+def sparse_ltx_downloads(monkeypatch):
+    """A sparse file of a published LTX size counts as that current download."""
+    from jasna.ltx import model_files
+
+    zeros = hashlib.sha256(bytes(1 << 20)).hexdigest()
+    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_HEADS", dict.fromkeys(model_files.LTX_DOWNLOAD_HEADS, zeros))

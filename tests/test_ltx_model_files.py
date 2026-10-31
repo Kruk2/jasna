@@ -1,5 +1,6 @@
 import hashlib
 import io
+import os
 import runpy
 import ssl
 import urllib.error
@@ -95,6 +96,8 @@ def test_outdated_encrypted_model_is_missing_until_verified_download_replaces_it
     entries = {name: replace(model_files.LTX_DOWNLOADS[name], size_bytes=len(current),
                             sha256=hashlib.sha256(current).hexdigest()) for name in names}
     monkeypatch.setattr(model_files, "LTX_DOWNLOADS", {**model_files.LTX_DOWNLOADS, **entries})
+    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_HEADS",
+                        {**model_files.LTX_DOWNLOAD_HEADS, **{name: hashlib.sha256(current).hexdigest() for name in names}})
     monkeypatch.setattr(model_files, "is_frozen", lambda: True)
     monkeypatch.setattr("jasna.license_api.require_protection", lambda: None)
     checked = Mock()
@@ -103,13 +106,11 @@ def test_outdated_encrypted_model_is_missing_until_verified_download_replaces_it
         (tmp_path / (name + ".enc")).write_bytes(current)
     transformer = tmp_path / (names[0] + ".enc")
     transformer.write_bytes(b"o" * old_size)
-    with monkeypatch.context() as stat_only:
-        stat_only.setattr(Path, "open", lambda *a, **k: pytest.fail("availability read model bytes"))
-        assert not model_files.model_installed(tmp_path, "distilled2", fast=False)
-        needed = model_files.missing_downloads(tmp_path, "distilled2", fast=False)
-        assert needed == [replace(entries[names[0]], name=transformer.name)]
-        with pytest.raises(FileNotFoundError, match="missing or outdated"):
-            LtxModelFiles.from_dir(tmp_path, "distilled2", fast=False)
+    assert not model_files.model_installed(tmp_path, "distilled2", fast=False)
+    needed = model_files.missing_downloads(tmp_path, "distilled2", fast=False)
+    assert needed == [replace(entries[names[0]], name=transformer.name)]
+    with pytest.raises(FileNotFoundError, match="missing or outdated"):
+        LtxModelFiles.from_dir(tmp_path, "distilled2", fast=False)
     assert checked.call_count == 1
     monkeypatch.setattr(model_files.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(current))
     model_files.download_files(tmp_path, needed, None, mirror_first=False)
@@ -117,6 +118,20 @@ def test_outdated_encrypted_model_is_missing_until_verified_download_replaces_it
     assert model_files.model_installed(tmp_path, "distilled2", fast=False)
     assert model_files.missing_downloads(tmp_path, "distilled2", fast=False) == []
     assert LtxModelFiles.from_dir(tmp_path, "distilled2", fast=False).transformer == transformer
+
+
+def test_an_older_file_of_the_same_size_needs_updating(tmp_path, monkeypatch):
+    name = "vae.safetensors"
+    current, older = b"new" * 30, b"old" * 30
+    monkeypatch.setitem(model_files.LTX_DOWNLOADS, name, replace(model_files.LTX_DOWNLOADS[name], size_bytes=len(current)))
+    monkeypatch.setitem(model_files.LTX_DOWNLOAD_HEADS, name, hashlib.sha256(current).hexdigest())
+    path = tmp_path / (name + ".enc")
+
+    path.write_bytes(older)
+    assert [f.name for f in model_files.missing_downloads(tmp_path, "distilled2", fast=False) if f.name == path.name]
+    path.write_bytes(current)
+    os.utime(path, ns=(1, 1))
+    assert not [f.name for f in model_files.missing_downloads(tmp_path, "distilled2", fast=False) if f.name == path.name]
 
 
 def test_download_verifies_and_replaces_atomically(tmp_path, monkeypatch):
@@ -278,7 +293,9 @@ def test_cli_offers_only_the_fast_models_files(tmp_path, monkeypatch, nvidia_ven
 
 
 @pytest.mark.parametrize("interactive", [False, True])
-def test_cli_explains_models_copied_from_older_release_need_updating(tmp_path, monkeypatch, nvidia_vendor, interactive):
+def test_cli_explains_models_copied_from_older_release_need_updating(
+    tmp_path, monkeypatch, nvidia_vendor, interactive, sparse_ltx_downloads
+):
     import sys
 
     from factories import session_config

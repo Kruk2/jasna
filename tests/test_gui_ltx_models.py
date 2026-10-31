@@ -135,7 +135,9 @@ def test_ensure_does_nothing_when_the_user_declines(tmp_path, monkeypatch, downl
 
 
 @pytest.mark.parametrize("fast,old_size", [(False, 13_368_048_749), (True, 7_733_294_997)])
-def test_ensure_warns_before_replacing_models_from_older_release(tmp_path, monkeypatch, downloadable, fast, old_size):
+def test_ensure_warns_before_replacing_models_from_older_release(
+    tmp_path, monkeypatch, downloadable, fast, old_size, sparse_ltx_downloads
+):
     from jasna.gui.locales import EN
 
     monkeypatch.setattr(model_files, "is_frozen", lambda: True)
@@ -257,7 +259,9 @@ def ltx_installed(tmp_path) -> None:
     _install(tmp_path / "models" / "ltx", LTX_DEFAULT_MODEL, fast=False)
 
 
-def test_start_downloads_only_the_fast_model_then_starts(downloadable, jasna_app, monkeypatch, validated) -> None:
+def test_start_downloads_only_the_fast_model_then_starts(
+    downloadable, jasna_app, monkeypatch, validated, sparse_ltx_downloads
+) -> None:
     _answer(monkeypatch, yes=True)
     monkeypatch.setattr(ltx_models_module, "license_missing", lambda *_args: False)
     downloaded: list[str] = []
