@@ -59,6 +59,18 @@ def start_unofficial_notice_check(on_done) -> threading.Thread:
     return _start(read_unofficial_notice_due, on_done)
 
 
+def start_device_count(on_done) -> threading.Thread:
+    """Calls ``on_done((used, limit, offline PCs, online devices), error)``; asks the license service."""
+
+    def count():
+        require_protection()
+        from jasna.protection import lease
+
+        return lease.device_count()
+
+    return _start(count, on_done)
+
+
 def start_lease_activation(code: str, on_done) -> threading.Thread:
     """Calls ``on_done(Activated, error)``: works offline on PCs with a TPM, otherwise checks online."""
 

@@ -152,8 +152,9 @@ def controlled_activation_workers(monkeypatch):
     pytest.importorskip("jasna.protection.license_store")
     from jasna.gui import activation_worker
 
-    pending = SimpleNamespace(info=[], activation=[])
+    pending = SimpleNamespace(info=[], activation=[], devices=[])
     monkeypatch.setattr(activation_worker, "start_license_info", lambda done: pending.info.append(done))
+    monkeypatch.setattr(activation_worker, "start_device_count", lambda done: pending.devices.append(done))
     monkeypatch.setattr(activation_worker, "start_lease_activation", lambda code, done: pending.activation.append((code, done)))
     return pending
 
@@ -182,7 +183,7 @@ def test_dialog_locks_input_while_activating(tk_root, controlled_activation_work
     assert dialog._status.cget("text") == t("license_service_slots_full")
 
 
-@pytest.mark.parametrize("stage", ["info", "activation"])
+@pytest.mark.parametrize("stage", ["info", "activation", "devices"])
 def test_dialog_ignores_worker_result_after_close(tk_root, controlled_activation_workers, caplog, stage):
     from jasna.gui.components import LicenseDialog
     from jasna.protection import lease
@@ -197,8 +198,12 @@ def test_dialog_ignores_worker_result_after_close(tk_root, controlled_activation
         dialog._main_thread._run_pending()
         dialog._activate_button.invoke()
         _, done = pending.activation.pop()
+    if stage == "devices":
+        done((True, "online"), None)
+        dialog._main_thread._run_pending()
+        done = pending.devices.pop()
     dialog.destroy()
-    done(lease.Activated([], "missing") if stage == "activation" else (False, None), None)
+    done({"info": (False, None), "activation": lease.Activated([], "missing"), "devices": (1, 3, 0, 1)}[stage], None)
     tk_root.update()
     activated.assert_not_called()
     assert "closed activation dialog" in caplog.text
@@ -258,7 +263,55 @@ def test_lease_dialog_names_the_saved_activation_when_reopened(tk_root, lease_ap
     monkeypatch.setattr(license_store, "is_licensed", lambda: True)
     monkeypatch.setattr(offline, "saved_grant", lambda: grant)
     monkeypatch.setattr(lease, "load_token", lambda: token)
+    monkeypatch.setattr(lease, "device_count", lambda: (2, 3, 1, 1))
     assert activation_worker.read_license_info() == (True, mode)
     dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     settle_activation(dialog)
     assert dialog._status.cget("text") == t(message)
+    assert dialog._devices.cget("text") == t("license_devices_count", used=2, limit=3, offline=1, online=1)
+    assert dialog._devices.winfo_manager() == "pack"
+
+
+def test_device_count_failure_keeps_the_activation_status(tk_root, lease_api, settle_activation, monkeypatch):
+    from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import t
+    from jasna.protection import lease, license_store, offline
+    from jasna.protection.activation import ActivationServiceError
+
+    monkeypatch.setattr(license_store, "is_licensed", lambda: True)
+    monkeypatch.setattr(offline, "saved_grant", lambda: None)
+    monkeypatch.setattr(lease, "load_token", lambda: {"token": "t", "models": []})
+
+    def unreachable():
+        raise ActivationServiceError("network_error")
+
+    monkeypatch.setattr(lease, "device_count", unreachable)
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
+    settle_activation(dialog)
+    assert dialog._devices.cget("text") == t("license_devices_unavailable")
+    assert dialog._status.cget("text") == t("license_lease_active")
+    assert dialog._activate_button.cget("state") == "normal"
+
+
+def test_device_count_waits_on_screen_and_a_new_activation_hides_it(tk_root, controlled_activation_workers):
+    from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import t
+    from jasna.protection import lease
+
+    pending = controlled_activation_workers
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
+    pending.info.pop()((False, None), None)
+    dialog._main_thread._run_pending()
+    assert pending.devices == [] and dialog._devices.winfo_manager() == ""
+    dialog.destroy()
+
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
+    pending.info.pop()((True, "online"), None)
+    dialog._main_thread._run_pending()
+    assert dialog._devices.cget("text") == t("license_devices_checking")
+    dialog._code.insert(0, "JL1-code")
+    dialog._activate_button.invoke()
+    _, activated = pending.activation.pop()
+    activated(lease.Activated([], "missing"), None)
+    dialog._main_thread._run_pending()
+    assert dialog._devices.winfo_manager() == ""

@@ -132,6 +132,8 @@ Good to know:
 - The header shows **Active (offline)** or **Active (online)**.
 - One License code works on **3 devices at the same time**. Activating the
   same PC again does not use a new slot.
+- Reopen **Activate Jasna** to see **Devices in use**: offline PCs plus
+  devices running supporter models online right now. Jasna checks this online.
 - Offline PCs keep their slot. Reinstalling the system or changing the GPU,
   disk or RAM keeps it; a new motherboard or a security chip reset in the BIOS
   counts as a new PC. To free a slot, ask where you got your License code.

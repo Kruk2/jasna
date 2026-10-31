@@ -161,7 +161,8 @@ GitHub.
 2. In Jasna, open **Activate Jasna**, enter the License code and press
    **Activate**.
 
-One License code works on **3 devices at the same time**.
+One License code works on **3 devices at the same time**. To see how many are
+in use, open **Activate Jasna** again.
 
 - **PC with a TPM 2.0 security chip** (most Windows 11 PCs): after one online
   activation, Jasna works offline. The PC keeps one of your 3 slots. Windows
