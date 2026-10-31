@@ -90,6 +90,37 @@ def cuda_driver() -> ctypes.CDLL:
     return lib
 
 
+def _windows_torch_hip_runtime() -> ctypes.CDLL:
+    """The amdhip64 copy torch_hip.dll imports. The frozen app maps more than one copy, and kernels launch only
+    on the copy whose contexts torch made (another copy fails with hipErrorContextIsDestroyed)."""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+    kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+    kernel32.GetModuleHandleExW.argtypes = [ctypes.c_uint32, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    kernel32.GetModuleFileNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint32]
+    base = kernel32.GetModuleHandleW("torch_hip.dll")
+    if not base:
+        raise RuntimeError("torch_hip.dll is not loaded")
+
+    def u32(offset: int) -> int:
+        return ctypes.c_uint32.from_address(base + offset).value
+
+    # PE32+: the optional header follows the 24-byte file header; data directory 1 is the import table.
+    descriptor = base + u32(u32(0x3C) + 24 + 112 + 8)
+    while name := ctypes.c_uint32.from_address(descriptor + 12).value:
+        if ctypes.string_at(base + name).lower().startswith(b"amdhip64"):
+            function = ctypes.c_uint64.from_address(base + ctypes.c_uint32.from_address(descriptor + 16).value).value
+            module = ctypes.c_void_p()
+            from_address_unchanged_refcount = 0x4 | 0x2
+            if not kernel32.GetModuleHandleExW(from_address_unchanged_refcount, function, ctypes.byref(module)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            path = ctypes.create_unicode_buffer(32768)
+            kernel32.GetModuleFileNameW(module, path, len(path))
+            return ctypes.CDLL(path.value)
+        descriptor += 20
+    raise RuntimeError("torch_hip.dll does not import the HIP runtime")
+
+
 def hip_runtime() -> ctypes.CDLL:
     """The HIP runtime Torch itself loaded (ROCm SDK wheel on Linux and Windows)."""
     global _hip
@@ -97,10 +128,7 @@ def hip_runtime() -> ctypes.CDLL:
         return _hip
 
     if os.name == "nt":
-        # By name Windows returns the copy torch_hip already uses; torch's helper loads rocm_sdk's copy by
-        # path, and the frozen app also ships one next to jasna.exe, so that would be a second runtime whose
-        # contexts torch never made (hipErrorContextIsDestroyed on the first kernel launch).
-        lib = ctypes.CDLL(f"amdhip64_{torch.version.hip.split('.')[0]}.dll")
+        lib = _windows_torch_hip_runtime()
     else:
         from torch.cuda._utils import _get_hip_runtime_library
 
