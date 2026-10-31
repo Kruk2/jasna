@@ -7,6 +7,7 @@ from argparse import Namespace
 import torch
 
 from jasna.engine_paths import default_restoration_model_path
+from jasna.main import batch_size_from_args
 from jasna.benchmark.basicvsrpp_restoration import benchmark_basicvsrpp_restoration
 from jasna.benchmark.detection_speed import benchmark_lada_yolo_detection_speed, benchmark_rfdetr_detection_speed
 from jasna.os_utils import check_required_executables, check_supported_gpu, gpu_check_error
@@ -107,7 +108,7 @@ def run_benchmark_cli(args: Namespace) -> None:
     )
     run_benchmarks(
         device=torch.device(str(args.device)),
-        batch_size=int(args.batch_size),
+        batch_size=batch_size_from_args(args),
         fp16=bool(args.fp16),
         benchmark_videos=benchmark_videos,
         detection_score_threshold=(

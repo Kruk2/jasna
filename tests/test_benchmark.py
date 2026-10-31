@@ -47,6 +47,23 @@ def test_benchmark_cli_preserves_auto_threshold_for_each_benchmark() -> None:
     assert run_benchmarks.call_args.kwargs["detection_score_threshold"] is None
 
 
+def test_benchmark_cli_without_batch_size_uses_the_vendor_default(monkeypatch) -> None:
+    import jasna.mosaic.detection_registry as registry
+    from jasna.benchmark import run_benchmark_cli
+    from jasna.main import build_parser
+
+    monkeypatch.setattr(registry, "is_amd_device", lambda _device: False)
+    args = build_parser().parse_args(["--benchmark"])
+    with (
+        patch("jasna.benchmark.check_required_executables"),
+        patch("jasna.benchmark.check_supported_gpu", return_value=(True, "gpu")),
+        patch("jasna.benchmark.run_benchmarks") as run_benchmarks,
+    ):
+        run_benchmark_cli(args)
+
+    assert run_benchmarks.call_args.kwargs["batch_size"] == 4
+
+
 def test_rfdetr_benchmark_uses_its_model_recommended_threshold(
     tmp_path,
 ) -> None:
