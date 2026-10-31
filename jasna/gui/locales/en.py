@@ -406,7 +406,7 @@ EN = {
         "license_lease_hint": "Paste your License code and select Activate. On a computer with a TPM 2.0 security chip, Jasna then works offline. Otherwise it checks your license online while it uses supporter models, so keep this computer connected. One License code works on 3 devices at the same time.",
         "license_offline_active": "Jasna activated. It works offline on this computer.",
         "license_offline_permission": "Checking your License code… Windows may ask for permission once. This is a one-time license check for offline use.",
-        "license_tss_hint": "For offline use run `sudo usermod -aG tss $USER`, log in again, then enter your License code again.",
+        "license_tss_hint": "For offline use run `sudo usermod -aG tss $USER`, restart the PC, then enter your License code again.",
         "license_tpm_missing": "No security chip (TPM) was found, so Jasna works online.",
         "license_tpm_uncertified": "Your security chip has no maker certificate Jasna can check, so Jasna works online.",
         "license_tpm_unusable": "Your security chip (TPM) could not be used, so Jasna works online.",

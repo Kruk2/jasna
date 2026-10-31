@@ -142,7 +142,7 @@ Good to know:
 - If Jasna works online on a PC with a security chip, the activation message
   says why.
 - Linux with a security chip: Jasna asks you to run
-  `sudo usermod -aG tss $USER`. Log in again and activate again to work
+  `sudo usermod -aG tss $USER`. Restart the PC and activate again to work
   offline. On NixOS, first add `security.tpm2.enable = true;` and put your
   user in the `tss` group in `configuration.nix`.
 - Linux in distrobox or toolbox: the container must use the host's TPM group.

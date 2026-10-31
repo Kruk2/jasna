@@ -172,7 +172,7 @@ in use, open **Activate Jasna** again.
   supporter models. A device counts only while Jasna runs. See
   [Cloud GPUs](docs/en/cloud.md).
 - Linux with a security chip: to use it offline, run
-  `sudo usermod -aG tss $USER`, log in again and activate again.
+  `sudo usermod -aG tss $USER`, restart the PC and activate again.
 
 Coming from Jasna 0.11? Your activation carries over the first time you use a
 supporter model, and Jasna 0.11 keeps working on the same PC.

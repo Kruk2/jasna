@@ -113,7 +113,7 @@
 - 在线设备只有 Jasna 运行时才占用名额。提示“已在 3 台设备上使用”？请先关闭其他设备上的
   Jasna，再重新开始。
 - 有安全芯片的电脑仍在线使用时，激活提示会说明原因。
-- 有安全芯片的 Linux：Jasna 会提示运行 `sudo usermod -aG tss $USER`。重新登录后再激活一次，
+- 有安全芯片的 Linux：Jasna 会提示运行 `sudo usermod -aG tss $USER`。重启电脑后再激活一次，
   即可离线使用。NixOS 需先在 `configuration.nix` 中加入 `security.tpm2.enable = true;`，并把用户加入 `tss` 组。
 - 在 distrobox 或 toolbox 里使用 Linux：容器必须能使用主机的 TPM 组。在容器内运行
   `ls -ln /dev/tpmrm0` 可看到组号；如果 `id` 里没有这个组号，请加上
