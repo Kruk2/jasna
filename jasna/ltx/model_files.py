@@ -6,6 +6,7 @@ folder.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import http.client
 import json
@@ -102,6 +103,29 @@ LTX_DOWNLOADS: dict[str, DownloadableFile] = {
         ("vae-encoder-max.safetensors", 292_811_931, "580e5447d7bb686a5003488c2ab14c6d6cdedc5f2d19254f5e57d159f6a45393"),
     )
 }
+
+
+# sha256 of the first MiB of each published file: tells a current file from an older one of
+# the same size without reading it all.
+LTX_DOWNLOAD_HEADS: dict[str, str] = {
+    "ltx-restore-alpha1-distill1-int8.safetensors": "d00e26c6379f6d3e3a8fda2f1fd1ec5a1b39b8c7150578f13ad55596235eed3b",
+    "ltx-restore-alpha1-distill1-nvfp4.safetensors": "46fdbdd8a24292850323734c3583281c94a25d82b33e9e1ac7ecf7ee7cab2e07",
+    "ltx-restore-alpha1-distill2-int8.safetensors": "7ba5ec34869521ef8ae7d7f8350255d6178af2363e32fcfc80bef14cb9858a9b",
+    "ltx-restore-alpha1-distill2-nvfp4.safetensors": "123f38b8e2ff654b7f7c2bac23c7b4c55ef5e1c40bcbb6c66136a29e2cd1267c",
+    "ltx-restore-alpha1-distill4-int8.safetensors": "9e7b3eb53da98af5df082f41a6cb0a885a1addd1c40a5e8c207d7ddf7121159b",
+    "ltx-restore-alpha1-distill4-nvfp4.safetensors": "f36d5cb65c5b0eb41fa3d80af907b03b75421bf84329cc7b22cc9fd8e0835d58",
+    "ltx-restore-alpha1-distill8-int8.safetensors": "bf0b6849a9190c87fe4b12e2a43963e250601a32542680e945b9ba98e1bf9ceb",
+    "ltx-restore-alpha1-distill8-nvfp4.safetensors": "4a65ad70c43a9a720df8cdbb1a7ac7cba4750282c7587e5590939faa91f050f2",
+    "ltx-restore-alpha1-int8.safetensors": "ba6584ba29299f7afdb6e919f6813e80397862d3a4f5acba5cb2ab93724547e8",
+    "ltx-restore-alpha1-nvfp4.safetensors": "9b54d531844e6f3221a68c1f397a8ffdb324dc0209d0fbe7136954fcb1cb5278",
+    "vae.safetensors": "d932e58705da2d5d1154b150c0e0a282c013a7d77ef0943b6ea909ed8839b299",
+    "vae-decoder-full.safetensors": "a63aa936e9c0bd42eb92beb7cb04a4f693e513760474b3d4712cc3f60c872c10",
+    "vae-decoder-half.safetensors": "6386f36f6b270a65b5f243f4250bbad4a519484e4c8249505f68d8a16af4aaed",
+    "vae-decoder-max.safetensors": "71fe2ae3bced0d4cc2b57ca8bab1995b47615e343af293cc5b236e60816b1082",
+    "vae-encoder-half.safetensors": "ecc51d50c263277379482ea3a31fb911894c93bd8c64a4bcf01c438c20db3a83",
+    "vae-encoder-max.safetensors": "9a3c99391e70e9ab02a39a5909c0b15d43c9c52eaae3deaffc45e26f3bbbc759",
+}
+_HEAD_BYTES = 1 << 20
 
 
 @dataclass(frozen=True)
@@ -295,10 +319,22 @@ def _current_model_file(path: Path) -> bool:
         info = path.stat()
     except (FileNotFoundError, NotADirectoryError):
         return False
-    # Size detects outdated downloads cheaply; native loading authenticates their bytes.
-    return stat.S_ISREG(info.st_mode) and (
-        path.suffix != ".enc" or info.st_size == LTX_DOWNLOADS[path.name.removesuffix(".enc")].size_bytes
+    if not stat.S_ISREG(info.st_mode):
+        return False
+    if path.suffix != ".enc":
+        return True
+    # Size and the first MiB detect outdated downloads cheaply; native loading authenticates their bytes.
+    name = path.name.removesuffix(".enc")
+    return info.st_size == LTX_DOWNLOADS[name].size_bytes and (
+        _head_digest(path, info.st_size, info.st_mtime_ns) == LTX_DOWNLOAD_HEADS[name]
     )
+
+
+@functools.lru_cache(maxsize=64)
+def _head_digest(path: Path, size: int, mtime_ns: int) -> str:
+    """sha256 of the first MiB; ``size`` and ``mtime_ns`` key the cache to this version of the file."""
+    with open(path, "rb") as file:
+        return hashlib.sha256(file.read(_HEAD_BYTES)).hexdigest()
 
 
 @dataclass(frozen=True)
