@@ -546,3 +546,19 @@ def test_amf_runtime_check_reports_the_load_error(monkeypatch, error) -> None:
     monkeypatch.setattr(ctypes, "CDLL", missing)
 
     assert os_utils.check_amd_amf_runtime() == (False, "libamfrt64.so.1: cannot open shared object file")
+
+
+def test_exit_without_joining_threads_runs_atexit_handlers_and_skips_stuck_threads(tmp_path) -> None:
+    marker = tmp_path / "released"
+    script = (
+        "import atexit, threading, pathlib\n"
+        "from jasna import os_utils\n"
+        "threading.Thread(target=threading.Event().wait).start()\n"
+        f"atexit.register(pathlib.Path({str(marker)!r}).write_text, 'released')\n"
+        "os_utils.exit_without_joining_threads()\n"
+    )
+
+    result = subprocess.run([sys.executable, "-c", script], timeout=60)
+
+    assert result.returncode == 0
+    assert marker.read_text() == "released"
