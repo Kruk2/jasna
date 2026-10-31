@@ -1,3 +1,4 @@
+import atexit
 import logging
 import os
 import platform
@@ -191,6 +192,13 @@ def drop_console_window() -> None:
 
     ctypes.windll.kernel32.FreeConsole()
     _redirect_std_streams_to_null()
+
+
+def exit_without_joining_threads() -> None:
+    """End the process without waiting for non-daemon threads that CUDA/TensorRT may leave running, after the atexit
+    handlers a normal exit runs (freeing the online license slot, stopping LTX workers, removing code caches)."""
+    atexit._run_exitfuncs()
+    os._exit(0)
 
 
 def subprocess_no_window_kwargs() -> dict:

@@ -86,7 +86,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | `unsigned or modified Jasna runtime` | `root` で `/root` に展開し直す。 |
 | `libGL.so.1: cannot open shared object file` | インストールの `apt-get` の行を実行する。 |
 | `Failed to open hevc encoder` | このマシンの動画エンコーダーが壊れています。別のマシンを借りる。 |
-| `in use on three devices` | 別の端末の Jasna を閉じてから、もう一度試す。 |
+| `in use on three devices` | 別の端末の Jasna を閉じるか、閉じたばかりなら15分待ってから、もう一度試す。 |
 | `could not reach the license service` または `lost the connection` | マシンのインターネット接続を確認して、もう一度開始する。 |
 | `No activation found` または `Activate Jasna with your License code` | `export` の行を実行してから Jasna を起動し直すか、もう一度有効化する。 |
 | `unsafe Jasna launch environment` | `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` で起動する。 |

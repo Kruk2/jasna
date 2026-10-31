@@ -1059,6 +1059,4 @@ def run_gui():
     
     app.mainloop()
 
-    # Force-exit the process. CUDA/TensorRT may leave non-daemon threads
-    # or background subprocesses that prevent a clean interpreter shutdown.
-    os._exit(0)
+    os_utils.exit_without_joining_threads()

@@ -415,7 +415,7 @@ ZH = {
         "license_problem_expired": "Jasna 与许可证核验的连接已中断，队列已停止。请检查网络后重新开始。",
         "license_problem_title": "许可证核验",
         "license_problem_offline": "LTX 等支持者模型需要联网核验许可证，队列已停止。请连接网络后重新开始。",
-        "license_problem_devices_full": "此许可证码已在 3 台设备上使用。请先关闭其他设备上的 Jasna，再重新开始。",
+        "license_problem_devices_full": "此许可证码已在 3 台设备上使用。请关闭其他设备上的 Jasna；如果刚刚关闭，请等待 15 分钟，再重新开始。",
         "license_problem_token_not_found": "此激活已失效。请打开“激活 Jasna”并重新输入许可证码。",
         "license_problem_already_converted": "此激活已转移到另一份 Jasna。请打开“激活 Jasna”并输入许可证码。",
         "license_problem_no_activation": "请先用许可证码激活 Jasna，才能使用支持者模型。",

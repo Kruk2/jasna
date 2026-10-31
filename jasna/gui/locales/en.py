@@ -415,7 +415,7 @@ EN = {
         "license_problem_expired": "Jasna lost the connection to check your license, so the queue stopped. Check your internet connection and start again.",
         "license_problem_title": "License check",
         "license_problem_offline": "Supporter models like LTX need the internet to check your license, so the queue stopped. Connect to the internet and start again.",
-        "license_problem_devices_full": "Your License code is already in use on 3 devices. Close Jasna on another device, then start again.",
+        "license_problem_devices_full": "Your License code is already in use on 3 devices. Close Jasna on another device, or wait 15 minutes if you just closed it, then start again.",
         "license_problem_token_not_found": "This activation no longer works. Open Activate Jasna and enter your License code again.",
         "license_problem_already_converted": "This activation moved to another copy of Jasna. Open Activate Jasna and enter your License code.",
         "license_problem_no_activation": "Activate Jasna with your License code to use supporter models.",
