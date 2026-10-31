@@ -96,9 +96,15 @@ def hip_runtime() -> ctypes.CDLL:
     if _hip is not None:
         return _hip
 
-    from torch.cuda._utils import _get_hip_runtime_library
+    if os.name == "nt":
+        # By name Windows returns the copy torch_hip already uses; torch's helper loads rocm_sdk's copy by
+        # path, and the frozen app also ships one next to jasna.exe, so that would be a second runtime whose
+        # contexts torch never made (hipErrorContextIsDestroyed on the first kernel launch).
+        lib = ctypes.CDLL(f"amdhip64_{torch.version.hip.split('.')[0]}.dll")
+    else:
+        from torch.cuda._utils import _get_hip_runtime_library
 
-    lib = _get_hip_runtime_library()
+        lib = _get_hip_runtime_library()
     lib.hipGetDevice.argtypes = [ctypes.POINTER(ctypes.c_int)]
     lib.hipGetDevice.restype = ctypes.c_int
     lib.hipModuleLoadData.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
