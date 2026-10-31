@@ -406,7 +406,7 @@ ZH = {
         "license_lease_hint": "粘贴许可证码并点击“激活”。如果电脑有 TPM 2.0 安全芯片，之后可离线使用。否则 Jasna 使用支持者模型时会在线核验许可证，请保持电脑联网。一个许可证码可同时在 3 台设备上使用。",
         "license_offline_active": "Jasna 已激活。在这台电脑上可离线使用。",
         "license_offline_permission": "正在核验许可证码… Windows 可能会请求一次权限。这是为离线使用进行的一次性许可证检查。",
-        "license_tss_hint": "如需离线使用，请运行 `sudo usermod -aG tss $USER`，重新登录，然后再次输入许可证码。",
+        "license_tss_hint": "如需离线使用，请运行 `sudo usermod -aG tss $USER`，重启电脑，然后再次输入许可证码。",
         "license_tpm_missing": "未找到安全芯片（TPM），因此 Jasna 将在线使用。",
         "license_tpm_uncertified": "你的安全芯片没有 Jasna 可以核验的厂商证书，因此 Jasna 将在线使用。",
         "license_tpm_unusable": "无法使用你的安全芯片（TPM），因此 Jasna 将在线使用。",

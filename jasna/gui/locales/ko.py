@@ -406,7 +406,7 @@ KO = {
         "license_lease_hint": "라이선스 코드를 붙여 넣고 활성화를 선택하세요. TPM 2.0 보안 칩이 있는 컴퓨터에서는 이후 오프라인으로 사용할 수 있습니다. 그 밖의 경우 Jasna는 후원자 모델을 사용하는 동안 라이선스를 온라인으로 확인하므로 이 컴퓨터를 인터넷에 연결해 두세요. 라이선스 코드 하나는 동시에 기기 3대에서 사용할 수 있습니다.",
         "license_offline_active": "Jasna가 활성화되었습니다. 이 컴퓨터에서는 오프라인으로 사용할 수 있습니다.",
         "license_offline_permission": "라이선스 코드를 확인하는 중… Windows가 한 번 권한을 요청할 수 있습니다. 오프라인 사용을 위한 한 번의 라이선스 확인입니다.",
-        "license_tss_hint": "오프라인으로 사용하려면 `sudo usermod -aG tss $USER`를 실행하고 다시 로그인한 뒤 라이선스 코드를 다시 입력하세요.",
+        "license_tss_hint": "오프라인으로 사용하려면 `sudo usermod -aG tss $USER`를 실행하고 PC를 다시 시작한 뒤 라이선스 코드를 다시 입력하세요.",
         "license_tpm_missing": "보안 칩(TPM)을 찾지 못해 Jasna가 온라인으로 작동합니다.",
         "license_tpm_uncertified": "보안 칩에 Jasna가 확인할 수 있는 제조사 인증서가 없어 Jasna가 온라인으로 작동합니다.",
         "license_tpm_unusable": "보안 칩(TPM)을 사용할 수 없어 Jasna가 온라인으로 작동합니다.",
