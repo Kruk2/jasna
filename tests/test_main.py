@@ -151,9 +151,13 @@ def test_a_video_job_needs_input_and_output(capsys, argv, error):
 
 
 def test_log_level_sets_the_logging_level(tmp_path):
-    with patch.object(logging, "basicConfig") as basic_config:
+    root = logging.getLogger()
+    previous = root.level
+    try:
         run_cli(cli_args(tmp_path, "--log-level", "debug"))
-    assert basic_config.call_args.kwargs["level"] == logging.DEBUG
+        assert root.level == logging.DEBUG
+    finally:
+        root.setLevel(previous)
 
 
 def test_disabling_basicvsrpp_compile_skips_its_engine(tmp_path):
