@@ -172,7 +172,9 @@ def test_session_reuses_its_detector_until_detection_settings_change() -> None:
 
 
 def test_build_pipeline_loads_a_segment_model_the_session_lacks() -> None:
-    session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
+    import torch
+
+    session = RestorationSession(device=torch.device("cuda:0"), restoration_pipeline=MagicMock())
     segments = (SegmentRange(1, 2), SegmentRange(3, 4, SegmentRestoration("ltx", 9)))
 
     with (
@@ -353,3 +355,17 @@ def test_a_lut_or_sharpening_encodes_the_parts_between_ranges_again(lut_path, sh
     job = plan_segment_job(config, Path("in.mp4"), spliced, (SegmentRange(2.5, 3.0),))
     unrestored = "copy" if lut_path is None and sharpen_strength == 0 else "reencode"
     assert [span.kind for span in job.splice_plan.spans] == [unrestored, "render", unrestored]
+
+
+@pytest.mark.parametrize("architecture", ["gfx1031", "gfx1152"])
+def test_ltx_refuses_amd_gpus_without_its_prebuilt_kernels(monkeypatch, architecture):
+    """#661: an RX 6700 XT failed mid-job with hipErrorInvalidKernelFile instead of a clear refusal."""
+    import torch
+    from jasna.session_factory import _ltx_model_files
+
+    monkeypatch.setattr("jasna.accelerator.is_amd_device", lambda device: True)
+    monkeypatch.setattr("jasna.accelerator.amd_gpu_architecture", lambda device: architecture)
+    monkeypatch.setattr("jasna.ltx.transformer.require_kernels", lambda device: pytest.fail("loaded unsupported kernels"))
+    config = session_config(restoration_model_name="ltx", ltx_trial=True)
+    with pytest.raises(ValueError, match=rf"^LTX can't run on this AMD GPU \({architecture}\): .*BasicVSR\+\+"):
+        _ltx_model_files(config, torch.device("cuda:0"), log_callback=None)

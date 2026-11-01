@@ -251,11 +251,16 @@ def _ltx_model_files(
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.ltx.model_files import LtxModelFiles
 
-    from jasna.accelerator import supports_nvfp4
+    from jasna.accelerator import TRITON_HIP_ARCHITECTURES, amd_gpu_architecture, is_amd_device, supports_nvfp4
     from jasna.ltx.transformer import require_kernels
 
     if config.ltx_fast and not supports_nvfp4(device):
         raise ValueError(LTX_FAST_NEEDS_BLACKWELL)
+    if is_amd_device(device) and (architecture := amd_gpu_architecture(device)) not in TRITON_HIP_ARCHITECTURES:
+        raise ValueError(
+            f"LTX can't run on this AMD GPU ({architecture}): it needs a Radeon RX 7000 or 9000 series GPU. "
+            "Use BasicVSR++ instead."
+        )
     require_kernels(device)
     if config.ltx_trial:
         from jasna.ltx.model_files import LTX_TRIAL_NOTICE
