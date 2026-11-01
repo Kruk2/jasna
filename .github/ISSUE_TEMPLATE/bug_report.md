@@ -8,6 +8,7 @@ assignees: ''
 ---
 
 ! ! ! DO NOT POST NSFW VIDEOS or SCREENSHOTS ! ! !
+! ! ! USE ENGLISH ! ! !
 Failing to fill this form will result in closing the issue immediately!
 Remove this section
 
