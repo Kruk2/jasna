@@ -448,6 +448,10 @@ def require_kernels(device: torch.device) -> None:
 
         gpu = f" ({amd_gpu_architecture(device)})" if amd else ""
         reason = f" ({kitchen_backend._EXT_ERROR})" if kitchen_backend._EXT_ERROR else ""
+        if amd and not reason:
+            # Kitchen needs matrix cores on every visible AMD GPU, not just the one LTX runs on.
+            visible = ", ".join(arch or "unknown" for arch in kitchen_backend._visible_gfx_arches())
+            reason = f" (visible AMD GPUs: {visible}; set HIP_VISIBLE_DEVICES to the one to use)"
         raise RuntimeError(f"LTX can't run on this GPU{gpu}: comfy-kitchen's INT8 attention did not load{reason}.")
 
 

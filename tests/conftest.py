@@ -71,7 +71,7 @@ def rocm_probe(monkeypatch, tmp_path):
         monkeypatch.setenv(name, "")
         monkeypatch.delenv(name)
 
-    def configure(output, platform, kernel_packs=("gfx1036", "gfx1100", "gfx1151", "gfx1200", "gfx1201")):
+    def configure(output, platform, kernel_packs=("gfx1030", "gfx1036", "gfx1100", "gfx1151", "gfx1200", "gfx1201")):
         monkeypatch.setattr(rocm_bootstrap.sys, "platform", platform)
         packs = tmp_path / "torch" / ".kpack"
         packs.mkdir(parents=True, exist_ok=True)
@@ -85,7 +85,11 @@ def rocm_probe(monkeypatch, tmp_path):
         def probe(*args, **kwargs):
             if isinstance(output, Exception):
                 raise output
-            return subprocess.CompletedProcess(args[0], 0, output)
+            stdout, returncode = output if isinstance(output, tuple) else (output, 0)
+            result = subprocess.CompletedProcess(args[0], returncode, stdout)
+            if kwargs.get("check"):
+                result.check_returncode()
+            return result
 
         monkeypatch.setattr(subprocess, "run", probe)
 

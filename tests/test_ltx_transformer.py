@@ -247,6 +247,20 @@ def test_ltx_refuses_amd_gpus_without_its_prebuilt_kernels(monkeypatch, architec
         T.require_kernels(torch.device("cuda"))
 
 
+def test_ltx_names_every_visible_amd_gpu_when_kitchen_refuses_the_mix(monkeypatch):
+    """#668: an R9700 refused LTX without a reason because another AMD adapter was visible."""
+    comfy_kitchen = pytest.importorskip("comfy_kitchen")
+    from comfy_kitchen.backends import hip as kitchen_hip
+
+    monkeypatch.setattr(comfy_kitchen, "int8_attention_is_available", lambda device: False)
+    monkeypatch.setattr(kitchen_hip, "_EXT_ERROR", None)
+    monkeypatch.setattr(kitchen_hip, "_visible_gfx_arches", lambda: ("gfx1201", None))
+    monkeypatch.setattr(torch.version, "hip", "7.0")
+    monkeypatch.setattr(T, "amd_gpu_architecture", lambda device: "gfx1201")
+    with pytest.raises(RuntimeError, match=r"\(visible AMD GPUs: gfx1201, unknown; set HIP_VISIBLE_DEVICES"):
+        T.require_kernels(torch.device("cuda"))
+
+
 def test_compiled_functions_fail_instead_of_running_eager_past_the_recompile_limit(monkeypatch, torch_config):
     from jasna.tensor_utils import compile_static
 
