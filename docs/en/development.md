@@ -118,8 +118,8 @@ $env:HIP_DEVICE_LIB_PATH = "$R\lib\llvm\amdgcn\bitcode"
 $env:CXX = "$R\lib\llvm\bin\clang-cl.exe"
 ```
 
-Release builds need every Radeon pack above (the build checks; Linux also keeps
-the Instinct ones). For your own GPU, its `device-gfx*` extra is enough.
+Release builds need every pack above (the build checks). For your own GPU, its
+`device-gfx*` extra is enough.
 
 AMD runs RF-DETR as the `rfdetr` torch model and decodes/encodes with AMF
 (software decode when AMF can't). UNet 4x secondary restoration uses a PyTorch

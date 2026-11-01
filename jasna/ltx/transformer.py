@@ -30,9 +30,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
-from jasna.accelerator import (
-    TRITON_HIP_ARCHITECTURES, KernelBackend, amd_gpu_architecture, has_triton, is_amd_device, kernel_backend,
-)
+from jasna.accelerator import KernelBackend, amd_gpu_architecture, has_triton, is_amd_device, kernel_backend
 from jasna.tensor_utils import half_dtype
 
 Weights = Mapping[str, torch.Tensor]
@@ -429,11 +427,6 @@ def require_kernels(device: torch.device) -> None:
     comfy-kitchen's INT8 attention can run on ``device``: without them every LTX pass would run on
     far slower fallbacks."""
     amd = is_amd_device(device)
-    if amd and (architecture := amd_gpu_architecture(device)) not in TRITON_HIP_ARCHITECTURES:
-        raise RuntimeError(
-            f"LTX can't run on this AMD GPU ({architecture}): it needs a Radeon RX 7000 or 9000 series GPU. "
-            "Use BasicVSR++ instead."
-        )
     if not amd and not has_triton():
         raise RuntimeError("LTX restoration needs triton, which is missing from this install. Reinstall Jasna.")
     if importlib.util.find_spec("comfy_kitchen") is None:
