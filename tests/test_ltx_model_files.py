@@ -254,12 +254,30 @@ def test_cli_offers_the_missing_model_only_when_ltx_runs(tmp_path, monkeypatch, 
 
     ltx = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    with pytest.raises(FileNotFoundError, match="Run jasna in a terminal"):
+    with pytest.raises(SystemExit, match="Run jasna in a terminal"):
         main._ensure_ltx_model(ltx, None)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    with pytest.raises(FileNotFoundError, match="missing"):
+    with pytest.raises(SystemExit, match="missing"):
         main._ensure_ltx_model(ltx, None)
     assert "GB" in asked[0] and "ltx-restore-alpha1-distill8-int8" in asked[0]
+
+
+def test_cli_without_input_to_read_explains_the_download_instead_of_failing(tmp_path, monkeypatch, nvidia_vendor):
+    import sys
+
+    from factories import session_config
+    from jasna import main
+
+    def closed_stdin(prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", closed_stdin)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("jasna.license_api.require_protection", lambda: None)
+    ltx = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
+
+    with pytest.raises(SystemExit, match="^Error: .*Run jasna in a terminal"):
+        main._ensure_ltx_model(ltx, None)
 
 
 def test_import_does_not_load_ca_or_start_downloads(monkeypatch):
@@ -285,7 +303,7 @@ def test_cli_offers_only_the_fast_models_files(tmp_path, monkeypatch, nvidia_ven
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (12, 0))
     fast = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path, ltx_fast=True)
 
-    with pytest.raises(FileNotFoundError, match="missing"):
+    with pytest.raises(SystemExit, match="missing"):
         main._ensure_ltx_model(fast, None)
 
     assert "ltx-restore-alpha1-distill8-nvfp4" in asked[0] and "int8" not in asked[0]
@@ -312,7 +330,7 @@ def test_cli_explains_models_copied_from_older_release_need_updating(
             stream.truncate(13_368_048_749 if index == 0 else model_files.LTX_DOWNLOADS[name].size_bytes)
     config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path, ltx_model="distilled2")
 
-    with pytest.raises(FileNotFoundError) as error:
+    with pytest.raises(SystemExit) as error:
         main._ensure_ltx_model(config, None)
     message = asked[0] if interactive else str(error.value)
     assert "need updating" in message and "older Jasna" in message

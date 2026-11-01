@@ -878,11 +878,16 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     message = f"LTX model files {status} in {directory}: {names}."
     if updating:
         message += " Models copied from older Jasna versions cannot be used. Your existing License code still works."
+    terminal_hint = f"Error: {message} Run jasna in a terminal to download them ({size})."
     if not sys.stdin.isatty():
-        raise FileNotFoundError(f"{message} Run jasna in a terminal to download them ({size}).")
-    answer = input(f"{message}\nDownload ({size})? [y/N]: ")
+        sys.exit(terminal_hint)
+    try:
+        answer = input(f"{message}\nDownload ({size})? [y/N]: ")
+    except EOFError:
+        # Windows reports a NUL stdin as a terminal; reading it ends at once.
+        sys.exit(terminal_hint)
     if answer.strip().lower() not in ("y", "yes"):
-        raise FileNotFoundError(message)
+        sys.exit(f"Error: {message}")
     from tqdm import tqdm
 
     from jasna.gui.locales import get_locale
