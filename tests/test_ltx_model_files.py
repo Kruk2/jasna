@@ -366,6 +366,7 @@ def test_licensed_amd_reaches_the_normal_model_preflight(tmp_path, monkeypatch):
     from jasna import accelerator, main, session_factory
 
     monkeypatch.setattr(accelerator, "is_amd_device", lambda device=None: True)
+    monkeypatch.setattr(accelerator, "amd_gpu_architecture", lambda device: "gfx1201")
     monkeypatch.setattr(model_files, "missing_downloads", Mock(side_effect=RuntimeError("normal download preflight")))
     monkeypatch.setattr("jasna.ltx.transformer.require_kernels", Mock(side_effect=RuntimeError("normal kernel preflight")))
     config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
