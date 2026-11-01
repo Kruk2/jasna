@@ -235,26 +235,30 @@ def test_smart_h264_amf_uses_amf_baseline_profile(source_profile: str) -> None:
     assert settings["profile"] == "constrained_baseline"
 
 
-def test_smart_h264_amf_rejects_more_than_three_b_frames() -> None:
+@pytest.mark.parametrize(
+    ("vendor", "max_b_frames", "cap"),
+    [(AcceleratorVendor.AMD, 4, 3), (AcceleratorVendor.NVIDIA, 8, 4)],
+)
+def test_smart_h264_rejects_more_b_frames_than_the_encoder_accepts(vendor, max_b_frames, cap) -> None:
     index = KeyframeIndex(
         (0, 60, 120),
         Fraction(1, 30),
         0,
         180,
-        max_b_frames=4,
+        max_b_frames=max_b_frames,
         uses_b_references=True,
     )
 
     with pytest.raises(
         SmartRenderCompatibilityError,
-        match="AMF H.264 smart rendering supports at most 3 consecutive B-frames; source uses 4",
+        match=f"{vendor.value} H.264 smart rendering supports at most {cap} consecutive B-frames; source uses {max_b_frames}",
     ):
         resolve_smart_encoder_settings(
             "h264",
             _metadata("h264"),
             index,
             {},
-            vendor=AcceleratorVendor.AMD,
+            vendor=vendor,
         )
 
 

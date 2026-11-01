@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import psutil
 import torch
 
-from jasna.accelerator import AcceleratorVendor, vendor_for_device
+from jasna.accelerator import vendor_for_device
 from jasna.job_resume import ResumeJob, resume_directory
 from jasna.media.container_utils import MOV_SUFFIXES
 from jasna.media.encoder_settings import require_encodable_size
@@ -21,6 +21,7 @@ from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
 from jasna.media.video_encoder import VideoEncoder
 from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.media.splice import (
+    H264_SMART_MAX_B_FRAMES,
     KeyframeIndex,
     SplicePlan,
     SpliceSpan,
@@ -522,20 +523,21 @@ class Pipeline:
         for segments in segments_of.values():
             require_one_model(segments)
         ltx_spans = {span for span, segments in segments_of.items() if segments[0].restoration.model == "ltx"}
-        # AMF's H.264 encoder caps at 3 consecutive B-frames, so it cannot
-        # match sources using more; re-render segments would not stitch
-        # cleanly against the stream-copied ones. Fall back to a full
-        # re-encode instead of failing the job (NVIDIA NVENC has no such cap).
+        # Re-rendered segments must match the source's B-frames to stitch
+        # against the stream-copied ones; past the encoder's cap, re-encode all.
+        vendor = vendor_for_device(self.device)
         if (
-            vendor_for_device(self.device) is AcceleratorVendor.AMD
-            and self.codec == "h264"
-            and index.max_b_frames > 3
+            self.codec == "h264"
+            and vendor in H264_SMART_MAX_B_FRAMES
+            and index.max_b_frames > H264_SMART_MAX_B_FRAMES[vendor]
         ):
             log.warning(
-                "%s uses %d consecutive B-frames; AMF H.264 smart rendering supports "
-                "at most 3, falling back to a full re-encode",
+                "%s uses %d consecutive B-frames; %s H.264 smart rendering supports "
+                "at most %d, falling back to a full re-encode",
                 self.input_video,
                 index.max_b_frames,
+                vendor.value,
+                H264_SMART_MAX_B_FRAMES[vendor],
             )
             self._run_full(
                 metadata,
@@ -551,7 +553,7 @@ class Pipeline:
             metadata,
             index,
             self.encoder_settings,
-            vendor=vendor_for_device(self.device),
+            vendor=vendor,
         )
         standard_spans = {span for span in plan.spans if span.kind != "copy" and span not in ltx_spans}
         standard_frames = sum(_span_frames(span, index, metadata) for span in standard_spans)
