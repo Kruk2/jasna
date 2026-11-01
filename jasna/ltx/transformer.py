@@ -300,7 +300,7 @@ def enable_quant_kernels(device: torch.device) -> str | None:
     global _quant_kernels, _kitchen_int8_linear
     if _quant_kernels is None and _kitchen_int8_linear is None and device.type == "cuda":
         amd = is_amd_device(device)
-        if has_triton() and kernel_backend(device) is not KernelBackend.AMD_PREBUILT:
+        if kernel_backend(device) is not KernelBackend.AMD_PREBUILT and has_triton():
             from jasna.ltx import kernel_policy, kernels
 
             if kernel_policy.supports(device):

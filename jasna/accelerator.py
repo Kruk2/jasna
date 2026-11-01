@@ -122,7 +122,8 @@ def kernel_backend(device: torch.device | str) -> KernelBackend:
     if resolved.type != "cuda":
         return KernelBackend.CPU
     if is_amd_device(resolved):
-        return KernelBackend.AMD_TRITON if has_triton() and not is_frozen() else KernelBackend.AMD_PREBUILT
+        # A release ships Triton only for UNet 4x; LTX runs on prebuilt kernels without importing it.
+        return KernelBackend.AMD_PREBUILT if is_frozen() or not has_triton() else KernelBackend.AMD_TRITON
     if torch.cuda.get_device_capability(resolved) < (8, 0):
         return KernelBackend.NVIDIA_PRE_SM80
     return KernelBackend.NVIDIA
