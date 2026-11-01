@@ -113,9 +113,10 @@ def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
         (AcceleratorVendor.AMD, 4, True),
         (AcceleratorVendor.AMD, 3, False),
         (AcceleratorVendor.NVIDIA, 4, False),
+        (AcceleratorVendor.NVIDIA, 8, True),
     ],
 )
-def test_smart_run_reencodes_everything_only_when_amd_h264_exceeds_its_b_frame_cap(
+def test_smart_run_reencodes_everything_only_when_h264_exceeds_the_encoder_b_frame_cap(
     tmp_path, vendor, max_b_frames, full_reencode
 ) -> None:
     pipeline = _smart_pipeline(tmp_path, (SegmentRange(2.5, 3.0),), ONE_RENDER, max_b_frames=max_b_frames)

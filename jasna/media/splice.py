@@ -261,11 +261,6 @@ def _amf_h264_settings(
     profile: str,
     index: KeyframeIndex,
 ) -> dict[str, object]:
-    if index.max_b_frames > 3:
-        raise SmartRenderCompatibilityError(
-            "AMF H.264 smart rendering supports at most 3 consecutive B-frames; "
-            f"source uses {index.max_b_frames}"
-        )
     return {
         "profile": _AMF_H264_SMART_PROFILES[profile],
         "bf": index.max_b_frames,
@@ -273,6 +268,13 @@ def _amf_h264_settings(
         "pa_adaptive_mini_gop": 0,
     }
 
+
+# Most consecutive B-frames each vendor's H.264 encoder accepts; a smart render
+# must match the source's count, so sources above this are re-encoded whole.
+H264_SMART_MAX_B_FRAMES = {
+    AcceleratorVendor.NVIDIA: 4,
+    AcceleratorVendor.AMD: 3,
+}
 
 _H264_SETTINGS_BY_VENDOR = {
     AcceleratorVendor.NVIDIA: _nvenc_h264_settings,
@@ -307,6 +309,11 @@ def resolve_smart_encoder_settings(
         raise SmartRenderCompatibilityError(
             f"Smart rendering is not supported on {vendor.value} encoders"
         ) from exc
+    if index.max_b_frames > H264_SMART_MAX_B_FRAMES[vendor]:
+        raise SmartRenderCompatibilityError(
+            f"{vendor.value} H.264 smart rendering supports at most {H264_SMART_MAX_B_FRAMES[vendor]} "
+            f"consecutive B-frames; source uses {index.max_b_frames}"
+        )
     resolved.update(h264_settings)
     return resolved
 
