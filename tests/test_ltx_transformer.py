@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 
 import pytest
 import torch
@@ -292,13 +293,16 @@ def _without_triton(monkeypatch, hip):
     monkeypatch.setattr(T, "_kitchen_int8_linear", None)
 
 
+def _install_comfy_kitchen(monkeypatch, int8_linear):
+    kitchen = types.ModuleType("comfy_kitchen")
+    kitchen.int8_linear = int8_linear
+    monkeypatch.setitem(sys.modules, "comfy_kitchen", kitchen)
+
+
 def test_amd_without_triton_runs_the_int8_linears_on_comfy_kitchen(monkeypatch):
     """Windows ROCm ships no Triton: the ConvRot INT8 linears run on comfy-kitchen instead of torch."""
-    from types import SimpleNamespace
-
     calls = []
-    kitchen = SimpleNamespace(int8_linear=lambda x, qdata, scales, bias, **options: calls.append(options) or x)
-    monkeypatch.setitem(sys.modules, "comfy_kitchen", kitchen)
+    _install_comfy_kitchen(monkeypatch, lambda x, qdata, scales, bias, **options: calls.append(options) or x)
     _without_triton(monkeypatch, "7.0")
     assert T.enable_quant_kernels(torch.device("cuda")) == "comfy-kitchen"
     x = torch.zeros(1, 4, 256)
@@ -310,11 +314,9 @@ def test_amd_without_triton_runs_the_int8_linears_on_comfy_kitchen(monkeypatch):
 
 def test_packaged_amd_runs_the_int8_linears_on_comfy_kitchen_without_importing_triton(monkeypatch, amd_gpu):
     """A release ships Triton only for UNet 4x; LTX runs on prebuilt kernels without importing it."""
-    from types import SimpleNamespace
-
     from jasna import accelerator
 
-    monkeypatch.setitem(sys.modules, "comfy_kitchen", SimpleNamespace(int8_linear=lambda x, *args, **options: x))
+    _install_comfy_kitchen(monkeypatch, lambda x, *args, **options: x)
     _without_triton(monkeypatch, "7.0")
     amd_gpu()
     monkeypatch.setattr(accelerator, "is_frozen", lambda: True)
