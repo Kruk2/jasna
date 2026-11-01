@@ -147,10 +147,10 @@ class BasicSection:
             (compile_frame, dict(side="right", fill="x", expand=True, padx=(4, 0))),
         ]
         self._standard_only = (row1, compile_frame)
-        self.set_model("basicvsrpp")
+        self.set_ltx_only(False)
 
-    def set_model(self, model: str) -> None:
-        hidden = self._standard_only if model == "ltx" else ()
+    def set_ltx_only(self, ltx_only: bool) -> None:
+        hidden = self._standard_only if ltx_only else ()
         pack_rows(self._rows, hidden)
         pack_rows(self._toggles, hidden)
 

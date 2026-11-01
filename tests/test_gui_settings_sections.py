@@ -277,6 +277,11 @@ def test_ltx_hides_standard_only_settings_and_restores_them(panel_factory) -> No
     assert panel._widgets["min_detection_duration"].master.winfo_manager()
     assert panel._model_section._ltx_options.winfo_manager()
 
+    panel._widgets["ltx_auto_split"]._toggle()
+    assert clip_row.winfo_manager() and panel._widgets["denoise_strength"].master.winfo_manager()
+    panel._widgets["ltx_auto_split"]._toggle()
+    assert not clip_row.winfo_manager()
+
     panel._model_section._cards["basicvsrpp"].radio.invoke()
 
     assert clip_row.winfo_manager() and overlap_row.winfo_manager()
