@@ -137,8 +137,9 @@ Good to know:
 - Offline PCs keep their slot. Reinstalling the system or changing the GPU,
   disk or RAM keeps it; a new motherboard or a security chip reset in the BIOS
   counts as a new PC. To free a slot, ask where you got your License code.
-- Online devices count only while Jasna runs. "In use on 3 devices"? Close
-  Jasna on another device and start again.
+- Online devices count only while Jasna runs, and each open Jasna counts.
+  "In use on 3 devices"? Close Jasna on another device and start again. If
+  Jasna crashed or was force-closed, wait up to 15 minutes.
 - If Jasna works online on a PC with a security chip, the activation message
   says why.
 - Linux with a security chip: Jasna asks you to run
