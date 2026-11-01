@@ -90,6 +90,22 @@ def cuda_driver() -> ctypes.CDLL:
     return lib
 
 
+def imported_function_address(read, dll_prefix: bytes) -> int | None:
+    """First import-address-table entry of the DLL whose lowercase name starts with ``dll_prefix``, from a mapped
+    PE32+ image that ``read(offset, size)`` reads."""
+
+    def u32(offset: int) -> int:
+        return int.from_bytes(read(offset, 4), "little")
+
+    # The optional header follows the 24-byte file header; data directory 1 is the import table.
+    descriptor = u32(u32(0x3C) + 24 + 112 + 8)
+    while name := u32(descriptor + 12):
+        if read(name, len(dll_prefix)).lower() == dll_prefix:
+            return int.from_bytes(read(u32(descriptor + 16), 8), "little")
+        descriptor += 20
+    return None
+
+
 def _windows_torch_hip_runtime() -> ctypes.CDLL:
     """The amdhip64 copy torch_hip.dll imports. The frozen app maps more than one copy, and kernels launch only
     on the copy whose contexts torch made (another copy fails with hipErrorContextIsDestroyed)."""
@@ -101,24 +117,16 @@ def _windows_torch_hip_runtime() -> ctypes.CDLL:
     base = kernel32.GetModuleHandleW("torch_hip.dll")
     if not base:
         raise RuntimeError("torch_hip.dll is not loaded")
-
-    def u32(offset: int) -> int:
-        return ctypes.c_uint32.from_address(base + offset).value
-
-    # PE32+: the optional header follows the 24-byte file header; data directory 1 is the import table.
-    descriptor = base + u32(u32(0x3C) + 24 + 112 + 8)
-    while name := ctypes.c_uint32.from_address(descriptor + 12).value:
-        if ctypes.string_at(base + name).lower().startswith(b"amdhip64"):
-            function = ctypes.c_uint64.from_address(base + ctypes.c_uint32.from_address(descriptor + 16).value).value
-            module = ctypes.c_void_p()
-            from_address_unchanged_refcount = 0x4 | 0x2
-            if not kernel32.GetModuleHandleExW(from_address_unchanged_refcount, function, ctypes.byref(module)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            path = ctypes.create_unicode_buffer(32768)
-            kernel32.GetModuleFileNameW(module, path, len(path))
-            return ctypes.CDLL(path.value)
-        descriptor += 20
-    raise RuntimeError("torch_hip.dll does not import the HIP runtime")
+    function = imported_function_address(lambda offset, size: ctypes.string_at(base + offset, size), b"amdhip64")
+    if function is None:
+        raise RuntimeError("torch_hip.dll does not import the HIP runtime")
+    module = ctypes.c_void_p()
+    from_address_unchanged_refcount = 0x4 | 0x2
+    if not kernel32.GetModuleHandleExW(from_address_unchanged_refcount, function, ctypes.byref(module)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    path = ctypes.create_unicode_buffer(32768)
+    kernel32.GetModuleFileNameW(module, path, len(path))
+    return ctypes.CDLL(path.value)
 
 
 def hip_runtime() -> ctypes.CDLL:
