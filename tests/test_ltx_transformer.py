@@ -308,6 +308,21 @@ def test_amd_without_triton_runs_the_int8_linears_on_comfy_kitchen(monkeypatch):
     assert calls == [{"convrot": True, "convrot_groupsize": T.ROT_SIZE}]
 
 
+def test_packaged_amd_runs_the_int8_linears_on_comfy_kitchen_without_importing_triton(monkeypatch, amd_gpu):
+    """A release ships Triton only for UNet 4x; LTX runs on prebuilt kernels without importing it."""
+    from types import SimpleNamespace
+
+    from jasna import accelerator
+
+    monkeypatch.setitem(sys.modules, "comfy_kitchen", SimpleNamespace(int8_linear=lambda x, *args, **options: x))
+    _without_triton(monkeypatch, "7.0")
+    amd_gpu()
+    monkeypatch.setattr(accelerator, "is_frozen", lambda: True)
+    for module in (accelerator, T):
+        monkeypatch.setattr(module, "has_triton", lambda: pytest.fail("a packaged AMD LTX run imported Triton"))
+    assert T.enable_quant_kernels(torch.device("cuda")) == "comfy-kitchen"
+
+
 def test_nvidia_without_triton_kernels_keeps_the_torch_linears(monkeypatch):
     _without_triton(monkeypatch, None)
     assert T.enable_quant_kernels(torch.device("cuda")) is None

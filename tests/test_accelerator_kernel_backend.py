@@ -30,11 +30,12 @@ def test_the_cpu_has_no_gpu_kernels():
     assert kernel_backend(torch.device("cpu")) is KernelBackend.CPU
 
 
-def test_packaged_amd_keeps_prebuilt_kernels_when_triton_is_installed(monkeypatch, amd_gpu):
+def test_packaged_amd_keeps_prebuilt_kernels_without_importing_triton(monkeypatch, amd_gpu):
+    """A release ships Triton only for UNet 4x; LTX runs on prebuilt kernels without importing it."""
     from jasna import tensor_utils
 
     amd_gpu()
-    monkeypatch.setattr(accelerator, "has_triton", lambda: True)
+    monkeypatch.setattr(accelerator, "has_triton", lambda: pytest.fail("a packaged AMD LTX run imported Triton"))
     monkeypatch.setattr(accelerator, "is_frozen", lambda: True)
     assert kernel_backend(torch.device("cuda")) is KernelBackend.AMD_PREBUILT
     assert not tensor_utils.compiles(torch.device("cuda"), torch.float16)

@@ -295,6 +295,22 @@ def test_native_block_off_names_the_path_that_runs_instead(monkeypatch, caplog, 
     assert [(record.levelno, path in record.getMessage()) for record in caplog.records] == [(level, True)]
 
 
+def test_packaged_amd_names_its_torch_path_without_importing_triton(monkeypatch, caplog, amd_gpu):
+    """A release ships Triton only for UNet 4x; LTX runs on prebuilt kernels without importing it."""
+    from jasna import accelerator
+
+    amd_gpu()
+    monkeypatch.setenv("JASNA_LTX_NATIVE", "0")
+    monkeypatch.setattr(accelerator, "is_frozen", lambda: True)
+    for module in (accelerator, native):
+        monkeypatch.setattr(module, "has_triton", lambda: pytest.fail("a packaged AMD LTX run imported Triton"))
+
+    with caplog.at_level(logging.INFO, logger=native.logger.name):
+        assert native.load(torch.device("cuda"), _block_specs("int8")) is None
+
+    assert "eager PyTorch (no Triton)" in caplog.text
+
+
 def _native_load_fails(monkeypatch, frozen: bool):
     monkeypatch.setattr(native, "unavailable_reason", lambda device, specs: None)
     monkeypatch.setattr(native, "compiles", lambda device, dtype: False)

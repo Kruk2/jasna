@@ -41,7 +41,7 @@ import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel
 
 from jasna._frozen import is_frozen
-from jasna.accelerator import has_triton, is_amd_device, is_nvidia_device
+from jasna.accelerator import KernelBackend, has_triton, is_amd_device, is_nvidia_device, kernel_backend
 from jasna.ltx import kernel_policy as policy
 from jasna.ltx import transformer as T
 from jasna.ltx.kernel_policy import FP4_ARCHS, BlockDims, is_amd
@@ -420,7 +420,7 @@ def _torch_path(device: torch.device) -> tuple[str, int]:
     """What the sampler runs instead of the native block, and the log level that deserves."""
     if compiles(device, torch.bfloat16):
         return "the torch.compile path", logging.INFO
-    if not has_triton():
+    if kernel_backend(device) is KernelBackend.AMD_PREBUILT or not has_triton():
         return "eager PyTorch (no Triton), much slower", logging.WARNING
     return "eager PyTorch (no bf16 torch.compile on this GPU), much slower", logging.WARNING
 
