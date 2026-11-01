@@ -228,3 +228,32 @@ def test_only_amd_gpus_in_the_launch_table_have_an_aot_kernel(amd_gpu, monkeypat
     monkeypatch.setattr(torch.version, "hip", None)
     monkeypatch.setattr(torch.version, "cuda", "13.0")
     assert not has_aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cuda:0"))
+
+
+def _pe_image_importing(*dlls: tuple[bytes, int]) -> bytes:
+    """A PE32+ image whose import table lists ``dlls`` as (name, first import address) pairs."""
+    image = bytearray(0x1000)
+    image[0x3C:0x40] = (0x80).to_bytes(4, "little")
+    descriptors = 0x200
+    image[0x80 + 24 + 112 + 8:0x80 + 24 + 112 + 12] = descriptors.to_bytes(4, "little")
+    for index, (name, address) in enumerate(dlls):
+        descriptor, name_at, thunk_at = descriptors + 20 * index, 0x400 + 0x40 * index, 0x800 + 8 * index
+        image[name_at:name_at + len(name) + 1] = name + b"\0"
+        image[thunk_at:thunk_at + 8] = address.to_bytes(8, "little")
+        image[descriptor + 12:descriptor + 16] = name_at.to_bytes(4, "little")
+        image[descriptor + 16:descriptor + 20] = thunk_at.to_bytes(4, "little")
+    return bytes(image)
+
+
+def _reader(image: bytes):
+    return lambda offset, size: image[offset:offset + size]
+
+
+def test_finds_the_runtime_a_dll_imports_by_name_prefix():
+    image = _pe_image_importing((b"KERNEL32.dll", 0x7FF8_0000_1000), (b"AMDHIP64_7.dll", 0x7FF8_1234_5678))
+    assert cuda_kernel.imported_function_address(_reader(image), b"amdhip64") == 0x7FF8_1234_5678
+
+
+def test_a_dll_that_does_not_import_the_runtime_has_no_address():
+    image = _pe_image_importing((b"KERNEL32.dll", 0x7FF8_0000_1000), (b"amd_comgr.dll", 0x7FF8_0000_2000))
+    assert cuda_kernel.imported_function_address(_reader(image), b"amdhip64") is None
