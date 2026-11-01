@@ -54,7 +54,7 @@ def configure_rocm_devices() -> None:
     try:
         result = subprocess.run(
             [str(tool), "--only=amdgpu"] if windows else [str(tool)],
-            capture_output=True, text=True, check=True, timeout=10,
+            capture_output=True, text=True, check=not windows, timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW if windows else 0,
         )
     except (OSError, subprocess.SubprocessError):
@@ -67,6 +67,8 @@ def configure_rocm_devices() -> None:
             log.warning("Could not read AMD GPU architectures: %r", result.stdout)
             return
         devices = [(arch, str(i)) for i, arch in enumerate(architectures)]
+        # offload-arch stops with an error at the first adapter it can't read; the ones it listed work.
+        device_count = len(devices) + (result.returncode != 0)
     else:
         name = r"^[ \t]*Name:[ \t]+(gfx[0-9a-f]+(?::[^\s]+)*)[ \t]*$"
         architectures = re.findall(name, result.stdout, re.MULTILINE)
@@ -77,10 +79,15 @@ def configure_rocm_devices() -> None:
         if not devices or len(devices) != len(architectures) or len({uuid for _, uuid in devices}) != len(devices):
             log.warning("Could not read unique AMD GPU UUIDs from rocminfo")
             return
+        device_count = len(devices)
     shipped = kernel_pack_architectures(root / "torch") or frozenset()
     supported = [(arch.split(":")[0], identifier) for arch, identifier in devices if arch.split(":")[0] in shipped]
-    discrete = [identifier for arch, identifier in supported if arch not in INTEGRATED_HIP_ARCHITECTURES]
-    chosen = discrete or [identifier for _, identifier in supported]
-    if chosen and len(chosen) < len(devices):
+    # comfy-kitchen's matrix-core kernels, which LTX needs, load only when every visible adapter has them.
+    def rank(arch: str) -> tuple[bool, bool]:
+        return arch in INTEGRATED_HIP_ARCHITECTURES, arch not in TRITON_HIP_ARCHITECTURES
+
+    best = min((rank(arch) for arch, _ in supported), default=None)
+    chosen = [identifier for arch, identifier in supported if rank(arch) == best]
+    if chosen and len(chosen) < device_count:
         # Filter before torch import: HIP may load kernels for every visible adapter.
         os.environ["HIP_VISIBLE_DEVICES" if windows else "ROCR_VISIBLE_DEVICES"] = ",".join(chosen)

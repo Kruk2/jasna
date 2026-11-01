@@ -16,6 +16,13 @@ from jasna import rocm_bootstrap
         ("gfx1036\ngfx1100:sramecc-:xnack-\n", "1"),
         ("gfx1031\ngfx1200\n", "1"),
         ("gfx1036\ngfx1031\n", "0"),
+        ("gfx1030\ngfx1201\n", "1"),
+        ("gfx1201\ngfx1030\ngfx1036\n", "0"),
+        ("gfx1030\ngfx1036\n", "0"),
+        ("gfx1036\ngfx1151\n", "1"),
+        (("gfx1201\n", 1), "0"),
+        (("gfx1036\ngfx1201\n", 1), "1"),
+        (("", 1), None),
         ("gfx1200\n", None),
         ("gfx1200\ngfx1201\n", None),
         ("gfx1151\n", None),
@@ -23,11 +30,11 @@ from jasna import rocm_bootstrap
         ("", None),
         ("unexpected diagnostic\ngfx1200\n", None),
         (subprocess.TimeoutExpired("offload-arch", 10), None),
-        (subprocess.CalledProcessError(1, "offload-arch"), None),
         (OSError("GPU probe could not start"), None),
     ],
 )
-def test_windows_amd_keeps_discrete_adapters_the_build_has_kernels_for(rocm_probe, output, expected):
+def test_windows_amd_keeps_the_best_adapters_the_build_has_kernels_for(rocm_probe, output, expected):
+    """#668: an R9700 next to an adapter offload-arch could not read, or next to an RDNA2 card, refused LTX."""
     rocm_probe(output, "win32")
 
     rocm_bootstrap.configure_rocm_devices()
@@ -49,6 +56,7 @@ LINUX_OTHER_DGPU = "  Name: gfx1201\n  Uuid: GPU-0000000000000003\n  Marketing N
         (LINUX_IGPU + LINUX_DGPU + LINUX_OTHER_DGPU, "GPU-0000000000000002,GPU-0000000000000003"),
         (LINUX_IGPU + LINUX_DGPU.replace("gfx1200", "gfx1100:sramecc-:xnack-"), "GPU-0000000000000002"),
         (LINUX_IGPU + LINUX_DGPU.replace("gfx1200", "gfx1031"), "GPU-0000000000000001"),
+        (LINUX_DGPU.replace("gfx1200", "gfx1030") + LINUX_OTHER_DGPU, "GPU-0000000000000003"),
         (LINUX_DGPU, None),
         (LINUX_DGPU + LINUX_OTHER_DGPU, None),
         (LINUX_IGPU, None),
