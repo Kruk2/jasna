@@ -13,7 +13,20 @@ from jasna._frozen import is_frozen
 log = logging.getLogger(__name__)
 
 TRITON_HIP_ARCHITECTURES = ("gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1200", "gfx1201")
-"""The AMD release targets and architectures of every prebuilt Triton kernel."""
+"""The architectures of every prebuilt Triton kernel, and so the AMD GPUs LTX runs on."""
+
+INTEGRATED_HIP_ARCHITECTURES = frozenset({"gfx1033", "gfx1035", "gfx1036", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153"})
+"""AMD integrated GPUs; a supported discrete GPU in the same PC is used instead."""
+
+
+def kernel_pack_architectures(torch_dir: Path) -> frozenset[str] | None:
+    """The gfx targets whose PyTorch device pack is installed, or None for a PyTorch without device packs.
+
+    AMD's ROCm wheels report every compiled target in ``torch.cuda.get_arch_list()`` but ship each
+    target's kernels in its own ``torch/.kpack`` pack; without it the first kernel launch fails with
+    hipErrorInvalidKernelFile."""
+    packs = frozenset(path.stem.removeprefix("torch_") for path in (torch_dir / ".kpack").glob("torch_gfx*.kpack"))
+    return packs or None
 
 
 def configure_rocm_devices() -> None:
@@ -64,8 +77,10 @@ def configure_rocm_devices() -> None:
         if not devices or len(devices) != len(architectures) or len({uuid for _, uuid in devices}) != len(devices):
             log.warning("Could not read unique AMD GPU UUIDs from rocminfo")
             return
-    supported = [identifier for arch, identifier in devices
-                 if arch.split(":")[0] in TRITON_HIP_ARCHITECTURES]
-    if supported and len(supported) < len(devices):
+    shipped = kernel_pack_architectures(root / "torch") or frozenset()
+    supported = [(arch.split(":")[0], identifier) for arch, identifier in devices if arch.split(":")[0] in shipped]
+    discrete = [identifier for arch, identifier in supported if arch not in INTEGRATED_HIP_ARCHITECTURES]
+    chosen = discrete or [identifier for _, identifier in supported]
+    if chosen and len(chosen) < len(devices):
         # Filter before torch import: HIP may load kernels for every visible adapter.
-        os.environ["HIP_VISIBLE_DEVICES" if windows else "ROCR_VISIBLE_DEVICES"] = ",".join(supported)
+        os.environ["HIP_VISIBLE_DEVICES" if windows else "ROCR_VISIBLE_DEVICES"] = ",".join(chosen)

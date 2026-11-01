@@ -54,16 +54,18 @@ def check_supported_gpu(
         _install_noise_filters()
         import torch
         from jasna.accelerator import AcceleratorVendor, amd_gpu_architecture, vendor_for_device
+        from jasna.rocm_bootstrap import kernel_pack_architectures
     except ImportError:
         logger.warning("PyTorch failed to import", exc_info=True)
         return False, "no_cuda"
     if not torch.cuda.is_available():
         return False, "no_cuda"
     if vendor_for_device(device) is AcceleratorVendor.AMD:
-        # A ROCm build has no kernels for a GPU arch it was not compiled for, and on
-        # Windows the first kernel launch then crashes the process (issue #408).
+        # Without kernels for the GPU's arch the first kernel launch fails, and on Windows
+        # crashes the process (issues #408, #661).
         arch = amd_gpu_architecture(device)
-        built_archs = {a.split(":")[0] for a in torch.cuda.get_arch_list()}
+        built_archs = (kernel_pack_architectures(Path(torch.__file__).parent)
+                       or {a.split(":")[0] for a in torch.cuda.get_arch_list()})
         if built_archs and arch not in built_archs:
             return False, ("arch_unsupported", arch)
         return True, torch.cuda.get_device_name(device)

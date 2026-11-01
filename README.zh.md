@@ -40,7 +40,8 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 
 - **NVIDIA** GTX 16 系列 / RTX 20 系列或更新，并使用较新的驱动
   （Windows 610 或更新，Linux 580 或更新）。GTX 10 系列及更旧的显卡无法使用。
-- 或 **AMD** Radeon RX 7000/9000（实验性）。RX 6000 及更早的显卡不能用。
+- 或 **AMD** Radeon RX 5000 或更新（实验性）。已测试 RX 7000/9000；
+  RX 5000/6000 未测试。
 - 本地磁盘上的一个文件夹，路径中不能有中文、日文、带重音的字母或其他非英文字符。
 
 <details>
@@ -59,7 +60,9 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 | Radeon RX 9060/9070、Radeon AI PRO R9700 | 支持 | 支持（Windows 为测试版） |
 | Radeon RX 7600–7900、Radeon PRO W7000 | 支持 | 支持（Windows 为测试版） |
 | Radeon 740M/760M/780M/880M/890M、Ryzen AI Max（8050S/8060S） | 支持（未测试） | 支持（未测试） |
-| Radeon RX 6000 及更早、Radeon 820M/840M/860M | 不支持 | 不支持 |
+| Radeon RX 5000/6000、Radeon PRO W5000/W6000 | 支持（未测试） | 不支持 |
+| Radeon 610M/660M/680M/820M/840M/860M | 支持（未测试） | 不支持 |
+| Radeon RX Vega、RX 500 及更早 | 不支持 | 不支持 |
 
 </details>
 
