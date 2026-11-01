@@ -8,6 +8,7 @@ assignees: ''
 ---
 
 ! ! ! DO NOT POST THE VIDEO OR SCREENSHOTS OF ITS CONTENT ! ! !
+! ! ! USE ENGLISH ! ! !
 Failing to fill this form will result in closing the issue immediately!
 Remove this section
 
