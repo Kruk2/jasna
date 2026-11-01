@@ -71,8 +71,12 @@ def rocm_probe(monkeypatch, tmp_path):
         monkeypatch.setenv(name, "")
         monkeypatch.delenv(name)
 
-    def configure(output, platform):
+    def configure(output, platform, kernel_packs=("gfx1036", "gfx1100", "gfx1151", "gfx1200", "gfx1201")):
         monkeypatch.setattr(rocm_bootstrap.sys, "platform", platform)
+        packs = tmp_path / "torch" / ".kpack"
+        packs.mkdir(parents=True, exist_ok=True)
+        for architecture in kernel_packs:
+            (packs / f"torch_{architecture}.kpack").touch()
         relative = "lib/llvm/bin/offload-arch.exe" if platform == "win32" else "bin/rocminfo"
         tool = tmp_path / "_rocm_sdk_core" / relative
         tool.parent.mkdir(parents=True, exist_ok=True)

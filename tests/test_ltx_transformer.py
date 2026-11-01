@@ -233,8 +233,17 @@ def test_ltx_names_the_amd_gpu_and_why_kitchens_hip_extension_did_not_load(monke
     monkeypatch.setattr(comfy_kitchen, "int8_attention_is_available", lambda device: False)
     monkeypatch.setattr(kitchen_hip, "_EXT_ERROR", "HIP extension not built")
     monkeypatch.setattr(torch.version, "hip", "7.0")
-    monkeypatch.setattr(T, "amd_gpu_architecture", lambda device: "gfx1030")
-    with pytest.raises(RuntimeError, match=r"^LTX can't run on this GPU \(gfx1030\): .* did not load \(HIP extension not built\)\.$"):
+    monkeypatch.setattr(T, "amd_gpu_architecture", lambda device: "gfx1201")
+    with pytest.raises(RuntimeError, match=r"^LTX can't run on this GPU \(gfx1201\): .* did not load \(HIP extension not built\)\.$"):
+        T.require_kernels(torch.device("cuda"))
+
+
+@pytest.mark.parametrize("architecture", ["gfx1031", "gfx1152", "gfx942"])
+def test_ltx_refuses_amd_gpus_without_its_prebuilt_kernels(monkeypatch, architecture):
+    """#661: an RX 6700 XT failed mid-job with hipErrorInvalidKernelFile instead of a clear refusal."""
+    monkeypatch.setattr(torch.version, "hip", "7.0")
+    monkeypatch.setattr(T, "amd_gpu_architecture", lambda device: architecture)
+    with pytest.raises(RuntimeError, match=rf"^LTX can't run on this AMD GPU \({architecture}\): .*BasicVSR\+\+"):
         T.require_kernels(torch.device("cuda"))
 
 
@@ -351,4 +360,5 @@ def test_amd_runs_ltx_without_triton(monkeypatch):
     monkeypatch.setattr(T, "has_triton", lambda: False)
     monkeypatch.setattr(torch.version, "hip", "7.0")
     monkeypatch.setattr(comfy_kitchen, "int8_attention_is_available", lambda device: True)
+    monkeypatch.setattr(T, "amd_gpu_architecture", lambda device: "gfx1201")
     T.require_kernels(torch.device("cuda"))

@@ -14,6 +14,8 @@ from jasna import rocm_bootstrap
         ("gfx1200\ngfx1036\n", "0"),
         ("gfx1036\ngfx1200\ngfx1201\n", "1,2"),
         ("gfx1036\ngfx1100:sramecc-:xnack-\n", "1"),
+        ("gfx1031\ngfx1200\n", "1"),
+        ("gfx1036\ngfx1031\n", "0"),
         ("gfx1200\n", None),
         ("gfx1200\ngfx1201\n", None),
         ("gfx1151\n", None),
@@ -25,7 +27,7 @@ from jasna import rocm_bootstrap
         (OSError("GPU probe could not start"), None),
     ],
 )
-def test_windows_amd_filters_only_mixed_supported_and_unsupported_adapters(rocm_probe, output, expected):
+def test_windows_amd_keeps_discrete_adapters_the_build_has_kernels_for(rocm_probe, output, expected):
     rocm_probe(output, "win32")
 
     rocm_bootstrap.configure_rocm_devices()
@@ -46,6 +48,7 @@ LINUX_OTHER_DGPU = "  Name: gfx1201\n  Uuid: GPU-0000000000000003\n  Marketing N
         (LINUX_DGPU + LINUX_IGPU, "GPU-0000000000000002"),
         (LINUX_IGPU + LINUX_DGPU + LINUX_OTHER_DGPU, "GPU-0000000000000002,GPU-0000000000000003"),
         (LINUX_IGPU + LINUX_DGPU.replace("gfx1200", "gfx1100:sramecc-:xnack-"), "GPU-0000000000000002"),
+        (LINUX_IGPU + LINUX_DGPU.replace("gfx1200", "gfx1031"), "GPU-0000000000000001"),
         (LINUX_DGPU, None),
         (LINUX_DGPU + LINUX_OTHER_DGPU, None),
         (LINUX_IGPU, None),
@@ -101,3 +104,23 @@ def test_explicit_device_choices_and_source_runs_are_preserved(rocm_probe, monke
 
     assert {name: os.environ[name] for name in selection} == selection
     assert os.environ.get("HIP_VISIBLE_DEVICES") == selection.get("HIP_VISIBLE_DEVICES")
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_amd_build_without_kernel_packs_leaves_adapters_alone(rocm_probe, platform):
+    rocm_probe(LINUX_IGPU + LINUX_DGPU if platform == "linux" else "gfx1036\ngfx1200\n", platform, kernel_packs=())
+
+    rocm_bootstrap.configure_rocm_devices()
+
+    assert os.environ.get("HIP_VISIBLE_DEVICES") is None
+    assert os.environ.get("ROCR_VISIBLE_DEVICES") is None
+
+
+def test_kernel_pack_architectures_lists_installed_device_packs(tmp_path):
+    assert rocm_bootstrap.kernel_pack_architectures(tmp_path) is None
+    packs = tmp_path / ".kpack"
+    packs.mkdir()
+    for name in ("torch_gfx1031.kpack", "torch_gfx1201.kpack", "blas_lib_gfx1100.kpack"):
+        (packs / name).touch()
+
+    assert rocm_bootstrap.kernel_pack_architectures(tmp_path) == {"gfx1031", "gfx1201"}

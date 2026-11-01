@@ -363,11 +363,12 @@ def test_check_supported_gpu_needs_compute_capability_7_5(monkeypatch, available
     assert os_utils.check_supported_gpu() == expected
 
 
-def _fake_rocm_torch(gcn_arch_name: str, arch_list: list[str]):
+def _fake_rocm_torch(gcn_arch_name: str, arch_list: list[str], torch_dir: Path):
     def _no_kernels(*_args, **_kwargs):
         raise AssertionError("the GPU check must not launch a kernel")
 
     return types.SimpleNamespace(
+        __file__=str(torch_dir / "__init__.py"),
         cuda=types.SimpleNamespace(
             is_available=lambda: True,
             get_device_properties=lambda device: types.SimpleNamespace(gcnArchName=gcn_arch_name),
@@ -379,16 +380,23 @@ def _fake_rocm_torch(gcn_arch_name: str, arch_list: list[str]):
 
 
 @pytest.mark.parametrize(
-    ("arch", "arch_list", "expected"),
+    ("arch", "arch_list", "kernel_packs", "expected"),
     [
-        ("gfx1103", ["gfx1100", "gfx1101", "gfx1102", "gfx1201"], (False, ("arch_unsupported", "gfx1103"))),
-        ("gfx90a:sramecc+:xnack-", ["gfx90a:xnack-", "gfx1100"], (True, "AMD Radeon 780M Graphics")),
-        ("gfx1103", [], (True, "AMD Radeon 780M Graphics")),
+        ("gfx1103", ["gfx1100", "gfx1101", "gfx1102", "gfx1201"], (), (False, ("arch_unsupported", "gfx1103"))),
+        ("gfx90a:sramecc+:xnack-", ["gfx90a:xnack-", "gfx1100"], (), (True, "AMD Radeon 780M Graphics")),
+        ("gfx1103", [], (), (True, "AMD Radeon 780M Graphics")),
+        ("gfx1031", ["gfx1030", "gfx1031", "gfx1201"], ("gfx1030", "gfx1201"), (False, ("arch_unsupported", "gfx1031"))),
+        ("gfx1031", ["gfx1030", "gfx1031", "gfx1201"], ("gfx1031",), (True, "AMD Radeon 780M Graphics")),
     ],
-    ids=["missing-from-build", "feature-suffixes", "no-arch-list"],
+    ids=["missing-from-build", "feature-suffixes", "no-arch-list", "kernel-pack-missing", "kernel-pack-installed"],
 )
-def test_check_supported_gpu_needs_an_amd_arch_the_build_contains(monkeypatch, arch, arch_list, expected) -> None:
-    fake_torch = _fake_rocm_torch(arch, arch_list)
+def test_check_supported_gpu_needs_an_amd_arch_the_build_contains(
+    monkeypatch, tmp_path, arch, arch_list, kernel_packs, expected,
+) -> None:
+    (tmp_path / ".kpack").mkdir()
+    for architecture in kernel_packs:
+        (tmp_path / ".kpack" / f"torch_{architecture}.kpack").touch()
+    fake_torch = _fake_rocm_torch(arch, arch_list, tmp_path)
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setattr(accelerator, "torch", fake_torch)
     monkeypatch.setattr(accelerator, "vendor_for_device", lambda _device: accelerator.AcceleratorVendor.AMD)
