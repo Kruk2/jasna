@@ -443,6 +443,7 @@ JA = {
         "secondary_tvai_hint": "高品質、低速",
         "secondary_rtx_super_res": "RTX Super Res",
         "secondary_rtx_hint": "まずまずの品質、非常に高速",
+        "secondary_ltx_only_note": "LTX では RTX Super Res のみ使えます。「大きなモザイクだけ LTX」をオンにするか BasicVSR++ を使うと他も選べます。",
         "rtx_scale": "スケール",
         "rtx_quality": "品質",
         "rtx_denoise": "ノイズ除去",

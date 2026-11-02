@@ -443,6 +443,7 @@ ZH = {
         "secondary_tvai_hint": "高质量，慢",
         "secondary_rtx_super_res": "RTX Super Res",
         "secondary_rtx_hint": "质量尚可，非常快",
+        "secondary_ltx_only_note": "使用 LTX 时只能选 RTX Super Res。开启“仅大马赛克用 LTX”或改用 BasicVSR++ 即可选择其他选项。",
         "rtx_scale": "缩放",
         "rtx_quality": "质量",
         "rtx_denoise": "降噪",

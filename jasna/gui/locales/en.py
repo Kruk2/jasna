@@ -443,6 +443,7 @@ EN = {
         "secondary_tvai_hint": "high quality, slow",
         "secondary_rtx_super_res": "RTX Super Res",
         "secondary_rtx_hint": "OK quality, very fast",
+        "secondary_ltx_only_note": "With LTX only RTX Super Res works. Turn on \"LTX only for big mosaics\" or use BasicVSR++ to pick the others.",
         "rtx_scale": "Scale",
         "rtx_quality": "Quality",
         "rtx_denoise": "Denoise",
