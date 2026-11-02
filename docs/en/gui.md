@@ -110,6 +110,11 @@ fail, install the driver and AMF from [Quick start](../../README.md#quick-start)
   the last 5000 lines. Please attach it when you report a problem.
 - **System stats**: the bottom bar shows GPU, VRAM, RAM and CPU use during
   processing.
+- **Tray**: click the gear in the header and turn on **Minimize to tray** or
+  **Close to tray** to keep Jasna running without a taskbar button. Click the
+  tray icon to open it again; on Windows, right-click it to quit. On Linux it
+  needs a tray that shows app icons (KDE, Ubuntu); **Close to tray** is
+  Windows only.
 
 ## Activate supporter models
 

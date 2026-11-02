@@ -22,7 +22,7 @@ from jasna.gui.branding import (
 from jasna.gui import scaling
 from jasna.gui import activation_worker
 from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
-from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, XianyuButton, XianyuQrDialog, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, CloseWhileProcessingDialog, grab_modal
+from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, XianyuButton, XianyuQrDialog, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, CloseWhileProcessingDialog, Tooltip, TrayOptionsDialog, grab_modal
 from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
@@ -30,7 +30,9 @@ from jasna.gui.control_bar import ControlBar
 from jasna.gui.log_panel import LogPanel
 from jasna.gui.log_filter import runtime_log_level_for_filter
 from jasna.gui.processor import Processor, ProgressUpdate
+from jasna.gui.paths import read_settings
 from jasna.gui.queues import MainThreadCalls
+from jasna.gui import tray
 from jasna.gui.models import JobStatus, PresetManager
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
@@ -117,6 +119,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._video_player_dialog = None
         self._closing_after_player = False
         self._preset_manager = PresetManager()
+        self._tray = tray.TrayIcon(
+            on_open=lambda: self._main_thread.post(self._show_from_tray),
+            on_quit=lambda: self._main_thread.post(self._quit_from_tray),
+        )
 
         self._system_stats_stop = threading.Event()
         self._system_stats_thread: threading.Thread | None = None
@@ -127,6 +133,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._start_system_stats_poller()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close_requested)
+        self.bind("<Unmap>", self._on_unmap, add="+")
 
         self.after_idle(self._log_startup_timing)
         self.after_idle(self._start_cuda_warmup)
@@ -202,6 +209,20 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         right = ctk.CTkFrame(header, fg_color="transparent")
         right.pack(side="right", padx=Sizing.PADDING_MEDIUM)
         
+        self._options_icon = create_icon("settings", 16, Colors.TEXT_PRIMARY)
+        self._options_btn = ctk.CTkButton(
+            right,
+            text="",
+            image=self._options_icon,
+            fg_color="transparent",
+            hover_color=Colors.BG_CARD,
+            width=28,
+            height=28,
+            command=self._show_tray_options,
+        )
+        self._options_btn.pack(side="left", padx=(0, 8))
+        Tooltip(self._options_btn, t("dialog_options_title"))
+
         # Language selector
         self._language_icon = create_native_icon_image(
             right,
@@ -418,6 +439,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         def ask():
             if not answer.set_running_or_notify_cancel():
                 return
+            self._show_from_tray()
             answer.set_result(messagebox.askyesno(
                 t("resume_restart_title"), t("resume_restart_confirm"), parent=self,
             ))
@@ -486,6 +508,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._update_start_button_state()
 
     def _on_close_requested(self):
+        if read_settings().get("close_to_tray", False) and self._hide_to_tray(needs_menu=True):
+            return
+        self._request_quit()
+
+    def _request_quit(self):
         if self._processor and self._processor.is_running():
             CloseWhileProcessingDialog(self, on_minimize=self.iconify, on_quit=self._on_close)
             return
@@ -508,10 +535,39 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 self._processor.stop()
                 self._processor.join(timeout=5.0)
         finally:
+            self._tray.hide()
             self._stop_system_stats_poller()
             self._main_thread.close()
             self.destroy()
         
+    def _show_tray_options(self):
+        TrayOptionsDialog(self, tray.tray_support())
+
+    def _on_unmap(self, event):
+        if event.widget is self and self.state() == "iconic" and read_settings().get("minimize_to_tray", False):
+            self.after_idle(self._hide_to_tray)
+
+    def _hide_to_tray(self, needs_menu: bool = False) -> bool:
+        """Hide the window behind a tray icon; False (window untouched) when there is no tray."""
+        support = tray.tray_support()
+        if not support.available or (needs_menu and not support.has_menu):
+            return False
+        self._tray.show()
+        self.withdraw()
+        return True
+
+    def _show_from_tray(self):
+        if not self._tray.shown:
+            return
+        self._tray.hide()
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
+    def _quit_from_tray(self):
+        self._show_from_tray()
+        self._request_quit()
+
     def _refresh_license_chip(self):
         activation_worker.start_license_info(
             lambda info, error: self._main_thread.post(lambda: self._license_chip_ready(info, error))
@@ -799,6 +855,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._main_thread.post(lambda: self._handle_progress(update))
         
     def _handle_progress(self, update: ProgressUpdate):
+        if update.license_problem:
+            self._show_from_tray()
         if update.license_problem == "unofficial_key":
             XianyuQrDialog(self, unofficial_notice=True)
         elif update.license_problem:
@@ -829,6 +887,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 queue_total=len(jobs),
                 stage=update.stage,
             )
+            self._tray.set_title(f"Jasna - {update.progress:.0f}% ({queue_current}/{len(jobs)})")
             try:
                 self._queue_panel.set_running(True, processing_job_id=job_id)
             except Exception:
@@ -860,6 +919,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
     def _handle_complete(self, queue_finished: bool):
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
+        self._tray.set_title("Jasna")
         if queue_finished:
             elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
             self._control_bar.set_completed(elapsed_seconds)
@@ -892,6 +952,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             return
         if action == POST_EXPORT_ACTION_SHUTDOWN:
             self._log_panel.info(f"Shutting down in {_SHUTDOWN_COUNTDOWN_SECONDS} seconds")
+            self._show_from_tray()
             ShutdownCountdownDialog(
                 self,
                 _SHUTDOWN_COUNTDOWN_SECONDS,

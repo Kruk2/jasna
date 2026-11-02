@@ -7,6 +7,8 @@ import customtkinter as ctk
 import webbrowser
 from jasna.gui import scaling
 from jasna.gui.branding import create_xianyu_qr_image
+from jasna.gui.icons import CompactSwitch
+from jasna.gui.paths import read_settings, update_settings
 from jasna.gui import activation_worker
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -852,3 +854,74 @@ class ShutdownCountdownDialog(ctk.CTkToplevel):
         self.after_cancel(self._tick_id)
         self.destroy()
         self._on_cancelled()
+
+
+TRAY_SETTING_KEYS = ("minimize_to_tray", "close_to_tray")
+
+
+class TrayOptionsDialog(ctk.CTkToplevel):
+    """Minimize/close-to-tray switches, saved in settings.json as soon as they change."""
+
+    def __init__(self, master, support):
+        super().__init__(master)
+        self.title(t("dialog_options_title"))
+        self.configure(fg_color=Colors.BG_MAIN)
+        self.resizable(False, False)
+        self.transient(master)
+        grab_modal(self)
+
+        content = ctk.CTkFrame(self, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+
+        saved = read_settings()
+        self.switches = {}
+        for key in TRAY_SETTING_KEYS:
+            usable = support.available and (key == "minimize_to_tray" or support.has_menu)
+            row = ctk.CTkFrame(content, fg_color=Colors.BG_CARD, corner_radius=Sizing.BORDER_RADIUS)
+            row.pack(fill="x", pady=(0, 8))
+            switch = CompactSwitch(row, lambda key=key: self._save(key), Colors.BG_CARD)
+            switch.pack(side="right", padx=12)
+            if saved.get(key, False):
+                switch.select()
+            if not usable:
+                switch.configure(state="disabled")
+            self.switches[key] = switch
+            ctk.CTkLabel(
+                row,
+                text=t(f"option_{key}"),
+                font=(Fonts.FAMILY, Fonts.SIZE_NORMAL, "bold"),
+                text_color=Colors.TEXT_PRIMARY,
+                anchor="w",
+            ).pack(fill="x", padx=12, pady=(10, 0))
+            if not support.available:
+                hint = t("option_tray_unavailable")
+            elif not usable:
+                hint = t("option_close_to_tray_unavailable")
+            else:
+                hint = t(f"option_{key}_hint")
+            ctk.CTkLabel(
+                row,
+                text=hint,
+                font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
+                text_color=Colors.TEXT_PRIMARY if usable else Colors.STATUS_PENDING,
+                anchor="w",
+                justify="left",
+                wraplength=300,
+            ).pack(fill="x", padx=12, pady=(2, 10))
+
+        ctk.CTkButton(
+            content,
+            text=t("btn_close"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            fg_color=Colors.PRIMARY,
+            hover_color=Colors.PRIMARY_HOVER,
+            text_color=Colors.TEXT_PRIMARY,
+            width=80,
+            command=self.destroy,
+        ).pack(side="right", pady=(8, 0))
+
+        self.update_idletasks()
+        scaling.place_centered_on_parent(self, master, *scaling.to_physical(self, 440, 290))
+
+    def _save(self, key: str) -> None:
+        update_settings(**{key: bool(self.switches[key].get())})
