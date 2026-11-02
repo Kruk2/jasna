@@ -23,6 +23,8 @@ dependencies = [
   "tqdm",
   "customtkinter==6.0.0",
   "tkinterdnd2",
+  "pystray; sys_platform == 'win32'",
+  "jeepney; sys_platform == 'linux'",
   "python-vlc==3.0.21203",
   # Older versions cannot reconstruct YOLO checkpoints under the release's weights-only policy.
   "ultralytics>=8.4.96,<8.5",

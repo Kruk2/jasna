@@ -1,5 +1,6 @@
 """Font-independent icons for GUI controls."""
 
+import math
 import tkinter as tk
 
 import customtkinter as ctk
@@ -120,6 +121,17 @@ def render_icon(name: str, size: int, color: str) -> Image.Image:
             outline=color,
             width=line_width,
         )
+    elif name == "settings":
+        for angle in range(0, 180, 45):
+            dx = math.cos(math.radians(angle)) * 7
+            dy = math.sin(math.radians(angle)) * 7
+            draw.line(
+                [(point(9 - dx), point(9 - dy)), (point(9 + dx), point(9 + dy))],
+                fill=color,
+                width=point(2.6),
+            )
+        draw.ellipse((point(4), point(4), point(14), point(14)), fill=color)
+        draw.ellipse((point(6.6), point(6.6), point(11.4), point(11.4)), fill=(0, 0, 0, 0))
     elif name == "play":
         draw.polygon(
             [
