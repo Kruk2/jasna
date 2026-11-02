@@ -113,7 +113,7 @@ Still images route here automatically; `--restoration-model-name` is video-only.
 
 | Option | Default | Notes |
 | ------ | ------- | ----- |
-| `--vr-mode` | `auto` | `auto`, `off`, `sbs`, `sbs-fisheye`. See [VR180](vr180.md). |
+| `--vr-mode` | `auto` | `auto`, `off`, `sbs`, `sbs-fisheye`, `tb`. See [VR180](vr180.md). |
 
 ## Continuing LTX jobs
 

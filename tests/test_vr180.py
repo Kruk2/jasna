@@ -12,7 +12,9 @@ from jasna.vr180 import (
     FISHEYE_STUDIO_TOKENS,
     PROJECTION_CHOICES,
     STUDIO_PROJECTION,
-    SbsDetectionAdapter,
+    StereoDetectionAdapter,
+    StereoLayout,
+    left_eye,
     resolve_projection,
     resolve_vr_mode,
 )
@@ -147,7 +149,7 @@ def test_projection_override_applies_to_detected_vr(projection: str) -> None:
         projection=projection,
     )
 
-    assert result.is_sbs
+    assert result.is_stereo
     assert result.projection == projection
 
 
@@ -159,7 +161,7 @@ def test_projection_override_does_not_enable_vr_layout() -> None:
         projection="gnomonic",
     )
 
-    assert not result.is_sbs
+    assert not result.is_stereo
     assert result.projection == "none"
 
 
@@ -254,7 +256,7 @@ class _FakeDetector:
 
 def test_sbs_detection_adapter_merges_boxes_and_full_canvas_masks() -> None:
     detector = _FakeDetector()
-    adapter = SbsDetectionAdapter(detector)
+    adapter = StereoDetectionAdapter(detector, "sbs")
     frames = torch.zeros((2, 3, 6, 8), dtype=torch.uint8)
     frames[:, :, :, 4:] = 9
 
@@ -279,7 +281,7 @@ def test_sbs_detection_adapter_merges_boxes_and_full_canvas_masks() -> None:
 
 def test_sbs_scan_adapter_uses_each_eye_and_merges_scores_masks() -> None:
     detector = _FakeDetector()
-    adapter = SbsDetectionAdapter(detector)
+    adapter = StereoDetectionAdapter(detector, "sbs")
     frames = torch.zeros((2, 3, 6, 8), dtype=torch.uint8)
     frames[0, :, :, :4] = 3
     frames[0, :, :, 4:] = 7
@@ -296,7 +298,98 @@ def test_sbs_scan_adapter_uses_each_eye_and_merges_scores_masks() -> None:
 
 def test_sbs_adapter_rejects_odd_source_width() -> None:
     with pytest.raises(ValueError, match="even frame width"):
-        SbsDetectionAdapter(_FakeDetector())(
+        StereoDetectionAdapter(_FakeDetector(), "sbs")(
             torch.zeros((1, 3, 4, 7), dtype=torch.uint8),
             target_hw=(4, 7),
         )
+
+
+def test_tb_detection_adapter_moves_right_eye_boxes_and_masks_below() -> None:
+    detector = _FakeDetector()
+    adapter = StereoDetectionAdapter(detector, "tb")
+    frames = torch.zeros((2, 3, 8, 6), dtype=torch.uint8)
+    frames[:, :, 4:, :] = 9
+
+    result = adapter(frames, target_hw=(8, 6))
+
+    assert [call[0].shape for call in detector.detect_calls] == [(2, 3, 4, 6), (2, 3, 4, 6)]
+    assert detector.detect_calls[0][1] == (4, 6)
+    np.testing.assert_array_equal(
+        result.boxes_xyxy[0],
+        np.array([[1.0, 2.0, 3.0, 4.0], [1.0, 6.0, 3.0, 8.0]], dtype=np.float32),
+    )
+    assert result.masks[0].shape == (2, 8, 5)
+    assert not result.masks[0][0].any()
+    assert result.masks[0][1, 4:].all()
+    assert not result.masks[0][1, :4].any()
+
+
+def test_tb_scan_adapter_stacks_eye_masks_vertically() -> None:
+    detector = _FakeDetector()
+    frames = torch.zeros((1, 3, 8, 6), dtype=torch.uint8)
+    frames[0, :, 4:, :] = 7
+
+    scores, masks = StereoDetectionAdapter(detector, "tb").scan_scores_masks(frames, mask_hw=(9, 5))
+
+    assert [call[1] for call in detector.scan_calls] == [(4, 5), (5, 5)]
+    assert scores.tolist() == [7.0]
+    assert masks.shape == (1, 9, 5)
+
+
+def test_tb_adapter_rejects_odd_source_height() -> None:
+    with pytest.raises(ValueError, match="even frame height"):
+        StereoDetectionAdapter(_FakeDetector(), "tb")(
+            torch.zeros((1, 3, 7, 4), dtype=torch.uint8),
+            target_hw=(7, 4),
+        )
+
+
+@pytest.mark.parametrize(
+    ("name", "metadata"),
+    [
+        ("unknown.mp4", _metadata(width=1920, height=3840)),
+        ("SAVR-001.mp4", _metadata(width=1080, height=2160)),
+        ("unknown.mp4", _metadata(width=1024, height=2048, stereo_layout="top and bottom", spherical_projection="equirectangular")),
+    ],
+    ids=["1:2-above-1080p", "studio-token", "spatial-metadata"],
+)
+def test_auto_detects_top_bottom_vr(name: str, metadata: VideoMetadata) -> None:
+    assert resolve_vr_mode("auto", metadata, Path(name)).resolved == "tb"
+
+
+@pytest.mark.parametrize(("width", "height"), [(1080, 2160), (2160, 3840), (1920, 3842)])
+def test_auto_does_not_infer_top_bottom_below_threshold_or_without_exact_geometry(width: int, height: int) -> None:
+    assert resolve_vr_mode("auto", _metadata(width=width, height=height), Path("unknown.mp4")).resolved == "off"
+
+
+def test_side_by_side_metadata_does_not_turn_on_a_top_bottom_frame() -> None:
+    metadata = _metadata(width=1024, height=2048, stereo_layout="side by side", spherical_projection="equirectangular")
+    assert resolve_vr_mode("auto", metadata, Path("unknown.mp4")).resolved == "off"
+
+
+def test_explicit_tb_uses_the_studio_projection_and_rejects_odd_height() -> None:
+    result = resolve_vr_mode("tb", _metadata(width=1920, height=3840), Path("savr00327.mp4"))
+    assert (result.resolved, result.projection) == ("tb", "fisheye")
+    with pytest.raises(ValueError, match="even frame height"):
+        resolve_vr_mode("tb", _metadata(width=1920, height=3839), Path("movie.mp4"))
+
+
+@pytest.mark.parametrize(
+    ("kind", "bbox", "eye"),
+    [
+        ("sbs", (90, 10, 110, 30), (100, 0, 200, 100)),
+        ("sbs", (10, 10, 60, 30), (0, 0, 100, 100)),
+        ("tb", (10, 90, 30, 112), (0, 100, 100, 200)),
+        ("tb", (10, 10, 30, 60), (0, 0, 100, 100)),
+    ],
+)
+def test_stereo_layout_finds_the_eye_holding_a_box_centre(kind, bbox, eye) -> None:
+    width, height = (200, 100) if kind == "sbs" else (100, 200)
+    assert StereoLayout(kind, width, height).eye_of(bbox) == eye
+
+
+def test_left_eye_keeps_the_top_half_of_a_top_bottom_mask() -> None:
+    mask = np.arange(24).reshape(6, 4)
+    np.testing.assert_array_equal(left_eye(mask, "tb"), mask[:3])
+    np.testing.assert_array_equal(left_eye(mask, "sbs"), mask[:, :2])
+    assert left_eye(mask, "off") is mask

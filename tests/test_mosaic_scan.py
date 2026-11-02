@@ -166,10 +166,19 @@ def test_mosaic_size_is_the_longest_side_of_the_biggest_mosaic_in_frame_heights(
     masks[1, 10:19, 10:15] = 1
     masks[1, 50:56, 100:150] = 1
     masks[2, 0:45, 0:2] = 1
-    sizes = mosaic_sizes(masks, frame_width=1920, frame_height=1080)
+    sizes = mosaic_sizes(masks, frame_width=1920, frame_height=1080, stereo=None)
     assert sizes[0] == 0.0
     assert sizes[1] == pytest.approx(50 / 160 * 16 / 9)
     assert sizes[2] == pytest.approx(0.5)
+
+
+def test_top_bottom_vr_mosaic_size_counts_in_eye_heights():
+    from jasna.vr180 import StereoLayout
+
+    masks = np.zeros((1, 100, 50), dtype=np.uint8)
+    masks[0, 60:85, 10:20] = 1
+    sizes = mosaic_sizes(masks, frame_width=1920, frame_height=3840, stereo=StereoLayout("tb", 1920, 3840))
+    assert sizes == pytest.approx((0.5,))
 
 
 LTX = SegmentRestoration("ltx", 7)

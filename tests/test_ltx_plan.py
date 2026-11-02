@@ -31,6 +31,7 @@ from jasna.ltx.plan import (
     window_starts,
 )
 from jasna.ltx.regions import trace_region
+from jasna.vr180 import StereoLayout
 
 
 def _square(x: float, y: float, side: float) -> Region:
@@ -70,7 +71,7 @@ def test_a_wider_max_gap_keeps_a_longer_dropout_in_one_filled_track():
     regions[100:106] = [[] for _ in range(6)]
 
     def spans(cuts, max_gap):
-        plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, eye_width=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=max_gap, min_duration=0)
+        plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, stereo=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=max_gap, min_duration=0)
         return [(p.start, p.stop) for p in plans], plans
 
     assert spans(set(), MAX_GAP)[0] == [(0, 100), (106, 200)]
@@ -123,7 +124,7 @@ def _split_video() -> list[list[Region]]:
 
 
 def test_a_lasting_split_gets_its_own_camera_with_a_handover():
-    plans = plan_video(_split_video(), set(), frame_w=1920, frame_h=1080, eye_width=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
+    plans = plan_video(_split_video(), set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
     assert [(p.start, p.stop) for p in plans] == [(0, 130), (100 - LEAD_IN_FRAMES, 500)]
     piece = plans[1]
     assert len(piece.presence) == len(piece.polygons) == piece.stop - piece.start
@@ -179,7 +180,7 @@ def test_min_duration_drops_short_tracks_but_not_a_short_size_run_of_a_long_one(
     regions[400] = [*regions[400], _square(1500, 700, 100)]
 
     def spans(min_duration):
-        plans = plan_video(regions, set(), frame_w=1920, frame_h=1080, eye_width=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=min_duration)
+        plans = plan_video(regions, set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=min_duration)
         return [(p.start, p.stop) for p in plans]
 
     assert (400, 401) in spans(0)
@@ -237,13 +238,13 @@ def test_shared_latents_encode_the_same_frames(hop):
 
 def test_plan_windows_follow_the_hop():
     regions = [[_square(300, 300, 120)] for _ in range(300)]
-    (plan,) = plan_video(regions, set(), frame_w=1920, frame_h=1080, eye_width=None, large_canvas=False, window_hop=LESS_OVERLAP_WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
+    (plan,) = plan_video(regions, set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=False, window_hop=LESS_OVERLAP_WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
     assert [w.start for w in plan.windows] == [0, 104, 208]
     assert plan.window_hop == LESS_OVERLAP_WINDOW_HOP
 
 
 def test_crossfade_weights_partition_unity():
-    plans = plan_video([[_square(300 + t, 300, 120)] for t in range(300)], set(), frame_w=1920, frame_h=1080, eye_width=None, large_canvas=True, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
+    plans = plan_video([[_square(300 + t, 300, 120)] for t in range(300)], set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=True, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
     windows = plans[0].windows
     total = np.zeros(300)
     for window, weight in zip(windows, crossfade_weights(windows)):
@@ -255,7 +256,7 @@ def test_crossfade_weights_partition_unity():
 def test_crossfade_hides_a_later_windows_unfused_lead_frames(hop):
     """A later window's free latent 0 sits in front of fused latents, and the decoder
     garbles the colour of that latent and the next one (#580): its first 9 frames get no weight."""
-    plans = plan_video([[_square(300, 300, 120)] for _ in range(400)], set(), frame_w=1920, frame_h=1080, eye_width=None, large_canvas=False, window_hop=hop, max_gap=MAX_GAP, min_duration=0)
+    plans = plan_video([[_square(300, 300, 120)] for _ in range(400)], set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=False, window_hop=hop, max_gap=MAX_GAP, min_duration=0)
     windows = plans[0].windows
     weights = crossfade_weights(windows)
     overlap = windows[0].stop - windows[1].start
@@ -283,9 +284,9 @@ def test_track_camera_contains_support_and_letterboxes():
 
 
 def test_large_crops_use_the_large_canvas():
-    plans = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, eye_width=None, large_canvas=True, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
+    plans = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=True, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
     assert plans[0].windows[0].canvas == LARGE_CANVAS
-    capped = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, eye_width=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
+    capped = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
     assert capped[0].windows[0].canvas == PLAN_CANVAS
     assert letterbox((0, 0, 900, 900), LARGE_CANVAS).resize_hw == (LARGE_CANVAS, LARGE_CANVAS)
 
@@ -353,7 +354,7 @@ def _plan_digest(plans) -> str:
 
 def test_plan_video_output_matches_the_recorded_plan():
     regions, cuts = _random_video(0, 4000)
-    plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, eye_width=None, large_canvas=True, window_hop=window_hop(17), max_gap=MAX_GAP, min_duration=0)
+    plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, stereo=None, large_canvas=True, window_hop=window_hop(17), max_gap=MAX_GAP, min_duration=0)
     assert _plan_digest(plans) == "1099f21ad72e3a86d0a9e3b1e2d94dc4b126535674cfdddf8d70d4c3e12f3e30"
 
 
@@ -362,48 +363,65 @@ def test_gap_fill_keeps_outlines_inside_the_frame_when_boxes_leave_it():
     tall = Region(box=(0.0, -800.0, 100.0, 100.0), polygon=outline)
     hugging = Region(box=(0.0, -5.0, 100.0, 100.0), polygon=outline)
     regions = [[tall], [], [], []] + [[hugging] for _ in range(200)]
-    (plan,) = plan_video(regions, set(), frame_w=1280, frame_h=720, eye_width=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
+    (plan,) = plan_video(regions, set(), frame_w=1280, frame_h=720, stereo=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
     points = np.concatenate([polygon for polygons in plan.polygons for polygon in polygons])
     assert points.min() >= 0
 
 
-def test_sbs_mosaics_too_far_apart_for_one_subject_are_planned_per_eye():
+def _eye_square(stereo: StereoLayout, eye: int, x: float, y: float, side: float) -> Region:
+    """A square at (x, y) in eye ``eye`` (0 left, 1 right)."""
+    dx, dy = stereo.right_offset
+    return _square(x + eye * dx, y + eye * dy, side)
+
+
+@pytest.mark.parametrize("kind", ["sbs", "tb"])
+def test_stereo_mosaics_too_far_apart_for_one_subject_are_planned_per_eye(kind):
     eye = 1000
-    regions = [[_square(eye - 160 + t % 3, 300, 150), _square(eye + 5 + t % 3, 300, 150)] for t in range(250)]
-    settings = dict(frame_w=2 * eye, frame_h=1000, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
+    stereo = StereoLayout(kind, eye * (2 if kind == "sbs" else 1), eye * (2 if kind == "tb" else 1))
+    axis = 0 if kind == "sbs" else 1
+    regions = [
+        [_eye_square(stereo, 0, *np.roll((eye - 160 + t % 3, 300), axis), 150), _eye_square(stereo, 1, *np.roll((5 + t % 3, 300), axis), 150)]
+        for t in range(250)
+    ]
+    settings = dict(frame_w=stereo.frame_w, frame_h=stereo.frame_h, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
 
-    flat = plan_video(regions, set(), eye_width=None, **settings)
-    plans = plan_video(regions, set(), eye_width=eye, **settings)
+    flat = plan_video(regions, set(), stereo=None, **settings)
+    plans = plan_video(regions, set(), stereo=stereo, **settings)
 
-    assert any(c.crop_box[0] < eye < c.crop_box[2] for p in flat for w in p.windows for c in w.crops)
+    assert any(c.crop_box[axis] < eye < c.crop_box[axis + 2] for p in flat for w in p.windows for c in w.crops)
     assert [p.track_id for p in plans] == [0, 1]
     windows = [w for p in plans for w in p.windows]
     assert [w.index for w in windows] == list(range(len(windows)))
     assert [w.noise for w in windows] == [w.index for w in windows]
     for plan, (low, high) in zip(plans, ((0, eye), (eye, 2 * eye))):
-        assert all(low <= c.crop_box[0] and c.crop_box[2] <= high for w in plan.windows for c in w.crops)
+        assert all(low <= c.crop_box[axis] and c.crop_box[axis + 2] <= high for w in plan.windows for c in w.crops)
         points = np.concatenate([polygon for polygons in plan.polygons for polygon in polygons])
-        assert low <= points[:, 0].min() and points[:, 0].max() <= high
+        assert low <= points[:, axis].min() and points[:, axis].max() <= high
 
 
-def test_sbs_right_eye_restores_each_left_track_as_a_twin_with_its_noise():
+@pytest.mark.parametrize("kind", ["sbs", "tb"])
+def test_stereo_right_eye_restores_each_left_track_as_a_twin_with_its_noise(kind):
     eye, disparity = 1000, -40
+    stereo = StereoLayout(kind, eye * (2 if kind == "sbs" else 1), eye * (2 if kind == "tb" else 1))
     regions = [
-        [_square(300 + t // 10, 400, 150), _square(eye + 300 + disparity + t // 10, 400, 150), _square(eye + 700, 700, 150)]
+        [
+            _eye_square(stereo, 0, 300 + t // 10, 400, 150),
+            _eye_square(stereo, 1, 300 + disparity + t // 10, 400, 150),
+            _eye_square(stereo, 1, 700, 700, 150),
+        ]
         for t in range(250)
     ]
     left, twin, right_only = plan_video(
-        regions, set(), frame_w=2 * eye, frame_h=1000, eye_width=eye, large_canvas=False, window_hop=WINDOW_HOP,
-        max_gap=MAX_GAP, min_duration=0,
+        regions, set(), frame_w=stereo.frame_w, frame_h=stereo.frame_h, stereo=stereo, large_canvas=False,
+        window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0,
     )
 
     assert [w.noise for w in twin.windows] == [w.index for w in left.windows]
     assert [w.noise for w in right_only.windows] == [w.index for w in right_only.windows]
     windows = [w for plan in (left, twin, right_only) for w in plan.windows]
     assert [w.index for w in windows] == list(range(len(windows)))
+    dx, dy = stereo.right_offset
     for left_window, twin_window in zip(left.windows, twin.windows):
         for left_crop, twin_crop in zip(left_window.crops, twin_window.crops):
-            assert twin_crop.crop_box == (
-                left_crop.crop_box[0] + eye + disparity, left_crop.crop_box[1],
-                left_crop.crop_box[2] + eye + disparity, left_crop.crop_box[3],
-            )
+            x1, y1, x2, y2 = left_crop.crop_box
+            assert twin_crop.crop_box == (x1 + dx + disparity, y1 + dy, x2 + dx + disparity, y2 + dy)

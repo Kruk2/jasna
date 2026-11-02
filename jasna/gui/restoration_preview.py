@@ -20,6 +20,7 @@ from jasna.gui.models import AppSettings
 from jasna.gui.video_session import build_video_session, release_session_memory, video_session_key
 from jasna.session_factory import RestorationSession
 from jasna.media.probe import VideoMetadata
+from jasna.vr180 import left_eye
 
 
 @dataclass(frozen=True)
@@ -111,10 +112,9 @@ def frame_image(
     max_size: tuple[int, int],
     lut_applier=None,
     *,
-    left_eye_only: bool = False,
+    stereo: str = "off",
 ) -> Image.Image:
-    if left_eye_only:
-        frame = frame[:, :, : frame.shape[-1] // 2]
+    frame = left_eye(frame, stereo)
     if lut_applier is not None:
         frame = lut_applier.apply(frame)
     image = Image.fromarray(frame.cpu().permute(1, 2, 0).numpy()).copy()
@@ -138,12 +138,12 @@ class _CenterFrameCollector:
         cancel_event: threading.Event,
         lut_applier=None,
         *,
-        left_eye_only: bool = False,
+        stereo: str = "off",
     ) -> None:
         self._center_pts = center_pts
         self._cancel_event = cancel_event
         self._lut_applier = lut_applier
-        self._left_eye_only = bool(left_eye_only)
+        self._stereo = stereo
         self._best_pts: int | None = None
         self._best_frame = None
         self.done = False
@@ -153,8 +153,7 @@ class _CenterFrameCollector:
             return
         if self._best_pts is None or abs(pts - self._center_pts) < abs(self._best_pts - self._center_pts):
             self._best_pts = pts
-            if self._left_eye_only:
-                frame = frame[:, :, : frame.shape[-1] // 2]
+            frame = left_eye(frame, self._stereo)
             if self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
             self._best_frame = frame.cpu()
@@ -180,12 +179,12 @@ class _PlaybackFrameCollector:
         max_size: tuple[int, int],
         lut_applier=None,
         *,
-        left_eye_only: bool = False,
+        stereo: str = "off",
     ) -> None:
         self._metadata = metadata
         self._max_size = max_size
         self._lut_applier = lut_applier
-        self._left_eye_only = bool(left_eye_only)
+        self._stereo = stereo
         self._frames: list[tuple[int, Image.Image]] = []
 
     @property
@@ -200,7 +199,7 @@ class _PlaybackFrameCollector:
                     frame,
                     self._max_size,
                     self._lut_applier,
-                    left_eye_only=self._left_eye_only,
+                    stereo=self._stereo,
                 ),
             )
         )
@@ -371,7 +370,7 @@ class RestorationPreviewWorker:
         settings = command.settings
         pipeline.vr_projection = command.projection
         pipeline.configure_vr(self.metadata)
-        left_eye_only = pipeline.vr_resolution.is_sbs
+        stereo = pipeline.vr_resolution.resolved
         window = (
             playback_window(self.metadata, command.center_seconds, settings.max_clip_size)
             if command.playback
@@ -389,9 +388,9 @@ class RestorationPreviewWorker:
             lut_applier = GpuLutApplier(parse_cube_file(lut_path), pipeline.device)
 
         collector = (
-            _PlaybackFrameCollector(self.metadata, self.max_size, lut_applier, left_eye_only=left_eye_only)
+            _PlaybackFrameCollector(self.metadata, self.max_size, lut_applier, stereo=stereo)
             if command.playback
-            else _CenterFrameCollector(window.center_pts, cancel_event, lut_applier, left_eye_only=left_eye_only)
+            else _CenterFrameCollector(window.center_pts, cancel_event, lut_applier, stereo=stereo)
         )
         try:
             error = run_restoration_pass(

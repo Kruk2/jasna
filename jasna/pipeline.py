@@ -39,10 +39,7 @@ from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange, job_models, job_restoration, resolve_restorations
 from jasna.session_config import RestorationModelName, SessionConfig
 from jasna.settings_tag import job_settings, settings_comment
-from jasna.vr180 import (
-    SbsDetectionAdapter,
-    resolve_vr_mode,
-)
+from jasna.vr180 import resolve_vr_mode, stereo_detector
 from jasna.vr_projection import build_vr_projector
 
 if TYPE_CHECKING:
@@ -167,6 +164,7 @@ class Pipeline:
         self.segments = tuple(segments) if segments else None
         self.splice_plan = splice_plan
         self.vr_resolution = None
+        self.stereo = None
         self.vr_projector = None
         self.job_detection_model = self.detection_model
         self._cancel_event = threading.Event()
@@ -187,19 +185,11 @@ class Pipeline:
             self.input_video,
             projection=self.vr_projection,
         )
-        self.job_detection_model = (
-            SbsDetectionAdapter(self.detection_model)
-            if self.vr_resolution.is_sbs
-            else self.detection_model
-        )
+        self.stereo = self.vr_resolution.layout(metadata)
+        self.job_detection_model = stereo_detector(self.detection_model, self.stereo)
         self.vr_projector = (
-            build_vr_projector(
-                self.vr_resolution.projection,
-                eye_width=int(metadata.video_width) // 2,
-                height=int(metadata.video_height),
-                device=self.device,
-            )
-            if self.vr_resolution.is_sbs
+            build_vr_projector(self.vr_resolution.projection, self.stereo, device=self.device)
+            if self.stereo is not None
             else None
         )
 
@@ -388,7 +378,7 @@ class Pipeline:
                 files=self.ltx_files,
                 frame_h=int(metadata.video_height),
                 frame_w=int(metadata.video_width),
-                eye_width=self._ltx_eye_width(metadata),
+                stereo=self.stereo,
                 batch_size=self.batch_size,
                 large_canvas=large_canvas,
                 window_hop=self.ltx_window_hop,
@@ -412,10 +402,6 @@ class Pipeline:
             writer.close()
         self._log_memory_at_end()
 
-    def _ltx_eye_width(self, metadata) -> int | None:
-        """The SBS eye width LTX plans with; None for flat video."""
-        return int(metadata.video_width) // 2 if self.vr_resolution.is_sbs else None
-
     def ltx_segment_render(self, metadata) -> "LtxRender":
         """How LTX restores segments: the 768 px decision and the decode tiles follow the
         GPU's size, never the VRAM free at that moment, so a segment renders the same in a
@@ -430,7 +416,7 @@ class Pipeline:
             files=self.ltx_files,
             frame_h=int(metadata.video_height),
             frame_w=int(metadata.video_width),
-            eye_width=self._ltx_eye_width(metadata),
+            stereo=self.stereo,
             batch_size=self.batch_size,
             large_canvas=segment_large_canvas(self.ltx_large_canvas, total_bytes),
             window_hop=self.ltx_window_hop,

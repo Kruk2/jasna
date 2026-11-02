@@ -52,9 +52,10 @@ CLI_HELP: dict[str, str] = {
     "denoise": "Spatial denoising strength applied to restored crops. Reduces noise artifacts. (default: %(default)s)",
     "secondary_restoration": "Optional second pass that makes restored areas sharper. UNet 4x works on NVIDIA and AMD and needs activation; TVAI and RTX Super Res require NVIDIA. With LTX only RTX Super Res works (others need --ltx-auto-split); it sharpens large mosaics. (default: %(default)s)",
     "vr_mode": (
-        "Side-by-side VR180 video: auto turns on by itself for VR videos; off treats every "
-        "video as normal; sbs treats every video as VR; sbs-fisheye is like sbs but restores "
-        "every mosaic as fisheye. (default: %(default)s)"
+        "VR180 video: auto turns on by itself for side-by-side and top/bottom VR videos; off "
+        "treats every video as normal; sbs treats every video as side-by-side VR; sbs-fisheye "
+        "is like sbs but restores every mosaic as fisheye; tb treats every video as top/bottom "
+        "VR. (default: %(default)s)"
     ),
     "tvai_ffmpeg_path": "Path to the ffmpeg.exe of Topaz Video (Windows only). (default: %(default)s)",
     "tvai_model": 'Topaz model name for tvai_up (e.g. "iris-2", "prob-4", "iris-3") (default: %(default)s)',

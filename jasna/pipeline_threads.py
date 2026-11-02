@@ -24,6 +24,7 @@ from jasna.restorer import RestorationPipeline
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.tracking.clip_tracker import ClipTracker
 from jasna.tracking.scene_detector import SceneCutDetector
+from jasna.vr180 import StereoLayout
 from jasna.vram_offloader import VramOffloader
 
 log = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ def decode_detect_loop(
     error_holder: list[BaseException],
     cancel_event: threading.Event,
     debug_memory: PipelineDebugMemoryLogger,
-    vr_mode: str,
+    stereo: StereoLayout | None,
     vr_projector,
     seek_ts: float | None,
     end_pts: int | None,
@@ -88,9 +89,6 @@ def decode_detect_loop(
             if progress is not None:
                 progress.init()
             target_hw = (int(metadata.video_height), int(metadata.video_width))
-            crop_eye_width = (
-                int(metadata.video_width) // 2 if vr_mode == "sbs" else None
-            )
             frame_idx = 0 if seek_ts is None else _estimate_start_frame(metadata, seek_ts)
             frame_shape = target_hw
             effect_active = effect_ranges is None
@@ -179,7 +177,7 @@ def decode_detect_loop(
                                     metadata_queue=metadata_queue,
                                     discard_margin=discard_margin,
                                     blend_frames=blend_frames,
-                                    crop_eye_width=crop_eye_width,
+                                    stereo=stereo,
                                     min_detection_duration=min_detection_duration,
                                     scene_detector=scene_detector,
                                     vr_projector=vr_projector,
@@ -721,7 +719,7 @@ def run_restoration_pass(
                 error_holder=error_holder,
                 cancel_event=stop_event,
                 debug_memory=debug_memory,
-                vr_mode=pipeline.vr_resolution.resolved,
+                stereo=pipeline.stereo,
                 vr_projector=pipeline.vr_projector,
                 seek_ts=seek_ts,
                 end_pts=end_pts,

@@ -5,6 +5,7 @@ import pytest
 import torch
 
 import jasna.crop_buffer as crop_buffer
+from jasna.vr180 import StereoLayout
 from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer, prepare_crops_for_restoration
 from jasna.frame_queue import FrameQueue
@@ -525,16 +526,17 @@ def test_scene_cut_ends_coasting_track_and_trims_synthetic_tail() -> None:
     assert not tracker.active_clips
 
 
-def test_vr_gnomonic_crop_and_blend_stays_within_one_eye() -> None:
+@pytest.mark.parametrize("layout", ["sbs", "tb"])
+def test_vr_gnomonic_crop_and_blend_stays_within_one_eye(layout) -> None:
     from jasna.vr_projection import GnomonicProjector
 
-    eye_w, height = 512, 64
-    frame_w = eye_w * 2
-    projector = GnomonicProjector(eye_width=eye_w, height=height, device=torch.device("cpu"))
+    eye_w, eye_h = 512, 64
+    stereo = StereoLayout(layout, eye_w * 2, eye_h) if layout == "sbs" else StereoLayout(layout, eye_w, eye_h * 2)
+    frame_w, height = stereo.frame_w, stereo.frame_h
+    projector = GnomonicProjector(stereo, device=torch.device("cpu"))
 
-    frame = torch.zeros((1, 3, height, frame_w), dtype=torch.uint8)
-    frame[:, :, :, :eye_w] = 50
-    frame[:, :, :, eye_w:] = 150
+    frame = torch.full((1, 3, height, frame_w), 150, dtype=torch.uint8)
+    frame[:, :, :eye_h, :eye_w] = 50
 
     def _detections_fn(frames: torch.Tensor, *, target_hw) -> Detections:
         b = int(frames.shape[0])
@@ -560,7 +562,7 @@ def test_vr_gnomonic_crop_and_blend_stays_within_one_eye() -> None:
         frames=frame, pts_list=[0], start_frame_idx=0, target_hw=(height, frame_w),
         detections_fn=_detections_fn, tracker=tracker, blend_buffer=blend_buffer,
         crop_buffers=crop_buffers, clip_queue=clip_queue, metadata_queue=metadata_queue,
-        discard_margin=0, blend_frames=0, crop_eye_width=eye_w, vr_projector=projector,
+        discard_margin=0, blend_frames=0, stereo=stereo, vr_projector=projector,
     )
     finalize_processing(
         tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
@@ -571,5 +573,6 @@ def test_vr_gnomonic_crop_and_blend_stays_within_one_eye() -> None:
     blended = blend_buffer.blend_frame(0, frame[0])
 
     # The restored fill (200) landed in the left eye; the right eye is untouched.
-    assert torch.equal(blended[:, :, eye_w:], frame[0, :, :, eye_w:])
-    assert (blended[:, :, :eye_w] == 200).any()
+    dx, dy = stereo.right_offset
+    assert torch.equal(blended[:, dy:, dx:], frame[0, :, dy:, dx:])
+    assert (blended[:, :eye_h, :eye_w] == 200).any()

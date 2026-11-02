@@ -497,7 +497,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--vr-mode",
         type=str,
         default="auto",
-        choices=["auto", "off", "sbs", "sbs-fisheye"],
+        choices=["auto", "off", "sbs", "sbs-fisheye", "tb"],
         help=CLI_HELP["vr_mode"],
     )
 

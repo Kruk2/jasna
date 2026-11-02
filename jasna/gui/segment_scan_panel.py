@@ -33,6 +33,7 @@ from jasna.gui.segment_timeline import SegmentTimeline
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.media.probe import VideoMetadata
+from jasna.vr180 import left_eye
 from jasna.mosaic_scan import ltx_auto_segments, mosaic_boxes, segments_from_scores
 from jasna.segments import SegmentRange, format_timestamp
 
@@ -54,7 +55,7 @@ class ScanPanel(ctk.CTkFrame):
         timeline: SegmentTimeline,
         detection_model: str,
         threshold: float,
-        left_eye_only: bool,
+        stereo: str,
         ltx_seed: int | None,
         keyframes: Callable[[], tuple[float, ...] | None],
         base_settings: Callable[[], AppSettings],
@@ -72,7 +73,7 @@ class ScanPanel(ctk.CTkFrame):
         self._metadata = metadata
         self._state = state
         self._timeline = timeline
-        self._left_eye_only = left_eye_only
+        self._stereo = stereo
         self._ltx_seed = ltx_seed
         self._keyframes = keyframes
         self._base_settings = base_settings
@@ -648,9 +649,7 @@ class ScanPanel(ctk.CTkFrame):
         _, score, mask = sample
         if score < self._threshold:
             return image
-        mask_np = mask.numpy()
-        if self._left_eye_only:
-            mask_np = mask_np[:, : mask_np.shape[1] // 2]
+        mask_np = left_eye(mask.numpy(), self._stereo)
         if not mask_np.any():
             return image
         alpha = Image.fromarray((mask_np * 130).astype("uint8"), "L").resize(

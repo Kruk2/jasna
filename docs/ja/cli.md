@@ -113,7 +113,7 @@ Jasna は `TMP`、次に `TEMP` を使います。`TMPDIR` は使いません。
 
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
-| `--vr-mode` | `auto` | `auto`、`off`、`sbs`、`sbs-fisheye`。詳しくは [VR180](vr180.md)。 |
+| `--vr-mode` | `auto` | `auto`、`off`、`sbs`、`sbs-fisheye`、`tb`。詳しくは [VR180](vr180.md)。 |
 
 ## LTX ジョブの再開
 

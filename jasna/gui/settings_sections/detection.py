@@ -63,6 +63,7 @@ class DetectionSection:
                 "off": t("vr_mode_off"),
                 "sbs": t("vr_mode_sbs"),
                 "sbs-fisheye": t("vr_mode_sbs_fisheye"),
+                "tb": t("vr_mode_tb"),
             },
             command=lambda _value: self._on_modified(),
             fg_color=Colors.BG_CARD,

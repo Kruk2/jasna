@@ -13,7 +13,7 @@ from jasna.pipeline_items import ClipRestoreItem, FrameMeta
 from jasna.pipeline_overlap import compute_crossfade_weights, compute_keep_range, compute_overlap_and_tail_indices, compute_parent_crossfade_weights
 from jasna.tracking.clip_tracker import ClipTracker, EndedClip, shorter_than_min_duration
 from jasna.tracking.scene_detector import SceneCutDetector
-from jasna.vr180 import eye_bounds
+from jasna.vr180 import StereoLayout
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,7 @@ def process_frame_batch(
     metadata_queue: Queue[FrameMeta | object],
     discard_margin: int,
     blend_frames: int = 0,
-    crop_eye_width: int | None = None,
+    stereo: StereoLayout | None = None,
     min_detection_duration: int = 0,
     scene_detector: SceneCutDetector | None = None,
     vr_projector=None,
@@ -169,7 +169,7 @@ def process_frame_batch(
                 crop_buffers[track_id] = CropBuffer(track_id=track_id, start_frame=clip.start_frame)
             bbox = clip.bboxes[-1]
             raw_crop = _extract_region_crop(
-                frame, bbox, frame_h, frame_w, crop_eye_width, vr_projector
+                frame, bbox, frame_h, frame_w, stereo, vr_projector
             )
             crop_buffers[track_id].add(raw_crop)
 
@@ -180,7 +180,7 @@ def process_frame_batch(
             if crop_buffers[tid].frame_count < ec.clip.frame_count:
                 bbox = ec.clip.bboxes[-1]
                 raw_crop = _extract_region_crop(
-                    frame, bbox, frame_h, frame_w, crop_eye_width, vr_projector
+                    frame, bbox, frame_h, frame_w, stereo, vr_projector
                 )
                 crop_buffers[tid].add(raw_crop)
 
@@ -209,15 +209,13 @@ def _extract_region_crop(
     bbox,
     frame_h: int,
     frame_w: int,
-    crop_eye_width: int | None,
+    stereo: StereoLayout | None,
     vr_projector,
 ) -> RawCrop:
-    x_bounds = eye_bounds(bbox, crop_eye_width, frame_w)
     if vr_projector is not None:
-        return vr_projector.extract_region_crop(
-            frame, bbox, frame_h, frame_w, x_bounds=x_bounds
-        )
-    return extract_crop(frame, bbox, frame_h, frame_w, x_bounds=x_bounds)
+        return vr_projector.extract_region_crop(frame, bbox, frame_h, frame_w)
+    bounds = stereo.eye_of(bbox) if stereo is not None else None
+    return extract_crop(frame, bbox, frame_h, frame_w, bounds=bounds)
 
 
 def finalize_processing(

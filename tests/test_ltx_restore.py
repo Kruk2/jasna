@@ -163,7 +163,7 @@ def _render(tmp_path):
         files=FILES,
         frame_h=64,
         frame_w=64,
-        eye_width=None,
+        stereo=None,
         batch_size=4,
         large_canvas=False,
         window_hop=restore.WINDOW_HOP,
@@ -225,7 +225,7 @@ def test_a_segment_plans_the_same_wherever_decoding_starts(fakes):
             batch_size=4,
             frame_h=64,
             frame_w=64,
-            eye_width=None,
+            stereo=None,
             large_canvas=False,
             window_hop=restore.WINDOW_HOP,
             bar=_Bar(),
@@ -246,7 +246,7 @@ def test_scan_span_bridges_detection_gaps_up_to_max_gap(fakes):
 
     def spans(max_gap):
         (plans,) = restore.scan_span(
-            _source(video), [whole], _Detector(), batch_size=4, frame_h=64, frame_w=64, eye_width=None, large_canvas=False,
+            _source(video), [whole], _Detector(), batch_size=4, frame_h=64, frame_w=64, stereo=None, large_canvas=False,
             window_hop=restore.WINDOW_HOP, bar=_Bar(), cancel=threading.Event(), max_gap=max_gap, min_duration=0,
         )
         return [(plan.start, plan.stop) for plan in plans]
@@ -303,7 +303,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         files=FILES,
         frame_h=64,
         frame_w=64,
-        eye_width=None,
+        stereo=None,
         batch_size=4,
         large_canvas=False,
         window_hop=restore.WINDOW_HOP,
@@ -784,7 +784,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
         files=FILES,
         frame_h=64,
         frame_w=64,
-        eye_width=None,
+        stereo=None,
         batch_size=4,
         large_canvas=False,
         window_hop=restore.WINDOW_HOP,
@@ -1254,7 +1254,7 @@ def test_the_speed_test_mosaics_plan_two_windows_on_each_canvas(frame_h, frame_w
     detections = restore._SpeedTestMosaics()(torch.zeros(1, 3, 8, 8), target_hw=(frame_h, frame_w))
     regions = restore.regions_per_frame(detections, frame_h, frame_w) * restore.SPEED_TEST_FRAMES
     plans = restore.plan_video(
-        regions, set(), frame_w=frame_w, frame_h=frame_h, eye_width=None, large_canvas=True, window_hop=restore.WINDOW_HOP,
+        regions, set(), frame_w=frame_w, frame_h=frame_h, stereo=None, large_canvas=True, window_hop=restore.WINDOW_HOP,
         max_gap=MAX_GAP, min_duration=0,
     )
     assert sorted(w.canvas for plan in plans for w in plan.windows) == [512, 512, 768, 768]

@@ -422,21 +422,14 @@ class MosaicScanWorker:
             score_threshold=SCAN_SCORE_FLOOR,
             log_callback=lambda message: self.events.put(ScanStatus(message)),
         )
-        from jasna.vr180 import (
-            SbsDetectionAdapter,
-            resolve_vr_mode,
-        )
+        from jasna.vr180 import resolve_vr_mode, stereo_detector
 
         self.vr_resolution = resolve_vr_mode(
             settings.vr_mode,
             self.metadata,
             self.path,
         )
-        return (
-            SbsDetectionAdapter(detector)
-            if self.vr_resolution.is_sbs
-            else detector
-        )
+        return stereo_detector(detector, self.vr_resolution.layout(self.metadata))
 
     def _scan(self, detector) -> None:
         import torch
@@ -602,6 +595,7 @@ class MosaicScanWorker:
                 masks.numpy(),
                 frame_width=int(metadata.video_width),
                 frame_height=int(metadata.video_height),
+                stereo=self.vr_resolution.layout(metadata),
             ),
             stride=sample_stride_seconds,
             duration=duration,

@@ -360,16 +360,19 @@ def ltx_auto_split(
     or with no mosaics found; those are logged and restored whole with LTX."""
     from jasna.mosaic_scan import ltx_auto_segments, scan_mosaic_sizes
     from jasna.progressbar import StageProgress
+    from jasna.vr180 import resolve_vr_mode
 
     def on_progress(fraction: float) -> None:
         if progress_callback is not None:
             progress_callback(0.0, 0.0, 0.0, 0, 0, StageProgress("split", 1, 1, fraction, 0.0))
 
     def scan(spliced: SpliceSource) -> "tuple[SegmentRange, ...]":
+        stereo = resolve_vr_mode(config.vr_mode, spliced.metadata, input_video).layout(spliced.metadata)
         samples = scan_mosaic_sizes(
             session.detection_model_for(config),
             input_video,
             spliced.metadata,
+            stereo=stereo,
             batch_size=config.batch_size,
             device=session.device,
             disable_progress=config.disable_progress,

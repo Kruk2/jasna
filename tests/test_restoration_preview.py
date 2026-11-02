@@ -190,13 +190,13 @@ def test_restoration_collectors_show_only_left_eye() -> None:
     still = _CenterFrameCollector(
         0,
         threading.Event(),
-        left_eye_only=True,
+        stereo="sbs",
     )
     still.write(frame, 0)
     playback = _PlaybackFrameCollector(
         _metadata(),
         (16, 16),
-        left_eye_only=True,
+        stereo="sbs",
     )
     playback.write(frame, 0)
 
@@ -276,7 +276,8 @@ def test_preview_pass_forwards_scene_detection(monkeypatch) -> None:
         vr_projection="auto",
         vr_projector=None,
         job_detection_model=MagicMock(),
-        vr_resolution=SimpleNamespace(resolved="off", is_sbs=False),
+        vr_resolution=SimpleNamespace(resolved="off"),
+        stereo=None,
         configure_vr=lambda metadata: None,
     )
 
@@ -291,7 +292,8 @@ def _preview_pipeline() -> SimpleNamespace:
     return SimpleNamespace(
         vr_projection="auto",
         configure_vr=lambda metadata: None,
-        vr_resolution=SimpleNamespace(is_sbs=False),
+        vr_resolution=SimpleNamespace(resolved="off"),
+        stereo=None,
         device=torch.device("cpu"),
     )
 

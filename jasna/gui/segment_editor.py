@@ -124,7 +124,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview_source: Image.Image | None = None
         self._preview_image = None
         self._preview_generation = 0
-        self._preview_left_eye = False
+        self._preview_stereo = "off"
         self._preview_view = PreviewView()
         self._preview_pan_anchor: tuple[int, int] | None = None
         self.vr_resolution = None
@@ -459,7 +459,7 @@ class SegmentEditor(ctk.CTkToplevel):
         projection_control = ctk.CTkFrame(preview_options, fg_color="transparent")
         projection_control.pack(side="right", padx=(0, 16))
         projection_label_text = t("segments_vr_projection")
-        if self.vr_resolution.is_sbs:
+        if self.vr_resolution.is_stereo:
             projection_label_text = t(
                 "segments_vr_projection_resolved",
                 projection=projection_names[self.vr_resolution.projection],
@@ -485,7 +485,7 @@ class SegmentEditor(ctk.CTkToplevel):
             dropdown_hover_color=Colors.PRIMARY,
             text_color=Colors.TEXT_PRIMARY,
             width=150,
-            state="normal" if self.vr_resolution.is_sbs else "disabled",
+            state="normal" if self.vr_resolution.is_stereo else "disabled",
         )
         self._vr_projection_menu.pack(side="left")
         self._vr_projection_menu.set_value(self._vr_projection)
@@ -1107,7 +1107,7 @@ class SegmentEditor(ctk.CTkToplevel):
                 if self._job.detection_score_threshold is not None
                 else settings.detection_score_threshold
             ),
-            left_eye_only=self._preview_left_eye,
+            stereo=self._preview_stereo,
             ltx_seed=None if self._ltx_blocked_reason() is not None else self._job_ltx_seed,
             keyframes=self._keyframe_seconds,
             base_settings=self._get_settings,
@@ -1251,7 +1251,7 @@ class SegmentEditor(ctk.CTkToplevel):
                             event.metadata,
                             self._job.path,
                         )
-                        self._preview_left_eye = self.vr_resolution.is_sbs
+                        self._preview_stereo = self.vr_resolution.resolved
                         self._build_editor(event.metadata)
                 elif isinstance(event, PreviewKeyframes):
                     self._keyframe_index = event.index

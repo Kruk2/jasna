@@ -147,13 +147,14 @@ def test_grab_full_returns_native_resolution_of_shown_frame(tmp_path) -> None:
         worker.close()
 
 
-def test_preview_worker_uses_left_eye_for_explicit_sbs(tmp_path) -> None:
-    source = tmp_path / "sbs-preview.mp4"
+@pytest.mark.parametrize(("vr_mode", "size"), [("sbs", (70, 80)), ("tb", (80, 22))])
+def test_preview_worker_shows_the_left_eye_of_explicit_vr(tmp_path, vr_mode, size) -> None:
+    source = tmp_path / "vr-preview.mp4"
     _make_preview_source(source)
     worker = SegmentPreviewWorker(
         source,
         max_size=(80, 80),
-        vr_mode="sbs",
+        vr_mode=vr_mode,
     )
     worker.start()
 
@@ -162,7 +163,7 @@ def test_preview_worker_uses_left_eye_for_explicit_sbs(tmp_path) -> None:
         worker.seek(0.0)
         frame = _next_event(worker, PreviewFrame)
 
-        assert frame.image.size == (70, 80)
+        assert frame.image.size == size
     finally:
         worker.close()
 
