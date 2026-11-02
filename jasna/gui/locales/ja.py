@@ -298,6 +298,8 @@ JA = {
         "model_ltx_trial_only": "LTX モデルがありません。お試しモードのみ使えます。",
         "ltx_license_trial_title": "LTX ライセンス",
         "ltx_license_trial_confirm": "LTX にはライセンスが必要です。お試しモードで実行しますか？出力は復元されません。",
+        "ltx_blocked_title": "LTX はロック中",
+        "ltx_blocked_text": "クラックまたは改造された Jasna（jasna-cn.exe など）がこのライセンスコードで実行されたため、LTX がロックされています。こうしたファイルは非公式の販売者から来ることがほとんどです。\n\n1. それらを削除し、Jasna は GitHub からだけダウンロードしてください。\n2. ライセンスコードは Jasna 内の販売者ボタンからだけ購入してください。\n3. GitHub で issue を作成してロック解除を依頼し、解除後にライセンスコードをもう一度入力してください。",
         "toast_ltx_trial": "お試しモード：出力は復元されません",
         "ltx_trial_stage": "{stage}（お試し）",
         "segments_seed_tried_trial": "試したシード（お試し）：",

@@ -747,11 +747,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             and self._settings_panel.ltx_unavailable_reason() is None
             and any_job_uses_ltx(jobs, settings)
         ):
-            from jasna.gui.ltx_models import license_missing
+            from tkinter import messagebox
 
+            from jasna.gui.ltx_models import license_blocked, license_missing
+
+            if license_blocked():
+                messagebox.showwarning(t("ltx_blocked_title"), t("ltx_blocked_text"))
+                return
             if license_missing(self._ltx_models.directory, settings.ltx_model, settings.ltx_fast):
-                from tkinter import messagebox
-
                 if messagebox.askyesno(t("ltx_license_trial_title"), t("ltx_license_trial_confirm")):
                     self._settings_panel.set_ltx_trial(True)
                     self._on_start()

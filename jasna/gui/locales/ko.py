@@ -298,6 +298,8 @@ KO = {
         "model_ltx_trial_only": "LTX 모델이 설치되지 않았습니다. 체험 모드만 사용할 수 있습니다.",
         "ltx_license_trial_title": "LTX 라이선스",
         "ltx_license_trial_confirm": "LTX에는 라이선스가 필요합니다. 대신 체험 모드로 실행할까요? 출력은 복원되지 않습니다.",
+        "ltx_blocked_title": "LTX 잠김",
+        "ltx_blocked_text": "크랙되거나 변조된 Jasna(예: jasna-cn.exe)가 이 라이선스 코드로 실행되어 LTX가 잠겼습니다. 이런 파일은 대개 비공식 판매자에게서 옵니다.\n\n1. 해당 파일을 지우고 Jasna는 GitHub에서만 받으세요.\n2. 라이선스 코드는 Jasna 안의 판매자 버튼으로만 구매하세요.\n3. GitHub에 issue를 올려 잠금 해제를 요청하고, 해제 후 라이선스 코드를 다시 입력하세요.",
         "toast_ltx_trial": "체험 모드: 출력이 복원되지 않습니다",
         "ltx_trial_stage": "{stage} (체험)",
         "segments_seed_tried_trial": "시험한 시드(체험):",
