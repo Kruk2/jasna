@@ -58,7 +58,7 @@ def _span_seconds(span: SpliceSpan, index: KeyframeIndex) -> float:
 
 
 def _span_frames(span: SpliceSpan, index: KeyframeIndex, metadata) -> int:
-    return round((span.end_pts - span.start_pts) * index.time_base * metadata.video_fps)
+    return round((span.end_pts - span.start_pts) * index.time_base * metadata.mean_fps)
 
 
 class _OfflineFrameWriter:
@@ -601,7 +601,7 @@ class Pipeline:
             standard_callback, ltx_callback = job_progress.part("standard"), job_progress.part("ltx")
         progress = Progressbar(
             total_frames=max(1, standard_frames),
-            video_fps=metadata.video_fps,
+            video_fps=metadata.mean_fps,
             disable=self.disable_progress,
             callback=standard_callback,
         )

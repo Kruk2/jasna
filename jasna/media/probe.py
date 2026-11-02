@@ -46,6 +46,12 @@ class VideoMetadata:
     spherical_projection: str = ""
     video_bitrate: int = 0
 
+    @property
+    def mean_fps(self) -> float:
+        """Frames per second on average. On variable-frame-rate video ``video_fps`` (r_frame_rate)
+        is only the timestamp grid and can be far above the rate frames arrive at."""
+        return self.average_fps or self.video_fps
+
 
 def resolve_video_start_pts(stream_start_time: int | None, metadata_start_pts: int) -> int:
     if stream_start_time is not None:
