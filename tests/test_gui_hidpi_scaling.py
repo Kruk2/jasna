@@ -102,8 +102,13 @@ def test_main_window_keeps_design_minimum_at_high_dpi_on_1440p(dpi, jasna_app, m
     assert minimum[0] >= 899 and minimum[1] >= 579
 
 
-def test_activate_static_dpi_is_a_no_op_off_windows(monkeypatch) -> None:
-    monkeypatch.setattr(scaling.sys, "platform", "linux")
+@pytest.mark.parametrize(("raw_xft_dpi", "factor"), [("192", 2.0), ("144", 1.5), ("", 1.0)])
+def test_xft_dpi_factor(raw_xft_dpi, factor) -> None:
+    assert scaling.xft_dpi_factor(raw_xft_dpi) == factor
+
+
+def test_activate_static_dpi_is_a_no_op_on_macos(monkeypatch) -> None:
+    monkeypatch.setattr(scaling.sys, "platform", "darwin")
     monkeypatch.setattr(ctk.ScalingTracker, "deactivate_automatic_dpi_awareness", False)
 
     scaling.activate_static_dpi((900, 580))

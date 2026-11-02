@@ -105,7 +105,8 @@ def test_gui_run_gui_patches_frozen_torch():
         pass
 
     with patch("jasna._frozen.patch_frozen_torch") as spy:
-        with patch.object(gui_app, "JasnaApp", side_effect=_Stop):
+        with (patch.object(gui_app, "JasnaApp", side_effect=_Stop),
+              patch.object(gui_app.scaling, "activate_static_dpi")):
             with pytest.raises(_Stop):
                 gui_app.run_gui()
     spy.assert_called()
