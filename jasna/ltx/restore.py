@@ -78,6 +78,7 @@ SEGMENT_DECODE_BUDGETS = (
 """(least total VRAM, decode budget per canvas): 8 GiB decodes a 512 window in one tile,
 16 GiB a 768 window; 5.5 GiB leaves a 6 GB card room for the rest of the job (768 px
 windows need 15 GiB, see ``segment_large_canvas``)."""
+DECODE_BUDGET_STEP_BYTES = 512 << 20
 WHOLE_VIDEO_PTS = (-(1 << 63), (1 << 63) - 1)
 SPEED_TEST_FRAMES = WINDOW_FRAMES + WINDOW_HOP
 """Two windows per track: the speed profile leaves out each canvas's cold first window."""
@@ -679,7 +680,10 @@ def denoise_track(
 
 
 def free_vram_budget(device: torch.device) -> DecodeBudget:
-    return lambda _canvas: device_free_bytes(device)
+    """Free VRAM rounded down to ``DECODE_BUDGET_STEP_BYTES``: decode tiling follows the budget and
+    each tile shape is a compiled graph, so an exact figure that wanders (8 GB cards) runs past
+    the compile limit (#690)."""
+    return lambda _canvas: device_free_bytes(device) // DECODE_BUDGET_STEP_BYTES * DECODE_BUDGET_STEP_BYTES
 
 
 def segment_decode_budget(total_bytes: int) -> DecodeBudget:
