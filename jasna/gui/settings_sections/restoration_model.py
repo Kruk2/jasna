@@ -27,6 +27,8 @@ from jasna.ltx.model_files import LTX_MODELS
 from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
 
 _MODELS = ("basicvsrpp", "ltx")
+# The simple view leaves out the barely faster and the much slower LTX variants.
+SIMPLE_LTX_MODELS = ("distilled2", "distilled4", "distilled")
 
 
 def parse_seed(text: str) -> int:
@@ -319,6 +321,10 @@ class RestorationModelSection:
         if locked:
             self._widgets["ltx_trial"].select()
         self._widgets["ltx_trial"].configure(state="normal" if editable and not locked else "disabled")
+        chosen = self._ltx_model.get_value()
+        self._ltx_model.offer(
+            [model for model in LTX_MODELS if not self._simple or model in SIMPLE_LTX_MODELS or model == chosen]
+        )
         hidden = list(self._expert_rows) if self._simple else []
         if not self._blackwell:
             hidden.append(self._fast_row)
