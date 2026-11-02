@@ -415,8 +415,8 @@ def download_files(
 ) -> None:
     """Download ``files`` into ``directory``, verifying each sha256 before it replaces
     anything. Each file falls back to the other source when the first is unreachable;
-    ``mirror_first`` tries the mirror first. ``progress_callback(done_bytes, total_bytes)``
-    covers all files together."""
+    ``mirror_first`` tries the mirror first. An interrupted download resumes from its ``.part``
+    file. ``progress_callback(done_bytes, total_bytes)`` covers all files together."""
     context = ssl.create_default_context(cafile=certifi.where())
     sources = (LTX_MIRROR_URL, LTX_DOWNLOAD_URL) if mirror_first else (LTX_DOWNLOAD_URL, LTX_MIRROR_URL)
     directory.mkdir(parents=True, exist_ok=True)
@@ -425,25 +425,37 @@ def download_files(
     for file in files:
         target = directory / file.name
         partial = target.with_name(target.name + ".part")
+        manual_hint = f"Download it yourself from {sources[0]}/{file.name} and put it in {directory}"
         for source, fallback in zip(sources, (*sources[1:], None)):
-            digest = hashlib.sha256()
-            received = 0
-            logger.info("Downloading %s from %s", file.name, source)
+            url = f"{source}/{file.name}"
+            offset = partial.stat().st_size if partial.is_file() else 0
+            if offset >= file.size_bytes:
+                offset = 0
+            request = urllib.request.Request(url, headers={"Range": f"bytes={offset}-"} if offset else {})
+            logger.info("Downloading %s", url)
             try:
-                with urllib.request.urlopen(f"{source}/{file.name}", timeout=30, context=context) as response, partial.open("wb") as out:
-                    while chunk := response.read(1 << 22):
-                        out.write(chunk)
-                        digest.update(chunk)
-                        received += len(chunk)
-                        if progress_callback is not None:
-                            progress_callback(done + received, total)
+                with urllib.request.urlopen(request, timeout=30, context=context) as response:
+                    if response.status != 206:
+                        offset = 0
+                    digest = hashlib.sha256()
+                    if offset:
+                        with partial.open("rb") as resumed:
+                            digest = hashlib.file_digest(resumed, "sha256")
+                    received = offset
+                    with partial.open("ab" if offset else "wb") as out:
+                        while chunk := response.read(1 << 22):
+                            out.write(chunk)
+                            digest.update(chunk)
+                            received += len(chunk)
+                            if progress_callback is not None:
+                                progress_callback(done + received, total)
                 break
             except _NETWORK_ERRORS as error:
                 if fallback is None:
-                    raise
-                logger.warning("Downloading %s from %s failed (%s); trying %s", file.name, source, error, fallback)
+                    raise RuntimeError(f"Could not download {file.name} ({error}). {manual_hint}.") from error
+                logger.warning("Downloading %s failed (%s); trying %s", url, error, fallback)
         done += received
         if digest.hexdigest() != file.sha256:
             partial.unlink()
-            raise RuntimeError(f"{file.name} is corrupted (checksum mismatch). The download was deleted.")
+            raise RuntimeError(f"{file.name} is corrupted (checksum mismatch). The download was deleted. {manual_hint}.")
         commit_file(partial, target)

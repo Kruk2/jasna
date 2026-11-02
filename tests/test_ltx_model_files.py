@@ -4,6 +4,7 @@ import os
 import runpy
 import ssl
 import urllib.error
+import urllib.response
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
@@ -112,7 +113,7 @@ def test_outdated_encrypted_model_is_missing_until_verified_download_replaces_it
     with pytest.raises(FileNotFoundError, match="missing or outdated"):
         LtxModelFiles.from_dir(tmp_path, "distilled2", fast=False)
     assert checked.call_count == 1
-    monkeypatch.setattr(model_files.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(current))
+    monkeypatch.setattr(model_files.urllib.request, "urlopen", lambda request, **k: _response(request, current))
     model_files.download_files(tmp_path, needed, None, mirror_first=False)
     assert transformer.read_bytes() == current
     assert model_files.model_installed(tmp_path, "distilled2", fast=False)
@@ -147,9 +148,48 @@ def test_download_verifies_and_replaces_atomically(tmp_path, monkeypatch):
     model_files.download_files(target, [ok], lambda done, total: progress.append((done, total)), mirror_first=False)
     assert (target / "a.safetensors.enc").read_bytes() == good and progress[-1] == (len(good), len(good))
     wrong = model_files.DownloadableFile("b.safetensors.enc", len(bad), hashlib.sha256(good).hexdigest())
-    with pytest.raises(RuntimeError, match="checksum"):
+    with pytest.raises(RuntimeError, match="checksum") as failure:
         model_files.download_files(target, [wrong], None, mirror_first=False)
+    assert f"{source.as_uri()}/b.safetensors.enc" in str(failure.value)
     assert sorted(p.name for p in target.iterdir()) == ["a.safetensors.enc"]
+
+
+def _response(request, content: bytes, status: int = 200):
+    return urllib.response.addinfourl(io.BytesIO(content), {}, request.full_url, code=status)
+
+
+@pytest.mark.parametrize(("status", "served"), [(206, b"tail"), (200, b"head+tail")])
+def test_download_resumes_its_partial_file(tmp_path, monkeypatch, status, served):
+    content = b"head+tail"
+    file = model_files.DownloadableFile("model.enc", len(content), hashlib.sha256(content).hexdigest())
+    (tmp_path / "model.enc.part").write_bytes(b"head+" if status == 206 else b"junk!")
+    ranges = []
+
+    def open_url(request, **kwargs):
+        ranges.append(request.get_header("Range"))
+        return _response(request, served, status)
+
+    monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
+    progress = []
+    model_files.download_files(tmp_path, [file], lambda done, total: progress.append(done), mirror_first=False)
+    assert ranges == ["bytes=5-"]
+    assert (tmp_path / "model.enc").read_bytes() == content and progress[-1] == len(content)
+    assert not (tmp_path / "model.enc.part").exists()
+
+
+def test_failed_download_keeps_its_partial_file_and_names_the_direct_link(tmp_path, monkeypatch):
+    content = b"model bytes"
+    file = model_files.DownloadableFile("model.enc", len(content), hashlib.sha256(content).hexdigest())
+    (tmp_path / "model.enc.part").write_bytes(b"model")
+
+    def unreachable(request, **kwargs):
+        raise urllib.error.URLError("offline")
+
+    monkeypatch.setattr(model_files.urllib.request, "urlopen", unreachable)
+    with pytest.raises(RuntimeError) as failure:
+        model_files.download_files(tmp_path, [file], None, mirror_first=False)
+    assert f"{model_files.LTX_DOWNLOAD_URL}/model.enc" in str(failure.value) and str(tmp_path) in str(failure.value)
+    assert (tmp_path / "model.enc.part").read_bytes() == b"model"
 
 
 def _published(directory, content: bytes) -> str:
@@ -179,11 +219,11 @@ def test_replacement_models_use_release_branch_on_both_sources(tmp_path, monkeyp
     file = model_files.DownloadableFile(name, len(content), hashlib.sha256(content).hexdigest())
     requests = []
 
-    def open_url(url, **kwargs):
-        requests.append(url)
+    def open_url(request, **kwargs):
+        requests.append(request.full_url)
         if len(requests) == 1:
             raise urllib.error.URLError("primary unreachable")
-        return io.BytesIO(content)
+        return _response(request, content)
 
     monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
     model_files.download_files(tmp_path, [file], None, mirror_first=mirror_first)
@@ -206,11 +246,11 @@ def test_download_uses_bundled_ca_for_primary_and_fallback_with_empty_system_tru
     files = [model_files.DownloadableFile(name, len(content), hashlib.sha256(content).hexdigest())
              for name in ("first.enc", "second.enc")]
 
-    def open_url(url, *, timeout, context=None):
-        requests.append((url, timeout, context or empty_default_context))
+    def open_url(request, *, timeout, context=None):
+        requests.append((request.full_url, timeout, context or empty_default_context))
         if len(requests) == 1:
             raise urllib.error.URLError("primary unavailable")
-        return io.BytesIO(content)
+        return _response(request, content)
 
     monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
     target = tmp_path / "models"
