@@ -2,7 +2,6 @@
 
 import customtkinter as ctk
 
-from jasna.gui.components import CollapsibleSection
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.queues import MainThreadCalls
@@ -18,11 +17,7 @@ class ImageRestorationSection:
         self._show_toast = show_toast
         self._on_interactive = on_interactive
 
-        self.frame = CollapsibleSection(parent, t("section_image_restoration"), expanded=True)
-        content = self.frame.content
-        content.configure(corner_radius=Sizing.BORDER_RADIUS)
-
-        inner = self.frame.body
+        self.frame = inner = ctk.CTkFrame(parent, fg_color="transparent")
 
         info = ctk.CTkLabel(
             inner, text=t("image_restore_hint"), text_color=Colors.STATUS_PENDING,

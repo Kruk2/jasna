@@ -6,7 +6,7 @@ from typing import Callable
 import customtkinter as ctk
 
 from jasna.accelerator import AcceleratorVendor
-from jasna.gui.components import CollapsibleSection, Tooltip
+from jasna.gui.components import Tooltip
 from jasna.gui.icons import CompactSwitch, NativeIconButton
 from jasna.gui.locales import t
 from jasna.gui.ltx_models import (
@@ -99,11 +99,7 @@ class RestorationModelSection:
         self._blackwell = False
         self._level = "expert"
 
-        self.frame = CollapsibleSection(parent, t("section_restoration_model"), expanded=True)
-        content = self.frame.content
-        content.configure(corner_radius=Sizing.BORDER_RADIUS)
-
-        inner = self.frame.body
+        self.frame = inner = ctk.CTkFrame(parent, fg_color="transparent")
 
         self._model = self._widgets["restoration_model"] = ctk.StringVar(value="basicvsrpp")
         self._cards_frame = ctk.CTkFrame(inner, fg_color="transparent")

@@ -2,7 +2,7 @@
 
 import customtkinter as ctk
 
-from jasna.gui.components import CollapsibleSection, Tooltip
+from jasna.gui.components import Tooltip
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import Row, ValueOptionMenu, add_setting_label, get_tooltip, layout_rows
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -14,11 +14,7 @@ class PostExportSection:
         self._on_modified = on_modified
         self._level = "expert"
 
-        self.frame = CollapsibleSection(parent, t("section_post_export_action"), expanded=True)
-        content = self.frame.content
-        content.configure(corner_radius=Sizing.BORDER_RADIUS)
-
-        inner = self.frame.body
+        self.frame = inner = ctk.CTkFrame(parent, fg_color="transparent")
 
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
 

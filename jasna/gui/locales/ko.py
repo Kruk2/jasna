@@ -240,8 +240,6 @@ KO = {
         "preset": "프리셋:",
 
         # Sections
-        "section_processing": "처리",
-        "section_restoration_model": "복원 모델",
         "model_basicvsrpp": "BasicVSR++",
         "model_basicvsrpp_description": "빠름",
         "model_ltx": "LTX",
@@ -312,7 +310,6 @@ KO = {
         "ltx_step_percent": "{count}단계 중 {number}단계: {stage} {percent}%",
         "ltx_step_eta": "{count}단계 중 {number}단계: {stage} {percent}%, {time} 남음",
         "ltx_step_short": "{number}/{count}단계: {percent}%",
-        "section_detection": "감지",
         "view_simple": "간단히",
         "view_advanced": "고급",
         "view_expert": "전문가",
@@ -322,7 +319,6 @@ KO = {
         "tab_upscale": "업스케일",
         "tab_output": "출력",
         "tab_images": "이미지",
-        "section_secondary": "2차 복원",
         "section_image_restoration": "이미지 복원 (정지 이미지)",
         "image_restore_hint": "정지 이미지에 자동으로 사용됩니다. Jasna가 모자이크를 찾아 SD 1.5 모델로 다시 그립니다. 비디오에는 이 설정이 적용되지 않습니다.",
         "image_restore_model": "모델",
@@ -359,8 +355,6 @@ KO = {
         "tip_image_restore_variants": "이미지마다 저장할 대체 결과 수입니다. 각 변형은 다음 시드를 사용하며 전체 처리를 한 번 더 실행합니다.\n\n배치 작업은 1을 쓰세요. 정지 이미지에서 가장 좋은 결과를 고를 때는 3-4가 좋습니다.",
         "tip_image_restore_seed": "무작위성을 제어합니다. 같은 이미지, 설정, 시드는 같은 결과를 반복하기 쉽고, 다른 시도를 원하면 값을 바꾸세요.\n\n변형은 seed, seed+1, seed+2 순서로 사용합니다.",
         "tip_image_restore_freeu": "형태가 더 또렷해지는 경우가 많습니다. 켜 두고, 딱딱한 경계나 이상한 질감이 보이면 끄세요.",
-        "section_encoding": "인코딩",
-        "section_post_export_action": "내보내기 후 작업",
 
         # Basic Processing
         "max_clip_size": "최대 클립 크기",

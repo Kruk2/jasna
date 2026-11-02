@@ -240,8 +240,6 @@ TH = {
         "preset": "พรีเซ็ต:",
 
         # Sections
-        "section_processing": "การประมวลผล",
-        "section_restoration_model": "โมเดลฟื้นฟู",
         "model_basicvsrpp": "BasicVSR++",
         "model_basicvsrpp_description": "เร็ว",
         "model_ltx": "LTX",
@@ -312,7 +310,6 @@ TH = {
         "ltx_step_percent": "ขั้นตอน {number}/{count}: {stage} {percent}%",
         "ltx_step_eta": "ขั้นตอน {number}/{count}: {stage} {percent}% เหลืออีก {time}",
         "ltx_step_short": "ขั้นตอน {number}/{count}: {percent}%",
-        "section_detection": "การตรวจจับ",
         "view_simple": "แบบง่าย",
         "view_advanced": "ขั้นสูง",
         "view_expert": "ผู้เชี่ยวชาญ",
@@ -322,7 +319,6 @@ TH = {
         "tab_upscale": "อัปสเกล",
         "tab_output": "เอาต์พุต",
         "tab_images": "รูปภาพ",
-        "section_secondary": "การฟื้นฟูขั้นที่สอง",
         "section_image_restoration": "การฟื้นฟูภาพ (ภาพนิ่ง)",
         "image_restore_hint": "ใช้โดยอัตโนมัติกับภาพนิ่ง: Jasna จะหาโมเสกและวาดใหม่ด้วยโมเดล SD 1.5 วิดีโอจะไม่ใช้การตั้งค่าเหล่านี้",
         "image_restore_model": "โมเดล",
@@ -359,8 +355,6 @@ TH = {
         "tip_image_restore_variants": "จำนวนผลลัพธ์ทางเลือกที่จะบันทึกต่อภาพ แต่ละตัวแปรใช้ซีดถัดไปและต้องประมวลผลเต็มอีกครั้ง\n\nใช้ 1 สำหรับงานชุด ใช้ 3-4 เมื่อต้องเลือกภาพนิ่งที่ดีที่สุด",
         "tip_image_restore_seed": "ควบคุมความสุ่ม ภาพ การตั้งค่า และซีดเดิมมักให้ผลเดิม เปลี่ยนค่านี้เมื่อต้องการลองผลแบบอื่น\n\nตัวแปรจะใช้ seed, seed+1, seed+2 ต่อไปเรื่อย ๆ",
         "tip_image_restore_freeu": "มักทำให้รูปทรงคมขึ้น เปิดไว้ และปิดถ้าเห็นขอบแข็งหรือพื้นผิวแปลก ๆ",
-        "section_encoding": "การเข้ารหัส",
-        "section_post_export_action": "การทำงานหลังส่งออก",
 
         # Basic Processing
         "max_clip_size": "ขนาดคลิปสูงสุด",

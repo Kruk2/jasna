@@ -240,8 +240,6 @@ ZH = {
         "preset": "预设:",
         
         # Sections
-        "section_processing": "处理",
-        "section_restoration_model": "修复模型",
         "model_basicvsrpp": "BasicVSR++",
         "model_basicvsrpp_description": "速度快",
         "model_ltx": "LTX",
@@ -312,7 +310,6 @@ ZH = {
         "ltx_step_percent": "第 {number}/{count} 步：{stage} {percent}%",
         "ltx_step_eta": "第 {number}/{count} 步：{stage} {percent}%，剩余 {time}",
         "ltx_step_short": "第 {number}/{count} 步：{percent}%",
-        "section_detection": "检测",
         "view_simple": "简洁",
         "view_advanced": "高级",
         "view_expert": "专家",
@@ -322,7 +319,6 @@ ZH = {
         "tab_upscale": "放大",
         "tab_output": "输出",
         "tab_images": "图片",
-        "section_secondary": "二次修复",
         "section_image_restoration": "图像修复（静态图片）",
         "image_restore_hint": "静态图片会自动使用：Jasna 找到马赛克，并用 SD 1.5 模型重绘。视频会忽略这些设置。",
         "image_restore_model": "模型",
@@ -359,8 +355,6 @@ ZH = {
         "tip_image_restore_variants": "每张图片保存多少个备选结果。每个变体会使用下一个种子，并需要再完整跑一次。\n\n批量处理用 1。想挑选最佳静态图时可用 3-4。",
         "tip_image_restore_seed": "控制随机性。同一图片、设置和种子通常会得到相同结果；换种子就是换一次尝试。\n\n变体会使用 seed、seed+1、seed+2，依此类推。",
         "tip_image_restore_freeu": "通常能让形状更清晰。建议保持开启；如果出现生硬边缘或奇怪纹理，可以关闭。",
-        "section_encoding": "编码设置",
-        "section_post_export_action": "导出后操作",
         
         # Basic Processing
         "max_clip_size": "最大片段大小",

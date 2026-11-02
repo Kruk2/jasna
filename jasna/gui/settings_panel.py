@@ -55,6 +55,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._on_interactive_image_restore: callable | None = None
         self._view = self._preset_manager.get_settings_view()
         self._tab = _TABS[0]
+        self._offered_tabs = list(_TABS)
         self._uses_standard, self._uses_ltx = True, False
 
         self._build_preset_bar()
@@ -182,20 +183,17 @@ class SettingsPanel(ctk.CTkFrame):
         view_tip.pack(side="left", padx=6)
         Tooltip(view_tip, t("tip_settings_view"))
 
-        # The tab bar comes and goes inside this slot, above the scroll area.
-        tab_slot = tk.Frame(self, background=Colors.BG_PANEL, height=0, borderwidth=0, highlightthickness=0)
-        tab_slot.pack(fill="x", padx=Sizing.PADDING_MEDIUM)
         tab_by_label = {t(f"tab_{tab}"): tab for tab in _TABS}
         self._tab_bar = ctk.CTkSegmentedButton(
-            tab_slot,
+            self,
             values=list(tab_by_label),
             command=lambda label: self.show_tab(tab_by_label[label]),
             **segmented_colors,
         )
-        self._tab_bar.set(t(f"tab_{self._tab}"))
+        self._tab_bar.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_MEDIUM))
 
     def set_view(self, view: str) -> None:
-        """Simple shows the main choices on one page; Advanced and Expert show more of them in tabs."""
+        """Each level shows more settings in the same tabs; Simple leaves out the tabs it has nothing in."""
         self._view = view
         self._view_switch.set(t(f"view_{view}"))
         self._preset_manager.set_settings_view(view)
@@ -203,26 +201,31 @@ class SettingsPanel(ctk.CTkFrame):
 
     def show_tab(self, tab: str) -> None:
         self._tab = tab
-        self._tab_bar.set(t(f"tab_{tab}"))
         self._layout_sections()
 
+    def _offer_tabs(self, tabs: list[str]) -> None:
+        if tabs == self._offered_tabs:
+            return
+        self._offered_tabs = tabs
+        self._tab_bar.configure(values=[t(f"tab_{tab}") for tab in tabs])
+        # CTkSegmentedButton keeps the weight of columns whose buttons are gone.
+        for column in range(len(tabs), len(_TABS)):
+            self._tab_bar.grid_columnconfigure(column, weight=0, minsize=0)
+
     def _layout_sections(self) -> None:
-        simple = self._view == "simple"
-        for section in self._sections:
-            section.frame.pack_forget()
-        if simple:
-            self._tab_bar.pack_forget()
-            shown = self._simple_sections
-        else:
-            self._tab_bar.pack(fill="x", pady=(0, Sizing.PADDING_MEDIUM))
-            shown = self._tab_sections[self._tab]
         visible = [
             section for section in self._sections
             if section.layout(self._view, standard=self._uses_standard, ltx=self._uses_ltx)
         ]
-        for section in shown:
+        tabs = [tab for tab in _TABS if any(section in visible for section in self._tab_sections[tab])]
+        if self._tab not in tabs:
+            self._tab = tabs[0]
+        self._offer_tabs(tabs)
+        self._tab_bar.set(t(f"tab_{self._tab}"))
+        for section in self._sections:
+            section.frame.pack_forget()
+        for section in self._tab_sections[self._tab]:
             if section in visible:
-                section.frame.set_header_shown(simple)
                 section.frame.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         self._scroll.scroll_to_top()
 
@@ -320,7 +323,6 @@ class SettingsPanel(ctk.CTkFrame):
             "images": [image_section],
         }
         self._sections = [section for sections in self._tab_sections.values() for section in sections]
-        self._simple_sections = [self._model_section, encoding_section, post_export_section, image_section]
 
     def _on_restoration_model_changed(self, model: str, auto_split: bool):
         self._uses_standard, self._uses_ltx = model != "ltx" or auto_split, model == "ltx"

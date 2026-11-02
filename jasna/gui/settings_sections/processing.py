@@ -2,7 +2,6 @@
 
 import customtkinter as ctk
 
-from jasna.gui.components import CollapsibleSection
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
@@ -28,11 +27,7 @@ class ProcessingSection:
         self._on_modified = on_modified
         self._on_max_clip_size_change = on_max_clip_size_change
 
-        self.frame = CollapsibleSection(parent, t("section_processing"), expanded=True)
-        content = self.frame.content
-        content.configure(corner_radius=Sizing.BORDER_RADIUS)
-
-        inner = self.frame.body
+        self.frame = inner = ctk.CTkFrame(parent, fg_color="transparent")
 
         overlap_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(overlap_row, "temporal_overlap")
