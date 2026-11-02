@@ -291,6 +291,29 @@ def device_free_bytes(device: torch.device) -> int:
     return free
 
 
+_ALLOCATION_PROBE_CHUNK_BYTES = 64 << 20
+
+
+def allocatable_bytes(device: torch.device, limit: int) -> int:
+    """How much of ``limit`` this process can really allocate on ``device`` now, found by
+    allocating it in chunks and freeing them again. Windows can allow less than the free figure
+    says, and without sysmem fallback the extra fails instead of spilling to RAM (#678)."""
+    torch.cuda.empty_cache()
+    chunks = []
+    allocated = 0
+    while allocated < limit:
+        size = min(_ALLOCATION_PROBE_CHUNK_BYTES, limit - allocated)
+        try:
+            chunks.append(torch.empty(size, dtype=torch.uint8, device=device))
+        except torch.OutOfMemoryError:
+            log.info("VRAM: %d of %d MiB free can be allocated", allocated >> 20, limit >> 20)
+            break
+        allocated += size
+    chunks.clear()
+    torch.cuda.empty_cache()
+    return allocated
+
+
 def device_name(device: torch.device | str) -> str:
     resolved = torch.device(device)
     if resolved.type == "cpu":
