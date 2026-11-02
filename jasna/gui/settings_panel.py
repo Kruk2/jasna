@@ -182,9 +182,12 @@ class SettingsPanel(ctk.CTkFrame):
         view_tip.pack(side="left", padx=6)
         Tooltip(view_tip, t("tip_settings_view"))
 
+        # The tab bar comes and goes inside this slot, above the scroll area.
+        tab_slot = tk.Frame(self, background=Colors.BG_PANEL, height=0, borderwidth=0, highlightthickness=0)
+        tab_slot.pack(fill="x", padx=Sizing.PADDING_MEDIUM)
         tab_by_label = {t(f"tab_{tab}"): tab for tab in _TABS}
         self._tab_bar = ctk.CTkSegmentedButton(
-            self,
+            tab_slot,
             values=list(tab_by_label),
             command=lambda label: self.show_tab(tab_by_label[label]),
             **segmented_colors,
@@ -207,14 +210,12 @@ class SettingsPanel(ctk.CTkFrame):
         simple = self._view == "simple"
         for section in self._sections:
             section.frame.pack_forget()
-        self._tab_bar.pack_forget()
-        self._scroll.pack_forget()
         if simple:
+            self._tab_bar.pack_forget()
             shown = self._simple_sections
         else:
-            self._tab_bar.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_MEDIUM))
+            self._tab_bar.pack(fill="x", pady=(0, Sizing.PADDING_MEDIUM))
             shown = self._tab_sections[self._tab]
-        self._scroll.pack(fill="both", expand=True, padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_MEDIUM))
         visible = [
             section for section in self._sections
             if section.layout(self._view, standard=self._uses_standard, ltx=self._uses_ltx)
@@ -287,6 +288,7 @@ class SettingsPanel(ctk.CTkFrame):
             scrollbar_button_color=Colors.BORDER_LIGHT,
             scrollbar_button_hover_color=Colors.BORDER_LIGHT,
         )
+        self._scroll.pack(fill="both", expand=True, padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_MEDIUM))
 
     def _build_sections(self, ltx_models: LtxModels):
         self._model_section = RestorationModelSection(
