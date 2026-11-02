@@ -473,7 +473,7 @@ JA = {
         "codec": "コーデック",
         "quality_cq": "品質 (CQ)",
         "custom_args": "カスタム引数",
-        "post_export_action": "アクション",
+        "post_export_action": "キュー完了後",
         "post_export_none": "なし",
         "post_export_shutdown": "PC をシャットダウン",
         "post_export_command": "カスタムコマンド",

@@ -101,7 +101,7 @@ ffprobe -v error -show_entries format_tags=comment out.mkv
 ## 队列完成后
 
 整个队列完成后执行一个操作：**关闭电脑**或**自定义命令**（例如给你发消息的脚本，仅**专家**视图）。
-在**导出后操作**部分设置，或在 CLI 中：
+在**输出**标签页的**队列完成后**设置，或在 CLI 中：
 
 ```bash
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown

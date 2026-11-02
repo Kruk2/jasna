@@ -591,3 +591,15 @@ def test_detection_timing_and_tvai_workers_are_expert_rows(panel_factory, view, 
 
     assert _shown(panel._widgets["max_detection_gap"].master) is shown
     assert _shown(panel._widgets["tvai_workers"].master) is shown
+
+
+@pytest.mark.parametrize(("view", "tab", "header"), [("advanced", "images", False), ("expert", "output", False), ("simple", None, True)])
+def test_tabs_show_their_sections_open_without_title_bars(panel_factory, view, tab, header) -> None:
+    panel = panel_factory()
+    panel.set_view(view)
+    if tab:
+        panel.show_tab(tab)
+    section = _section(panel, ImageRestorationSection if tab != "output" else EncodingSection).frame
+
+    assert _shown(section._header) is header
+    assert _shown(section.content)

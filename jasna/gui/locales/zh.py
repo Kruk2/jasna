@@ -473,7 +473,7 @@ ZH = {
         "codec": "编解码器",
         "quality_cq": "质量 (CQ)",
         "custom_args": "自定义参数",
-        "post_export_action": "操作",
+        "post_export_action": "队列完成后",
         "post_export_none": "无",
         "post_export_shutdown": "关闭电脑",
         "post_export_command": "自定义命令",

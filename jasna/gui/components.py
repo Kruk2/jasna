@@ -541,6 +541,15 @@ class CollapsibleSection(ctk.CTkFrame):
         else:
             self._content.pack_forget()
             
+    def set_header_shown(self, shown: bool) -> None:
+        """Without its header the section is always open."""
+        self._header.pack_forget()
+        self._content.pack_forget()
+        if shown:
+            self._header.pack(fill="x")
+        if self._expanded or not shown:
+            self._content.pack(fill="x", pady=(2, 0) if shown else 0)
+
     @property
     def content(self) -> ctk.CTkFrame:
         return self._content

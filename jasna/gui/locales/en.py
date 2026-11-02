@@ -473,7 +473,7 @@ EN = {
         "codec": "Codec",
         "quality_cq": "Quality (CQ)",
         "custom_args": "Custom Args",
-        "post_export_action": "Action",
+        "post_export_action": "When Queue Is Done",
         "post_export_none": "None",
         "post_export_shutdown": "Shutdown PC",
         "post_export_command": "Custom Command",

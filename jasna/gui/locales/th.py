@@ -473,7 +473,7 @@ TH = {
         "codec": "ตัวแปลงสัญญาณ",
         "quality_cq": "คุณภาพ (CQ)",
         "custom_args": "อาร์กิวเมนต์กำหนดเอง",
-        "post_export_action": "การทำงาน",
+        "post_export_action": "เมื่อคิวเสร็จ",
         "post_export_none": "ไม่มี",
         "post_export_shutdown": "ปิดเครื่อง PC",
         "post_export_command": "คำสั่งกำหนดเอง",

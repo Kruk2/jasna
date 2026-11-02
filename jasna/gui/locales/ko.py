@@ -473,7 +473,7 @@ KO = {
         "codec": "코덱",
         "quality_cq": "품질 (CQ)",
         "custom_args": "사용자 정의 인수",
-        "post_export_action": "작업",
+        "post_export_action": "대기열 완료 후",
         "post_export_none": "없음",
         "post_export_shutdown": "PC 종료",
         "post_export_command": "사용자 정의 명령",

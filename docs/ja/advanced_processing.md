@@ -121,7 +121,7 @@ ffprobe -v error -show_entries format_tags=comment out.mkv
 
 キュー全体が終わったときに何かを実行できます: **PC をシャットダウン**、
 または**カスタムコマンド**（たとえばメッセージを送るスクリプト、**エキスパート**表示のみ）です。
-**エクスポート後のアクション**セクションか、CLI で設定します:
+**出力**タブの**キュー完了後**か、CLI で設定します:
 
 ```bash
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown
