@@ -9,7 +9,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from jasna.media.probe import UnsupportedVideoError
 from jasna.mosaic.detections import Detections
 
 log = logging.getLogger(__name__)
@@ -192,9 +191,15 @@ def resolve_vr_mode(
     return result
 
 
-def require_ltx_input(resolution: VrModeResolution) -> None:
-    if resolution.is_sbs:
-        raise UnsupportedVideoError("LTX does not support VR180 side-by-side video; restore it with BasicVSR++")
+def eye_bounds(bbox, eye_width: int | None, frame_width: int) -> tuple[int, int] | None:
+    """The x range of the SBS eye holding the centre of ``bbox``; None for flat video."""
+    if eye_width is None:
+        return None
+    eye_width = int(eye_width)
+    if eye_width <= 0 or eye_width * 2 != int(frame_width):
+        raise ValueError(f"Invalid SBS eye width {eye_width} for frame width {frame_width}")
+    center_x = (float(bbox[0]) + float(bbox[2])) * 0.5
+    return (0, eye_width) if center_x < eye_width else (eye_width, frame_width)
 
 
 class SbsDetectionAdapter:

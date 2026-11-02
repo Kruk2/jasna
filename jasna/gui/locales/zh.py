@@ -160,7 +160,6 @@ ZH = {
         "segments_restore_with": "修复方式",
         "segments_use_for_all": "用于所有区间",
         "tip_segments_use_for_all": "将此模型和种子应用到所有区间。",
-        "segments_ltx_needs_flat_video": "LTX 不支持 VR 左右并排视频。",
         "segments_ltx_ranges_unavailable": "这台电脑无法运行 LTX。LTX 区间不会被修复。",
         "segments_seed_starting": "种子 {seed}：开始",
         "segments_seed_progress": "种子 {seed}：{stage} {percent:.0f}%，剩余 {eta}",

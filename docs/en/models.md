@@ -80,7 +80,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   continues where it stopped. Download still fails? See
   [Downloading LTX yourself](#downloading-ltx-yourself).
 
-LTX does not work with VR180 side-by-side videos or streaming. Denoising is
+LTX does not work with streaming. Denoising is
 turned off with LTX, and of the secondary restorations only RTX Super Res works.
 With **LTX only for big mosaics** (`--ltx-auto-split`), the smaller mosaics
 restored by BasicVSR++ still use any secondary restoration and denoising.

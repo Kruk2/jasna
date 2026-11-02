@@ -177,8 +177,8 @@ def test_only_windows_compose_enlarges_get_super_resolution():
     from jasna.ltx.super_res import enlarged_windows
 
     fits = letterbox((0, 0, 400, 400), 512)
-    shrunk = Window(index=0, track_id=0, start=0, real_frames=2, crops=(fits, fits))
-    enlarged = Window(index=1, track_id=0, start=1, real_frames=2, crops=(fits, letterbox((0, 0, 700, 700), 512)))
+    shrunk = Window(index=0, track_id=0, start=0, real_frames=2, crops=(fits, fits), noise=0)
+    enlarged = Window(index=1, track_id=0, start=1, real_frames=2, crops=(fits, letterbox((0, 0, 700, 700), 512)), noise=1)
     assert enlarged_windows([shrunk, enlarged]) == {1}
 
 

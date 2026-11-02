@@ -160,7 +160,6 @@ KO = {
         "segments_restore_with": "복원 방식",
         "segments_use_for_all": "모든 구간에 사용",
         "tip_segments_use_for_all": "이 모델과 시드를 모든 구간에 적용합니다.",
-        "segments_ltx_needs_flat_video": "LTX는 VR 사이드 바이 사이드 비디오를 지원하지 않습니다.",
         "segments_ltx_ranges_unavailable": "이 PC에서는 LTX를 실행할 수 없습니다. LTX 구간은 복원되지 않습니다.",
         "segments_seed_starting": "시드 {seed}: 시작",
         "segments_seed_progress": "시드 {seed}: {stage} {percent:.0f}%, {eta} 남음",

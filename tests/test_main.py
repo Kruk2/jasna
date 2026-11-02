@@ -266,7 +266,7 @@ def test_post_export_video_command_failure_continues_folder_and_exits_1(tmp_path
 
 def test_unsupported_video_is_skipped_and_the_folder_continues(tmp_path, capsys):
     rejected, restored = MagicMock(), MagicMock()
-    rejected.run.side_effect = UnsupportedVideoError("LTX does not support VR180 side-by-side video")
+    rejected.run.side_effect = UnsupportedVideoError("yuv422 unsupported")
 
     with cli_environment() as pipeline_cls, patch("sys.argv", ["jasna", *_folder_args(tmp_path, ["a_vr.mp4", "b_clip.mp4"])]):
         pipeline_cls.side_effect = [rejected, restored]
@@ -274,7 +274,7 @@ def test_unsupported_video_is_skipped_and_the_folder_continues(tmp_path, capsys)
         main()
 
     restored.run.assert_called_once()
-    assert "Error processing a_vr.mp4: LTX does not support VR180 side-by-side video" in capsys.readouterr().out
+    assert "Error processing a_vr.mp4: yuv422 unsupported" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

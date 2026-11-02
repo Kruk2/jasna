@@ -163,6 +163,7 @@ def _render(tmp_path):
         files=FILES,
         frame_h=64,
         frame_w=64,
+        eye_width=None,
         batch_size=4,
         large_canvas=False,
         window_hop=restore.WINDOW_HOP,
@@ -224,6 +225,7 @@ def test_a_segment_plans_the_same_wherever_decoding_starts(fakes):
             batch_size=4,
             frame_h=64,
             frame_w=64,
+            eye_width=None,
             large_canvas=False,
             window_hop=restore.WINDOW_HOP,
             bar=_Bar(),
@@ -244,7 +246,7 @@ def test_scan_span_bridges_detection_gaps_up_to_max_gap(fakes):
 
     def spans(max_gap):
         (plans,) = restore.scan_span(
-            _source(video), [whole], _Detector(), batch_size=4, frame_h=64, frame_w=64, large_canvas=False,
+            _source(video), [whole], _Detector(), batch_size=4, frame_h=64, frame_w=64, eye_width=None, large_canvas=False,
             window_hop=restore.WINDOW_HOP, bar=_Bar(), cancel=threading.Event(), max_gap=max_gap, min_duration=0,
         )
         return [(plan.start, plan.stop) for plan in plans]
@@ -301,6 +303,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         files=FILES,
         frame_h=64,
         frame_w=64,
+        eye_width=None,
         batch_size=4,
         large_canvas=False,
         window_hop=restore.WINDOW_HOP,
@@ -328,7 +331,7 @@ def test_decode_window_converts_a_float32_decode(monkeypatch):
 
 def _two_window_composer(monkeypatch, decode, composite):
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
-    windows = (Window(0, 0, 0, 13, (crop,) * 13), Window(1, 0, 3, 13, (crop,) * 13))
+    windows = (Window(0, 0, 0, 13, (crop,) * 13, 0), Window(1, 0, 3, 13, (crop,) * 13, 1))
     plan = restore.TrackPlan(0, 0, ((),) * 16, (1.0,) * 16, windows, 3)
     monkeypatch.setattr(restore, "_decode_window", decode)
     monkeypatch.setattr(restore, "composite_frame", composite)
@@ -596,7 +599,7 @@ def test_pass_time_left_is_the_profile_work_left_scaled_by_the_measured_pace(mon
 
 
 def _window(index: int, start: int, frames: int, canvas: int = 512) -> Window:
-    return Window(index, 0, start, frames, (CropFrame((0, 0, 4, 4), (canvas, canvas), (0, 0, 0, 0)),) * frames)
+    return Window(index, 0, start, frames, (CropFrame((0, 0, 4, 4), (canvas, canvas), (0, 0, 0, 0)),) * frames, index)
 
 
 def test_decode_shares_spread_each_window_over_the_frames_it_decodes_during():
@@ -773,6 +776,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
         files=FILES,
         frame_h=64,
         frame_w=64,
+        eye_width=None,
         batch_size=4,
         large_canvas=False,
         window_hop=restore.WINDOW_HOP,
@@ -872,7 +876,7 @@ _CUDA = pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_availabl
 @pytest.mark.parametrize("device", ["cpu", _CUDA])
 def test_segment_encoder_feeds_each_window_its_crops_padded_with_the_last(device):
     crop = CropFrame(crop_box=(0, 0, 8, 8), resize_hw=(8, 8), pad=(0, 0, 0, 0))
-    windows = (Window(0, 0, 1, 3, (crop,) * 3), Window(1, 0, 2, 2, (crop,) * 2), Window(2, 0, 4, 1, (crop,)))
+    windows = (Window(0, 0, 1, 3, (crop,) * 3, 0), Window(1, 0, 2, 2, (crop,) * 2, 1), Window(2, 0, 4, 1, (crop,), 2))
     encoded = {}
     store = SimpleNamespace(put=lambda index, latent: encoded.__setitem__(index, latent.cpu()))
     buffers = restore._WindowBuffers()
@@ -1197,7 +1201,7 @@ def _save_whole_video_768_plan(resume_dir: Path) -> None:
     resume_dir.mkdir()
     crop = CropFrame((0, 0, 700, 700), (768, 768), (0, 0, 0, 0))
     polygon = np.array([[0, 0], [700, 0], [700, 700]], dtype=np.int32)
-    plan = TrackPlan(0, 0, ((polygon,),), (1.0,), (Window(0, 0, 0, 1, (crop,)),), 88)
+    plan = TrackPlan(0, 0, ((polygon,),), (1.0,), (Window(0, 0, 0, 1, (crop,), 0),), 88)
     span = restore.LtxSpan(_source(_video(12, range(0))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)
     np.savez(restore._plan_path(span, resume_dir), frames=np.array(12), **plans_to_arrays([[plan]]))
 
@@ -1242,7 +1246,7 @@ def test_the_speed_test_mosaics_plan_two_windows_on_each_canvas(frame_h, frame_w
     detections = restore._SpeedTestMosaics()(torch.zeros(1, 3, 8, 8), target_hw=(frame_h, frame_w))
     regions = restore.regions_per_frame(detections, frame_h, frame_w) * restore.SPEED_TEST_FRAMES
     plans = restore.plan_video(
-        regions, set(), frame_w=frame_w, frame_h=frame_h, large_canvas=True, window_hop=restore.WINDOW_HOP,
+        regions, set(), frame_w=frame_w, frame_h=frame_h, eye_width=None, large_canvas=True, window_hop=restore.WINDOW_HOP,
         max_gap=MAX_GAP, min_duration=0,
     )
     assert sorted(w.canvas for plan in plans for w in plan.windows) == [512, 512, 768, 768]

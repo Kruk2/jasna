@@ -78,7 +78,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   それでも失敗する場合は
   [LTX を手動でダウンロードする](#ltx-を手動でダウンロードする)を見てください。
 
-LTX は VR180 サイドバイサイド動画とストリーミングでは使えません。LTX では
+LTX はストリーミングでは使えません。LTX では
 ノイズ除去はオフになり、二次復元は RTX Super Res だけが使えます。**大きなモザイクだけ LTX**
 （`--ltx-auto-split`）では、BasicVSR++ で復元する小さなモザイクにすべての二次復元とノイズ除去が使われます。
 

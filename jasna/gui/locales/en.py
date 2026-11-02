@@ -160,7 +160,6 @@ EN = {
         "segments_restore_with": "Restore with",
         "segments_use_for_all": "Use for all ranges",
         "tip_segments_use_for_all": "Apply this model and seed to all ranges.",
-        "segments_ltx_needs_flat_video": "LTX doesn't support VR side-by-side video.",
         "segments_ltx_ranges_unavailable": "LTX can't run on this PC. LTX ranges won't be restored.",
         "segments_seed_starting": "Seed {seed}: starting",
         "segments_seed_progress": "Seed {seed}: {stage} {percent:.0f}%, {eta} left",
