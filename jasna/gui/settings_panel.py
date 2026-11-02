@@ -221,6 +221,7 @@ class SettingsPanel(ctk.CTkFrame):
         ]
         for section in shown:
             if section in visible:
+                section.frame.set_header_shown(simple)
                 section.frame.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         self._scroll.scroll_to_top()
 

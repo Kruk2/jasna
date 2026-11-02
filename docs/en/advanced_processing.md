@@ -123,7 +123,7 @@ A comment the source video had is replaced.
 
 Run something when the whole queue is finished: **Shutdown PC** or a
 **Custom Command** (for example a script that sends you a message, **Expert**
-view only). Set it in the **Post-Export Action** section or in the CLI:
+view only). Set it with **When Queue Is Done** in the **Output** tab or in the CLI:
 
 ```bash
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown
