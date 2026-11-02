@@ -71,6 +71,10 @@ class ValueOptionMenu(ctk.CTkOptionMenu):
     def get_value(self) -> str:
         return self._label_to_value[self.get()]
 
+    def offer(self, values) -> None:
+        """Limit the menu to ``values``; the current selection stays as it is."""
+        self.configure(values=[self._value_to_label[value] for value in values])
+
     def set_value(self, value: str):
         label = self._value_to_label.get(value)
         if label is None:

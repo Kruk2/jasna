@@ -534,3 +534,23 @@ def test_the_settings_view_is_remembered(panel_factory) -> None:
     panel_factory().set_view("advanced")
 
     assert _shown(panel_factory()._tab_bar)
+
+
+@pytest.mark.parametrize(
+    ("view", "chosen", "offered"),
+    [
+        ("simple", "distilled2", ["distilled2", "distilled4", "distilled"]),
+        ("simple", "undistilled", ["distilled2", "distilled4", "distilled", "undistilled"]),
+        ("advanced", "distilled2", ["distilled1", "distilled2", "distilled4", "distilled", "undistilled"]),
+    ],
+)
+def test_simple_view_offers_three_ltx_models_and_keeps_another_chosen_one(panel_factory, view, chosen, offered) -> None:
+    from jasna.gui.locales import t
+
+    panel = panel_factory(True)
+    panel.set_view(view)
+
+    _apply(panel, AppSettings(restoration_model="ltx", ltx_model=chosen))
+
+    assert panel._widgets["ltx_model"].cget("values") == [t(f"ltx_model_{model}") for model in offered]
+    assert panel.get_settings().ltx_model == chosen
