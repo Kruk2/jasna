@@ -377,10 +377,13 @@ def windows_module_loaded(name: str) -> bool:
     return bool(get_module_handle(name))
 
 
+def windows_powershell() -> str:
+    return str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+
+
 def _check_amd_driver_version() -> tuple[bool | None, str]:
     """None is a warning: the driver is older than tested, or its version cannot be compared."""
     if sys.platform == "win32":
-        powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
         command = (
             "$ErrorActionPreference = 'Stop'; "
             "Get-CimInstance Win32_VideoController | "
@@ -389,7 +392,7 @@ def _check_amd_driver_version() -> tuple[bool | None, str]:
         )
         try:
             result = subprocess.run(
-                [str(powershell), "-NoProfile", "-NonInteractive", "-Command", command],
+                [windows_powershell(), "-NoProfile", "-NonInteractive", "-Command", command],
                 capture_output=True, text=True, errors="replace", check=False, timeout=10,
                 **subprocess_no_window_kwargs(),
             )

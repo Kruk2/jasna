@@ -19,6 +19,7 @@ from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
 from jasna.progressbar import StageProgress
 from jasna.session_config import SessionConfig
+from jasna.system_report import log_system_summary
 from jasna.session_factory import (
     RestorationSession,
     build_job_pipeline,
@@ -208,6 +209,7 @@ class Processor:
 
     def _run(self):
         self._log("INFO", "Processing started")
+        log_system_summary()
 
         try:
             while not self._stop_event.is_set():
