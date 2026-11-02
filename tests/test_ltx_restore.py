@@ -125,7 +125,7 @@ def fakes(monkeypatch, tmp_path):
         budgets.append(free_bytes)
         return torch.zeros(1, 3, restore.WINDOW_FRAMES, 2, 2)
 
-    def composite(source, candidates, *, feather):
+    def composite(source, candidates, *, feather, projector):
         out = source.clone()
         out[2, 0, 0] = len(candidates)
         return out
@@ -138,7 +138,7 @@ def fakes(monkeypatch, tmp_path):
         restore, "regions_per_frame", lambda frames, h, w: [[MOSAIC] if int(f[0, 0, 0]) else [] for f in frames]
     )
     monkeypatch.setattr(restore, "_SpeedTestMosaics", _Detector)
-    monkeypatch.setattr(restore, "crop_to_canvas", lambda frame, crop: torch.zeros(1))
+    monkeypatch.setattr(restore, "crop_to_canvas", lambda frame, crop, projector: torch.zeros(1))
     monkeypatch.setattr(restore, "_vae_pixels", lambda canvases, device: torch.zeros(1))
     monkeypatch.setattr(inference, "load_video_encoder", lambda path, device, encoder: lambda pixels: torch.zeros(1))
     monkeypatch.setattr(inference, "load_video_decoder", lambda vae, tuned, device: object())
@@ -171,7 +171,7 @@ def _render(tmp_path):
         budget_name="segment",
         device=torch.device("cpu"),
         speed_profile=tmp_path / "speed.json",
-        max_gap=MAX_GAP, min_duration=0, super_res=None,
+        max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None,
     )
 
 
@@ -313,7 +313,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         speed_profile=tmp_path / "speed.json",
         progress=restore.Progress(12, disable=True, report=None),
         cancel=threading.Event(),
-        max_gap=MAX_GAP, min_duration=0, super_res=None,
+        max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None,
     )
     assert budgets == [123 << 20]
     assert _Transformer.seeds == [[5]]
@@ -338,7 +338,7 @@ def _two_window_composer(monkeypatch, decode, composite):
     decodes = ThreadPoolExecutor(max_workers=1)
     composer = restore._SegmentComposer(
         [plan], None, SimpleNamespace(get=lambda index: index), seed=0, feather=1, budget=lambda canvas: 0,
-        device=torch.device("cpu"), bar=_Bar(), decodes=decodes, stream=None, super_res=None,
+        device=torch.device("cpu"), bar=_Bar(), decodes=decodes, stream=None, super_res=None, projector=None,
     )
     return composer, decodes
 
@@ -352,7 +352,7 @@ def test_composer_decodes_the_next_window_while_earlier_frames_are_composited(mo
             second_started.set()
         return torch.full((13, 3, 4, 4), latent, dtype=torch.uint8)
 
-    def composite(source, candidates, *, feather):
+    def composite(source, candidates, *, feather, projector):
         if int(source[0, 0, 0]) == 2:
             started_before_its_start.append(second_started.wait(timeout=5))
         return torch.stack([c.canvas for c in candidates]).max(0).values
@@ -786,7 +786,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
         speed_profile=tmp_path / "speed.json",
         progress=restore.Progress(0, disable=True, report=None),
         cancel=threading.Event(),
-        max_gap=MAX_GAP, min_duration=0, super_res=None,
+        max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None,
     )
     assert list(json.loads((tmp_path / "speed.json").read_text())) == [
         restore.speed.profile_key("Test GPU", "t", "free VRAM")
@@ -881,7 +881,7 @@ def test_segment_encoder_feeds_each_window_its_crops_padded_with_the_last(device
     store = SimpleNamespace(put=lambda index, latent: encoded.__setitem__(index, latent.cpu()))
     buffers = restore._WindowBuffers()
     encoder = restore._SegmentEncoder(
-        [SimpleNamespace(windows=windows)], lambda pixels: pixels, store, buffers, torch.device(device), _Bar()
+        [SimpleNamespace(windows=windows)], lambda pixels: pixels, store, buffers, torch.device(device), _Bar(), None
     )
     for value in range(5):
         encoder.frame(torch.full((3, 16, 16), value * 10, dtype=torch.uint8, device=device))
@@ -931,7 +931,7 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
     monkeypatch.setattr(inference, "load_video_decoder", forbidden)
     monkeypatch.setattr(inference, "LtxTransformer", forbidden)
     monkeypatch.setattr(inference.ModelRuntime, "request", request)
-    monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, crop: torch.zeros(3, crop.canvas, crop.canvas, dtype=torch.uint8))
+    monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, crop, _projector: torch.zeros(3, crop.canvas, crop.canvas, dtype=torch.uint8))
     files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
     render = replace(_render(tmp_path), files=files, window_hop=LESS_OVERLAP_WINDOW_HOP)
     writer = _Writer()
@@ -975,7 +975,7 @@ def test_encrypted_worker_starts_on_its_own_thread_while_the_scan_runs(fakes, mo
 
     monkeypatch.setattr(restore, "scan_span", slow_scan)
     monkeypatch.setattr(inference.ModelRuntime, "request", request)
-    monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, crop: torch.zeros(3, crop.canvas, crop.canvas, dtype=torch.uint8))
+    monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, crop, _projector: torch.zeros(3, crop.canvas, crop.canvas, dtype=torch.uint8))
     files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), _Writer)],

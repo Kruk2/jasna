@@ -33,15 +33,15 @@ def test_feather_alpha_matches_opencv():
 def test_crop_round_trip_at_unit_scale():
     frame = _frame()
     crop = letterbox((100, 50, 356, 306), 256)
-    canvas = crop_to_canvas(frame, crop)
+    canvas = crop_to_canvas(frame, crop, None)
     assert canvas.shape == (3, 256, 256)
-    assert torch.equal(canvas_to_source(canvas, crop).to(torch.uint8), frame[:, 50:306, 100:356])
+    assert torch.equal(canvas_to_source(canvas, crop, frame, None).to(torch.uint8), frame[:, 50:306, 100:356])
 
 
 def test_crop_pads_by_reflection():
     frame = _frame()
     crop = letterbox((0, 0, 200, 100), 200)
-    canvas = crop_to_canvas(frame, crop)
+    canvas = crop_to_canvas(frame, crop, None)
     top = crop.pad[0]
     assert torch.equal(canvas[:, top - 1], canvas[:, top + 1])
 
@@ -51,7 +51,7 @@ def test_composite_touches_only_the_feathered_mask():
     crop = letterbox((200, 100, 456, 356), 256)
     restored = torch.full((3, 256, 256), 128, dtype=torch.uint8)
     polygon = [[300.0, 200.0], [360.0, 200.0], [360.0, 260.0], [300.0, 260.0]]
-    out = composite_frame(source, [Candidate(restored, crop, 1.0, 0, [polygon], 1.0)], feather=8)
+    out = composite_frame(source, [Candidate(restored, crop, 1.0, 0, [polygon], 1.0)], feather=8, projector=None)
     changed = (out != source).any(dim=0)
     ys, xs = torch.nonzero(changed, as_tuple=True)
     assert changed[230, 330]
@@ -73,8 +73,8 @@ def test_zero_weight_and_no_candidates_keep_the_source():
     crop = letterbox((200, 100, 456, 356), 256)
     restored = torch.zeros((3, 256, 256), dtype=torch.uint8)
     polygon = [[300.0, 200.0], [360.0, 200.0], [360.0, 260.0]]
-    assert torch.equal(composite_frame(source, [], feather=8), source)
-    assert torch.equal(composite_frame(source, [Candidate(restored, crop, 0.0, 0, [polygon], 1.0)], feather=8), source)
+    assert torch.equal(composite_frame(source, [], feather=8, projector=None), source)
+    assert torch.equal(composite_frame(source, [Candidate(restored, crop, 0.0, 0, [polygon], 1.0)], feather=8, projector=None), source)
 
 
 def test_two_agreeing_windows_equal_one():
@@ -82,9 +82,12 @@ def test_two_agreeing_windows_equal_one():
     crop = letterbox((200, 100, 456, 356), 256)
     restored = torch.full((3, 256, 256), 90, dtype=torch.uint8)
     polygon = [[300.0, 200.0], [360.0, 200.0], [360.0, 260.0], [300.0, 260.0]]
-    one = composite_frame(source, [Candidate(restored, crop, 1.0, 0, [polygon], 1.0)], feather=8)
+    one = composite_frame(source, [Candidate(restored, crop, 1.0, 0, [polygon], 1.0)], feather=8, projector=None)
     two = composite_frame(
-        source, [Candidate(restored, crop, 0.3, 0, [polygon], 1.0), Candidate(restored, crop, 0.7, 0, [polygon], 1.0)], feather=8
+        source,
+        [Candidate(restored, crop, 0.3, 0, [polygon], 1.0), Candidate(restored, crop, 0.7, 0, [polygon], 1.0)],
+        feather=8,
+        projector=None,
     )
     assert (one.int() - two.int()).abs().max() <= 1
 
@@ -135,7 +138,7 @@ def test_composite_shifts_the_restored_colour_towards_the_ring():
     crop = letterbox((200, 100, 456, 356), 256)
     restored = torch.full((3, 256, 256), 140, dtype=torch.uint8)
     polygon = [[300.0, 200.0], [360.0, 200.0], [360.0, 260.0], [300.0, 260.0]]
-    out = composite_frame(source, [Candidate(restored, crop, 1.0, 0, [polygon], 1.0)], feather=8)
+    out = composite_frame(source, [Candidate(restored, crop, 1.0, 0, [polygon], 1.0)], feather=8, projector=None)
     assert out[:, 230, 330].tolist() == [110, 110, 110]
 
 
@@ -146,7 +149,7 @@ def test_two_tracks_each_paint_their_own_mask():
     right = [[400.0, 150.0], [460.0, 150.0], [460.0, 210.0], [400.0, 210.0]]
     dark = torch.full((3, 480, 480), 20, dtype=torch.uint8)
     bright = torch.full((3, 480, 480), 220, dtype=torch.uint8)
-    out = composite_frame(source, [Candidate(dark, crop, 1.0, 0, [left], 1.0), Candidate(bright, crop, 1.0, 1, [right], 1.0)], feather=8)
+    out = composite_frame(source, [Candidate(dark, crop, 1.0, 0, [left], 1.0), Candidate(bright, crop, 1.0, 1, [right], 1.0)], feather=8, projector=None)
     assert out[0, 180, 230] < 100 < out[0, 180, 430]
 
 
@@ -158,7 +161,10 @@ def _handover(presence: float) -> torch.Tensor:
     dark = torch.full((3, 480, 480), 20, dtype=torch.uint8)
     bright = torch.full((3, 480, 480), 220, dtype=torch.uint8)
     return composite_frame(
-        source, [Candidate(dark, crop, 1.0, 0, [parent], 1.0), Candidate(bright, crop, 1.0, 1, [child], presence)], feather=8
+        source,
+        [Candidate(dark, crop, 1.0, 0, [parent], 1.0), Candidate(bright, crop, 1.0, 1, [child], presence)],
+        feather=8,
+        projector=None,
     )
 
 
@@ -190,9 +196,33 @@ def test_a_2x_canvas_maps_back_onto_the_same_crop():
     canvas = torch.stack([ramp[None, :].expand(512, 512), ramp[:, None].expand(512, 512), torch.full((512, 512), 90.0)])
     canvas = canvas.round().to(torch.uint8)
     doubled = torch.nn.functional.interpolate(canvas[None].float(), scale_factor=2, mode="bilinear")[0]
+    frame = torch.zeros((3, 700, 1100), dtype=torch.uint8)
 
-    direct = canvas_to_source(canvas, crop)
-    upscaled = canvas_to_source(doubled.round().to(torch.uint8), upscaled_crop(crop))
+    direct = canvas_to_source(canvas, crop, frame, None)
+    upscaled = canvas_to_source(doubled.round().to(torch.uint8), upscaled_crop(crop), frame, None)
 
     assert upscaled.shape == direct.shape == (3, 600, 900)
     assert (upscaled - direct).abs().mean() < 1.0
+
+
+@pytest.mark.parametrize("kind", ["fisheye", "gnomonic"])
+def test_vr_projected_crops_change_only_what_the_restoration_changed(kind):
+    from jasna.vr_projection import build_vr_projector
+
+    eye = 320
+    source = _frame(3)
+    projector = build_vr_projector(kind, eye_width=eye, height=360, device=torch.device("cpu"))
+    crop = letterbox((eye + 60, 80, eye + 260, 280), 256)
+    polygon = [[eye + 120.0, 140.0], [eye + 200.0, 140.0], [eye + 200.0, 220.0], [eye + 120.0, 220.0]]
+    view = crop_to_canvas(source, crop, projector)
+
+    kept = composite_frame(source, [Candidate(view, crop, 1.0, 0, [polygon], 1.0)], feather=8, projector=projector)
+    brighter = (view.int() + 40).clamp(max=255).to(torch.uint8)
+    changed = composite_frame(source, [Candidate(brighter, crop, 1.0, 0, [polygon], 1.0)], feather=8, projector=projector)
+
+    assert view.shape == (3, 256, 256)
+    assert torch.equal(kept, source)
+    moved = (changed != source).any(dim=0)
+    assert moved[180, eye + 160]
+    ys, xs = torch.nonzero(moved, as_tuple=True)
+    assert xs.min() >= eye + 60 and xs.max() < eye + 260 and ys.min() >= 80 and ys.max() < 280

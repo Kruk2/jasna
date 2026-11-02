@@ -109,7 +109,7 @@ def test_project_region_matches_extract_crop(cls) -> None:
     frame = torch.randint(0, 255, (3, 120, 400), dtype=torch.float32)
     bbox = np.array([60.0, 30.0, 140.0, 90.0], dtype=np.float32)
     raw = proj.extract_region_crop(frame, bbox, 120, 400, x_bounds=(0, 200))
-    projected = proj.project_region(frame, raw.enlarged_bbox)
+    projected = proj.project_region(frame, raw.enlarged_bbox, raw.crop_shape[0])
     assert projected.shape == raw.crop.shape
     assert torch.allclose(projected, raw.crop.float(), atol=1e-4)
 
@@ -122,7 +122,7 @@ def test_project_region_matches_quantized_uint8_crop(cls) -> None:
     bbox = np.array([60.0, 30.0, 140.0, 90.0], dtype=np.float32)
 
     raw = proj.extract_region_crop(frame, bbox, 120, 400, x_bounds=(0, 200))
-    projected = proj.project_region(frame, raw.enlarged_bbox)
+    projected = proj.project_region(frame, raw.enlarged_bbox, raw.crop_shape[0])
 
     assert torch.equal(projected, raw.crop.float())
 
@@ -175,7 +175,7 @@ def test_noop_delta_leaves_source_unchanged(cls) -> None:
     frame = torch.randint(0, 255, (3, 120, 400), dtype=torch.float32)
     bbox = np.array([60.0, 30.0, 140.0, 90.0], dtype=np.float32)
     raw = proj.extract_region_crop(frame, bbox, 120, 400, x_bounds=(0, 200))
-    original_projected = proj.project_region(frame, raw.enlarged_bbox)
+    original_projected = proj.project_region(frame, raw.enlarged_bbox, raw.crop_shape[0])
     restored = original_projected.clone()  # no-op restoration
     source_delta = proj.source_region_from_patch(restored - original_projected, raw.enlarged_bbox)
     assert source_delta.abs().max().item() == 0.0
