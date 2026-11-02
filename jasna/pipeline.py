@@ -18,7 +18,7 @@ from jasna.job_resume import ResumeJob, resume_directory
 from jasna.media.container_utils import MOV_SUFFIXES
 from jasna.media.encoder_settings import require_encodable_size
 from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
-from jasna.media.video_encoder import VideoEncoder
+from jasna.media.video_encoder import VideoEncoder, resolve_encoder_options
 from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.media.splice import (
     H264_SMART_MAX_B_FRAMES,
@@ -37,7 +37,8 @@ from jasna.pipeline_threads import run_restoration_pass
 from jasna.progressbar import JobProgress, ProgressCallback, Progressbar
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange, job_models, job_restoration, resolve_restorations
-from jasna.session_config import SessionConfig
+from jasna.session_config import RestorationModelName, SessionConfig
+from jasna.settings_tag import job_settings, settings_comment
 from jasna.vr180 import (
     SbsDetectionAdapter,
     require_ltx_input,
@@ -296,7 +297,20 @@ class Pipeline:
             )
         return frame_rate
 
-    def _video_encoder(self, metadata, frame_rate) -> VideoEncoder:
+    def _job_settings(
+        self, models: frozenset[RestorationModelName], *, ltx_large_canvas: bool | None
+    ) -> dict[str, object]:
+        default = job_restoration(self.restoration_model_name, self.ltx_seed)
+        return job_settings(
+            self.config,
+            models=models,
+            segments=resolve_restorations(self.segments, default) if self.segments else None,
+            vr=self.vr_resolution,
+            ltx_weights=self.ltx_files.transformer_name if "ltx" in models else None,
+            ltx_large_canvas=ltx_large_canvas,
+        )
+
+    def _video_encoder(self, metadata, frame_rate, settings: dict[str, object]) -> VideoEncoder:
         if self.fmp4 and self.output_video.suffix.lower() not in MOV_SUFFIXES:
             log.info(
                 "Fragmented MP4 has no effect on %s output; it is already playable while it grows",
@@ -312,6 +326,7 @@ class Pipeline:
             sharpen_strength=self.sharpen_strength,
             output_fps=frame_rate.output_fps,
             fmp4=self.fmp4,
+            settings=settings,
         )
 
     def _run_full(
@@ -325,7 +340,11 @@ class Pipeline:
             disable=self.disable_progress,
             callback=self.progress_callback,
         )
-        encoder_ctx = self._video_encoder(metadata, frame_rate)
+        encoder_ctx = self._video_encoder(
+            metadata,
+            frame_rate,
+            self._job_settings(job_models(self.restoration_model_name, self.segments), ltx_large_canvas=None),
+        )
         try:
             self._run_pass(
                 metadata=metadata,
@@ -347,11 +366,14 @@ class Pipeline:
 
     def _run_ltx(self, metadata) -> None:
         from jasna.ltx.plan import track_max_gap
-        from jasna.ltx.restore import Cancelled, restore_video, video_frames
+        from jasna.ltx.restore import Cancelled, restore_video, video_frames, whole_video_large_canvas
         from jasna.ltx.speed import profile_path
 
         frame_rate = self._resolve_frame_rate(metadata)
-        writer = _OfflineFrameWriter(self._video_encoder(metadata, frame_rate), [time.monotonic()])
+        resume_dir = self.resume.directory / "ltx"
+        large_canvas = whole_video_large_canvas(self.ltx_large_canvas, self.device, resume_dir)
+        settings = self._job_settings(frozenset({"ltx"}), ltx_large_canvas=large_canvas)
+        writer = _OfflineFrameWriter(self._video_encoder(metadata, frame_rate, settings), [time.monotonic()])
         try:
             restore_video(
                 video_frames(
@@ -369,13 +391,13 @@ class Pipeline:
                 frame_h=int(metadata.video_height),
                 frame_w=int(metadata.video_width),
                 batch_size=self.batch_size,
-                large_canvas=self.ltx_large_canvas,
+                large_canvas=large_canvas,
                 window_hop=self.ltx_window_hop,
                 seed=self.ltx_seed,
                 device=self.device,
                 work_dir=self.working_dir or self.output_video.parent,
                 speed_profile=profile_path(),
-                resume_dir=self.resume.directory / "ltx",
+                resume_dir=resume_dir,
                 progress=self._ltx_progress(
                     frame_rate.output_frame_count(metadata.num_frames), self.progress_callback
                 ),
@@ -462,6 +484,7 @@ class Pipeline:
 
     def _run_ltx_spans(
         self,
+        render: "LtxRender",
         metadata,
         index: KeyframeIndex,
         spans: list[tuple[SpliceSpan, tuple[SegmentRange, ...], Callable[[], _OfflineFrameWriter]]],
@@ -471,7 +494,6 @@ class Pipeline:
         """Restore the LTX render spans in one batched run, so every model loads once."""
         from jasna.ltx.restore import Cancelled, restore_spans
 
-        render = self.ltx_segment_render(metadata)
         frames = sum(_span_frames(span, index, metadata) for span, _, _ in spans)
         try:
             restore_spans(
@@ -555,6 +577,18 @@ class Pipeline:
             self.encoder_settings,
             vendor=vendor,
         )
+        smart_spec, smart_encoder_options = resolve_encoder_options(
+            vendor, self.codec, metadata, smart_encoder_settings, smart_fragment=True
+        )
+        ltx_render = self.ltx_segment_render(metadata) if ltx_spans else None
+        comment = settings_comment(
+            self._job_settings(
+                frozenset(segments[0].restoration.model for segments in segments_of.values()),
+                ltx_large_canvas=None if ltx_render is None else ltx_render.large_canvas,
+            ),
+            encoder=smart_spec.encoder_name,
+            options=smart_encoder_options,
+        )
         standard_spans = {span for span in plan.spans if span.kind != "copy" and span not in ltx_spans}
         standard_frames = sum(_span_frames(span, index, metadata) for span in standard_spans)
         ltx_callback = standard_callback = self.progress_callback
@@ -635,14 +669,14 @@ class Pipeline:
                     if span in ltx_spans and not fragments.done(span_index)
                 ]
                 if pending_ltx:
-                    self._run_ltx_spans(metadata, index, pending_ltx, work_root, ltx_callback)
+                    self._run_ltx_spans(ltx_render, metadata, index, pending_ltx, work_root, ltx_callback)
                 if self._cancel_event.is_set():
                     return
-                self._assemble(fragments, plan)
+                self._assemble(fragments, plan, comment)
         finally:
             progress.close(ensure_completed_bar=True)
 
-    def _assemble(self, fragments: _FragmentDir, plan: SplicePlan) -> None:
+    def _assemble(self, fragments: _FragmentDir, plan: SplicePlan, comment: str) -> None:
         suffix = ".ts" if self.codec in {"h264", "hevc"} else ".mkv"
         normalized = []
         for span_index, span in enumerate(plan.spans):
@@ -653,7 +687,7 @@ class Pipeline:
         concatenate_fragments(
             normalized, manifest=fragments.directory / "fragments.ffconcat", destination=assembled, codec=self.codec
         )
-        mux_final_output(assembled, self.input_video, self.output_video, codec=self.codec)
+        mux_final_output(assembled, self.input_video, self.output_video, codec=self.codec, comment=comment)
 
     def run(self) -> None:
         metadata = get_video_meta_data(str(self.input_video))

@@ -873,6 +873,22 @@ def large_canvas_fits(requested: bool, free_bytes: int) -> bool:
     return requested
 
 
+def whole_video_large_canvas(requested: bool, device: torch.device, resume_dir: Path) -> bool:
+    """The 768 px decision of a whole-video run: saved work keeps the one it was made with,
+    else the VRAM free now decides."""
+    saved = _read_plans(_plans_file(_pts_key(*WHOLE_VIDEO_PTS), resume_dir))
+    if saved is None:
+        return large_canvas_fits(requested, device_free_bytes(device))
+    free = device_free_bytes(device)
+    if saved.large_canvas and free < LARGE_CANVAS_MIN_FREE_BYTES:
+        raise RuntimeError(
+            f"The saved LTX work for this video uses 768 px windows, which need "
+            f"{LARGE_CANVAS_MIN_FREE_BYTES / 2**30:.0f} GiB of free GPU memory; {free / 2**30:.1f} GiB is free. "
+            "Close other programs that use the GPU and try again."
+        )
+    return saved.large_canvas
+
+
 def segment_large_canvas(requested: bool, total_bytes: int) -> bool:
     """The 768 px decision for segments, from the GPU's size so it is the same every run."""
     if requested and total_bytes < LARGE_CANVAS_MIN_TOTAL_BYTES:
@@ -1059,12 +1075,20 @@ def _scan_spans(
     return prepared
 
 
+def _pts_key(start_pts: int, end_pts: int) -> str:
+    return f"{start_pts}-{end_pts}"
+
+
 def _span_key(span: LtxSpan) -> str:
-    return f"{span.segments[0].start_pts}-{span.segments[-1].end_pts}"
+    return _pts_key(span.segments[0].start_pts, span.segments[-1].end_pts)
+
+
+def _plans_file(key: str, directory: Path) -> Path:
+    return directory / f"{key}.plans.npz"
 
 
 def _plan_path(span: LtxSpan, directory: Path) -> Path:
-    return directory / f"{_span_key(span)}.plans.npz"
+    return _plans_file(_span_key(span), directory)
 
 
 @dataclass(frozen=True)
@@ -1078,7 +1102,10 @@ class _SavedPlans:
 
 
 def _saved_plans(span: LtxSpan, directory: Path) -> _SavedPlans | None:
-    path = _plan_path(span, directory)
+    return _read_plans(_plan_path(span, directory))
+
+
+def _read_plans(path: Path) -> _SavedPlans | None:
     if not path.is_file():
         return None
     with np.load(path, allow_pickle=False) as arrays:
@@ -1297,21 +1324,9 @@ def restore_video(
     min_duration: int,
     super_res: LtxSuperRes | None,
 ) -> None:
-    """Restore every mosaic of the video ``frames`` yields as one segment; the 768 px
-    decision and the decode tiles follow the VRAM free when they are made."""
+    """Restore every mosaic of the video ``frames`` yields as one segment. ``large_canvas``
+    is ``whole_video_large_canvas``'s decision; the decode tiles follow the free VRAM."""
     span = LtxSpan(frames, (LtxSegment(*WHOLE_VIDEO_PTS, seed),), lambda: writer)
-    saved = _saved_plans(span, resume_dir)
-    if saved is None:
-        canvas = large_canvas_fits(large_canvas, device_free_bytes(device))
-    else:
-        canvas = saved.large_canvas
-        free = device_free_bytes(device)
-        if canvas and free < LARGE_CANVAS_MIN_FREE_BYTES:
-            raise RuntimeError(
-                f"The saved LTX work for this video uses 768 px windows, which need "
-                f"{LARGE_CANVAS_MIN_FREE_BYTES / 2**30:.0f} GiB of free GPU memory; {free / 2**30:.1f} GiB is free. "
-                "Close other programs that use the GPU and try again."
-            )
     restore_spans(
         [span],
         LtxRender(
@@ -1320,7 +1335,7 @@ def restore_video(
             frame_h=frame_h,
             frame_w=frame_w,
             batch_size=batch_size,
-            large_canvas=canvas,
+            large_canvas=large_canvas,
             window_hop=window_hop,
             budget=free_vram_budget(device),
             budget_name="free VRAM",

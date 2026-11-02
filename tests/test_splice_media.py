@@ -30,6 +30,8 @@ from factories import (
     write_non_utf8_metadata_source,
 )
 
+COMMENT = '{"jasna":"test","schema":1}'
+
 
 def _ffmpeg(*args: str) -> None:
     completed = subprocess.run(
@@ -215,7 +217,7 @@ def test_mixed_encoder_splice_decodes_with_exact_duration_and_audio(
         codec=codec,
     )
     output = tmp_path / f"output-{codec}.mp4"
-    mux_final_output(assembled, source, output, codec=codec)
+    mux_final_output(assembled, source, output, codec=codec, comment=COMMENT)
 
     with av.open(str(output)) as container:
         assert len(container.streams.video) == 1
@@ -278,7 +280,7 @@ def test_splice_keeps_source_timestamps_of_hrd_timing_sei_source(
     assembled = tmp_path / "assembled.ts"
     concatenate_fragments(fragments, manifest=tmp_path / "parts.ffconcat", destination=assembled, codec="h264")
     output = tmp_path / "output.mp4"
-    mux_final_output(assembled, source, output, codec="h264")
+    mux_final_output(assembled, source, output, codec="h264", comment=COMMENT)
 
     def shown_seconds(path: Path) -> list[float]:
         with av.open(str(path)) as container:
@@ -337,7 +339,7 @@ def test_mid_gop_cut_splices_to_the_shown_frames_and_duration(tmp_path: Path, se
     assembled = tmp_path / "assembled.ts"
     concatenate_fragments(fragments, manifest=tmp_path / "parts.ffconcat", destination=assembled, codec="h264")
     output = tmp_path / "output.mp4"
-    mux_final_output(assembled, source, output, codec="h264")
+    mux_final_output(assembled, source, output, codec="h264", comment=COMMENT)
 
     with av.open(str(source)) as container:
         source_frames = sum(1 for _ in container.decode(video=0))
@@ -372,6 +374,7 @@ def test_final_mux_preserves_compatible_source_structure(
     ffmetadata.write_text(
         ";FFMETADATA1\n"
         "title=Source title\n"
+        "comment=Source comment\n"
         "[CHAPTER]\n"
         "TIMEBASE=1/1000\n"
         "START=0\n"
@@ -418,10 +421,11 @@ def test_final_mux_preserves_compatible_source_structure(
     )
     output = tmp_path / f"output{suffix}"
 
-    mux_final_output(assembled, source, output, codec="h264")
+    mux_final_output(assembled, source, output, codec="h264", comment=COMMENT)
 
     with av.open(str(output)) as container:
         assert container.metadata["title"] == "Source title"
+        assert [value for key, value in container.metadata.items() if key.lower() == "comment"] == [COMMENT]
         assert [chapter["metadata"]["title"] for chapter in container.chapters()] == [
             "Opening",
             "Main",
@@ -488,7 +492,7 @@ def test_final_mux_rebuilds_mp4_chapter_carrier_only_once(tmp_path: Path) -> Non
     )
     output = tmp_path / "output.mp4"
 
-    mux_final_output(assembled, source, output, codec="h264")
+    mux_final_output(assembled, source, output, codec="h264", comment=COMMENT)
 
     with av.open(str(output)) as container:
         assert [chapter["metadata"]["title"] for chapter in container.chapters()] == [
@@ -515,7 +519,7 @@ def test_final_mux_skips_mp4_timecode_stream_without_codec(tmp_path: Path) -> No
     _ffmpeg("-i", str(source), "-map", "0:v:0", "-c:v", "copy", str(assembled))
     output = tmp_path / "output.mp4"
 
-    mux_final_output(assembled, source, output, codec="h264")
+    mux_final_output(assembled, source, output, codec="h264", comment=COMMENT)
 
     with av.open(str(output)) as container:
         assert len(container.streams.video) == 1
@@ -529,7 +533,7 @@ def test_final_mux_copies_double_adts_aac_into_mp4(tmp_path: Path) -> None:
     _ffmpeg("-i", str(source), "-map", "0:v:0", "-c:v", "copy", str(assembled))
     output = tmp_path / "output.mp4"
 
-    mux_final_output(assembled, source, output, codec="h264")
+    mux_final_output(assembled, source, output, codec="h264", comment=COMMENT)
 
     with av.open(str(output)) as container:
         assert sum(1 for _ in container.decode(audio=0)) > 1
@@ -546,7 +550,7 @@ def test_source_with_non_utf8_tags_probes_and_splices(tmp_path: Path) -> None:
     normalized = tmp_path / "copy.ts"
     normalize_fragment(copied, normalized, codec="h264")
     output = tmp_path / "output.mp4"
-    mux_final_output(normalized, source, output, codec="h264")
+    mux_final_output(normalized, source, output, codec="h264", comment=COMMENT)
 
     with av.open(str(output), metadata_errors="replace") as container:
         assert container.metadata["title"] == "JASNA\ufffdTAG"
@@ -572,7 +576,7 @@ def test_restored_fragment_with_long_multibyte_title_splices_and_keeps_title(tmp
     normalized = tmp_path / "restored.ts"
     normalize_fragment(restored, normalized, codec="h264")
     output = tmp_path / "output.mp4"
-    mux_final_output(normalized, source, output, codec="h264")
+    mux_final_output(normalized, source, output, codec="h264", comment=COMMENT)
 
     with av.open(str(output)) as container:
         assert container.metadata["title"] == title

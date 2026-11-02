@@ -90,6 +90,17 @@ jasna --input in.mp4 --output out.mkv --cq 22
 在 GUI 中不能在这里设置 CQ，请使用 CQ 控件。所有参数、范围和默认值见
 [CLI 参考](cli.md#编码)。
 
+## 视频中保存的设置
+
+Jasna 会把所用的设置写入输出文件的 **Comment** 标签：模型、LTX 种子、检测和编码器设置等。
+它是一行文本。可以在 MediaInfo、VLC（**工具 → 媒体信息**）中查看，或使用：
+
+```bash
+ffprobe -v error -show_entries format_tags=comment out.mkv
+```
+
+源视频原有的注释会被替换。
+
 ## 队列完成后
 
 整个队列完成后执行一个操作：**关闭电脑**或**自定义命令**（例如给你发消息的脚本）。

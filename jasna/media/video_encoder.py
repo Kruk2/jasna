@@ -38,6 +38,7 @@ from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_setti
 from jasna.media.lut import GpuLutApplier, parse_cube_file
 from jasna.media.probe import VideoMetadata
 from jasna.media.rgb_to_yuv import RgbToYuvConverter
+from jasna.settings_tag import settings_comment
 
 logger = logging.getLogger(__name__)
 
@@ -444,7 +445,9 @@ class VideoEncoder:
         pts_origin: int = 0,
         smart_fragment: bool = False,
         fmp4: bool = False,
+        settings: Mapping[str, object] | None = None,
     ):
+        """``settings`` (from ``settings_tag.job_settings``) become the output's comment tag."""
         self.device = torch.device(device)
         self.vendor = vendor_for_device(self.device)
         if self.vendor not in {AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD}:
@@ -466,6 +469,7 @@ class VideoEncoder:
         self.pts_origin = int(pts_origin)
         self.smart_fragment = bool(smart_fragment)
         self.fmp4 = bool(fmp4)
+        self.settings = settings
         self.output_fps = Fraction(
             metadata.video_fps_exact if output_fps is None else output_fps
         )
@@ -601,6 +605,12 @@ class VideoEncoder:
 
     def _copy_source_metadata(self, in_v, out_v) -> None:
         self.dst.metadata.update(self._src.metadata)
+        if self.settings is not None:
+            for key in [key for key in self.dst.metadata if key.lower() == "comment"]:
+                del self.dst.metadata[key]
+            self.dst.metadata["comment"] = settings_comment(
+                self.settings, encoder=self.encoder_name, options=self.encoder_options
+            )
         out_v.metadata.update(in_v.metadata)
         out_v.disposition = in_v.disposition
         if not self.smart_fragment:

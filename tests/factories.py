@@ -173,12 +173,14 @@ def no_resume_conflict(directory: Path):
     raise AssertionError(f"unexpected saved-progress conflict: {directory}")
 
 
-def fake_session(*, device: torch.device, restoration_pipeline, detection_model=None) -> SimpleNamespace:
+def fake_session(
+    *, device: torch.device, restoration_pipeline, detection_model=None, ltx_files=None
+) -> SimpleNamespace:
     detection_model = MagicMock() if detection_model is None else detection_model
     return SimpleNamespace(
         device=device,
         restoration_pipeline=restoration_pipeline,
-        ltx_files=None,
+        ltx_files=ltx_files,
         detection_model_for=lambda config: detection_model,
     )
 
@@ -193,6 +195,7 @@ def make_pipeline(
     progress_callback=None,
     segments=None,
     splice_plan=None,
+    ltx_files=None,
     **config_overrides,
 ) -> Pipeline:
     if restoration_pipeline is None:
@@ -207,6 +210,7 @@ def make_pipeline(
             device=device,
             restoration_pipeline=restoration_pipeline,
             detection_model=detection_model,
+            ltx_files=ltx_files,
         ),
         input_video=input_video,
         output_video=output_video,
