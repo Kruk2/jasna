@@ -42,6 +42,11 @@ def read_license_info() -> tuple[bool, str | None]:
     return license_store.is_licensed(), mode
 
 
+def license_status_key(mode: str | None) -> str:
+    """Locale key that names how an activated Jasna checks the license; ``mode`` comes from ``read_license_info``."""
+    return {"offline": "license_offline_active", "online": "license_lease_active"}.get(mode, "license_active")
+
+
 def start_license_info(on_done) -> threading.Thread:
     return _start(read_license_info, on_done)
 

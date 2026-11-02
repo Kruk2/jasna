@@ -385,6 +385,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         help=CLI_HELP["license_code"],
     )
+    license_group.add_argument(
+        "--activation-status",
+        action="store_true",
+        help=CLI_HELP["activation_status"],
+    )
 
     rtx = parser.add_argument_group("RTX Super Res")
     rtx.add_argument(
@@ -915,6 +920,23 @@ def _reject_options_of_other_restoration_backend(
             parser.error(f"{option} needs --restoration-model-name {needed_models}")
 
 
+def _print_activation_status(parser: argparse.ArgumentParser) -> None:
+    from jasna.gui.activation_worker import license_status_key, read_license_info
+    from jasna.gui.locales import t
+
+    licensed, mode = read_license_info()
+    if not licensed:
+        parser.exit(1, t("license_problem_no_activation") + "\n")
+    print(t(license_status_key(mode)))
+    from jasna.protection import ProtectionError, lease
+
+    try:
+        used, limit, offline, online = lease.device_count()
+    except (ProtectionError, OSError) as exc:
+        parser.exit(1, f"Could not check devices in use: {exc}\n")
+    print(t("license_devices_count", used=used, limit=limit, offline=offline, online=online))
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -937,6 +959,9 @@ def main() -> None:
         print(lease.activated_message(result.online_reason))
         if args.input is None and not args.stream and not args.benchmark:
             return
+    if args.activation_status:
+        _print_activation_status(parser)
+        return
     codec_was_explicit = any(
         value == "--codec" or value.startswith("--codec=")
         for value in sys.argv[1:]

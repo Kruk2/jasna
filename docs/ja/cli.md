@@ -292,10 +292,12 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | オプション | 説明 |
 | ------ | ----- |
 | `--license-code CODE` | GPU の準備前に、ライセンスコードで有効化します。処理オプションがなければ有効化して終了します。TPM 2.0 セキュリティチップのある PC では、その後オフラインで動きます。それ以外では、支援者向けモデルを使う間、ライセンスをオンラインで確認します。 |
+| `--activation-status` | 有効化されているか、使用中のデバイス数を表示して終了します。有効化されていなければ 1 で終了します。 |
 
 ```bash
 jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
+jasna --activation-status
 ```
 
 - オンラインで動く場合は、メッセージに理由が表示されます。Linux で `sudo usermod -aG tss $USER` が必要なときは、Jasna が知らせます。

@@ -356,8 +356,7 @@ class LicenseDialog(ctk.CTkToplevel):
             return
         licensed, mode = info
         if licensed:
-            status = {"offline": "license_offline_active", "online": "license_lease_active"}.get(mode, "license_active")
-            self._status.configure(text=t(status), text_color=Colors.STATUS_COMPLETED)
+            self._status.configure(text=t(activation_worker.license_status_key(mode)), text_color=Colors.STATUS_COMPLETED)
             self._devices.configure(text=t("license_devices_checking"))
             self._devices.pack(anchor="w", pady=(6, 0))
             activation_worker.start_device_count(lambda count, error: self._post_result(self._devices_ready, count, error))
