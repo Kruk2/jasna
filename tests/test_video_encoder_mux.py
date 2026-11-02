@@ -3,6 +3,7 @@ audio copy vs aac fallback, metadata/disposition, faststart, pts passthrough.
 Requires a CUDA GPU and an ffmpeg binary for fixture generation."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -508,6 +509,32 @@ def test_container_metadata_and_audio_language_copied(tmp_path):
     with av.open(str(dst)) as c:
         assert c.metadata.get("title") == "jasna-test"
         assert c.streams.audio[0].metadata.get("language") == "pol"
+
+
+@pytest.mark.parametrize("suffix", [".mp4", ".mkv", ".mov"])
+def test_settings_replace_the_source_comment(tmp_path, suffix):
+    src = _make_source(tmp_path, f"src{suffix}", extra=["-metadata", "comment=source comment"])
+    dst = tmp_path / f"out{suffix}"
+    metadata = get_video_meta_data(str(src))
+    settings = {"jasna": "test", "output": {"codec": "hevc"}}
+    with (
+        VideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
+        VideoEncoder(
+            str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={}, settings=settings
+        ) as encoder,
+    ):
+        for frames, pts_list in reader.frames():
+            for i, pts in enumerate(pts_list):
+                encoder.encode(frames[i], pts)
+
+    with av.open(str(dst)) as c:
+        comments = [value for key, value in c.metadata.items() if key.lower() == "comment"]
+    assert [json.loads(comment) for comment in comments] == [
+        {
+            "jasna": "test",
+            "output": {"codec": "hevc", "encoder": encoder.encoder_name, "encoder_options": encoder.encoder_options},
+        }
+    ]
 
 
 @pytest.mark.parametrize(

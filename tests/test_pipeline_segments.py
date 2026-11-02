@@ -37,15 +37,18 @@ def _smart_pipeline(tmp_path, segments, spans, *, max_b_frames=0, **overrides) -
         ltx_window_hop=104,
     )
     settings.update(overrides)
-    return make_pipeline(
+    pipeline = make_pipeline(
         segments=segments,
         splice_plan=SplicePlan(
             index=KeyframeIndex((0, 60, 120, 180), Fraction(1, 30), 0, 240, max_b_frames=max_b_frames),
             spans=spans,
             segments=segments,
         ),
+        ltx_files=MagicMock(transformer_name="ltx-restore-alpha1-distill2-int8.safetensors"),
         **settings,
     )
+    pipeline.configure_vr(METADATA)
+    return pipeline
 
 
 @contextmanager
@@ -62,6 +65,7 @@ def _smart_run(vendor=AcceleratorVendor.NVIDIA):
         patch.object(Pipeline, "_run_full") as run_full,
         patch.object(Pipeline, "_run_pass") as run_pass,
         patch.object(Pipeline, "_run_ltx_spans") as run_ltx_spans,
+        patch.object(Pipeline, "ltx_segment_render", return_value=MagicMock(large_canvas=True)),
         patch.object(Pipeline, "_reencode_span") as reencode_span,
     ):
         yield dict(
@@ -137,7 +141,7 @@ def test_mixed_job_batches_ltx_spans_and_keeps_fragments_in_span_order(tmp_path)
         pipeline._run_smart(METADATA)
 
     assert [call.kwargs["effect_ranges"] for call in mocks["run_pass"].call_args_list] == [((75, 90),)]
-    (_, _, ltx_spans, _, _), _ = mocks["run_ltx_spans"].call_args
+    (_, _, _, ltx_spans, _, _), _ = mocks["run_ltx_spans"].call_args
     assert [(span, segs) for span, segs, _ in ltx_spans] == [(FOUR_SPANS[3], (SegmentRange(6.5, 7.0, LTX),))]
     assert _fragment_names(mocks) == ["0000.ts", "0001.ts", "0002.ts", "0003.ts"]
 
@@ -146,7 +150,6 @@ def test_mixed_job_reports_time_left_from_the_ltx_estimate_until_ltx_reports_its
     pipeline = _smart_pipeline(
         tmp_path, (SegmentRange(2.5, 3.0), SegmentRange(6.5, 7.0, LTX)), FOUR_SPANS, progress_callback=MagicMock()
     )
-    pipeline.ltx_files = MagicMock(transformer_name="t")
 
     with (
         patch("jasna.ltx.speed.segment_estimate_seconds", return_value=900.0) as estimate,
@@ -173,7 +176,7 @@ def test_segments_on_the_job_model_follow_an_ltx_job(tmp_path) -> None:
         pipeline._run_smart(METADATA)
 
     mocks["run_pass"].assert_not_called()
-    (_, _, ltx_spans, _, _), _ = mocks["run_ltx_spans"].call_args
+    (_, _, _, ltx_spans, _, _), _ = mocks["run_ltx_spans"].call_args
     assert ltx_spans[0][1] == (SegmentRange(2.5, 3.0, SegmentRestoration("ltx", 5)),)
 
 
@@ -277,7 +280,7 @@ def test_ltx_smart_resume_keeps_completed_fragments_and_retries_partial_span(tmp
         def __exit__(self, *exc):
             pass
 
-    def ltx_run(_metadata, _index, pending, *_args):
+    def ltx_run(_render, _metadata, _index, pending, *_args):
         restored.extend(span for span, _, _ in pending)
         writer = pending[0][2]()
         writer.write(torch.zeros(1), 75)

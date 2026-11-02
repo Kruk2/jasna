@@ -689,7 +689,10 @@ def mux_final_output(
     destination: Path,
     *,
     codec: str,
+    comment: str,
 ) -> None:
+    """Mux the assembled ``video`` with every stream, tag and chapter of ``source``; ``comment``
+    replaces the source's comment tag."""
     temporary = destination.with_name(f".{destination.stem}.smart-render{destination.suffix}")
     output_format = {
         ".mkv": "matroska",
@@ -768,6 +771,7 @@ def mux_final_output(
 
         args += [
             "-map_metadata", "1",
+            "-metadata", f"comment={comment}",
             "-map_metadata:s:v:0", "1:s:v:0",
             "-map_chapters", "1",
             "-c", "copy",

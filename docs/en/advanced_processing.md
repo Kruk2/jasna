@@ -110,6 +110,19 @@ for example bitrate limits or keyframe interval. CQ can't be set there in the
 GUI; use the CQ control. All keys, ranges and defaults are in the
 [CLI reference](cli.md#encoding).
 
+## Settings saved in the video
+
+Jasna writes the settings it used into the output's **Comment** tag: the
+model, the LTX seed, the detection and encoder settings, and so on. It is one
+line of text. You can see it in MediaInfo, in VLC (**Tools → Media Information**)
+or with:
+
+```bash
+ffprobe -v error -show_entries format_tags=comment out.mkv
+```
+
+A comment the source video had is replaced.
+
 ## After the queue is done
 
 Run something when the whole queue is finished: **Shutdown PC** or a

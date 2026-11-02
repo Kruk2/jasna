@@ -248,7 +248,8 @@ jasna --input input_folder --output output_folder
 - [Tuning VRAM and GPU usage](docs/en/tuning.md): clip size, overlap, what to
   do when VRAM runs out.
 - [Advanced processing](docs/en/advanced_processing.md): denoise, 60→30 FPS,
-  color LUT, sharpening, encoder quality, actions after the queue.
+  color LUT, sharpening, encoder quality, settings saved in the video,
+  actions after the queue.
 - [Streaming](docs/en/streaming.md): watch in the browser or in Stash.
 - [Cloud GPUs](docs/en/cloud.md): Jasna on a rented GPU (RunPod, Vast).
 - [CLI reference](docs/en/cli.md): all command line options.

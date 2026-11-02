@@ -1191,40 +1191,33 @@ def test_incomplete_track_keeps_all_references_until_finals_are_committed(fakes,
     assert _Transformer.seeds == [[7, 8]]
 
 
-def test_resume_replays_whole_video_canvas_decision(fakes, monkeypatch, tmp_path):
-    kwargs = dict(
-        detector=_Detector(), files=FILES, frame_h=64, frame_w=64, batch_size=4,
-        window_hop=88, seed=7, device=torch.device("cpu"), work_dir=tmp_path,
-        speed_profile=tmp_path / "speed.json", resume_dir=tmp_path / "saved", max_gap=MAX_GAP, min_duration=0, super_res=None,
-    )
-    def run():
-        restore.restore_video(
-            _source(_video(12, range(2, 10))), _Writer(), large_canvas=True,
-            progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(), **kwargs,
-        )
-
-    run()
-    monkeypatch.setattr(restore, "large_canvas_fits", lambda *_a: pytest.fail("canvas decision repeated"))
-    run()
-
-
-def test_resume_of_saved_768_px_windows_fails_plainly_when_vram_is_short(fakes, tmp_path):
+def _save_whole_video_768_plan(resume_dir: Path) -> None:
     from jasna.ltx.plan import TrackPlan, plans_to_arrays
 
-    resume_dir = tmp_path / "saved"
     resume_dir.mkdir()
     crop = CropFrame((0, 0, 700, 700), (768, 768), (0, 0, 0, 0))
     polygon = np.array([[0, 0], [700, 0], [700, 700]], dtype=np.int32)
     plan = TrackPlan(0, 0, ((polygon,),), (1.0,), (Window(0, 0, 0, 1, (crop,)),), 88)
     span = restore.LtxSpan(_source(_video(12, range(0))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)
     np.savez(restore._plan_path(span, resume_dir), frames=np.array(12), **plans_to_arrays([[plan]]))
+
+
+def test_whole_video_canvas_without_saved_work_follows_the_free_vram(fakes, tmp_path):
+    assert restore.whole_video_large_canvas(True, torch.device("cpu"), tmp_path / "saved") is False
+
+
+def test_resume_replays_the_saved_whole_video_canvas_decision(fakes, monkeypatch, tmp_path):
+    _save_whole_video_768_plan(tmp_path / "saved")
+    monkeypatch.setattr(restore, "device_free_bytes", lambda device: 16 << 30)
+    monkeypatch.setattr(restore, "large_canvas_fits", lambda *_a: pytest.fail("canvas decision repeated"))
+
+    assert restore.whole_video_large_canvas(False, torch.device("cpu"), tmp_path / "saved") is True
+
+
+def test_resume_of_saved_768_px_windows_fails_plainly_when_vram_is_short(fakes, tmp_path):
+    _save_whole_video_768_plan(tmp_path / "saved")
     with pytest.raises(RuntimeError, match="768 px"):
-        restore.restore_video(
-            span.frames, _Writer(), detector=_Detector(), files=FILES, frame_h=720, frame_w=1280, batch_size=4,
-            large_canvas=True, window_hop=88, seed=7, device=torch.device("cpu"), work_dir=tmp_path,
-            speed_profile=tmp_path / "speed.json", progress=restore.Progress(12, disable=True, report=None),
-            resume_dir=resume_dir, cancel=threading.Event(), max_gap=MAX_GAP, min_duration=0, super_res=None,
-        )
+        restore.whole_video_large_canvas(True, torch.device("cpu"), tmp_path / "saved")
 
 
 def test_resuming_only_the_remaining_span_uses_its_original_latents(fakes, monkeypatch, tmp_path):

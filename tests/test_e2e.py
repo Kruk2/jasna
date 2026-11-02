@@ -1,6 +1,7 @@
 """End-to-end tests using the real test clip assets/test_clip1_1080p.mp4."""
 from __future__ import annotations
 
+import json
 import os
 import threading
 from importlib.util import find_spec
@@ -357,6 +358,15 @@ class TestFullPipelineE2E:
 
         assert primary_spy.call_count > 0, "at least one clip should be restored"
         assert secondary_spy.call_count == primary_spy.call_count
+
+        import av
+
+        with av.open(str(output)) as container:
+            (comment,) = [value for key, value in container.metadata.items() if key.lower() == "comment"]
+        tag = json.loads(comment)
+        assert tag["basicvsrpp"]["max_clip_size"] == 60
+        assert tag["detection"]["threshold"] == 0.25
+        assert "ltx" not in tag
 
     @REQUIRES_NVVFX
     def test_rtx_superres_secondary(self, tmp_path):
