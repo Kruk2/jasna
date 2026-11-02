@@ -240,8 +240,6 @@ EN = {
         "preset": "Preset:",
         
         # Sections
-        "section_processing": "Processing",
-        "section_restoration_model": "Restoration Model",
         "model_basicvsrpp": "BasicVSR++",
         "model_basicvsrpp_description": "Fast",
         "model_ltx": "LTX",
@@ -312,7 +310,6 @@ EN = {
         "ltx_step_percent": "Step {number} of {count}: {stage} {percent}%",
         "ltx_step_eta": "Step {number} of {count}: {stage} {percent}%, {time} left",
         "ltx_step_short": "Step {number}/{count}: {percent}%",
-        "section_detection": "Detection",
         "view_simple": "Simple",
         "view_advanced": "Advanced",
         "view_expert": "Expert",
@@ -322,7 +319,6 @@ EN = {
         "tab_upscale": "Upscale",
         "tab_output": "Output",
         "tab_images": "Images",
-        "section_secondary": "Secondary Restoration",
         "section_image_restoration": "Image Restoration (still images)",
         "image_restore_hint": "Used automatically for still images: Jasna finds the mosaics and redraws them with the SD 1.5 model. Videos ignore these settings.",
         "image_restore_model": "Model",
@@ -359,8 +355,6 @@ EN = {
         "tip_image_restore_variants": "How many alternate outputs to save for each image. Each variant uses the next seed and costs another full run.\n\nUse 1 for batches. Use 3-4 when choosing the best still image.",
         "tip_image_restore_seed": "Controls randomness. Same image, settings, and seed should repeat the same result; change it for a different attempt.\n\nVariants use seed, seed+1, seed+2, and so on.",
         "tip_image_restore_freeu": "Often makes shapes sharper. Keep it on; turn it off if you see harsh edges or odd texture.",
-        "section_encoding": "Encoding",
-        "section_post_export_action": "Post-Export Action",
         
         # Basic Processing
         "max_clip_size": "Max Clip Size",

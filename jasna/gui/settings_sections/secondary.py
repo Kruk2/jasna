@@ -4,7 +4,7 @@ import customtkinter as ctk
 from tkinter import filedialog
 
 from jasna.accelerator import AcceleratorVendor
-from jasna.gui.components import CollapsibleSection, Tooltip
+from jasna.gui.components import Tooltip
 from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import Row, add_setting_label, create_slider_value_label, get_tooltip, layout_rows
@@ -19,11 +19,7 @@ class SecondarySection:
         self._enabled = True
         self._ltx_only = False
 
-        self.frame = CollapsibleSection(parent, t("section_secondary"), expanded=True)
-        content = self.frame.content
-        content.configure(corner_radius=Sizing.BORDER_RADIUS)
-
-        inner = self.frame.body
+        self.frame = inner = ctk.CTkFrame(parent, fg_color="transparent")
 
         # Engine selection (radio-like)
         self._widgets["secondary_var"] = ctk.StringVar(value="none")
@@ -289,9 +285,9 @@ class SecondarySection:
         self._widgets["rtx_scale"].configure(state="disabled" if self._ltx_only else state)
 
     def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
-        """The TVAI model and worker count are expert settings."""
+        """Upscaling is not offered in the simple view; the TVAI model and worker count are expert settings."""
         layout_rows(self._tvai_rows, level, standard=standard, ltx=ltx)
-        return True
+        return level != "simple"
 
     def set_gpu_support(self, vendor: AcceleratorVendor) -> None:
         self._vendor = vendor

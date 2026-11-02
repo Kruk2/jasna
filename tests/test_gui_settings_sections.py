@@ -485,7 +485,6 @@ def test_simple_view_hides_tuning_rows_and_keeps_their_values(panel_factory) -> 
     assert not _shown(panel._widgets["sharpen_strength"].master)
     assert not _shown(panel._widgets["post_export_video_command"])
     assert not _shown(_section(panel, DetectionSection).frame)
-    assert not _shown(panel._tab_bar)
 
     panel.set_view("advanced")
     panel.show_tab("output")
@@ -534,16 +533,45 @@ def test_advanced_view_shows_only_the_chosen_tab(panel_factory, tab, expected) -
 
     panel.show_tab(tab)
 
-    assert _shown(panel._tab_bar)
     assert [type(section) for section in panel._sections if _shown(section.frame)] == expected
 
 
+def _offered_tabs(panel) -> list[str]:
+    from jasna.gui.locales import t
+
+    labels = list(panel._tab_bar.cget("values"))
+    return [tab for tab in ("model", "detection", "upscale", "output", "images") if t(f"tab_{tab}") in labels]
+
+
+@pytest.mark.parametrize(
+    ("view", "tabs"),
+    [
+        ("simple", ["model", "output", "images"]),
+        ("advanced", ["model", "detection", "upscale", "output", "images"]),
+    ],
+)
+def test_each_view_offers_only_the_tabs_it_has_settings_in(panel_factory, view, tabs) -> None:
+    panel = panel_factory()
+    panel.set_view("advanced")
+    panel.show_tab("detection")
+
+    panel.set_view(view)
+
+    assert _offered_tabs(panel) == tabs
+    assert _shown(_section(panel, DetectionSection).frame) is (view != "simple")
+    panel.pack(fill="both", expand=True)
+    panel.winfo_toplevel().geometry("1000x700")
+    panel.update()
+    buttons = panel._tab_bar._buttons_dict.values()
+    assert sum(button.winfo_width() for button in buttons) >= panel.winfo_width() * 0.9
+
+
 def test_the_settings_view_is_remembered(panel_factory) -> None:
-    assert not _shown(panel_factory()._tab_bar)
+    assert "detection" not in _offered_tabs(panel_factory())
 
     panel_factory().set_view("advanced")
 
-    assert _shown(panel_factory()._tab_bar)
+    assert "detection" in _offered_tabs(panel_factory())
 
 
 @pytest.mark.parametrize(
@@ -591,15 +619,3 @@ def test_detection_timing_and_tvai_workers_are_expert_rows(panel_factory, view, 
 
     assert _shown(panel._widgets["max_detection_gap"].master) is shown
     assert _shown(panel._widgets["tvai_workers"].master) is shown
-
-
-@pytest.mark.parametrize(("view", "tab", "header"), [("advanced", "images", False), ("expert", "output", False), ("simple", None, True)])
-def test_tabs_show_their_sections_open_without_title_bars(panel_factory, view, tab, header) -> None:
-    panel = panel_factory()
-    panel.set_view(view)
-    if tab:
-        panel.show_tab(tab)
-    section = _section(panel, ImageRestorationSection if tab != "output" else EncodingSection).frame
-
-    assert _shown(section._header) is header
-    assert _shown(section.content)

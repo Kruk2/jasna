@@ -2,7 +2,6 @@
 
 import customtkinter as ctk
 
-from jasna.gui.components import CollapsibleSection
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
@@ -23,11 +22,7 @@ class DetectionSection:
         self._widgets = widgets
         self._on_modified = on_modified
 
-        self.frame = CollapsibleSection(parent, t("section_detection"), expanded=True)
-        content = self.frame.content
-        content.configure(corner_radius=Sizing.BORDER_RADIUS)
-
-        inner = self.frame.body
+        self.frame = inner = ctk.CTkFrame(parent, fg_color="transparent")
 
         model_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(model_row, "detection_model")

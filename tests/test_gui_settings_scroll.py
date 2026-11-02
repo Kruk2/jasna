@@ -6,7 +6,6 @@ import pytest
 
 from jasna import os_utils
 
-from jasna.gui.components import CollapsibleSection
 from jasna.gui.models import PresetManager
 from jasna.gui.settings_panel import SettingsPanel
 from jasna.gui.theme import Colors
@@ -27,12 +26,6 @@ def _settings_panel(root: ctk.CTk, tmp_path) -> SettingsPanel:
     return panel
 
 
-def _collapse_all_sections(panel: SettingsPanel) -> None:
-    for section in panel._scroll.winfo_children():
-        if isinstance(section, CollapsibleSection) and section._expanded:
-            section._toggle()
-
-
 def test_settings_scrollbar_thumb_contrasts_with_panel_without_hover(tk_root, tmp_path, fresh_settings) -> None:
     panel = _settings_panel(tk_root, tmp_path)
 
@@ -42,10 +35,14 @@ def test_settings_scrollbar_thumb_contrasts_with_panel_without_hover(tk_root, tm
 def test_settings_scrollbar_only_appears_when_sections_overflow(tk_root, tmp_path, fresh_settings) -> None:
     tk_root.geometry("420x480")
     panel = _settings_panel(tk_root, tmp_path)
+    panel.set_view("expert")
+    panel.show_tab("output")
+    tk_root.update()
 
     assert panel._scroll._scrollbar.winfo_ismapped()
 
-    _collapse_all_sections(panel)
+    panel.show_tab("images")
+    panel.set_view("simple")
     tk_root.update()
 
     assert not panel._scroll._scrollbar.winfo_ismapped()

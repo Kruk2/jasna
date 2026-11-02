@@ -240,8 +240,6 @@ JA = {
         "preset": "プリセット:",
 
         # Sections
-        "section_processing": "処理",
-        "section_restoration_model": "復元モデル",
         "model_basicvsrpp": "BasicVSR++",
         "model_basicvsrpp_description": "高速",
         "model_ltx": "LTX",
@@ -312,7 +310,6 @@ JA = {
         "ltx_step_percent": "ステップ {number}/{count}：{stage} {percent}%",
         "ltx_step_eta": "ステップ {number}/{count}：{stage} {percent}%、残り {time}",
         "ltx_step_short": "ステップ {number}/{count}：{percent}%",
-        "section_detection": "検出",
         "view_simple": "シンプル",
         "view_advanced": "詳細",
         "view_expert": "エキスパート",
@@ -322,7 +319,6 @@ JA = {
         "tab_upscale": "アップスケール",
         "tab_output": "出力",
         "tab_images": "画像",
-        "section_secondary": "二次復元",
         "section_image_restoration": "画像復元（静止画）",
         "image_restore_hint": "静止画に自動で使われます。Jasna がモザイクを見つけ、SD 1.5 モデルで描き直します。動画ではこの設定は使われません。",
         "image_restore_model": "モデル",
@@ -359,8 +355,6 @@ JA = {
         "tip_image_restore_variants": "画像ごとに保存する別案の数です。各バリエーションは次のシードを使い、もう一度フル処理します。\n\nバッチ処理は 1。静止画で良い結果を選びたいときは 3-4 が目安です。",
         "tip_image_restore_seed": "ランダム性を制御します。同じ画像・設定・シードなら同じ結果になりやすく、別の試行をしたいときは変更します。\n\nバリエーションは seed、seed+1、seed+2 の順に使います。",
         "tip_image_restore_freeu": "形がくっきりすることが多いです。通常はオンのまま。硬いエッジや不自然な質感が出るときはオフにしてください。",
-        "section_encoding": "エンコード",
-        "section_post_export_action": "エクスポート後のアクション",
 
         # Basic Processing
         "max_clip_size": "最大クリップサイズ",

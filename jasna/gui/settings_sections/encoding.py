@@ -4,7 +4,7 @@ import customtkinter as ctk
 from tkinter import filedialog
 
 from jasna.accelerator import vendor_for_device
-from jasna.gui.components import CollapsibleSection, Tooltip
+from jasna.gui.components import Tooltip
 from jasna.gui.icons import CompactSwitch, create_icon
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
@@ -34,11 +34,7 @@ class EncodingSection:
         self._widgets = widgets
         self._on_modified = on_modified
 
-        self.frame = CollapsibleSection(parent, t("section_encoding"), expanded=True)
-        content = self.frame.content
-        content.configure(corner_radius=Sizing.BORDER_RADIUS)
-
-        inner = self.frame.body
+        self.frame = inner = ctk.CTkFrame(parent, fg_color="transparent")
 
         conflict_row = ctk.CTkFrame(inner, fg_color="transparent")
         conflict_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
