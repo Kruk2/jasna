@@ -55,3 +55,18 @@ def test_vram_held_by_another_process_is_not_free():
         assert accelerator.device_free_bytes(device) <= before - int(1.5 * GIB)
     finally:
         holder.communicate("")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_allocatable_vram_stops_where_allocations_fail_and_frees_the_probe():
+    device = torch.device("cuda:0")
+    total = torch.cuda.get_device_properties(device).total_memory
+    torch.cuda.empty_cache()
+    reserved = torch.cuda.memory_reserved(device)
+    torch.cuda.set_per_process_memory_fraction((reserved + GIB) / total, device)
+    try:
+        allocatable = accelerator.allocatable_bytes(device, total)
+    finally:
+        torch.cuda.set_per_process_memory_fraction(1.0, device)
+    assert GIB // 2 < allocatable <= GIB
+    assert torch.cuda.memory_reserved(device) == reserved

@@ -20,6 +20,7 @@ from pathlib import Path
 import torch
 
 from jasna._frozen import is_frozen
+from jasna.accelerator import allocatable_bytes
 from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors, open_tensors
@@ -201,7 +202,10 @@ class LtxTransformer:
             raise
 
     def _resident_blocks(self, sizes: list[int]) -> int:
-        budget = self._free_vram(self.device) - ACTIVATION_RESERVE_BYTES - 2 * max(sizes)
+        free = self._free_vram(self.device)
+        if self.device.type == "cuda":
+            free = allocatable_bytes(self.device, free)
+        budget = free - ACTIVATION_RESERVE_BYTES - 2 * max(sizes)
         resident, used = 0, 0
         for size in sizes:
             if used + size > budget:
