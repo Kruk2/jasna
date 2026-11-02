@@ -288,7 +288,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._unifans_btn = UnifansButton(right, width=110, height=28)
         self._unifans_btn.pack(side="left", padx=(0, 8 if show_xianyu else 12))
         if show_xianyu:
-            XianyuButton(right, width=70, height=28).pack(side="left", padx=(0, 12))
+            XianyuButton(right, width=110, height=28).pack(side="left", padx=(0, 12))
 
         self._license_chip = ctk.CTkButton(
             right, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),

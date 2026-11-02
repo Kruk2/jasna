@@ -436,7 +436,7 @@ ZH = {
         "ctx_copy": "复制",
         "ctx_paste": "粘贴",
         "ctx_select_all": "全选",
-        "license_official_sellers": "许可证码只能从 Buy Me a Coffee、Unifans (kruk2) 和闲鱼获得。其他地方的许可证码都是假的。",
+        "license_official_sellers": "许可证码只能从 Buy Me a Coffee、Unifans (kruk2) 和闲鱼获得。闲鱼只认下方按钮里的二维码，其他闲鱼店铺即使同名也是假的。",
         "official_sellers_notice": "Jasna 在 GitHub 上免费提供。许可证码只能通过下方按钮获得。其他任何出售 Jasna、许可证码或修改版文件的人都是骗子，他们的文件可能会在你的电脑上运行隐藏代码。",
         "license_chip_inactive": "激活 Jasna",
         "license_chip_active": "已激活",
@@ -527,7 +527,7 @@ ZH = {
         # Support buttons (Buy Me a Coffee + Unifans)
         "bmc_support": "支持",
         "unifans_support": "Unifans",
-        "xianyu_support": "闲鱼",
+        "xianyu_support": "闲鱼扫码购买",
         "xianyu_dialog_title": "在闲鱼购买",
         "xianyu_scan_hint": "中国用户请使用“闲鱼”扫描此二维码购买",
         "unofficial_notice_title": "关于这台电脑上的激活",

@@ -12,7 +12,7 @@ from jasna.gui.paths import read_settings, update_settings
 from jasna.gui import activation_worker
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.gui.locales import t
+from jasna.gui.locales import get_locale, t
 from jasna.license_api import protection_available
 
 logger = logging.getLogger(__name__)
@@ -243,7 +243,15 @@ class XianyuQrDialog(ctk.CTkToplevel):
 
         self.update_idletasks()
         scaling.place_centered_on_parent(self, master, self.winfo_reqwidth(), self.winfo_reqheight())
+        self._previous_grab = self.grab_current()
         grab_modal(self)
+
+    def destroy(self):
+        """Hand the grab back to the modal window that opened it, such as the license window."""
+        previous = self._previous_grab
+        super().destroy()
+        if previous is not None and previous.winfo_exists():
+            previous.grab_set()
 
 
 def shows_xianyu_seller(language: str) -> bool:
@@ -284,6 +292,8 @@ class LicenseDialog(ctk.CTkToplevel):
             outer, text=t("license_official_sellers"), text_color=Colors.STATUS_PENDING,
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 10))
+        if shows_xianyu_seller(get_locale().current_language):
+            XianyuButton(outer, width=150, height=32).pack(anchor="w", pady=(0, 10))
 
         ctk.CTkLabel(
             outer, text=t("license_code"), text_color=Colors.TEXT_PRIMARY,
