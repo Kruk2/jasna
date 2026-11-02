@@ -526,6 +526,7 @@ def scan_span(
     batch_size: int,
     frame_h: int,
     frame_w: int,
+    eye_width: int | None,
     large_canvas: bool,
     window_hop: int,
     bar: _StageBar,
@@ -550,6 +551,7 @@ def scan_span(
             segment_cuts,
             frame_w=frame_w,
             frame_h=frame_h,
+            eye_width=eye_width,
             large_canvas=large_canvas,
             window_hop=window_hop,
             max_gap=max_gap,
@@ -666,7 +668,7 @@ def denoise_track(
     """The final latents of one track's windows, in window order."""
     return transformer.denoise_chain(
         [references.get(w.index) for w in plan.windows],
-        [seed + w.index for w in plan.windows],
+        [seed + w.noise for w in plan.windows],
         plan.window_hop,
         advance,
     )
@@ -760,7 +762,7 @@ class _SegmentComposer:
             video = _decode_window(
                 self._decoder,
                 self._finals.get(window.index),
-                self._seed + window.index,
+                self._seed + window.noise,
                 window.canvas,
                 self._budget,
                 self._device,
@@ -900,8 +902,8 @@ def segment_large_canvas(requested: bool, total_bytes: int) -> bool:
 @dataclass(frozen=True)
 class LtxRender:
     """What every pass needs besides the spans: the detector, the model files, the frame
-    size, detection batch size, the 768 px decision, the frames between window starts, the
-    decode budget per canvas and its name (decode tiling follows the budget, so it keys the
+    size, the SBS VR eye width (None for flat video), detection batch size, the 768 px
+    decision, the frames between window starts, the decode budget per canvas and its name (decode tiling follows the budget, so it keys the
     speed profile), the GPU, the speed profile file (``speed.py``), the max detection gap
     a track bridges (``track_max_gap``), the fewest frames a kept track spans and the
     super resolution of windows compose enlarges (``super_res.py``), if any."""
@@ -910,6 +912,7 @@ class LtxRender:
     files: LtxModelFiles
     frame_h: int
     frame_w: int
+    eye_width: int | None
     batch_size: int
     large_canvas: bool
     window_hop: int
@@ -1048,7 +1051,7 @@ def _scan_spans(
 
                 span_plans = scan_span(
                     counted_frames, span.segments, render.detector,
-                    batch_size=render.batch_size, frame_h=render.frame_h, frame_w=render.frame_w,
+                    batch_size=render.batch_size, frame_h=render.frame_h, frame_w=render.frame_w, eye_width=render.eye_width,
                     large_canvas=render.large_canvas, window_hop=render.window_hop, bar=bar, cancel=cancel,
                     max_gap=render.max_gap, min_duration=render.min_duration,
                 )
@@ -1310,6 +1313,7 @@ def restore_video(
     files: LtxModelFiles,
     frame_h: int,
     frame_w: int,
+    eye_width: int | None,
     batch_size: int,
     large_canvas: bool,
     window_hop: int,
@@ -1334,6 +1338,7 @@ def restore_video(
             files=files,
             frame_h=frame_h,
             frame_w=frame_w,
+            eye_width=eye_width,
             batch_size=batch_size,
             large_canvas=large_canvas,
             window_hop=window_hop,

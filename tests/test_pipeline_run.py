@@ -318,18 +318,6 @@ def test_validate_metadata_accepts_only_supported_color_spaces(color_space, supp
             make_pipeline().validate_metadata(metadata)
 
 
-def test_ltx_run_skips_vr_side_by_side_as_unsupported_video():
-    meta = _fake_metadata()
-    meta.video_width = 16
-    p = make_pipeline(restoration_model_name="ltx", vr_mode="sbs", vr_projection="raw")
-
-    with (
-        patch("jasna.pipeline.get_video_meta_data", return_value=meta),
-        pytest.raises(UnsupportedVideoError, match="VR180 side-by-side"),
-    ):
-        p.run()
-
-
 def test_run_rejects_a_video_too_small_for_the_amd_encoder_before_processing():
     meta = _fake_metadata()
     meta.video_width, meta.video_height = AMF_MIN_SIZE["hevc"][0] - 2, 240

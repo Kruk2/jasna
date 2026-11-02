@@ -160,7 +160,6 @@ JA = {
         "segments_restore_with": "復元方法",
         "segments_use_for_all": "すべての区間に使う",
         "tip_segments_use_for_all": "このモデルとシードをすべての区間に使います。",
-        "segments_ltx_needs_flat_video": "LTX は VR のサイドバイサイド動画に対応していません。",
         "segments_ltx_ranges_unavailable": "この PC では LTX を使えません。LTX の区間は復元されません。",
         "segments_seed_starting": "シード {seed}：開始",
         "segments_seed_progress": "シード {seed}：{stage} {percent:.0f}%、残り {eta}",

@@ -41,7 +41,6 @@ from jasna.session_config import RestorationModelName, SessionConfig
 from jasna.settings_tag import job_settings, settings_comment
 from jasna.vr180 import (
     SbsDetectionAdapter,
-    require_ltx_input,
     resolve_vr_mode,
 )
 from jasna.vr_projection import build_vr_projector
@@ -390,6 +389,7 @@ class Pipeline:
                 files=self.ltx_files,
                 frame_h=int(metadata.video_height),
                 frame_w=int(metadata.video_width),
+                eye_width=self._ltx_eye_width(metadata),
                 batch_size=self.batch_size,
                 large_canvas=large_canvas,
                 window_hop=self.ltx_window_hop,
@@ -412,6 +412,10 @@ class Pipeline:
             writer.close()
         self._log_memory_at_end()
 
+    def _ltx_eye_width(self, metadata) -> int | None:
+        """The SBS eye width LTX plans with; None for flat video."""
+        return int(metadata.video_width) // 2 if self.vr_resolution.is_sbs else None
+
     def ltx_segment_render(self, metadata) -> "LtxRender":
         """How LTX restores segments: the 768 px decision and the decode tiles follow the
         GPU's size, never the VRAM free at that moment, so a segment renders the same in a
@@ -420,13 +424,13 @@ class Pipeline:
         from jasna.ltx.restore import LtxRender, segment_decode_budget, segment_large_canvas
         from jasna.ltx.speed import profile_path
 
-        require_ltx_input(self.vr_resolution)
         total_bytes = torch.cuda.get_device_properties(self.device).total_memory
         return LtxRender(
             detector=self.job_detection_model,
             files=self.ltx_files,
             frame_h=int(metadata.video_height),
             frame_w=int(metadata.video_width),
+            eye_width=self._ltx_eye_width(metadata),
             batch_size=self.batch_size,
             large_canvas=segment_large_canvas(self.ltx_large_canvas, total_bytes),
             window_hop=self.ltx_window_hop,
@@ -695,8 +699,6 @@ class Pipeline:
         require_encodable_size(vendor_for_device(self.device), self.codec, metadata.video_width, metadata.video_height)
         self.configure_vr(metadata)
         uses_ltx = "ltx" in job_models(self.restoration_model_name, self.segments)
-        if uses_ltx:
-            require_ltx_input(self.vr_resolution)
         auto_split = self.restoration_model_name == "ltx" and self.config.ltx_auto_split_percent is not None
         if uses_ltx or auto_split or (resume_directory(self.config, self.output_video) / "render").exists():
             self.resume = ResumeJob(self.config, self.input_video, self.output_video, metadata, self.splice_plan)

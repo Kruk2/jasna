@@ -11,6 +11,10 @@ cut where its size changes for good (``restart_cameras``). A track starting insi
 another hands over from it: it starts ``LEAD_IN_FRAMES`` early on its first outline and
 takes the area over during the last ``BLEND_FRAMES`` of them; a track ending inside
 another hands the area back over ``BLEND_FRAMES``.
+
+SBS VR plans the left eye on its own; the right eye restores each left track as a twin
+shifted by its disparity and denoised with the same noise, so both eyes invent the same
+detail.
 """
 
 from __future__ import annotations
@@ -19,12 +23,23 @@ import bisect
 import functools
 import itertools
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES, Box, CropFrame, lada_crop_boxes, letterbox, track_camera
+from jasna.ltx.camera import (
+    PLAN_CANVAS,
+    SMOOTH_SIGMA_FRAMES,
+    WINDOW_FRAMES,
+    Box,
+    CropFrame,
+    gaussian_smooth,
+    lada_crop_boxes,
+    letterbox,
+    track_camera,
+)
 from jasna.tracking.clip_tracker import compute_iou_matrix, shorter_than_min_duration
+from jasna.vr180 import eye_bounds
 
 Polygon = np.ndarray
 
@@ -60,12 +75,7 @@ class RegionGroup:
     @functools.cached_property
     def extent(self) -> Box:
         """Bounds of the polygon points."""
-        if not self.polygons:
-            raise ValueError("a tracked frame carries no polygon")
-        points = np.concatenate(self.polygons)
-        x1, y1 = points.min(axis=0)
-        x2, y2 = points.max(axis=0)
-        return float(x1), float(y1), float(x2), float(y2)
+        return _extent(self.polygons)
 
 
 @dataclass
@@ -89,6 +99,7 @@ class Window:
     start: int
     real_frames: int  # the model always sees WINDOW_FRAMES; the tail is padded
     crops: tuple[CropFrame, ...]  # one per real frame
+    noise: int  # noise seed offset: the index, or the left window's for a right-eye twin
 
     @property
     def stop(self) -> int:
@@ -132,8 +143,8 @@ def plans_to_arrays(segments: Sequence[Sequence[TrackPlan]]) -> dict[str, np.nda
         "polygon_float": np.array([polygon.dtype == np.float64 for polygon in polygons], dtype=bool),
         "points": np.concatenate([np.zeros((0, 2)), *polygons]),
         "windows": np.array(
-            [(t, w.index, w.track_id, w.start, w.real_frames) for t, w in windows], dtype=np.int64
-        ).reshape(-1, 5),
+            [(t, w.index, w.track_id, w.start, w.real_frames, w.noise) for t, w in windows], dtype=np.int64
+        ).reshape(-1, 6),
         "crops": np.array(
             [(*c.crop_box, *c.resize_hw, *c.pad) for _, w in windows for c in w.crops], dtype=np.int64
         ).reshape(-1, 10),
@@ -149,9 +160,9 @@ def plans_from_arrays(arrays: Mapping[str, np.ndarray]) -> list[list[TrackPlan]]
     presence = iter(arrays["presence"].tolist())
     crops = iter(CropFrame(tuple(c[:4]), tuple(c[4:6]), tuple(c[6:])) for c in arrays["crops"].tolist())
     windows: dict[int, list[Window]] = {}
-    for t, index, track_id, start, real_frames in arrays["windows"].tolist():
+    for t, index, track_id, start, real_frames, noise in arrays["windows"].tolist():
         windows.setdefault(t, []).append(
-            Window(index, track_id, start, real_frames, tuple(itertools.islice(crops, real_frames)))
+            Window(index, track_id, start, real_frames, tuple(itertools.islice(crops, real_frames)), noise)
         )
     segments: list[list[TrackPlan]] = [[] for _ in range(int(arrays["segments"]))]
     for t, (s, track_id, start, window_hop, frames) in enumerate(arrays["tracks"].tolist()):
@@ -579,6 +590,7 @@ def plan_track(
             start=start + local,
             real_frames=min(WINDOW_FRAMES, len(polygons) - local),
             crops=tuple(camera[local : local + WINDOW_FRAMES]),
+            noise=first_index + offset,
         )
         for offset, local in enumerate(window_starts(len(polygons), window_hop))
     )
@@ -592,10 +604,12 @@ def plan_track(
     )
 
 
-def plan_video(
+def _plan_eye(
     regions_per_frame: Sequence[Sequence[Region]],
     cuts: set[int],
     *,
+    first_track: int,
+    first_index: int,
     frame_w: int,
     frame_h: int,
     large_canvas: bool,
@@ -603,10 +617,6 @@ def plan_video(
     max_gap: int,
     min_duration: int,
 ) -> list[TrackPlan]:
-    """Every mosaic track of a video with its windows, in window-index order.
-    Tracks bridge detection gaps up to ``max_gap`` frames (``track_max_gap``); a track
-    spanning fewer than ``min_duration`` frames is dropped before size-run cuts, so a short
-    piece of a longer track is never dropped."""
     groups = [group_regions(regions) for regions in regions_per_frame]
     tracks = rejoin_across_cover(
         merge_continuations(
@@ -616,7 +626,7 @@ def plan_video(
     )
     tracks = [track for track in tracks if not shorter_than_min_duration(track.last - track.first + 1, min_duration)]
     tracks = [
-        Track(track_id, track.frames)
+        Track(first_track + track_id, track.frames)
         for track_id, track in enumerate(restart_cameras(tracks, frame_w=frame_w, frame_h=frame_h))
     ]
     plans = []
@@ -624,7 +634,7 @@ def plan_video(
         plan = plan_track(
             track,
             lead=lead,
-            first_index=sum(len(p.windows) for p in plans),
+            first_index=first_index + sum(len(p.windows) for p in plans),
             frame_w=frame_w,
             frame_h=frame_h,
             large_canvas=large_canvas,
@@ -632,6 +642,165 @@ def plan_video(
         )
         plans.append(plan)
     return plans
+
+
+def _shift_region(region: Region, dx: int) -> Region:
+    x1, y1, x2, y2 = region.box
+    return Region((x1 + dx, y1, x2 + dx, y2), region.polygon + np.array((dx, 0), dtype=region.polygon.dtype))
+
+
+def _shift_crop(crop: CropFrame, dx: int) -> CropFrame:
+    x1, y1, x2, y2 = crop.crop_box
+    return replace(crop, crop_box=(x1 + dx, y1, x2 + dx, y2))
+
+
+def _shift_plan(plan: TrackPlan, dx: int) -> TrackPlan:
+    return replace(
+        plan,
+        polygons=tuple(
+            tuple(polygon + np.array((dx, 0), dtype=polygon.dtype) for polygon in frame) for frame in plan.polygons
+        ),
+        windows=tuple(replace(w, crops=tuple(_shift_crop(c, dx) for c in w.crops)) for w in plan.windows),
+    )
+
+
+def _window_count(plans: Sequence[TrackPlan]) -> int:
+    return sum(len(plan.windows) for plan in plans)
+
+
+def plan_video(
+    regions_per_frame: Sequence[Sequence[Region]],
+    cuts: set[int],
+    *,
+    frame_w: int,
+    frame_h: int,
+    eye_width: int | None,
+    large_canvas: bool,
+    window_hop: int,
+    max_gap: int,
+    min_duration: int,
+) -> list[TrackPlan]:
+    """Every mosaic track of a video with its windows, in window-index order.
+    Tracks bridge detection gaps up to ``max_gap`` frames (``track_max_gap``); a track
+    spanning fewer than ``min_duration`` frames is dropped before size-run cuts, so a short
+    piece of a longer track is never dropped. SBS VR (``eye_width``) plans the left eye on
+    its own, gives each left track a right-eye twin (``right_eye_twins``) and plans the
+    right-eye mosaics no twin covers on their own; no track or crop crosses into the other eye."""
+    settings = dict(
+        frame_h=frame_h, large_canvas=large_canvas, window_hop=window_hop, max_gap=max_gap, min_duration=min_duration
+    )
+    if eye_width is None:
+        return _plan_eye(regions_per_frame, cuts, first_track=0, first_index=0, frame_w=frame_w, **settings)
+    left_regions = [[r for r in regions if eye_bounds(r.box, eye_width, frame_w)[0] == 0] for regions in regions_per_frame]
+    right_regions = [
+        [_shift_region(r, -eye_width) for r in regions if eye_bounds(r.box, eye_width, frame_w)[0] == eye_width]
+        for regions in regions_per_frame
+    ]
+    left = _plan_eye(left_regions, cuts, first_track=0, first_index=0, frame_w=eye_width, **settings)
+    twins, unpaired = right_eye_twins(
+        left, right_regions, eye_width=eye_width, first_track=len(left), first_index=_window_count(left)
+    )
+    right = twins + _plan_eye(
+        unpaired,
+        cuts,
+        first_track=len(left) + len(twins),
+        first_index=_window_count(left + twins),
+        frame_w=frame_w - eye_width,
+        **settings,
+    )
+    return left + [_shift_plan(plan, eye_width) for plan in right]
+
+
+def _extent(polygons: Sequence[Polygon]) -> Box:
+    """Bounds of the polygon points."""
+    if not polygons:
+        raise ValueError("a tracked frame carries no polygon")
+    points = np.concatenate(polygons)
+    x1, y1 = points.min(axis=0)
+    x2, y2 = points.max(axis=0)
+    return float(x1), float(y1), float(x2), float(y2)
+
+
+STEREO_MAX_LEFT_SHIFT = 0.12
+"""Eye-width fraction a mosaic may sit further left in the right eye (a near subject)."""
+STEREO_MAX_RIGHT_SHIFT = 0.02
+STEREO_MAX_ROW_SHIFT = 0.25
+"""Fraction of the mosaic height the two eyes' mosaic centres may differ by vertically."""
+STEREO_MIN_MATCHED = 0.5
+
+
+def _right_eye_match(left: Box, regions: Sequence[Region], eye_width: int) -> tuple[int, float] | None:
+    """The right-eye region showing the same mosaic as the left box (about the same row and
+    size, a plausible disparity), nearest first, with its horizontal disparity."""
+    lx1, ly1, lx2, ly2 = left
+    best = None
+    for i, region in enumerate(regions):
+        rx1, ry1, rx2, ry2 = _extent((region.polygon,))
+        dx = (rx1 + rx2 - lx1 - lx2) / 2.0
+        dy = abs(ry1 + ry2 - ly1 - ly2) / 2.0
+        size = max(rx2 - rx1, ry2 - ry1) / max(lx2 - lx1, ly2 - ly1, 1.0)
+        if (
+            -STEREO_MAX_LEFT_SHIFT * eye_width <= dx <= STEREO_MAX_RIGHT_SHIFT * eye_width
+            and dy <= STEREO_MAX_ROW_SHIFT * (ly2 - ly1)
+            and 0.5 <= size <= 2.0
+            and (best is None or abs(dx) + dy < best[2])
+        ):
+            best = (i, dx, abs(dx) + dy)
+    return None if best is None else best[:2]
+
+
+def _twin_crop(crop: CropFrame, shift: int, eye_width: int) -> CropFrame:
+    x1, _, x2, _ = crop.crop_box
+    return _shift_crop(crop, min(max(shift, -x1), eye_width - x2))
+
+
+def right_eye_twins(
+    left_plans: Sequence[TrackPlan],
+    right_regions: Sequence[Sequence[Region]],
+    *,
+    eye_width: int,
+    first_track: int,
+    first_index: int,
+) -> tuple[list[TrackPlan], list[list[Region]]]:
+    """Each left-eye track the right eye sees on at least ``STEREO_MIN_MATCHED`` of its frames,
+    copied to the right eye (eye coordinates) and shifted by its smoothed disparity. A twin's
+    windows keep the left windows' ``noise``, so both eyes restore the same detail. Also
+    returns the right-eye regions no twin matched."""
+    used: list[set[int]] = [set() for _ in right_regions]
+    twins: list[TrackPlan] = []
+    index = first_index
+    for plan in left_plans:
+        frames = len(plan.polygons)
+        disparity = np.full(frames, np.nan)
+        matched = []
+        for k, polygons in enumerate(plan.polygons):
+            t = plan.start + k
+            match = _right_eye_match(_extent(polygons), right_regions[t], eye_width) if 0 <= t < len(right_regions) else None
+            if match is not None:
+                matched.append((t, match[0]))
+                disparity[k] = match[1]
+        if len(matched) < STEREO_MIN_MATCHED * frames:
+            continue
+        for t, i in matched:
+            used[t].add(i)
+        known = np.flatnonzero(~np.isnan(disparity))
+        shift = np.round(
+            gaussian_smooth(np.interp(np.arange(frames), known, disparity[known]), SMOOTH_SIGMA_FRAMES)
+        ).astype(int)
+        track_id = first_track + len(twins)
+        windows = []
+        for window in plan.windows:
+            offset = window.start - plan.start
+            crops = tuple(_twin_crop(crop, int(shift[offset + j]), eye_width) for j, crop in enumerate(window.crops))
+            windows.append(replace(window, index=index, track_id=track_id, crops=crops))
+            index += 1
+        polygons = tuple(
+            tuple(polygon + np.array((shift[k], 0), dtype=polygon.dtype) for polygon in frame)
+            for k, frame in enumerate(plan.polygons)
+        )
+        twins.append(replace(plan, track_id=track_id, polygons=polygons, windows=tuple(windows)))
+    unpaired = [[r for i, r in enumerate(regions) if i not in used[t]] for t, regions in enumerate(right_regions)]
+    return twins, unpaired
 
 
 UNFUSED_LEAD_FRAMES = 1 + TEMPORAL_SCALE

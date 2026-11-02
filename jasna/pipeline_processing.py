@@ -13,6 +13,7 @@ from jasna.pipeline_items import ClipRestoreItem, FrameMeta
 from jasna.pipeline_overlap import compute_crossfade_weights, compute_keep_range, compute_overlap_and_tail_indices, compute_parent_crossfade_weights
 from jasna.tracking.clip_tracker import ClipTracker, EndedClip, shorter_than_min_duration
 from jasna.tracking.scene_detector import SceneCutDetector
+from jasna.vr180 import eye_bounds
 
 logger = logging.getLogger(__name__)
 
@@ -211,28 +212,12 @@ def _extract_region_crop(
     crop_eye_width: int | None,
     vr_projector,
 ) -> RawCrop:
-    x_bounds = _eye_bounds(bbox, crop_eye_width, frame_w)
+    x_bounds = eye_bounds(bbox, crop_eye_width, frame_w)
     if vr_projector is not None:
         return vr_projector.extract_region_crop(
             frame, bbox, frame_h, frame_w, x_bounds=x_bounds
         )
     return extract_crop(frame, bbox, frame_h, frame_w, x_bounds=x_bounds)
-
-
-def _eye_bounds(
-    bbox,
-    eye_width: int | None,
-    frame_width: int,
-) -> tuple[int, int] | None:
-    if eye_width is None:
-        return None
-    eye_width = int(eye_width)
-    if eye_width <= 0 or eye_width * 2 != int(frame_width):
-        raise ValueError(
-            f"Invalid SBS eye width {eye_width} for frame width {frame_width}"
-        )
-    center_x = (float(bbox[0]) + float(bbox[2])) * 0.5
-    return (0, eye_width) if center_x < eye_width else (eye_width, frame_width)
 
 
 def finalize_processing(

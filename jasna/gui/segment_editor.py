@@ -730,11 +730,7 @@ class SegmentEditor(ctk.CTkToplevel):
 
     def _ltx_blocked_reason(self) -> str | None:
         """Locale key saying why a range cannot use LTX here, or None when it can."""
-        if self._ltx_unavailable_reason is not None:
-            return self._ltx_unavailable_reason
-        if self.vr_resolution.is_sbs:
-            return "segments_ltx_needs_flat_video"
-        return None
+        return self._ltx_unavailable_reason
 
     def _selected_restoration(self) -> SegmentRestoration:
         model = self._range_model.get()

@@ -400,14 +400,10 @@ def _auto_split_job(
     """The auto split job from the saved split, else from ``scan``; with ``scan`` None only
     a saved split counts."""
     from jasna.job_resume import ResumeJob
-    from jasna.media.probe import get_video_meta_data
     from jasna.media.splice import SmartRenderCompatibilityError
-    from jasna.vr180 import require_ltx_input, resolve_vr_mode
 
     if config.ltx_auto_split_percent is None or config.restoration_model_name != "ltx":
         return None
-    metadata = get_video_meta_data(str(input_video))
-    require_ltx_input(resolve_vr_mode(config.vr_mode, metadata, input_video, projection=config.vr_projection))
     try:
         spliced = splice_source(config, input_video, output_video)
     except SmartRenderCompatibilityError as exc:

@@ -55,7 +55,7 @@ def test_plans_round_trip_preserves_crops_float64_polygons_and_weights(tmp_path)
     crop = CropFrame((1, 2, 640, 480), (384, 512), (64, 64, 0, 0))
     integer = np.array([[1, 2], [3, 4], [5, 6]], dtype=np.int32)
     floating = integer.astype(np.float64) + 0.1234567890123456
-    plans = [TrackPlan(7, 12, ((integer,), (floating, integer)), (0.1, 1.0), (Window(3, 7, 12, 2, (crop, crop)),), 104)]
+    plans = [TrackPlan(7, 12, ((integer,), (floating, integer)), (0.1, 1.0), (Window(3, 7, 12, 2, (crop, crop), 3),), 104)]
     path = tmp_path / "plans.npz"
     np.savez(path, **plans_to_arrays([[], plans]))
     with np.load(path, allow_pickle=False) as arrays:

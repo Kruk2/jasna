@@ -160,7 +160,6 @@ TH = {
         "segments_restore_with": "ฟื้นฟูด้วย",
         "segments_use_for_all": "ใช้กับทุกช่วง",
         "tip_segments_use_for_all": "ใช้โมเดลและซีดนี้กับทุกช่วง",
-        "segments_ltx_needs_flat_video": "LTX ไม่รองรับวิดีโอ VR แบบซ้าย-ขวา",
         "segments_ltx_ranges_unavailable": "PC เครื่องนี้ใช้ LTX ไม่ได้ ช่วง LTX จะไม่ถูกฟื้นฟู",
         "segments_seed_starting": "ซีด {seed}: เริ่ม",
         "segments_seed_progress": "ซีด {seed}: {stage} {percent:.0f}% เหลืออีก {eta}",

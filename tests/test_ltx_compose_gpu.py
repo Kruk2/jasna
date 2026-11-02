@@ -40,7 +40,7 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
 
     device = torch.device("cuda")
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
-    plan = TrackPlan(0, 0, ((),) * 6, (1.0,) * 6, (Window(0, 0, 0, 6, (crop,) * 6),), 3)
+    plan = TrackPlan(0, 0, ((),) * 6, (1.0,) * 6, (Window(0, 0, 0, 6, (crop,) * 6, 0),), 3)
     decodes, writes = [], []
 
     def decode(decoder, latent, seed, canvas, budget, device):
@@ -92,7 +92,7 @@ def test_decoded_windows_wait_in_host_memory_and_composite_on_the_gpu(monkeypatc
     )
     assert restore._decode_window(None, torch.zeros(1, 128, 1, 1, 1), 0, 512, lambda canvas: 1, device).is_cpu
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
-    plan = TrackPlan(0, 0, ((),) * 6, (1.0,) * 6, (Window(0, 0, 0, 6, (crop,) * 6),), 3)
+    plan = TrackPlan(0, 0, ((),) * 6, (1.0,) * 6, (Window(0, 0, 0, 6, (crop,) * 6, 0),), 3)
     canvases = []
 
     def composite(source, candidates, *, feather):
