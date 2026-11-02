@@ -203,7 +203,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._unifans_btn = UnifansButton(btn_container, width=150, height=48)
         self._unifans_btn.pack(side="left", padx=(12, 0))
         if shows_xianyu_seller(get_locale().current_language):
-            XianyuButton(btn_container, width=110, height=48).pack(side="left", padx=(12, 0))
+            XianyuButton(btn_container, width=150, height=48).pack(side="left", padx=(12, 0))
         
     def _start_checks_in_background(self) -> None:
         self._checks_deadline = time.monotonic() + _CHECKS_TIMEOUT_SECONDS

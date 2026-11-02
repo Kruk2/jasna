@@ -50,3 +50,18 @@ def test_wizard_blocks_amd_without_amf_and_links_the_fix(tk_root, monkeypatch):
 
     assert dialog._continue_btn.cget("text") == t("btn_exit")
     assert dialog._check_labels["amf"][2].winfo_manager() == "pack"
+
+
+def test_chinese_license_dialog_has_the_xianyu_button_and_stays_modal_after_the_qr(tk_root, settle_activation, gui_language):
+    from jasna.gui.components import LicenseDialog, XianyuButton, XianyuQrDialog
+
+    gui_language("zh")
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
+    settle_activation(dialog)
+    [button] = [child for child in dialog.winfo_children()[0].winfo_children() if isinstance(child, XianyuButton)]
+
+    button.invoke()
+    [qr] = [child for child in dialog.winfo_children() if isinstance(child, XianyuQrDialog)]
+    qr.destroy()
+
+    assert dialog.grab_current() == dialog
