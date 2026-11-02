@@ -245,6 +245,7 @@ class PresetManager:
         self._last_output_folder: str = ""
         self._last_output_pattern: str = DEFAULT_OUTPUT_PATTERN
         self._system_check_passed_version: str = ""
+        self._settings_view: str = "simple"
         self._load()
         
     def _load(self):
@@ -261,6 +262,7 @@ class PresetManager:
             self._last_output_folder = data.get("last_output_folder", "")
             self._last_output_pattern = data.get("last_output_pattern", DEFAULT_OUTPUT_PATTERN)
             self._system_check_passed_version = data.get("system_check_passed_version", "")
+            self._settings_view = "advanced" if data.get("settings_view") == "advanced" else "simple"
             
             for name, preset_dict in data.get("user_presets", {}).items():
                 try:
@@ -347,6 +349,14 @@ class PresetManager:
     def set_last_output_pattern(self, pattern: str):
         self._last_output_pattern = pattern or DEFAULT_OUTPUT_PATTERN
         self._save(last_output_pattern=self._last_output_pattern)
+
+    def get_settings_view(self) -> str:
+        """``"simple"`` or ``"advanced"``; new users start with the simple view."""
+        return self._settings_view
+
+    def set_settings_view(self, view: str):
+        self._settings_view = view
+        self._save(settings_view=view)
 
     def get_system_check_passed_version(self) -> str:
         return self._system_check_passed_version

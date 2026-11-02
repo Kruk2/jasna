@@ -20,20 +20,19 @@ from jasna.gui.components import (
 from jasna.gui.icons import NativeIconButton
 from jasna.gui.locales import t
 from jasna.gui.ltx_models import LtxModels
-from jasna.gui.settings_sections.advanced import (
-    TEMPORAL_FILTER_SLIDER_MAX,
-    AdvancedSection,
-)
-from jasna.gui.settings_sections.basic import BasicSection
+from jasna.gui.settings_sections.detection import TEMPORAL_FILTER_SLIDER_MAX, DetectionSection
 from jasna.gui.settings_sections.encoding import EncodingSection
 from jasna.gui.settings_sections.image_restoration import ImageRestorationSection
 from jasna.gui.settings_sections.post_export import PostExportSection
+from jasna.gui.settings_sections.processing import ProcessingSection
 from jasna.gui.settings_sections.restoration_model import RestorationModelSection
 from jasna.gui.settings_sections.secondary import SecondarySection
 
 logger = logging.getLogger(__name__)
 
 _EDITABLE_WHILE_PROCESSING = frozenset({"post_export_action", "post_export_command"})
+_VIEWS = ("simple", "advanced")
+_TABS = ("model", "detection", "upscale", "output", "images")
 
 
 class SettingsPanel(ctk.CTkFrame):
@@ -54,11 +53,15 @@ class SettingsPanel(ctk.CTkFrame):
         self._applying_preset = False  # Flag to prevent modification tracking during apply
         self._widgets: dict = {}
         self._on_interactive_image_restore: callable | None = None
+        self._view = self._preset_manager.get_settings_view()
+        self._tab = _TABS[0]
 
         self._build_preset_bar()
+        self._build_view_bar()
         self._build_scrollable()
         self._build_sections(ltx_models)
         self._apply_preset(self._current_preset)
+        self._layout_sections()
 
     def _build_preset_bar(self):
         bar = ctk.CTkFrame(self, fg_color="transparent", height=48)
@@ -153,6 +156,71 @@ class SettingsPanel(ctk.CTkFrame):
         self._create_btn.pack(side="right", padx=(0, 4))
         Tooltip(self._create_btn, t("tip_preset_create"))
 
+    def _build_view_bar(self):
+        segmented_colors = dict(
+            selected_color=Colors.PRIMARY,
+            selected_hover_color=Colors.PRIMARY_HOVER,
+            unselected_color=Colors.BG_CARD,
+            unselected_hover_color=Colors.BORDER_LIGHT,
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_SMALL))
+        view_by_label = {t(f"view_{view}"): view for view in _VIEWS}
+        self._view_switch = ctk.CTkSegmentedButton(
+            bar,
+            values=list(view_by_label),
+            command=lambda label: self.set_view(view_by_label[label]),
+            **segmented_colors,
+        )
+        self._view_switch.pack(side="left")
+        self._view_switch.set(t(f"view_{self._view}"))
+        view_tip = ctk.CTkLabel(
+            bar, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2"
+        )
+        view_tip.pack(side="left", padx=6)
+        Tooltip(view_tip, t("tip_settings_view"))
+
+        tab_by_label = {t(f"tab_{tab}"): tab for tab in _TABS}
+        self._tab_bar = ctk.CTkSegmentedButton(
+            self,
+            values=list(tab_by_label),
+            command=lambda label: self.show_tab(tab_by_label[label]),
+            **segmented_colors,
+        )
+        self._tab_bar.set(t(f"tab_{self._tab}"))
+
+    def set_view(self, view: str) -> None:
+        """Switch between the short simple view and the tabbed view of every setting."""
+        self._view = view
+        self._view_switch.set(t(f"view_{view}"))
+        self._preset_manager.set_settings_view(view)
+        self._layout_sections()
+
+    def show_tab(self, tab: str) -> None:
+        self._tab = tab
+        self._tab_bar.set(t(f"tab_{tab}"))
+        self._layout_sections()
+
+    def _layout_sections(self) -> None:
+        simple = self._view == "simple"
+        for section in self._simple_trimmed_sections:
+            section.set_simple(simple)
+        for section in self._sections:
+            section.frame.pack_forget()
+        self._tab_bar.pack_forget()
+        self._scroll.pack_forget()
+        if simple:
+            shown = self._simple_sections
+        else:
+            self._tab_bar.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_MEDIUM))
+            shown = self._tab_sections[self._tab]
+        self._scroll.pack(fill="both", expand=True, padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_MEDIUM))
+        for section in shown:
+            section.frame.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        self._scroll.scroll_to_top()
+
     def _update_dropdown_values(self):
         """Build dropdown values list."""
         factory, user = self._preset_manager.get_all_preset_names()
@@ -214,7 +282,6 @@ class SettingsPanel(ctk.CTkFrame):
             scrollbar_button_color=Colors.BORDER_LIGHT,
             scrollbar_button_hover_color=Colors.BORDER_LIGHT,
         )
-        self._scroll.pack(fill="both", expand=True, padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_MEDIUM))
 
     def _build_sections(self, ltx_models: LtxModels):
         self._model_section = RestorationModelSection(
@@ -224,29 +291,34 @@ class SettingsPanel(ctk.CTkFrame):
             self._on_restoration_model_changed,
             ltx_models=ltx_models,
         )
-        basic_section = BasicSection(
+        processing_section = ProcessingSection(
             self._scroll,
             self._widgets,
             self._mark_modified,
             self._sync_temporal_filter_limits,
         )
-        advanced_section = AdvancedSection(self._scroll, self._widgets, self._mark_modified)
+        detection_section = DetectionSection(self._scroll, self._widgets, self._mark_modified)
         self._secondary_section = SecondarySection(self._scroll, self._widgets)
-        self._model_aware_sections = [basic_section, advanced_section]
-        self._sections = [
-            self._model_section,
-            *self._model_aware_sections,
-            self._secondary_section,
-            ImageRestorationSection(
-                self._scroll,
-                self._widgets,
-                self._mark_modified,
-                self._show_toast,
-                self._open_interactive_image_restore,
-            ),
-            EncodingSection(self._scroll, self._widgets, self._mark_modified),
-            PostExportSection(self._scroll, self._widgets, self._mark_modified),
-        ]
+        image_section = ImageRestorationSection(
+            self._scroll,
+            self._widgets,
+            self._mark_modified,
+            self._show_toast,
+            self._open_interactive_image_restore,
+        )
+        encoding_section = EncodingSection(self._scroll, self._widgets, self._mark_modified)
+        post_export_section = PostExportSection(self._scroll, self._widgets, self._mark_modified)
+        self._model_aware_sections = [processing_section, detection_section]
+        self._tab_sections = {
+            "model": [self._model_section, processing_section],
+            "detection": [detection_section],
+            "upscale": [self._secondary_section],
+            "output": [encoding_section, post_export_section],
+            "images": [image_section],
+        }
+        self._sections = [section for sections in self._tab_sections.values() for section in sections]
+        self._simple_sections = [self._model_section, encoding_section, post_export_section, image_section]
+        self._simple_trimmed_sections = [self._model_section, encoding_section, post_export_section]
 
     def _on_restoration_model_changed(self, model: str, auto_split: bool):
         ltx_only = model == "ltx" and not auto_split

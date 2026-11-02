@@ -4,7 +4,7 @@ import customtkinter as ctk
 
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.locales import t
-from jasna.gui.settings_sections.widgets import add_setting_label, ValueOptionMenu, get_tooltip
+from jasna.gui.settings_sections.widgets import add_setting_label, ValueOptionMenu, get_tooltip, pack_rows
 from jasna.gui.theme import Colors, Fonts, Sizing
 
 
@@ -12,17 +12,16 @@ class PostExportSection:
     def __init__(self, parent, widgets: dict, on_modified):
         self._widgets = widgets
         self._on_modified = on_modified
+        self._simple = False
 
-        section = CollapsibleSection(parent, t("section_post_export_action"), expanded=True)
-        section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
-        content = section.content
+        self.frame = CollapsibleSection(parent, t("section_post_export_action"), expanded=True)
+        content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
         inner = ctk.CTkFrame(content, fg_color="transparent")
         inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
 
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
-        row1.pack(fill="x")
 
         add_setting_label(row1, "post_export_action")
 
@@ -64,7 +63,6 @@ class PostExportSection:
         self._widgets["post_export_command"].bind("<KeyRelease>", lambda _event: self._on_modified())
 
         video_command_label_row = ctk.CTkFrame(inner, fg_color="transparent")
-        video_command_label_row.pack(fill="x", pady=(Sizing.PADDING_MEDIUM, 4))
         video_command_label = ctk.CTkLabel(
             video_command_label_row,
             text=t("post_export_video_command"),
@@ -88,16 +86,32 @@ class PostExportSection:
             text_color=Colors.TEXT_PRIMARY,
             placeholder_text=t("post_export_video_command_placeholder"),
         )
-        self._widgets["post_export_video_command"].pack(fill="x")
         self._widgets["post_export_video_command"].bind(
             "<KeyRelease>", lambda _event: self._on_modified()
         )
 
-    def _on_action_changed(self, value: str):
-        if value == "command":
-            self._command_frame.pack(fill="x")
-        else:
-            self._command_frame.pack_forget()
+        self._rows = [
+            (row1, dict(fill="x")),
+            (self._command_frame, dict(fill="x")),
+            (video_command_label_row, dict(fill="x", pady=(Sizing.PADDING_MEDIUM, 4))),
+            (self._widgets["post_export_video_command"], dict(fill="x")),
+        ]
+        self._video_command_rows = (video_command_label_row, self._widgets["post_export_video_command"])
+        self._layout()
+
+    def _layout(self) -> None:
+        hidden = self._video_command_rows if self._simple else ()
+        if self._widgets["post_export_action"].get_value() != "command":
+            hidden = (*hidden, self._command_frame)
+        pack_rows(self._rows, hidden)
+
+    def set_simple(self, simple: bool) -> None:
+        """Simple view keeps the queue-wide action and leaves out the per-video command."""
+        self._simple = simple
+        self._layout()
+
+    def _on_action_changed(self, _value: str):
+        self._layout()
         self._on_modified()
 
     def apply(self, preset):

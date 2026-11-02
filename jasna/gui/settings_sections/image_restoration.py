@@ -18,9 +18,8 @@ class ImageRestorationSection:
         self._show_toast = show_toast
         self._on_interactive = on_interactive
 
-        section = CollapsibleSection(parent, t("section_image_restoration"), expanded=False)
-        section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
-        content = section.content
+        self.frame = CollapsibleSection(parent, t("section_image_restoration"), expanded=False)
+        content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
         inner = ctk.CTkFrame(content, fg_color="transparent")

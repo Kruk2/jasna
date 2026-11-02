@@ -68,6 +68,7 @@ def test_preset_manager_persists_user_preset(windows_settings, settings) -> None
     [
         ("get_last_output_folder", "set_last_output_folder", "/some/output"),
         ("get_last_output_pattern", "set_last_output_pattern", "{original}_done.mkv"),
+        ("get_settings_view", "set_settings_view", "advanced"),
     ],
 )
 def test_preset_manager_remembers_the_last_output(windows_settings, getter, setter, value) -> None:

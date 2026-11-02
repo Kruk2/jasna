@@ -19,10 +19,8 @@ class SecondarySection:
         self._enabled = True
         self._ltx_only = False
 
-        section = CollapsibleSection(parent, t("section_secondary"), expanded=False)
-        section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
-        self._section = section
-        content = section.content
+        self.frame = CollapsibleSection(parent, t("section_secondary"), expanded=True)
+        content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
         inner = ctk.CTkFrame(content, fg_color="transparent")
