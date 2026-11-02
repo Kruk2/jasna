@@ -209,8 +209,8 @@ def test_less_overlap_window_starts_step_104():
     assert window_starts(600, LESS_OVERLAP_WINDOW_HOP) == [0, 104, 208, 312, 416, 520]
 
 
-def test_window_hop_from_the_less_overlap_switch():
-    assert (window_hop(False), window_hop(True)) == (88, 104)
+def test_window_hop_from_the_overlap_frames():
+    assert (window_hop(33), window_hop(17)) == (88, 104)
 
 
 def test_default_hop_shares_four_latents():
@@ -353,7 +353,7 @@ def _plan_digest(plans) -> str:
 
 def test_plan_video_output_matches_the_recorded_plan():
     regions, cuts = _random_video(0, 4000)
-    plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, eye_width=None, large_canvas=True, window_hop=window_hop(True), max_gap=MAX_GAP, min_duration=0)
+    plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, eye_width=None, large_canvas=True, window_hop=window_hop(17), max_gap=MAX_GAP, min_duration=0)
     assert _plan_digest(plans) == "1099f21ad72e3a86d0a9e3b1e2d94dc4b126535674cfdddf8d70d4c3e12f3e30"
 
 

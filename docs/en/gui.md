@@ -49,9 +49,17 @@ models slowly, and it warns you at startup.
 - **Output pattern** sets the output name. `{original}` is the input file
   name. If a name would overwrite another file, the queue items are marked at
   once.
-- **File Conflict** (in **Basic Processing**) decides what to do when the
+- **File Conflict** (in the **Output** tab) decides what to do when the
   output file already exists: **Auto-Rename** (default), **Overwrite** or
   **Skip**.
+
+## Simple and Advanced
+
+The switch under the preset bar picks how much you see. **Simple** shows the
+main choices: restoration model, file conflict, codec, quality and what to do
+when the queue is done. **Advanced** shows every setting in tabs. **Expert**
+holds speed and troubleshooting options most people never need. Settings you
+can't see still apply, and Jasna remembers your choice.
 
 ## Presets
 

@@ -272,7 +272,6 @@ def test_preview_pass_forwards_scene_detection(monkeypatch) -> None:
         temporal_overlap=settings.temporal_overlap,
         max_detection_gap=settings.max_detection_gap,
         min_detection_duration=settings.min_detection_duration,
-        enable_crossfade=settings.enable_crossfade,
         scene_detection=settings.scene_detection,
         vr_projection="auto",
         vr_projector=None,

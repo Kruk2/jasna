@@ -1,5 +1,7 @@
 """Old settings.json presets (PyNvVideoCodec-era) must survive loading: unknown
 fields dropped, encoder custom args translated to hevc_nvenc names."""
+import pytest
+
 from jasna.gui.models import AppSettings, _migrate_preset_dict
 from jasna.media.encoder_settings import parse_encoder_settings
 
@@ -73,3 +75,10 @@ def test_unreadable_custom_args_are_kept_with_a_warning(caplog):
 
     assert migrated["encoder_custom_args"] == "not==valid,,=x"
     assert "unreadable custom encoder settings" in caplog.text
+
+
+@pytest.mark.parametrize(("less_overlap", "overlap"), [(True, 17), (False, 33), (None, 17)])
+def test_the_old_less_overlap_switch_becomes_the_matching_ltx_overlap(less_overlap, overlap):
+    old = {} if less_overlap is None else {"ltx_less_overlap": less_overlap}
+
+    assert AppSettings(**_migrate_preset_dict(old)).ltx_overlap == overlap

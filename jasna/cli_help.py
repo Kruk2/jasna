@@ -41,17 +41,15 @@ CLI_HELP: dict[str, str] = {
         "so a whole run can take up to about 3x longer; needs 12 GB of free VRAM (ignored otherwise). "
         "(default: %(default)s)"
     ),
-    "experimental_ltx_less_overlap": (
-        "ltx: experimental. Fewer frames shared between the chunks LTX restores, about 13%% "
-        "faster when a mosaic stays on screen for more than 4 seconds. Turn it off for the older mode with more overlap. (default: %(default)s)"
+    "ltx_overlap": (
+        "ltx: frames shared between the chunks LTX restores. Fewer is faster when a mosaic stays on screen "
+        "for more than 4 seconds; 33 is the older mode with more overlap. (default: %(default)s)"
     ),
     "fp16": "Use half precision. Uses less VRAM and is often faster, with no visible quality loss.",
     "compile_basicvsrpp": "Prepare BasicVSR++ for your GPU: about 3x faster, almost no extra VRAM. The first run takes 15-60 minutes. NVIDIA only. (default: %(default)s)",
     "max_clip_size": "Frames restored together. Bigger is steadier and faster but uses more VRAM; use the biggest that fits. (default: %(default)s)",
     "temporal_overlap": "Frames shared between neighboring clips, to hide flicker where they meet. 8-20 is a good range; must be less than half of --max-clip-size. (default: %(default)s)",
-    "enable_crossfade": "Cross-fade between clip boundaries to reduce flickering at seams. Uses frames that are already processed but otherwise discarded, so no extra GPU cost. (default: %(default)s)",
     "denoise": "Spatial denoising strength applied to restored crops. Reduces noise artifacts. (default: %(default)s)",
-    "denoise_step": "When to apply denoising: after_primary (before secondary) or after_secondary (right before blend). (default: %(default)s)",
     "secondary_restoration": "Optional second pass that makes restored areas sharper. UNet 4x works on NVIDIA and AMD and needs activation; TVAI and RTX Super Res require NVIDIA. With LTX only RTX Super Res works (others need --ltx-auto-split); it sharpens large mosaics. (default: %(default)s)",
     "vr_mode": (
         "Side-by-side VR180 video: auto turns on by itself for VR videos; off treats every "

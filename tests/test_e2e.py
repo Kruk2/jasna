@@ -48,14 +48,7 @@ def _tvai_available() -> bool:
 REQUIRES_TVAI = pytest.mark.skipif(not _tvai_available(), reason="TVAI environment not configured")
 TVAI_ARGS = "model=iris-2:scale=1:preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1"
 
-_PIPELINE_COMBOS = [
-    pytest.param(0, False, "after_primary", id="overlap0-nocf-denoise_primary"),
-    pytest.param(0, False, "after_secondary", id="overlap0-nocf-denoise_secondary"),
-    pytest.param(8, False, "after_primary", id="overlap8-nocf-denoise_primary"),
-    pytest.param(8, False, "after_secondary", id="overlap8-nocf-denoise_secondary"),
-    pytest.param(8, True, "after_primary", id="overlap8-cf-denoise_primary"),
-    pytest.param(8, True, "after_secondary", id="overlap8-cf-denoise_secondary"),
-]
+_TEMPORAL_OVERLAPS = [pytest.param(0, id="overlap0"), pytest.param(8, id="overlap8")]
 
 
 @REQUIRES_TEST_CLIP
@@ -258,20 +251,17 @@ class TestFullPipelineE2E:
         *,
         secondary_restorer=None,
         temporal_overlap=8,
-        enable_crossfade=True,
         denoise_strength=None,
-        denoise_step=None,
     ):
         from factories import make_pipeline
         from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-        from jasna.restorer.denoise import DenoiseStrength, DenoiseStep
+        from jasna.restorer.denoise import DenoiseStrength
         from jasna.restorer.restoration_pipeline import RestorationPipeline
 
         device = torch.device("cuda:0")
         output = tmp_path / "output.mkv"
 
         ds = denoise_strength if denoise_strength is not None else DenoiseStrength.NONE
-        dstep = denoise_step if denoise_step is not None else DenoiseStep.AFTER_PRIMARY
 
         restorer = BasicvsrppMosaicRestorer(
             checkpoint_path=str(RESTORATION_MODEL_PTH),
@@ -284,7 +274,6 @@ class TestFullPipelineE2E:
             restorer=restorer,
             secondary_restorer=secondary_restorer,
             denoise_strength=ds,
-            denoise_step=dstep,
         )
 
         from jasna.mosaic.detection_registry import build_detection_model
@@ -310,7 +299,6 @@ class TestFullPipelineE2E:
             temporal_overlap=temporal_overlap,
             max_detection_gap=0,
             min_detection_duration=0,
-            enable_crossfade=enable_crossfade,
             fp16=True,
             disable_progress=True,
         )
@@ -395,12 +383,11 @@ class TestFullPipelineE2E:
         assert rtx_restore_spy.call_count == primary_spy.call_count
 
     @REQUIRES_TVAI
-    @pytest.mark.parametrize("overlap,crossfade,denoise_step_name", _PIPELINE_COMBOS)
-    def test_tvai_secondary(self, tmp_path, overlap, crossfade, denoise_step_name):
-        from jasna.restorer.denoise import DenoiseStrength, DenoiseStep
+    @pytest.mark.parametrize("overlap", _TEMPORAL_OVERLAPS)
+    def test_tvai_secondary(self, tmp_path, overlap):
+        from jasna.restorer.denoise import DenoiseStrength
         from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
 
-        ds = DenoiseStep.AFTER_PRIMARY if denoise_step_name == "after_primary" else DenoiseStep.AFTER_SECONDARY
         tvai = TvaiSecondaryRestorer(
             ffmpeg_path=TVAI_FFMPEG_PATH,
             tvai_args=TVAI_ARGS,
@@ -412,9 +399,7 @@ class TestFullPipelineE2E:
                 tmp_path,
                 secondary_restorer=tvai,
                 temporal_overlap=overlap,
-                enable_crossfade=crossfade,
                 denoise_strength=DenoiseStrength.LOW,
-                denoise_step=ds,
             )
             pipeline.run()
         finally:
@@ -426,12 +411,11 @@ class TestFullPipelineE2E:
         assert secondary_spy.call_count == primary_spy.call_count
 
     @REQUIRES_NVVFX
-    @pytest.mark.parametrize("overlap,crossfade,denoise_step_name", _PIPELINE_COMBOS)
-    def test_rtx_secondary(self, tmp_path, overlap, crossfade, denoise_step_name):
-        from jasna.restorer.denoise import DenoiseStrength, DenoiseStep
+    @pytest.mark.parametrize("overlap", _TEMPORAL_OVERLAPS)
+    def test_rtx_secondary(self, tmp_path, overlap):
+        from jasna.restorer.denoise import DenoiseStrength
         from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
 
-        ds = DenoiseStep.AFTER_PRIMARY if denoise_step_name == "after_primary" else DenoiseStep.AFTER_SECONDARY
         rtx = RtxSuperresSecondaryRestorer(
             device=torch.device("cuda:0"),
             scale=4,
@@ -443,9 +427,7 @@ class TestFullPipelineE2E:
                 tmp_path,
                 secondary_restorer=rtx,
                 temporal_overlap=overlap,
-                enable_crossfade=crossfade,
                 denoise_strength=DenoiseStrength.LOW,
-                denoise_step=ds,
             )
             pipeline.run()
         finally:

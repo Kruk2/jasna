@@ -1,6 +1,6 @@
 import torch
 
-from jasna.restorer.denoise import DenoiseStrength, apply_denoise_u8, spatial_denoise
+from jasna.restorer.denoise import spatial_denoise
 
 
 def test_spatial_denoise_reduces_noise() -> None:
@@ -51,21 +51,3 @@ def test_spatial_denoise_per_frame_independence() -> None:
     assert torch.allclose(single_a[0], batched[0], atol=1e-6)
 
 
-def test_apply_denoise_u8_none_returns_unchanged() -> None:
-    x = torch.randint(0, 256, (2, 3, 16, 16), dtype=torch.uint8)
-    out = apply_denoise_u8(x, DenoiseStrength.NONE)
-    assert torch.equal(out, x)
-    single = torch.randint(0, 256, (3, 16, 16), dtype=torch.uint8)
-    out_single = apply_denoise_u8(single, DenoiseStrength.NONE)
-    assert torch.equal(out_single, single)
-
-
-def test_apply_denoise_u8_returns_uint8_same_shape() -> None:
-    batch = torch.randint(0, 256, (3, 3, 32, 32), dtype=torch.uint8)
-    out = apply_denoise_u8(batch, DenoiseStrength.LOW)
-    assert out.dtype == torch.uint8
-    assert out.shape == batch.shape
-    single = torch.randint(0, 256, (3, 32, 32), dtype=torch.uint8)
-    out_single = apply_denoise_u8(single, DenoiseStrength.LOW)
-    assert out_single.dtype == torch.uint8
-    assert out_single.shape == single.shape

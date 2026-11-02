@@ -9,7 +9,6 @@ import importlib
 
 _LAZY_EXPORTS = {
     "BasicvsrppMosaicRestorer": "jasna.restorer.basicvsrpp_mosaic_restorer",
-    "DenoiseStep": "jasna.restorer.denoise",
     "DenoiseStrength": "jasna.restorer.denoise",
     "RestorationPipeline": "jasna.restorer.restoration_pipeline",
 }

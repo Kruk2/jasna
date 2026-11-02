@@ -20,8 +20,9 @@ from jasna.gui.components import (
 from jasna.gui.icons import NativeIconButton
 from jasna.gui.locales import t
 from jasna.gui.ltx_models import LtxModels
-from jasna.gui.settings_sections.detection import TEMPORAL_FILTER_SLIDER_MAX, DetectionSection
+from jasna.gui.settings_sections.detection import DetectionSection
 from jasna.gui.settings_sections.encoding import EncodingSection
+from jasna.gui.settings_sections.expert import TEMPORAL_FILTER_SLIDER_MAX, ExpertSection
 from jasna.gui.settings_sections.image_restoration import ImageRestorationSection
 from jasna.gui.settings_sections.post_export import PostExportSection
 from jasna.gui.settings_sections.processing import ProcessingSection
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 _EDITABLE_WHILE_PROCESSING = frozenset({"post_export_action", "post_export_command"})
 _VIEWS = ("simple", "advanced")
-_TABS = ("model", "detection", "upscale", "output", "images")
+_TABS = ("model", "detection", "upscale", "output", "images", "expert")
 
 
 class SettingsPanel(ctk.CTkFrame):
@@ -55,13 +56,13 @@ class SettingsPanel(ctk.CTkFrame):
         self._on_interactive_image_restore: callable | None = None
         self._view = self._preset_manager.get_settings_view()
         self._tab = _TABS[0]
+        self._ltx_only = False
 
         self._build_preset_bar()
         self._build_view_bar()
         self._build_scrollable()
         self._build_sections(ltx_models)
         self._apply_preset(self._current_preset)
-        self._layout_sections()
 
     def _build_preset_bar(self):
         bar = ctk.CTkFrame(self, fg_color="transparent", height=48)
@@ -218,7 +219,8 @@ class SettingsPanel(ctk.CTkFrame):
             shown = self._tab_sections[self._tab]
         self._scroll.pack(fill="both", expand=True, padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_MEDIUM))
         for section in shown:
-            section.frame.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+            if not (self._ltx_only and section is self._processing_section):
+                section.frame.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         self._scroll.scroll_to_top()
 
     def _update_dropdown_values(self):
@@ -291,13 +293,11 @@ class SettingsPanel(ctk.CTkFrame):
             self._on_restoration_model_changed,
             ltx_models=ltx_models,
         )
-        processing_section = ProcessingSection(
-            self._scroll,
-            self._widgets,
-            self._mark_modified,
-            self._sync_temporal_filter_limits,
-        )
+        self._processing_section = ProcessingSection(self._scroll, self._widgets, self._mark_modified)
         detection_section = DetectionSection(self._scroll, self._widgets, self._mark_modified)
+        self._expert_section = ExpertSection(
+            self._scroll, self._widgets, self._mark_modified, self._sync_temporal_filter_limits
+        )
         self._secondary_section = SecondarySection(self._scroll, self._widgets)
         image_section = ImageRestorationSection(
             self._scroll,
@@ -308,23 +308,23 @@ class SettingsPanel(ctk.CTkFrame):
         )
         encoding_section = EncodingSection(self._scroll, self._widgets, self._mark_modified)
         post_export_section = PostExportSection(self._scroll, self._widgets, self._mark_modified)
-        self._model_aware_sections = [processing_section, detection_section]
         self._tab_sections = {
-            "model": [self._model_section, processing_section],
+            "model": [self._model_section, self._processing_section],
             "detection": [detection_section],
             "upscale": [self._secondary_section],
             "output": [encoding_section, post_export_section],
             "images": [image_section],
+            "expert": [self._expert_section],
         }
         self._sections = [section for sections in self._tab_sections.values() for section in sections]
         self._simple_sections = [self._model_section, encoding_section, post_export_section, image_section]
         self._simple_trimmed_sections = [self._model_section, encoding_section, post_export_section]
 
     def _on_restoration_model_changed(self, model: str, auto_split: bool):
-        ltx_only = model == "ltx" and not auto_split
-        for section in self._model_aware_sections:
-            section.set_ltx_only(ltx_only)
-        self._secondary_section.set_ltx_only(ltx_only)
+        self._ltx_only = model == "ltx" and not auto_split
+        self._expert_section.set_models(standard=not self._ltx_only, ltx=model == "ltx")
+        self._secondary_section.set_ltx_only(self._ltx_only)
+        self._layout_sections()
 
     def ltx_unavailable_reason(self) -> str | None:
         """Locale key saying why the chosen LTX model cannot run now, or None when it can."""

@@ -176,22 +176,6 @@ class EncodingSection:
         )
         self._widgets["fmp4"].pack(side="right")
 
-        # Custom args
-        row3 = ctk.CTkFrame(inner, fg_color="transparent")
-
-        args_label = ctk.CTkLabel(row3, text=t("custom_args"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        args_label.pack(side="left", anchor="w")
-        args_tip = ctk.CTkLabel(row3, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        args_tip.pack(side="left", padx=4)
-        Tooltip(args_tip, get_tooltip("encoder_custom_args"))
-
-        args_row = ctk.CTkFrame(inner, fg_color="transparent")
-        self._widgets["encoder_custom_args"] = ctk.CTkEntry(
-            args_row, fg_color=Colors.BG_CARD, border_color=Colors.BORDER,
-            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("placeholder_encoder_args")
-        )
-        self._widgets["encoder_custom_args"].pack(fill="x")
-
         # LUT (color correction)
         lut_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(lut_row, "lut_path")
@@ -210,31 +194,12 @@ class EncodingSection:
         )
         lut_browse_btn.pack(side="right")
 
-        working_dir_row = ctk.CTkFrame(inner, fg_color="transparent")
-        add_setting_label(working_dir_row, "working_directory")
-
-        working_dir_input_row = ctk.CTkFrame(inner, fg_color="transparent")
-        self._widgets["working_directory"] = ctk.CTkEntry(
-            working_dir_input_row, fg_color=Colors.BG_CARD, border_color=Colors.BORDER,
-            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("working_directory_placeholder"),
-        )
-        self._widgets["working_directory"].pack(side="left", fill="x", expand=True, padx=(0, 4))
-
-        working_dir_browse_btn = ctk.CTkButton(
-            working_dir_input_row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
-            fg_color=Colors.BG_CARD, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
-            command=self._browse_working_directory,
-        )
-        working_dir_browse_btn.pack(side="right")
-
         row_gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
         label_gap = dict(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         input_gap = dict(fill="x", pady=(4, 0))
         self._expert_rows = [
             (sharpen_row, row_gap), (retarget_row, row_gap), (fmp4_row, row_gap),
-            (row3, dict(fill="x")), (args_row, input_gap),
             (lut_row, label_gap), (lut_input_row, input_gap),
-            (working_dir_row, label_gap), (working_dir_input_row, input_gap),
         ]
         self.set_simple(False)
 
@@ -280,12 +245,6 @@ class EncodingSection:
             self._widgets["lut_path"].delete(0, "end")
             self._widgets["lut_path"].insert(0, filepath)
 
-    def _browse_working_directory(self):
-        directory = filedialog.askdirectory(title=t("dialog_select_working_directory"))
-        if directory:
-            self._widgets["working_directory"].delete(0, "end")
-            self._widgets["working_directory"].insert(0, directory)
-
     def apply(self, preset):
         self._widgets["file_conflict"].set_value(preset.file_conflict)
         self._on_file_conflict_changed(self._widgets["file_conflict"].get_value())
@@ -312,8 +271,6 @@ class EncodingSection:
         )
         self._widgets["encoder_cq"].set(cq)
         self._widgets["encoder_cq_val"].configure(text=str(cq))
-        self._widgets["encoder_custom_args"].delete(0, "end")
-        self._widgets["encoder_custom_args"].insert(0, preset.encoder_custom_args)
         self._widgets["sharpen_strength"].set(preset.sharpen_strength)
         self._widgets["sharpen_strength_val"].configure(
             text=f"{preset.sharpen_strength:.2f}"
@@ -330,18 +287,13 @@ class EncodingSection:
         self._widgets["lut_path"].delete(0, "end")
         self._widgets["lut_path"].insert(0, preset.lut_path or "")
 
-        self._widgets["working_directory"].delete(0, "end")
-        self._widgets["working_directory"].insert(0, preset.working_directory or "")
-
     def collect(self) -> dict:
         return {
             "file_conflict": self._widgets["file_conflict"].get_value(),
             "codec": self._widgets["codec"].get_value(),
             "encoder_cq": int(self._widgets["encoder_cq"].get()),
-            "encoder_custom_args": self._widgets["encoder_custom_args"].get(),
             "sharpen_strength": round(float(self._widgets["sharpen_strength"].get()), 2),
             "retarget_high_fps": self._widgets["retarget_high_fps"].get() == 1,
             "fmp4": self._widgets["fmp4"].get() == 1,
             "lut_path": self._widgets["lut_path"].get().strip(),
-            "working_directory": self._widgets["working_directory"].get().strip(),
         }

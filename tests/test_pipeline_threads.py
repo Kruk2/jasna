@@ -65,7 +65,6 @@ def _decode(reader, *, process=_register_frames, metadata=None, **overrides):
         temporal_overlap=8,
         max_detection_gap=0,
         min_detection_duration=0,
-        enable_crossfade=True,
         scene_detection=False,
         blend_buffer=BlendBuffer(device=torch.device("cpu")),
         crop_buffers={},

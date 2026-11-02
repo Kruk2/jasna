@@ -53,7 +53,7 @@ def test_preset_manager_preserves_other_settings_keys(windows_settings) -> None:
         AppSettings(retarget_high_fps=True),
         AppSettings(sharpen_strength=0.45),
         AppSettings(post_export_action="command", post_export_command="echo done", post_export_video_command="remux {output}"),
-        AppSettings(restoration_model="ltx", ltx_seed=42, ltx_fast=True, ltx_large_canvas=True, ltx_less_overlap=True),
+        AppSettings(restoration_model="ltx", ltx_seed=42, ltx_fast=True, ltx_large_canvas=True, ltx_overlap=25),
     ],
     ids=["lut", "working-directory", "frame-rate", "sharpen", "post-export", "ltx"],
 )

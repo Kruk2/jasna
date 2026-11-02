@@ -17,11 +17,14 @@ LTX_DEFAULT_MODEL: LtxModelName = "distilled2"
 
 LTX_DEFAULT_SEED = 20260923
 LTX_AUTO_DEFAULT_PERCENT = 12
+# Frames two neighbouring LTX windows share: the hop stays whole latents and leaves room for
+# the crossfade after a window's unfused lead frames.
+LTX_OVERLAP_CHOICES = (17, 25, 33, 41, 49)
+LTX_DEFAULT_OVERLAP = 17
 SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res"]
 LTX_SECONDARY_RESTORATIONS: tuple[SecondaryRestorationName, ...] = ("none", "rtx-super-res")
 """What LTX restoration supports without auto split; the others need BasicVSR++ parts."""
 DenoiseStrengthName = Literal["none", "low", "medium", "high"]
-DenoiseStepName = Literal["after_primary", "after_secondary"]
 VrModeName = Literal["auto", "off", "sbs", "sbs-fisheye"]
 VrProjectionName = Literal["auto", "raw", "fisheye", "gnomonic"]
 RtxQualityName = Literal["low", "medium", "high", "ultra"]
@@ -52,9 +55,7 @@ class SessionConfig:
     compile_basicvsrpp: bool
     max_clip_size: int
     temporal_overlap: int
-    enable_crossfade: bool
     denoise_strength: DenoiseStrengthName
-    denoise_step: DenoiseStepName
     secondary_restoration: SecondaryRestorationName
     tvai_ffmpeg_path: str
     tvai_model: str

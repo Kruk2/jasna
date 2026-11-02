@@ -10,7 +10,7 @@ from pathlib import Path
 
 from jasna.gui.paths import get_settings_path, update_settings
 from jasna.segments import SegmentRange
-from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
+from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_OVERLAP, LTX_DEFAULT_SEED
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ class AppSettings:
     ltx_seed: int = LTX_DEFAULT_SEED
     ltx_fast: bool = False
     ltx_large_canvas: bool = False
-    ltx_less_overlap: bool = True
+    ltx_overlap: int = LTX_DEFAULT_OVERLAP
     ltx_trial: bool = False
     ltx_auto_split: bool = False
     ltx_auto_split_percent: int = LTX_AUTO_DEFAULT_PERCENT
@@ -119,14 +119,12 @@ class AppSettings:
     batch_size: int = 4
     max_clip_size: int = 90
     temporal_overlap: int = 8
-    enable_crossfade: bool = True
     vr_mode: str = "auto"
     vr_projection: str = "auto"
     fp16_mode: bool = True
     
     # Denoising
     denoise_strength: str = "none"  # none, low, medium, high
-    denoise_step: str = "after_primary"  # after_primary, after_secondary
     
     # Secondary restoration
     secondary_restoration: str = "none"  # none, unet-4x, tvai, rtx-super-res
@@ -201,6 +199,10 @@ def _normalize_preset_codec(value: object) -> str:
     return canonical
 
 
+# Presets saved with the old "less overlap" switch off used this overlap.
+_OLD_FULL_LTX_OVERLAP = 33
+
+
 def _migrate_preset_dict(preset_dict: dict) -> dict:
     known_fields = {f.name for f in fields(AppSettings)}
     migrated = {k: v for k, v in preset_dict.items() if k in known_fields}
@@ -231,6 +233,8 @@ def _migrate_preset_dict(preset_dict: dict) -> dict:
             )
     if "codec" in migrated:
         migrated["codec"] = _normalize_preset_codec(migrated["codec"])
+    if preset_dict.get("ltx_less_overlap") is False and "ltx_overlap" not in migrated:
+        migrated["ltx_overlap"] = _OLD_FULL_LTX_OVERLAP
     return migrated
 
 

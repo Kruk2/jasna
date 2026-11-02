@@ -147,7 +147,6 @@ class Pipeline:
         self.temporal_overlap = config.temporal_overlap
         self.max_detection_gap = config.max_detection_gap
         self.min_detection_duration = config.min_detection_duration
-        self.enable_crossfade = config.enable_crossfade
         self.scene_detection = config.scene_detection
         self.vr_mode = config.vr_mode
         self.vr_projection = config.vr_projection

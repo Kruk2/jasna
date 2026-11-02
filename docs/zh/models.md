@@ -20,7 +20,7 @@
 `lada-yolo-v4`。
 
 每个模型都有自己的默认检测阈值（`rfdetr-v6`：0.35，`rfdetr-v6-large` 和 `rfdetr-vr-v1`：0.40）。
-在**基本处理**中的**检测阈值**修改，或用 `--detection-score-threshold`。
+在**检测**标签页中的**检测阈值**修改，或用 `--detection-score-threshold`。
 
 ```bash
 jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
@@ -124,8 +124,8 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
 - **大马赛克更清晰**：大马赛克（特写、4K）细节更多。大多数视频都有大马赛克，整个视频可能慢到约 3 倍。
   需要约 12 GB 空闲显存（区间编辑器中的区间需要 16 GB 显卡）；否则 Jasna 会
   按普通方式修复它们。CLI：`--ltx-large-canvas`。
-- **减少重叠（实验性，更快）**：默认开启，马赛克持续超过 4 秒的场景约快 13%。关闭后使用重叠更多的
-  旧模式。CLI：`--no-experimental-ltx-less-overlap`。
+- **LTX 重叠**（位于**专家**标签页）：LTX 修复的各段之间共享的帧数，默认 `17`。马赛克持续超过 4 秒时，
+  越少越快；`33` 是重叠更多的旧模式。CLI：`--ltx-overlap 33`。
 - **种子**：换一个种子，结果会略有不同；同一个种子得到同样的结果。
   CLI：`--ltx-seed 7`。
 - **试用模式（速度测试）**：不需要模型和许可证，以全速运行 LTX，让你看看它在

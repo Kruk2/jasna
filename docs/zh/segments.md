@@ -95,7 +95,7 @@ jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto
 ## 工作目录
 
 Jasna 拼接视频时，会把临时文件放在输出旁边的隐藏文件夹中。要使用另一块磁盘
-（更快或更大），请在**编码设置**部分设置**工作目录**，或使用：
+（更快或更大），请在**专家**标签页设置**工作目录**，或使用：
 
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch

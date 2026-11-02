@@ -57,16 +57,14 @@ Jasna は `TMP`、次に `TEMP` を使います。`TMPDIR` は使いません。
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth`、LTX では `model_weights/ltx-restore` | 復元モデルの重み（LTX はフォルダー）。 |
 | `--ltx-fast` / `--no-ltx-fast` | オフ | LTX：約 1.4 倍高速、ディテールはわずかに減ります。RTX 50 シリーズのみ。他の GPU ではエラーで止まります。 |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | オフ | LTX：大きなモザイクをより精細に。ほとんどの動画に大きなモザイクがあるため、動画全体で最大約 3 倍時間がかかります。空き VRAM が約 12 GB 必要です。足りない場合、そのモザイクは通常どおり復元します。 |
-| `--experimental-ltx-less-overlap` / `--no-experimental-ltx-less-overlap` | オン | LTX（実験的）：モザイクが 4 秒以上続く場面で約 13% 速くなります。オフにすると、重なりの多い従来のモードになります。 |
+| `--ltx-overlap` | `17` | LTX：LTX が復元する区間どうしで共有するフレーム数（`17`、`25`、`33`、`41`、`49`）。モザイクが 4 秒以上続く場面では少ないほど速くなります。`33` は重なりの多い従来のモードです。 |
 | `--ltx-seed` | `20260923` | LTX：シードを変えると結果が少し変わります。同じシードなら同じ結果になります。 |
 | `--ltx-trial` / `--no-ltx-trial` | オフ | LTX：モデルやライセンスなしで速度を試します。動画は復元されません。 |
 | `--ltx-auto-split` | — | LTX：大きなモザイク（動画の高さのこの割合以上、例 `12`）を LTX、小さなものを BasicVSR++ で復元します。フォルダーにも使えます。`--segments` や `--fmp4` とは併用できません。[区間](segments.md#cli---ltx-auto-split)を参照。 |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | オン | BasicVSR++ をお使いの GPU 向けに準備します。約 3 倍速く、VRAM はほとんど増えません。初回は 15～60 分かかります。NVIDIA のみ。詳しくは[調整ガイド](tuning.md)。 |
 | `--max-clip-size` | `90` | 一度に復元するフレーム数。大きいほど安定して速くなりますが、VRAM を多く使います。収まる最大の値を使ってください。 |
 | `--temporal-overlap` | `8` | 隣り合うクリップが共有するフレーム数で、つなぎ目のちらつきを隠します。`8`～`20` が目安で、`--max-clip-size` の半分未満にしてください。 |
-| `--enable-crossfade` / `--no-enable-crossfade` | オン | 処理済みフレームを再利用してクリップ境界をクロスフェード。追加の GPU コストはありません。 |
 | `--denoise` | `none` | 復元した部分のノイズを除去します: `low`、`medium`、`high`。 |
-| `--denoise-step` | `after_primary` | ノイズ除去を二次復元の前（`after_primary`）に行うか、後（`after_secondary`）に行うか。 |
 
 `--ltx-*` オプションには `--restoration-model-name ltx-basic`、`ltx`、`ltx-4step`、`ltx-8step` または `ltx-undistilled` が必要です。
 `--no-compile-basicvsrpp` は `basicvsrpp` でのみ使えます。

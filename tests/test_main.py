@@ -9,7 +9,7 @@ from factories import cli_args, cli_environment, run_cli
 from jasna.main import batch_size_from_args, build_parser
 from jasna.media.probe import UnsupportedVideoError
 from jasna.post_export_action import PostExportVideoCommandError
-from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
+from jasna.restorer.denoise import DenoiseStrength
 
 pytestmark = pytest.mark.usefixtures("nvidia_vendor")
 
@@ -100,12 +100,11 @@ def test_cli_warns_only_when_the_chosen_detection_model_is_missing(tmp_path, cap
     assert ("not found in model_weights" in capsys.readouterr().out) is warns
 
 
-def test_denoise_options_reach_the_restoration_pipeline(tmp_path):
+def test_denoise_option_reaches_the_restoration_pipeline(tmp_path):
     with patch("jasna.restorer.restoration_pipeline.RestorationPipeline") as restoration_pipeline:
-        run_cli(cli_args(tmp_path, "--denoise", "high", "--denoise-step", "after_secondary"))
+        run_cli(cli_args(tmp_path, "--denoise", "high"))
 
-    kwargs = restoration_pipeline.call_args.kwargs
-    assert (kwargs["denoise_strength"], kwargs["denoise_step"]) == (DenoiseStrength.HIGH, DenoiseStep.AFTER_SECONDARY)
+    assert restoration_pipeline.call_args.kwargs["denoise_strength"] is DenoiseStrength.HIGH
 
 
 @pytest.mark.parametrize(
