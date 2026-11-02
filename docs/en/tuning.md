@@ -11,7 +11,7 @@ The clip and compilation settings are for BasicVSR++. LTX manages its memory by 
 
 Jasna restores mosaics in clips: groups of frames processed together.
 
-- **Max Clip Size** (**Model** tab, **Expert** view): the longest clip, in frames. Longer clips give a more
+- **Max Clip Size** (**Model** tab, **Advanced** view): the longest clip, in frames. Longer clips give a more
   stable result but use more VRAM.
 - **Temporal Overlap**: smooths the places where two clips meet. More overlap
   takes more time. Above `20` it usually doesn't help.
