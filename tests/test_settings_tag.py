@@ -33,7 +33,7 @@ def test_whole_video_ltx_records_the_canvas_the_run_used_and_no_basicvsrpp():
     assert settings["output"]["lut"] == "warm.cube"
 
 
-def test_mixed_job_records_each_range_with_its_model_and_seed():
+def test_mixed_job_sums_ranges_per_model_with_every_ltx_seed():
     config = session_config(
         restoration_model_name="ltx",
         ltx_auto_split_percent=12,
@@ -44,6 +44,8 @@ def test_mixed_job_records_each_range_with_its_model_and_seed():
     segments = (
         SegmentRange(1.0, 2.0, SegmentRestoration("basicvsrpp", None)),
         SegmentRange(4.0, 6.5, SegmentRestoration("ltx", 9)),
+        SegmentRange(8.0, 8.25, SegmentRestoration("ltx", 3)),
+        SegmentRange(9.0, 9.5, SegmentRestoration("ltx", 9)),
     )
 
     settings = job_settings(
@@ -55,10 +57,11 @@ def test_mixed_job_records_each_range_with_its_model_and_seed():
         ltx_large_canvas=True,
     )
 
-    assert settings["segments"] == [
-        {"start": 1.0, "end": 2.0, "model": "basicvsrpp"},
-        {"start": 4.0, "end": 6.5, "model": "ltx", "seed": 9},
-    ]
+    assert settings["segments"] == {
+        "count": 4,
+        "basicvsrpp": {"count": 1, "seconds": 1.0},
+        "ltx": {"count": 3, "seconds": 3.25, "seeds": [3, 9]},
+    }
     assert "seed" not in settings["ltx"]
     assert settings["auto_split_percent"] == 12
     assert settings["basicvsrpp"]["secondary"] == {
@@ -95,3 +98,18 @@ def test_comment_is_one_json_line_led_by_the_jasna_version_with_the_encoder_opti
     assert tag["output"]["encoder"] == "hevc_nvenc"
     assert tag["output"]["encoder_options"] == {"cq": "28", "preset": "p5"}
     assert tag["output"]["codec"] == "hevc"
+
+
+def test_hundreds_of_ranges_keep_the_comment_short():
+    ltx, basicvsrpp = SegmentRestoration("ltx", 7), SegmentRestoration("basicvsrpp", None)
+    segments = tuple(SegmentRange(i * 2.0, i * 2.0 + 1.0, ltx if i % 2 else basicvsrpp) for i in range(1000))
+    settings = job_settings(
+        session_config(restoration_model_name="ltx", ltx_auto_split_percent=12),
+        models=frozenset({"ltx", "basicvsrpp"}),
+        segments=segments,
+        vr=FLAT,
+        ltx_weights=WEIGHTS,
+        ltx_large_canvas=True,
+    )
+
+    assert len(settings_comment(settings, encoder="h264_nvenc", options={"cq": "25"})) < 2000

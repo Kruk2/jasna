@@ -42,11 +42,20 @@ def _secondary_settings(config: SessionConfig) -> dict[str, object]:
     return {"name": name}
 
 
-def _segment_settings(segment: SegmentRange) -> dict[str, object]:
-    settings: dict[str, object] = {"start": segment.start, "end": segment.end, "model": segment.restoration.model}
-    if segment.restoration.ltx_seed is not None:
-        settings["seed"] = segment.restoration.ltx_seed
-    return settings
+def _segments_summary(segments: tuple[SegmentRange, ...]) -> dict[str, object]:
+    """Per model: how many ranges and seconds, plus every LTX seed. Fixed size, so a job with
+    hundreds of ranges keeps a short tag (the smart-render mux passes it on a command line)."""
+    summary: dict[str, object] = {"count": len(segments)}
+    for model in sorted({segment.restoration.model for segment in segments}):
+        ranges = [segment for segment in segments if segment.restoration.model == model]
+        part: dict[str, object] = {
+            "count": len(ranges),
+            "seconds": round(sum(segment.duration for segment in ranges), 3),
+        }
+        if model == "ltx":
+            part["seeds"] = sorted({segment.restoration.ltx_seed for segment in ranges})
+        summary[model] = part
+    return summary
 
 
 def job_settings(
@@ -106,7 +115,7 @@ def job_settings(
     if config.restoration_model_name == "ltx" and config.ltx_auto_split_percent is not None:
         settings["auto_split_percent"] = config.ltx_auto_split_percent
     if segments:
-        settings["segments"] = [_segment_settings(segment) for segment in segments]
+        settings["segments"] = _segments_summary(segments)
     settings["output"] = {
         "codec": config.codec,
         "lut": Path(config.lut_path).name if config.lut_path else None,
