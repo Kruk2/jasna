@@ -11,6 +11,7 @@ import pytest
 import torch
 
 import jasna.vr_projection as vr_projection
+from jasna.vr180 import StereoLayout
 from jasna.crop_buffer import compute_enlarged_bbox
 from jasna.vr_projection import (
     FisheyeProjector,
@@ -49,7 +50,7 @@ def test_forward_grid_matches_numpy_reference(kind: str) -> None:
     eye_w, height, patch = 1600, 800, 96
     bbox_uv = (640 / eye_w, 300 / height, 900 / eye_w, 470 / height)
     local = (640, 300, 900, 470)
-    proj = build_vr_projector(kind, eye_width=eye_w, height=height, device=CPU)
+    proj = build_vr_projector(kind, StereoLayout("sbs", 2 * eye_w, height), device=CPU)
     got = proj._forward_eye_uv(local, patch, patch).numpy()
     ref = _ref_forward_eye_uv(kind, bbox_uv, patch)
     assert np.abs(got - ref).max() < 2e-4
@@ -61,7 +62,7 @@ def test_inverse_grid_matches_numpy_reference(kind: str) -> None:
     x1, y1, x2, y2 = 640, 300, 900, 470
     rh, rw = y2 - y1, x2 - x1
     bbox_uv = (x1 / eye_w, y1 / height, x2 / eye_w, y2 / height)
-    proj = build_vr_projector(kind, eye_width=eye_w, height=height, device=CPU)
+    proj = build_vr_projector(kind, StereoLayout("sbs", 2 * eye_w, height), device=CPU)
     got = proj._inverse_patch_uv((x1, y1, x2, y2), rh, rw).numpy()
 
     ru = bbox_uv[0] + (bbox_uv[2] - bbox_uv[0]) * (np.arange(rw) + 0.5) / rw
@@ -89,11 +90,11 @@ def test_inverse_grid_matches_numpy_reference(kind: str) -> None:
 
 @pytest.mark.parametrize("cls", [GnomonicProjector, FisheyeProjector])
 def test_projected_crop_is_square_while_source_bbox_is_preserved(cls) -> None:
-    proj = cls(eye_width=64, height=64, device=CPU)
+    proj = cls(StereoLayout("sbs", 2 * 64, 64), device=CPU)
     frame = torch.zeros((3, 64, 128), dtype=torch.float32)
     bbox = np.array([10.0, 12.0, 34.0, 40.0], dtype=np.float32)
-    raw = proj.extract_region_crop(frame, bbox, 64, 128, x_bounds=(0, 64))
-    x1, y1, x2, y2 = compute_enlarged_bbox(bbox, 64, 128, (0, 64))
+    raw = proj.extract_region_crop(frame, bbox, 64, 128)
+    x1, y1, x2, y2 = compute_enlarged_bbox(bbox, 64, 128, (0, 0, 64, 64))
     patch_size = max(y2 - y1, x2 - x1)
     assert raw.enlarged_bbox == (x1, y1, x2, y2)
     assert raw.crop_shape == (patch_size, patch_size)
@@ -104,11 +105,11 @@ def test_projected_crop_is_square_while_source_bbox_is_preserved(cls) -> None:
 def test_project_region_matches_extract_crop(cls) -> None:
     # crop/inverse parameter identity: project_region reproduces the exact patch
     # extract_region_crop fed to the restorer (needed for the delta composite).
-    proj = cls(eye_width=200, height=120, device=CPU)
+    proj = cls(StereoLayout("sbs", 2 * 200, 120), device=CPU)
     torch.manual_seed(0)
     frame = torch.randint(0, 255, (3, 120, 400), dtype=torch.float32)
     bbox = np.array([60.0, 30.0, 140.0, 90.0], dtype=np.float32)
-    raw = proj.extract_region_crop(frame, bbox, 120, 400, x_bounds=(0, 200))
+    raw = proj.extract_region_crop(frame, bbox, 120, 400)
     projected = proj.project_region(frame, raw.enlarged_bbox, raw.crop_shape[0])
     assert projected.shape == raw.crop.shape
     assert torch.allclose(projected, raw.crop.float(), atol=1e-4)
@@ -116,12 +117,12 @@ def test_project_region_matches_extract_crop(cls) -> None:
 
 @pytest.mark.parametrize("cls", [GnomonicProjector, FisheyeProjector])
 def test_project_region_matches_quantized_uint8_crop(cls) -> None:
-    proj = cls(eye_width=200, height=120, device=CPU)
+    proj = cls(StereoLayout("sbs", 2 * 200, 120), device=CPU)
     torch.manual_seed(4)
     frame = torch.randint(0, 256, (3, 120, 400), dtype=torch.uint8)
     bbox = np.array([60.0, 30.0, 140.0, 90.0], dtype=np.float32)
 
-    raw = proj.extract_region_crop(frame, bbox, 120, 400, x_bounds=(0, 200))
+    raw = proj.extract_region_crop(frame, bbox, 120, 400)
     projected = proj.project_region(frame, raw.enlarged_bbox, raw.crop_shape[0])
 
     assert torch.equal(projected, raw.crop.float())
@@ -137,7 +138,7 @@ def _coordinate_ramp(height: int, width: int) -> torch.Tensor:
 
 
 def test_forward_sampling_uses_ffmpeg_source_pixel_coordinates(monkeypatch) -> None:
-    projector = GnomonicProjector(eye_width=7, height=5, device=CPU)
+    projector = GnomonicProjector(StereoLayout("sbs", 2 * 7, 5), device=CPU)
     monkeypatch.setattr(
         projector,
         "_forward_eye_uv",
@@ -145,13 +146,13 @@ def test_forward_sampling_uses_ffmpeg_source_pixel_coordinates(monkeypatch) -> N
     )
     frame = torch.cat((_coordinate_ramp(5, 7), torch.zeros((3, 5, 7))), dim=2)
 
-    sampled = projector._forward_sample(frame, 0, (0, 0, 1, 1), 1, 1)
+    sampled = projector._forward_sample(frame, (0, 0), (0, 0, 1, 1), 1, 1)
 
     assert torch.allclose(sampled[:, 0, 0], torch.tensor([1.5, 3.0, 0.0]))
 
 
 def test_inverse_sampling_uses_ffmpeg_source_pixel_coordinates(monkeypatch) -> None:
-    projector = GnomonicProjector(eye_width=7, height=5, device=CPU)
+    projector = GnomonicProjector(StereoLayout("sbs", 2 * 7, 5), device=CPU)
     monkeypatch.setattr(
         projector,
         "_inverse_patch_uv",
@@ -170,49 +171,47 @@ def test_inverse_sampling_uses_ffmpeg_source_pixel_coordinates(monkeypatch) -> N
 def test_noop_delta_leaves_source_unchanged(cls) -> None:
     # When the restorer returns its input unchanged, the projected delta is 0 and
     # the source region must round-trip bit-for-bit (delta compositing invariant).
-    proj = cls(eye_width=200, height=120, device=CPU)
+    proj = cls(StereoLayout("sbs", 2 * 200, 120), device=CPU)
     torch.manual_seed(1)
     frame = torch.randint(0, 255, (3, 120, 400), dtype=torch.float32)
     bbox = np.array([60.0, 30.0, 140.0, 90.0], dtype=np.float32)
-    raw = proj.extract_region_crop(frame, bbox, 120, 400, x_bounds=(0, 200))
+    raw = proj.extract_region_crop(frame, bbox, 120, 400)
     original_projected = proj.project_region(frame, raw.enlarged_bbox, raw.crop_shape[0])
     restored = original_projected.clone()  # no-op restoration
     source_delta = proj.source_region_from_patch(restored - original_projected, raw.enlarged_bbox)
     assert source_delta.abs().max().item() == 0.0
 
 
+@pytest.mark.parametrize("kind", ["sbs", "tb"])
 @pytest.mark.parametrize("cls", [GnomonicProjector, FisheyeProjector])
-def test_extract_selects_the_correct_eye(cls) -> None:
-    proj = cls(eye_width=64, height=64, device=CPU)
-    frame = torch.zeros((3, 64, 128), dtype=torch.float32)
-    frame[:, :, :64] = 30.0
-    frame[:, :, 64:] = 200.0
-    left = proj.extract_region_crop(
-        frame, np.array([8.0, 8.0, 28.0, 28.0], dtype=np.float32), 64, 128, x_bounds=(0, 64)
-    )
-    right = proj.extract_region_crop(
-        frame, np.array([72.0, 8.0, 92.0, 28.0], dtype=np.float32), 64, 128, x_bounds=(64, 128)
-    )
+def test_extract_selects_the_correct_eye(cls, kind) -> None:
+    w, h = (128, 64) if kind == "sbs" else (64, 128)
+    proj = cls(StereoLayout(kind, w, h), device=CPU)
+    dx, dy = proj.layout.right_offset
+    frame = torch.full((3, h, w), 200.0)
+    frame[:, :64, :64] = 30.0
+    box = np.array([8.0, 8.0, 28.0, 28.0], dtype=np.float32)
+    left = proj.extract_region_crop(frame, box, h, w)
+    right = proj.extract_region_crop(frame, box + np.array([dx, dy, dx, dy], dtype=np.float32), h, w)
     assert left.crop.max().item() <= 31.0
     assert right.crop.min().item() >= 199.0
-    assert right.enlarged_bbox[0] >= 64
+    assert right.enlarged_bbox[0] >= dx and right.enlarged_bbox[1] >= dy
 
 
 @pytest.mark.parametrize("cls", [GnomonicProjector, FisheyeProjector])
 def test_uint8_frame_yields_uint8_crop(cls) -> None:
-    proj = cls(eye_width=64, height=64, device=CPU)
+    proj = cls(StereoLayout("sbs", 2 * 64, 64), device=CPU)
     frame = torch.zeros((3, 64, 128), dtype=torch.uint8)
     frame[:, :, :64] = 120
     raw = proj.extract_region_crop(
-        frame, np.array([8.0, 8.0, 40.0, 40.0], dtype=np.float32), 64, 128, x_bounds=(0, 64)
+        frame, np.array([8.0, 8.0, 40.0, 40.0], dtype=np.float32), 64, 128
     )
     assert raw.crop.dtype == torch.uint8
 
 
-@pytest.mark.parametrize("cls", [GnomonicProjector, FisheyeProjector])
-def test_projector_rejects_degenerate_dimensions(cls) -> None:
-    with pytest.raises(ValueError, match="Invalid eye dimensions"):
-        cls(eye_width=0, height=64, device=CPU)
+def test_stereo_layout_rejects_degenerate_dimensions() -> None:
+    with pytest.raises(ValueError, match="even frame width"):
+        StereoLayout("sbs", 0, 64)
 
 
 @pytest.mark.parametrize("cls", [GnomonicProjector, FisheyeProjector])
@@ -228,31 +227,29 @@ def test_projection_geometry_does_not_convert_tensors_to_python(
         return builtin_float(value)
 
     monkeypatch.setattr(vr_projection, "float", checked_float, raising=False)
-    proj = cls(eye_width=64, height=64, device=CPU)
+    proj = cls(StereoLayout("sbs", 2 * 64, 64), device=CPU)
     frame = torch.zeros((3, 64, 128), dtype=torch.float32)
     proj.extract_region_crop(
         frame,
         np.array([8.0, 12.0, 42.0, 36.0], dtype=np.float32),
         64,
         128,
-        x_bounds=(0, 64),
     )
 
 
 def test_factory_routes_projection_kinds() -> None:
-    kw = dict(eye_width=64, height=64, device=CPU)
-    assert build_vr_projector("raw", **kw) is None
-    assert build_vr_projector("none", **kw) is None
-    assert isinstance(build_vr_projector("fisheye", **kw), FisheyeProjector)
-    assert isinstance(build_vr_projector("gnomonic", **kw), GnomonicProjector)
+    layout = StereoLayout("sbs", 128, 64)
+    assert build_vr_projector("raw", layout, device=CPU) is None
+    assert build_vr_projector("none", layout, device=CPU) is None
+    assert isinstance(build_vr_projector("fisheye", layout, device=CPU), FisheyeProjector)
+    assert isinstance(build_vr_projector("gnomonic", layout, device=CPU), GnomonicProjector)
 
 
 def test_factory_rejects_unknown_projection() -> None:
     with pytest.raises(ValueError, match="Unknown VR projection"):
         build_vr_projector(
             "cylindrical",
-            eye_width=64,
-            height=64,
+            StereoLayout("sbs", 128, 64),
             device=CPU,
         )
 

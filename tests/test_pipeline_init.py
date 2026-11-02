@@ -9,7 +9,7 @@ from jasna.ltx.restore import LtxSegment
 from jasna.media.splice import KeyframeIndex, SpliceSpan
 from jasna.progressbar import StageProgress
 from jasna.segments import SegmentRange, SegmentRestoration
-from jasna.vr180 import SbsDetectionAdapter
+from jasna.vr180 import StereoDetectionAdapter
 from jasna.vr_projection import FisheyeProjector, GnomonicProjector
 
 
@@ -40,7 +40,7 @@ def test_configure_vr_detects_per_eye_and_builds_the_studio_projector(
 
     assert pipeline.vr_resolution.resolved == "sbs"
     assert pipeline.vr_resolution.projection == projection
-    assert isinstance(pipeline.job_detection_model, SbsDetectionAdapter)
+    assert isinstance(pipeline.job_detection_model, StereoDetectionAdapter)
     assert isinstance(pipeline.vr_projector, projector)
     if pipeline.vr_projector is not None:
         assert pipeline.vr_projector.eye_width == 100

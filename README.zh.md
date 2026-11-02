@@ -227,7 +227,7 @@ jasna --input input_folder --output output_folder
   用于图片的 SD 1.5。
 - [只修复视频的一部分](docs/zh/segments.md)：区间编辑器、马赛克扫描、
   仅大马赛克用 LTX。
-- [VR180 视频](docs/zh/vr180.md)：如何处理左右并排 VR。
+- [VR180 视频](docs/zh/vr180.md)：如何处理左右并排和上下 VR。
 - [调整显存和 GPU 占用](docs/zh/tuning.md)：片段大小、时间重叠、显存不足时
   怎么办。
 - [高级处理](docs/zh/advanced_processing.md)：降噪、60→30 FPS、色彩 LUT、

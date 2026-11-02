@@ -92,7 +92,7 @@ def job_settings(
             "secondary": _secondary_settings(config),
             "vr": vr.resolved,
         }
-        if vr.is_sbs:
+        if vr.is_stereo:
             basicvsrpp["vr_projection"] = vr.projection
         settings["basicvsrpp"] = basicvsrpp
     if "ltx" in models:

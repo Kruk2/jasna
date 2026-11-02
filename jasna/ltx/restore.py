@@ -60,6 +60,7 @@ from jasna.mosaic.detections import Detections
 from jasna.progressbar import StageProgress
 from jasna.tensor_utils import half_dtype
 from jasna.tracking.scene_detector import SceneCutDetector
+from jasna.vr180 import StereoLayout
 from jasna.vr_projection import RegionProjector
 
 logger = logging.getLogger(__name__)
@@ -528,7 +529,7 @@ def scan_span(
     batch_size: int,
     frame_h: int,
     frame_w: int,
-    eye_width: int | None,
+    stereo: StereoLayout | None,
     large_canvas: bool,
     window_hop: int,
     bar: _StageBar,
@@ -553,7 +554,7 @@ def scan_span(
             segment_cuts,
             frame_w=frame_w,
             frame_h=frame_h,
-            eye_width=eye_width,
+            stereo=stereo,
             large_canvas=large_canvas,
             window_hop=window_hop,
             max_gap=max_gap,
@@ -913,19 +914,19 @@ def segment_large_canvas(requested: bool, total_bytes: int) -> bool:
 @dataclass(frozen=True)
 class LtxRender:
     """What every pass needs besides the spans: the detector, the model files, the frame
-    size, the SBS VR eye width (None for flat video), detection batch size, the 768 px
-    decision, the frames between window starts, the decode budget per canvas and its name
-    (decode tiling follows the budget, so it keys the speed profile), the GPU, the speed
-    profile file (``speed.py``), the max detection gap a track bridges (``track_max_gap``),
-    the fewest frames a kept track spans, the super resolution of windows compose enlarges
-    (``super_res.py``), if any, and the VR fisheye/gnomonic projector crops are seen
-    through, if any."""
+    size, where a stereo VR frame keeps its eyes (None for flat video), detection batch
+    size, the 768 px decision, the frames between window starts, the decode budget per
+    canvas and its name (decode tiling follows the budget, so it keys the speed profile),
+    the GPU, the speed profile file (``speed.py``), the max detection gap a track bridges
+    (``track_max_gap``), the fewest frames a kept track spans, the super resolution of
+    windows compose enlarges (``super_res.py``), if any, and the VR fisheye/gnomonic
+    projector crops are seen through, if any."""
 
     detector: Callable
     files: LtxModelFiles
     frame_h: int
     frame_w: int
-    eye_width: int | None
+    stereo: StereoLayout | None
     batch_size: int
     large_canvas: bool
     window_hop: int
@@ -1066,7 +1067,7 @@ def _scan_spans(
 
                 span_plans = scan_span(
                     counted_frames, span.segments, render.detector,
-                    batch_size=render.batch_size, frame_h=render.frame_h, frame_w=render.frame_w, eye_width=render.eye_width,
+                    batch_size=render.batch_size, frame_h=render.frame_h, frame_w=render.frame_w, stereo=render.stereo,
                     large_canvas=render.large_canvas, window_hop=render.window_hop, bar=bar, cancel=cancel,
                     max_gap=render.max_gap, min_duration=render.min_duration,
                 )
@@ -1329,7 +1330,7 @@ def restore_video(
     files: LtxModelFiles,
     frame_h: int,
     frame_w: int,
-    eye_width: int | None,
+    stereo: StereoLayout | None,
     batch_size: int,
     large_canvas: bool,
     window_hop: int,
@@ -1355,7 +1356,7 @@ def restore_video(
             files=files,
             frame_h=frame_h,
             frame_w=frame_w,
-            eye_width=eye_width,
+            stereo=stereo,
             batch_size=batch_size,
             large_canvas=large_canvas,
             window_hop=window_hop,

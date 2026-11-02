@@ -395,7 +395,7 @@ def test_raw_pass_forwards_seek_and_player_writer(monkeypatch) -> None:
         scene_detection=False,
         vr_projector=None,
         job_detection_model=MagicMock(),
-        vr_resolution=SimpleNamespace(resolved="off"),
+        stereo=None,
     )
     writer = MagicMock()
 

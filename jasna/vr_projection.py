@@ -6,7 +6,7 @@ Torch port of ``scripts/vr_projection.py``, matched to FFmpeg 8.1 ``v360``
 pins this torch port to that numpy reference.
 
 Detection, tracking, masks, and blend registration stay in source
-half-equirectangular coordinates for every SBS mode. Only the mosaic-region crop
+half-equirectangular coordinates for every stereo layout. Only the mosaic-region crop
 handed to the 2D restorer is reprojected here, and only the restoration *delta*
 is projected back (see ``BlendBuffer``), so source pixels outside the blend mask
 survive unchanged.
@@ -26,6 +26,7 @@ import torch
 import torch.nn.functional as F
 
 from jasna.crop_buffer import RawCrop, compute_enlarged_bbox
+from jasna.vr180 import StereoLayout
 
 log = logging.getLogger(__name__)
 
@@ -275,19 +276,20 @@ class RegionProjector:
 
     kind = "raw"
 
-    def __init__(self, *, eye_width: int, height: int, device: torch.device) -> None:
-        self.eye_width = int(eye_width)
-        self.height = int(height)
-        if self.eye_width <= 0 or self.height <= 0:
-            raise ValueError(f"Invalid eye dimensions {self.eye_width}x{self.height}")
+    def __init__(self, layout: StereoLayout, *, device: torch.device) -> None:
+        self.layout = layout
+        self.eye_width = layout.eye_w
+        self.height = layout.eye_h
         self.device = device
         log.info(
-            "VR %s projection enabled (eye %dx%d)", self.kind, self.eye_width, self.height
+            "VR %s projection enabled (%s eye %dx%d)", self.kind, layout.kind, self.eye_width, self.height
         )
 
-    def _eye_offset(self, enlarged_bbox: tuple[int, int, int, int]) -> int:
-        centre_x = (int(enlarged_bbox[0]) + int(enlarged_bbox[2])) * 0.5
-        return 0 if centre_x < self.eye_width else self.eye_width
+    def _local(self, enlarged_bbox) -> tuple[tuple[int, int], tuple[int, int, int, int]]:
+        """The eye origin holding ``enlarged_bbox`` and the box in that eye's pixels."""
+        x1, y1, x2, y2 = (int(v) for v in enlarged_bbox)
+        ox, oy = self.layout.eye_of((x1, y1, x2, y2))[:2]
+        return (ox, oy), (x1 - ox, y1 - oy, x2 - ox, y2 - oy)
 
     def _bbox_uv(self, local_bbox: tuple[int, int, int, int]) -> tuple[float, float, float, float]:
         x1, y1, x2, y2 = local_bbox
@@ -309,9 +311,10 @@ class RegionProjector:
         return max(y2 - y1, x2 - x1)
 
     def _forward_sample(
-        self, frame: torch.Tensor, offset: int, local_bbox, patch_h: int, patch_w: int
+        self, frame: torch.Tensor, origin: tuple[int, int], local_bbox, patch_h: int, patch_w: int
     ) -> torch.Tensor:
-        eye = frame[:, :, offset : offset + self.eye_width]
+        ox, oy = origin
+        eye = frame[:, oy : oy + self.height, ox : ox + self.eye_width]
         grid = self._as_grid(self._forward_eye_uv(local_bbox, patch_h, patch_w)).to(frame.device)
         return F.grid_sample(
             eye.unsqueeze(0).float(), grid,
@@ -334,14 +337,11 @@ class RegionProjector:
         bbox,
         frame_h: int,
         frame_w: int,
-        *,
-        x_bounds: tuple[int, int] | None = None,
     ) -> RawCrop:
-        x1, y1, x2, y2 = compute_enlarged_bbox(bbox, frame_h, frame_w, x_bounds)
-        offset = x_bounds[0] if x_bounds is not None else self._eye_offset((x1, y1, x2, y2))
-        local = (x1 - offset, y1, x2 - offset, y2)
+        x1, y1, x2, y2 = compute_enlarged_bbox(bbox, frame_h, frame_w, self.layout.eye_of(bbox))
+        origin, local = self._local((x1, y1, x2, y2))
         patch_size = self._patch_size((x1, y1, x2, y2))
-        sampled = self._forward_sample(frame, offset, local, patch_size, patch_size)
+        sampled = self._forward_sample(frame, origin, local, patch_size, patch_size)
         crop = self._match_source_precision(sampled, frame.dtype)
         return RawCrop(
             crop=crop,
@@ -356,10 +356,8 @@ class RegionProjector:
         """Forward-project a full frame into this region's ``size`` x ``size`` patch
         space (float, rounded like the source), as ``extract_region_crop`` does at
         its crop resolution. Used to obtain the original patch for delta compositing."""
-        x1, y1, x2, y2 = (int(v) for v in enlarged_bbox)
-        offset = self._eye_offset((x1, y1, x2, y2))
-        local = (x1 - offset, y1, x2 - offset, y2)
-        sampled = self._forward_sample(frame, offset, local, size, size)
+        origin, local = self._local(enlarged_bbox)
+        sampled = self._forward_sample(frame, origin, local, size, size)
         return self._match_source_precision(sampled, frame.dtype).float()
 
     @torch.inference_mode()
@@ -369,9 +367,8 @@ class RegionProjector:
         """Inverse-project a patch-space signal back to the source region. Uses
         zero padding so region pixels the projection does not cover contribute no
         delta (they keep the untouched source)."""
-        x1, y1, x2, y2 = (int(v) for v in enlarged_bbox)
-        offset = self._eye_offset((x1, y1, x2, y2))
-        local = (x1 - offset, y1, x2 - offset, y2)
+        _, local = self._local(enlarged_bbox)
+        x1, y1, x2, y2 = local
         grid = self._as_grid(self._inverse_patch_uv(local, y2 - y1, x2 - x1)).to(patch.device)
         return F.grid_sample(
             patch.unsqueeze(0).float(), grid,
@@ -439,11 +436,11 @@ _PROJECTORS = {"gnomonic": GnomonicProjector, "fisheye": FisheyeProjector}
 
 
 def build_vr_projector(
-    projection: str, *, eye_width: int, height: int, device: torch.device
+    projection: str, layout: StereoLayout, *, device: torch.device
 ) -> RegionProjector | None:
     if projection in {"raw", "none"}:
         return None
     cls = _PROJECTORS.get(projection)
     if cls is None:
         raise ValueError(f"Unknown VR projection '{projection}'")
-    return cls(eye_width=eye_width, height=height, device=device)
+    return cls(layout, device=device)

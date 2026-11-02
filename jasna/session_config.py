@@ -25,7 +25,7 @@ SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res"]
 LTX_SECONDARY_RESTORATIONS: tuple[SecondaryRestorationName, ...] = ("none", "rtx-super-res")
 """What LTX restoration supports without auto split; the others need BasicVSR++ parts."""
 DenoiseStrengthName = Literal["none", "low", "medium", "high"]
-VrModeName = Literal["auto", "off", "sbs", "sbs-fisheye"]
+VrModeName = Literal["auto", "off", "sbs", "sbs-fisheye", "tb"]
 VrProjectionName = Literal["auto", "raw", "fisheye", "gnomonic"]
 RtxQualityName = Literal["low", "medium", "high", "ultra"]
 RtxLevelName = Literal["none", "low", "medium", "high", "ultra"]

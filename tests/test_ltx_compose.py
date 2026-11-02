@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 import torch
 
+from jasna.vr180 import StereoLayout
 from jasna.ltx.camera import letterbox
 from jasna.ltx.compose import (
     Candidate,
@@ -205,15 +206,19 @@ def test_a_2x_canvas_maps_back_onto_the_same_crop():
     assert (upscaled - direct).abs().mean() < 1.0
 
 
+@pytest.mark.parametrize("layout", ["sbs", "tb"])
 @pytest.mark.parametrize("kind", ["fisheye", "gnomonic"])
-def test_vr_projected_crops_change_only_what_the_restoration_changed(kind):
+def test_vr_projected_crops_change_only_what_the_restoration_changed(kind, layout):
     from jasna.vr_projection import build_vr_projector
 
-    eye = 320
-    source = _frame(3)
-    projector = build_vr_projector(kind, eye_width=eye, height=360, device=torch.device("cpu"))
-    crop = letterbox((eye + 60, 80, eye + 260, 280), 256)
-    polygon = [[eye + 120.0, 140.0], [eye + 200.0, 140.0], [eye + 200.0, 220.0], [eye + 120.0, 220.0]]
+    stereo = StereoLayout("sbs", 640, 360) if layout == "sbs" else StereoLayout("tb", 320, 720)
+    dx, dy = stereo.right_offset
+    source = torch.randint(
+        0, 256, (3, stereo.frame_h, stereo.frame_w), dtype=torch.uint8, generator=torch.Generator().manual_seed(3)
+    )
+    projector = build_vr_projector(kind, stereo, device=torch.device("cpu"))
+    crop = letterbox((dx + 60, dy + 80, dx + 260, dy + 280), 256)
+    polygon = [[dx + 120.0, dy + 140.0], [dx + 200.0, dy + 140.0], [dx + 200.0, dy + 220.0], [dx + 120.0, dy + 220.0]]
     view = crop_to_canvas(source, crop, projector)
 
     kept = composite_frame(source, [Candidate(view, crop, 1.0, 0, [polygon], 1.0)], feather=8, projector=projector)
@@ -223,6 +228,6 @@ def test_vr_projected_crops_change_only_what_the_restoration_changed(kind):
     assert view.shape == (3, 256, 256)
     assert torch.equal(kept, source)
     moved = (changed != source).any(dim=0)
-    assert moved[180, eye + 160]
+    assert moved[dy + 180, dx + 160]
     ys, xs = torch.nonzero(moved, as_tuple=True)
-    assert xs.min() >= eye + 60 and xs.max() < eye + 260 and ys.min() >= 80 and ys.max() < 280
+    assert xs.min() >= dx + 60 and xs.max() < dx + 260 and ys.min() >= dy + 80 and ys.max() < dy + 280

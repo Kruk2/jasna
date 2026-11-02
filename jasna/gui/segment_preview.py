@@ -99,7 +99,7 @@ class SegmentPreviewWorker:
         self.path = Path(path)
         self.max_size = max_size
         self.vr_mode = str(vr_mode)
-        self._left_eye_only = False
+        self._stereo = "off"
         self.events: queue.Queue[PreviewEvent] = queue.Queue()
         self._commands: queue.Queue[_Command] = queue.Queue(maxsize=1)
         self._closed = threading.Event()
@@ -153,11 +153,11 @@ class SegmentPreviewWorker:
                 raise ValueError(f"Could not determine duration of {self.path.name}")
             from jasna.vr180 import resolve_vr_mode
 
-            self._left_eye_only = resolve_vr_mode(
+            self._stereo = resolve_vr_mode(
                 self.vr_mode,
                 metadata,
                 self.path,
-            ).is_sbs
+            ).resolved
             self.events.put(PreviewLoaded(metadata))
             threading.Thread(
                 target=self._probe_keyframes,
@@ -266,23 +266,21 @@ class SegmentPreviewWorker:
         return frame.reformat(format="rgb24").to_image()
 
     def _to_image(self, frame) -> Image.Image:
-        width, height = int(frame.width), int(frame.height)
-        content_width = width // 2 if self._left_eye_only else width
+        eyes_x = 2 if self._stereo == "sbs" else 1
+        eyes_y = 2 if self._stereo == "tb" else 1
+        content_width = int(frame.width) // eyes_x
+        content_height = int(frame.height) // eyes_y
         max_width, max_height = self.max_size
-        scale = min(1.0, max_width / content_width, max_height / height)
+        scale = min(1.0, max_width / content_width, max_height / content_height)
         target_width = max(2, round(content_width * scale))
-        target_height = max(2, round(height * scale))
+        target_height = max(2, round(content_height * scale))
         if target_width % 2:
             target_width -= 1
         if target_height % 2:
             target_height -= 1
-        preview_width = target_width * 2 if self._left_eye_only else target_width
         preview = frame.reformat(
-            width=preview_width,
-            height=target_height,
+            width=target_width * eyes_x,
+            height=target_height * eyes_y,
             format="rgb24",
         )
-        image = preview.to_image()
-        if self._left_eye_only:
-            return image.crop((0, 0, target_width, target_height))
-        return image
+        return preview.to_image().crop((0, 0, target_width, target_height))

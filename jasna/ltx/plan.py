@@ -12,7 +12,7 @@ another hands over from it: it starts ``LEAD_IN_FRAMES`` early on its first outl
 takes the area over during the last ``BLEND_FRAMES`` of them; a track ending inside
 another hands the area back over ``BLEND_FRAMES``.
 
-SBS VR plans the left eye on its own; the right eye restores each left track as a twin
+Stereo VR (side by side or top/bottom) plans the left eye on its own; the right eye restores each left track as a twin
 shifted by its disparity and denoised with the same noise, so both eyes invent the same
 detail.
 """
@@ -39,7 +39,7 @@ from jasna.ltx.camera import (
     track_camera,
 )
 from jasna.tracking.clip_tracker import compute_iou_matrix, shorter_than_min_duration
-from jasna.vr180 import eye_bounds
+from jasna.vr180 import StereoLayout
 
 Polygon = np.ndarray
 
@@ -644,23 +644,23 @@ def _plan_eye(
     return plans
 
 
-def _shift_region(region: Region, dx: int) -> Region:
+def _shift_region(region: Region, dx: int, dy: int) -> Region:
     x1, y1, x2, y2 = region.box
-    return Region((x1 + dx, y1, x2 + dx, y2), region.polygon + np.array((dx, 0), dtype=region.polygon.dtype))
+    return Region((x1 + dx, y1 + dy, x2 + dx, y2 + dy), region.polygon + np.array((dx, dy), dtype=region.polygon.dtype))
 
 
-def _shift_crop(crop: CropFrame, dx: int) -> CropFrame:
+def _shift_crop(crop: CropFrame, dx: int, dy: int) -> CropFrame:
     x1, y1, x2, y2 = crop.crop_box
-    return replace(crop, crop_box=(x1 + dx, y1, x2 + dx, y2))
+    return replace(crop, crop_box=(x1 + dx, y1 + dy, x2 + dx, y2 + dy))
 
 
-def _shift_plan(plan: TrackPlan, dx: int) -> TrackPlan:
+def _shift_plan(plan: TrackPlan, dx: int, dy: int) -> TrackPlan:
     return replace(
         plan,
         polygons=tuple(
-            tuple(polygon + np.array((dx, 0), dtype=polygon.dtype) for polygon in frame) for frame in plan.polygons
+            tuple(polygon + np.array((dx, dy), dtype=polygon.dtype) for polygon in frame) for frame in plan.polygons
         ),
-        windows=tuple(replace(w, crops=tuple(_shift_crop(c, dx) for c in w.crops)) for w in plan.windows),
+        windows=tuple(replace(w, crops=tuple(_shift_crop(c, dx, dy) for c in w.crops)) for w in plan.windows),
     )
 
 
@@ -674,7 +674,7 @@ def plan_video(
     *,
     frame_w: int,
     frame_h: int,
-    eye_width: int | None,
+    stereo: StereoLayout | None,
     large_canvas: bool,
     window_hop: int,
     max_gap: int,
@@ -683,32 +683,27 @@ def plan_video(
     """Every mosaic track of a video with its windows, in window-index order.
     Tracks bridge detection gaps up to ``max_gap`` frames (``track_max_gap``); a track
     spanning fewer than ``min_duration`` frames is dropped before size-run cuts, so a short
-    piece of a longer track is never dropped. SBS VR (``eye_width``) plans the left eye on
+    piece of a longer track is never dropped. Stereo VR (``stereo``) plans the left eye on
     its own, gives each left track a right-eye twin (``right_eye_twins``) and plans the
     right-eye mosaics no twin covers on their own; no track or crop crosses into the other eye."""
-    settings = dict(
-        frame_h=frame_h, large_canvas=large_canvas, window_hop=window_hop, max_gap=max_gap, min_duration=min_duration
-    )
-    if eye_width is None:
-        return _plan_eye(regions_per_frame, cuts, first_track=0, first_index=0, frame_w=frame_w, **settings)
-    left_regions = [[r for r in regions if eye_bounds(r.box, eye_width, frame_w)[0] == 0] for regions in regions_per_frame]
+    settings = dict(large_canvas=large_canvas, window_hop=window_hop, max_gap=max_gap, min_duration=min_duration)
+    if stereo is None:
+        return _plan_eye(regions_per_frame, cuts, first_track=0, first_index=0, frame_w=frame_w, frame_h=frame_h, **settings)
+    dx, dy = stereo.right_offset
+    eye = dict(frame_w=stereo.eye_w, frame_h=stereo.eye_h, **settings)
+    left_regions = [[r for r in regions if stereo.eye_of(r.box)[:2] == (0, 0)] for regions in regions_per_frame]
     right_regions = [
-        [_shift_region(r, -eye_width) for r in regions if eye_bounds(r.box, eye_width, frame_w)[0] == eye_width]
+        [_shift_region(r, -dx, -dy) for r in regions if stereo.eye_of(r.box)[:2] == (dx, dy)]
         for regions in regions_per_frame
     ]
-    left = _plan_eye(left_regions, cuts, first_track=0, first_index=0, frame_w=eye_width, **settings)
+    left = _plan_eye(left_regions, cuts, first_track=0, first_index=0, **eye)
     twins, unpaired = right_eye_twins(
-        left, right_regions, eye_width=eye_width, first_track=len(left), first_index=_window_count(left)
+        left, right_regions, eye_width=stereo.eye_w, first_track=len(left), first_index=_window_count(left)
     )
     right = twins + _plan_eye(
-        unpaired,
-        cuts,
-        first_track=len(left) + len(twins),
-        first_index=_window_count(left + twins),
-        frame_w=frame_w - eye_width,
-        **settings,
+        unpaired, cuts, first_track=len(left) + len(twins), first_index=_window_count(left + twins), **eye
     )
-    return left + [_shift_plan(plan, eye_width) for plan in right]
+    return left + [_shift_plan(plan, dx, dy) for plan in right]
 
 
 def _extent(polygons: Sequence[Polygon]) -> Box:
@@ -751,7 +746,7 @@ def _right_eye_match(left: Box, regions: Sequence[Region], eye_width: int) -> tu
 
 def _twin_crop(crop: CropFrame, shift: int, eye_width: int) -> CropFrame:
     x1, _, x2, _ = crop.crop_box
-    return _shift_crop(crop, min(max(shift, -x1), eye_width - x2))
+    return _shift_crop(crop, min(max(shift, -x1), eye_width - x2), 0)
 
 
 def right_eye_twins(

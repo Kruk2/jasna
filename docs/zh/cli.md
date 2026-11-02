@@ -110,7 +110,7 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
-| `--vr-mode` | `auto` | `auto`、`off`、`sbs`、`sbs-fisheye`。见 [VR180](vr180.md)。 |
+| `--vr-mode` | `auto` | `auto`、`off`、`sbs`、`sbs-fisheye`、`tb`。见 [VR180](vr180.md)。 |
 
 ## 继续 LTX 任务
 

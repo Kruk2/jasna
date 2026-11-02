@@ -12,10 +12,14 @@ import bisect
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from jasna.segments import SegmentRange, SegmentRestoration, normalize_segments
+
+if TYPE_CHECKING:
+    from jasna.vr180 import StereoLayout
 
 SCAN_MASK_HW = (90, 160)
 
@@ -79,11 +83,17 @@ def mosaic_boxes(mask: np.ndarray, *, aspect: float) -> list[MosaicBox]:
     ]
 
 
-def mosaic_sizes(masks: np.ndarray, *, frame_width: int, frame_height: int) -> tuple[float, ...]:
+def mosaic_sizes(
+    masks: np.ndarray, *, frame_width: int, frame_height: int, stereo: StereoLayout | None
+) -> tuple[float, ...]:
     """Per scan mask (uint8 [N, H, W] covering the whole frame), the size of its biggest
-    mosaic; 0.0 when it holds none."""
+    mosaic as a fraction of the eye height (the frame height for flat video); 0.0 when it
+    holds none."""
     aspect = frame_width / frame_height
-    return tuple(max((box.size for box in mosaic_boxes(mask, aspect=aspect)), default=0.0) for mask in masks)
+    scale = frame_height / stereo.eye_h if stereo is not None else 1.0
+    return tuple(
+        scale * max((box.size for box in mosaic_boxes(mask, aspect=aspect)), default=0.0) for mask in masks
+    )
 
 
 def ltx_auto_segments(
@@ -150,18 +160,22 @@ def scan_mosaic_sizes(
     path: Path,
     metadata,
     *,
+    stereo: StereoLayout | None,
     batch_size: int,
     device,
     disable_progress: bool,
     on_progress: Callable[[float], None],
 ) -> MosaicSamples:
-    """Sample the video once a second with ``detector`` for the LTX auto split of a job
-    (the editor's scan runs in ``gui.mosaic_scan``); ``on_progress`` gets the fraction done."""
+    """Sample the video once a second with ``detector`` (per eye for stereo VR) for the LTX
+    auto split of a job (the editor's scan runs in ``gui.mosaic_scan``); ``on_progress``
+    gets the fraction done."""
     import torch
     from tqdm import tqdm
 
     from jasna.media.video_decoder import VideoReader
+    from jasna.vr180 import stereo_detector
 
+    detector = stereo_detector(detector, stereo)
     frame_stride = scan_sample_stride(metadata.video_fps)
     time_base = float(metadata.time_base)
     times: list[float] = []
@@ -182,6 +196,7 @@ def scan_mosaic_sizes(
                     batch_masks[:count].to(torch.uint8).cpu().numpy(),
                     frame_width=int(metadata.video_width),
                     frame_height=int(metadata.video_height),
+                    stereo=stereo,
                 )
             )
             bar.update(count)

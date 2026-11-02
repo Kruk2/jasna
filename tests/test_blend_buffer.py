@@ -4,6 +4,7 @@ import threading
 
 import torch
 
+from jasna.vr180 import StereoLayout
 from jasna.blend_buffer import BlendBuffer
 from jasna.pipeline_items import SecondaryRestoreResult
 
@@ -299,7 +300,7 @@ def test_vr_delta_composite_preserves_pixels_outside_mask() -> None:
         m[rh // 2 :, :] = 1.0  # bottom half restored, top half untouched
         return m
 
-    projector = GnomonicProjector(eye_width=32, height=32, device=torch.device("cpu"))
+    projector = GnomonicProjector(StereoLayout("sbs", 64, 32), device=torch.device("cpu"))
     bb = BlendBuffer(
         device=torch.device("cpu"), blend_mask_fn=half_mask_fn, vr_projector=projector
     )

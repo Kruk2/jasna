@@ -236,7 +236,7 @@ jasna --input input_folder --output output_folder
   二次復元、画像用の SD 1.5。
 - [動画の一部だけを復元する](docs/ja/segments.md): 区間エディター、
   モザイクスキャン、大きなモザイクだけ LTX。
-- [VR180 動画](docs/ja/vr180.md): サイドバイサイド VR の扱い方。
+- [VR180 動画](docs/ja/vr180.md): サイドバイサイドとトップボトム VR の扱い方。
 - [VRAM と GPU 使用量の調整](docs/ja/tuning.md): クリップサイズ、
   オーバーラップ、VRAM が足りないときの対処。
 - [高度な処理](docs/ja/advanced_processing.md): ノイズ除去、60→30 FPS、

@@ -73,7 +73,7 @@ def _decode(reader, *, process=_register_frames, metadata=None, **overrides):
         error_holder=[],
         cancel_event=threading.Event(),
         debug_memory=MagicMock(),
-        vr_mode="off",
+        stereo=None,
         vr_projector=None,
         seek_ts=None,
         end_pts=None,

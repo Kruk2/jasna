@@ -244,7 +244,7 @@ jasna --input input_folder --output output_folder
   secondary restoration, SD 1.5 for images.
 - [Restoring only parts of a video](docs/en/segments.md): Segment Editor,
   mosaic scan, LTX only for big mosaics.
-- [VR180 videos](docs/en/vr180.md): how side-by-side VR is handled.
+- [VR180 videos](docs/en/vr180.md): how side-by-side and top/bottom VR are handled.
 - [Tuning VRAM and GPU usage](docs/en/tuning.md): clip size, overlap, what to
   do when VRAM runs out.
 - [Advanced processing](docs/en/advanced_processing.md): denoise, 60→30 FPS,
