@@ -168,7 +168,7 @@ class BlendBuffer:
             # unchanged, so the delta is ~0 there and the inverse resample cannot
             # smear reprojection error onto untouched pixels.
             original_projected = self.vr_projector.project_region(
-                original, (x1, y1, x2, y2)
+                original, (x1, y1, x2, y2), crop_h
             )
             source_delta = self.vr_projector.source_region_from_patch(
                 resized_back - original_projected, (x1, y1, x2, y2)

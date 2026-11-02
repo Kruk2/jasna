@@ -269,7 +269,7 @@ def _region_eye_uv_grid(
     return ruu, rvv
 
 
-class _RegionProjector:
+class RegionProjector:
     """Shared crop/uncrop machinery; subclasses supply the forward (patch->eye)
     and inverse (region->patch) uv maps for one mosaic region."""
 
@@ -351,16 +351,15 @@ class _RegionProjector:
 
     @torch.inference_mode()
     def project_region(
-        self, frame: torch.Tensor, enlarged_bbox: tuple[int, int, int, int]
+        self, frame: torch.Tensor, enlarged_bbox: tuple[int, int, int, int], size: int
     ) -> torch.Tensor:
-        """Forward-project a full frame into this region's patch space (float),
-        at the crop resolution ``extract_region_crop`` produced. Used to obtain
-        the original patch for delta compositing."""
+        """Forward-project a full frame into this region's ``size`` x ``size`` patch
+        space (float, rounded like the source), as ``extract_region_crop`` does at
+        its crop resolution. Used to obtain the original patch for delta compositing."""
         x1, y1, x2, y2 = (int(v) for v in enlarged_bbox)
         offset = self._eye_offset((x1, y1, x2, y2))
         local = (x1 - offset, y1, x2 - offset, y2)
-        patch_size = self._patch_size((x1, y1, x2, y2))
-        sampled = self._forward_sample(frame, offset, local, patch_size, patch_size)
+        sampled = self._forward_sample(frame, offset, local, size, size)
         return self._match_source_precision(sampled, frame.dtype).float()
 
     @torch.inference_mode()
@@ -380,7 +379,7 @@ class _RegionProjector:
         )[0]
 
 
-class GnomonicProjector(_RegionProjector):
+class GnomonicProjector(RegionProjector):
     """Rectilinear (tangent-plane) view of the mosaic region: gives the 2D model a
     near-undistorted patch. Square FOV bounds the region's angular extent."""
 
@@ -404,7 +403,7 @@ class GnomonicProjector(_RegionProjector):
         return _xyz_to_flat_uv(vec, fov, fov)
 
 
-class FisheyeProjector(_RegionProjector):
+class FisheyeProjector(RegionProjector):
     """Equidistant-180 fisheye sub-window covering the mosaic region: the space
     several studios bake the mosaic in. Window is the region's disc bbox, squared
     with a small margin (matches the Phase-4 experiment)."""
@@ -441,7 +440,7 @@ _PROJECTORS = {"gnomonic": GnomonicProjector, "fisheye": FisheyeProjector}
 
 def build_vr_projector(
     projection: str, *, eye_width: int, height: int, device: torch.device
-) -> _RegionProjector | None:
+) -> RegionProjector | None:
     if projection in {"raw", "none"}:
         return None
     cls = _PROJECTORS.get(projection)

@@ -35,7 +35,7 @@ def test_seed_frame_writer_keeps_only_the_range_frames(tmp_path) -> None:
     assert all(frame.path.is_file() for frame in writer.frames)
 
 
-def test_prepared_key_follows_detection_and_canvas_but_not_the_look() -> None:
+def test_prepared_key_follows_detection_canvas_and_vr_but_not_the_look() -> None:
     segment = SegmentRange(1, 2)
     settings = AppSettings()
 
@@ -43,6 +43,8 @@ def test_prepared_key_follows_detection_and_canvas_but_not_the_look() -> None:
     assert prepared_key(segment, replace(settings, detection_score_threshold=0.9)) != prepared_key(segment, settings)
     assert prepared_key(segment, replace(settings, ltx_large_canvas=True)) != prepared_key(segment, settings)
     assert prepared_key(segment, replace(settings, ltx_overlap=33)) != prepared_key(segment, settings)
+    assert prepared_key(segment, replace(settings, vr_projection="fisheye")) != prepared_key(segment, settings)
+    assert prepared_key(segment, replace(settings, vr_mode="off")) != prepared_key(segment, settings)
     assert prepared_key(SegmentRange(1, 3), settings) != prepared_key(segment, settings)
 
 

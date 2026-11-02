@@ -20,6 +20,7 @@ import torch.nn.functional as F
 from jasna.ltx.camera import CropFrame
 from jasna.ltx.plan import Polygon
 from jasna.tracking.blending import dilate_ellipse
+from jasna.vr_projection import RegionProjector
 
 COLOUR_MATCH_STRENGTH = 0.75
 
@@ -31,8 +32,11 @@ def _reflect101_index(size: int, before: int, after: int, device: torch.device) 
     return torch.where(index >= size, period - index, index)
 
 
-def crop_to_canvas(frame: torch.Tensor, crop: CropFrame) -> torch.Tensor:
-    """Crop, bilinear-resize and reflect-101 pad one frame onto the model canvas."""
+def crop_to_canvas(frame: torch.Tensor, crop: CropFrame, projector: RegionProjector | None) -> torch.Tensor:
+    """Crop, bilinear-resize and reflect-101 pad one frame onto the model canvas. A VR
+    ``projector`` instead fills the whole canvas with its view of the crop box."""
+    if projector is not None:
+        return projector.project_region(frame, crop.crop_box, crop.canvas).to(torch.uint8)
     x1, y1, x2, y2 = crop.crop_box
     content = frame[:, y1:y2, x1:x2]
     if content.shape[1:] != crop.resize_hw:
@@ -56,9 +60,18 @@ def _area_weights(out_size: int, in_size: int, device: torch.device) -> torch.Te
     return ((hi - lo).clamp(min=0) / scale).to(device=device, dtype=torch.float32)
 
 
-def canvas_to_source(canvas: torch.Tensor, crop: CropFrame) -> torch.Tensor:
+def canvas_to_source(
+    canvas: torch.Tensor, crop: CropFrame, source: torch.Tensor, projector: RegionProjector | None
+) -> torch.Tensor:
     """The restored canvas mapped back to its source crop box, float ``[3, h, w]`` in 0..255
-    rounded to whole grey levels (bicubic when enlarging, pixel area when shrinking)."""
+    rounded to whole grey levels (bicubic when enlarging, pixel area when shrinking). With a
+    VR ``projector`` only the restoration's change to the ``source`` frame's view maps back,
+    so the crop keeps its source pixels wherever the canvas kept the view."""
+    if projector is not None:
+        x1, y1, x2, y2 = crop.crop_box
+        change = canvas.float() - projector.project_region(source, crop.crop_box, canvas.shape[-1])
+        restored = source[:, y1:y2, x1:x2].float() + projector.source_region_from_patch(change, crop.crop_box)
+        return restored.round_().clamp_(0, 255)
     top, _, left, _ = crop.pad
     resize_h, resize_w = crop.resize_hw
     content = canvas[:, top : top + resize_h, left : left + resize_w].float()
@@ -146,7 +159,9 @@ class Candidate:
     presence: float
 
 
-def composite_frame(source: torch.Tensor, candidates: Sequence[Candidate], *, feather: int) -> torch.Tensor:
+def composite_frame(
+    source: torch.Tensor, candidates: Sequence[Candidate], *, feather: int, projector: RegionProjector | None
+) -> torch.Tensor:
     live = [c for c in candidates if c.weight > 0.0 and c.presence > 0.0]
     if not live:
         return source
@@ -175,7 +190,7 @@ def composite_frame(source: torch.Tensor, candidates: Sequence[Candidate], *, fe
         x1, y1, x2, y2 = x1 - x0, y1 - y0, x2 - x0, y2 - y0
         ramp = crop_edge_ramp((x1, y1, x2, y2), shape, feather, device)
         covered = ramp > 0.0
-        restored_crop = canvas_to_source(candidate.canvas, candidate.crop)
+        restored_crop = canvas_to_source(candidate.canvas, candidate.crop, source, projector)
         restored = region.clone()
         restored[:, y1:y2, x1:x2] = restored_crop
         edge = torch.where(roi, covered.float(), ramp)

@@ -61,7 +61,7 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
         yield torch.zeros(6, 3, 4, 4, dtype=torch.uint8, device=device), list(range(6))
 
     monkeypatch.setattr(restore, "_decode_window", decode)
-    monkeypatch.setattr(restore, "composite_frame", lambda source, candidates, *, feather: source)
+    monkeypatch.setattr(restore, "composite_frame", lambda source, candidates, *, feather, projector: source)
     bar = SimpleNamespace(
         update=lambda n: None,
         window=lambda canvas: contextlib.nullcontext(),
@@ -71,7 +71,7 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
     span = restore.LtxSpan(frames, (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 0),), Writer)
     restore.compose_span(
         span, [[plan]], None, [SimpleNamespace(get=lambda index: index)], frame_h=64, batch_size=6,
-        budget=lambda canvas: 0, device=device, bar=bar, cancel=threading.Event(), super_res=None,
+        budget=lambda canvas: 0, device=device, bar=bar, cancel=threading.Event(), super_res=None, projector=None,
     )
     assert decodes == [(False, 0)]
     assert len(writes) == 6 and all(priority < 0 for priority in writes)
@@ -95,7 +95,7 @@ def test_decoded_windows_wait_in_host_memory_and_composite_on_the_gpu(monkeypatc
     plan = TrackPlan(0, 0, ((),) * 6, (1.0,) * 6, (Window(0, 0, 0, 6, (crop,) * 6, 0),), 3)
     canvases = []
 
-    def composite(source, candidates, *, feather):
+    def composite(source, candidates, *, feather, projector):
         canvases.extend(candidate.canvas.device.type for candidate in candidates)
         return source
 
@@ -108,7 +108,7 @@ def test_decoded_windows_wait_in_host_memory_and_composite_on_the_gpu(monkeypatc
     try:
         composer = restore._SegmentComposer(
             [plan], None, SimpleNamespace(get=lambda index: torch.zeros(1)), seed=0, feather=1,
-            budget=lambda canvas: 1, device=device, bar=bar, decodes=decodes, stream=torch.cuda.Stream(device), super_res=None,
+            budget=lambda canvas: 1, device=device, bar=bar, decodes=decodes, stream=torch.cuda.Stream(device), super_res=None, projector=None,
         )
         for _ in range(6):
             composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))

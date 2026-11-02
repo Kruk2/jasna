@@ -978,7 +978,9 @@ class SegmentEditor(ctk.CTkToplevel):
                 on_stopped=lambda: self._set_preview_gpu_busy(False),
             )
             self._seed_worker.start()
-        self._seed_generation = self._seed_worker.try_seed(segment, seed, self._current_video_settings())
+        self._seed_generation = self._seed_worker.try_seed(
+            segment, seed, replace(self._current_video_settings(), vr_projection=self._vr_projection)
+        )
         self._seed_running = (self._range_key(segment), seed)
         self._shown_seed = (self._range_key(segment), seed)
         self._seed_progress.set(0.0)

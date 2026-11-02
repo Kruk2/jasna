@@ -60,6 +60,7 @@ from jasna.mosaic.detections import Detections
 from jasna.progressbar import StageProgress
 from jasna.tensor_utils import half_dtype
 from jasna.tracking.scene_detector import SceneCutDetector
+from jasna.vr_projection import RegionProjector
 
 logger = logging.getLogger(__name__)
 
@@ -602,10 +603,12 @@ class _SegmentEncoder:
         buffers: _WindowBuffers,
         device: torch.device,
         bar: _StageBar,
+        projector: RegionProjector | None,
     ) -> None:
         self._pending = iter(sorted((w for plan in plans for w in plan.windows), key=lambda w: w.start))
         self._upcoming = next(self._pending, None)
         self._active: dict[int, tuple[Window, torch.Tensor]] = {}
+        self._projector = projector
         self._encoder = encoder
         self._store = store
         self._buffers = buffers
@@ -619,7 +622,7 @@ class _SegmentEncoder:
             self._upcoming = next(self._pending, None)
         for index, (window, window_pixels) in list(self._active.items()):
             position = self._frame_idx - window.start
-            _copy_canvas(window_pixels, position, window.real_frames, crop_to_canvas(frame, window.crops[position]))
+            _copy_canvas(window_pixels, position, window.real_frames, crop_to_canvas(frame, window.crops[position], self._projector))
             if position == window.real_frames - 1:
                 with self._bar.window(window.canvas), torch.inference_mode():
                     pixels = (
@@ -648,10 +651,11 @@ def encode_span(
     device: torch.device,
     bar: _StageBar,
     cancel: threading.Event,
+    projector: RegionProjector | None,
 ) -> None:
     """VAE-encode every planned window's reference crops into its segment's store."""
     buffers = _WindowBuffers()
-    encoders = [_SegmentEncoder(p, encoder, store, buffers, device, bar) for p, store in zip(plans, stores)]
+    encoders = [_SegmentEncoder(p, encoder, store, buffers, device, bar, projector) for p, store in zip(plans, stores)]
     for owner, batch, _pts in segment_batches(frames(), segments, batch_size):
         _check(cancel)
         bar.update(len(batch))
@@ -729,6 +733,7 @@ class _SegmentComposer:
         decodes: ThreadPoolExecutor,
         stream: torch.cuda.Stream | None,
         super_res: LtxSuperRes | None,
+        projector: RegionProjector | None,
     ) -> None:
         self._weights: dict[int, torch.Tensor] = {}
         self._tracks: dict[int, TrackPlan] = {}
@@ -738,6 +743,7 @@ class _SegmentComposer:
                 self._tracks[window.index] = plan
         windows = sorted((w for plan in plans for w in plan.windows), key=lambda w: w.start)
         self._super_res = super_res
+        self._projector = projector
         self._upscaled = enlarged_windows(windows) if super_res is not None else set()
         self._pending = iter(windows)
         self._upcoming = next(self._pending, None)
@@ -816,7 +822,7 @@ class _SegmentComposer:
         for canvas, share in self._decode_shares.get(frame_idx, ()):
             self._bar.windows_done(canvas, share)
         self._frame_idx += 1
-        return composite_frame(frame, candidates, feather=self._feather)
+        return composite_frame(frame, candidates, feather=self._feather, projector=self._projector)
 
 
 def compose_span(
@@ -832,6 +838,7 @@ def compose_span(
     bar: _StageBar,
     cancel: threading.Event,
     super_res: LtxSuperRes | None,
+    projector: RegionProjector | None,
 ) -> None:
     """Write every frame of ``span``: segment frames composited, the rest unchanged. Windows
     decode one ahead on a thread; on CUDA on a stream of their own, below the priority of the
@@ -844,7 +851,7 @@ def compose_span(
         composers = [
             _SegmentComposer(
                 p, decoder, store, seed=segment.seed, feather=feather, budget=budget, device=device, bar=bar,
-                decodes=decodes, stream=decode_stream, super_res=super_res,
+                decodes=decodes, stream=decode_stream, super_res=super_res, projector=projector,
             )
             for p, store, segment in zip(plans, finals, span.segments)
         ]
@@ -903,10 +910,12 @@ def segment_large_canvas(requested: bool, total_bytes: int) -> bool:
 class LtxRender:
     """What every pass needs besides the spans: the detector, the model files, the frame
     size, the SBS VR eye width (None for flat video), detection batch size, the 768 px
-    decision, the frames between window starts, the decode budget per canvas and its name (decode tiling follows the budget, so it keys the
-    speed profile), the GPU, the speed profile file (``speed.py``), the max detection gap
-    a track bridges (``track_max_gap``), the fewest frames a kept track spans and the
-    super resolution of windows compose enlarges (``super_res.py``), if any."""
+    decision, the frames between window starts, the decode budget per canvas and its name
+    (decode tiling follows the budget, so it keys the speed profile), the GPU, the speed
+    profile file (``speed.py``), the max detection gap a track bridges (``track_max_gap``),
+    the fewest frames a kept track spans, the super resolution of windows compose enlarges
+    (``super_res.py``), if any, and the VR fisheye/gnomonic projector crops are seen
+    through, if any."""
 
     detector: Callable
     files: LtxModelFiles
@@ -923,6 +932,7 @@ class LtxRender:
     max_gap: int
     min_duration: int
     super_res: LtxSuperRes | None
+    vr_projector: RegionProjector | None
 
 
 @dataclass(frozen=True)
@@ -999,6 +1009,7 @@ def prepare_spans(
                             encode_span(
                                 p.span.frames, p.span.segments, p.plans, encoder, p.references,
                                 batch_size=render.batch_size, device=render.device, bar=bar, cancel=cancel,
+                                projector=render.vr_projector,
                             )
             finally:
                 del encoder
@@ -1190,6 +1201,7 @@ def compose_spans(
                 bar=bar,
                 cancel=cancel,
                 super_res=render.super_res,
+                projector=render.vr_projector,
             )
 
 
@@ -1327,6 +1339,7 @@ def restore_video(
     max_gap: int,
     min_duration: int,
     super_res: LtxSuperRes | None,
+    vr_projector: RegionProjector | None,
 ) -> None:
     """Restore every mosaic of the video ``frames`` yields as one segment. ``large_canvas``
     is ``whole_video_large_canvas``'s decision; the decode tiles follow the free VRAM."""
@@ -1349,6 +1362,7 @@ def restore_video(
             max_gap=max_gap,
             min_duration=min_duration,
             super_res=super_res,
+            vr_projector=vr_projector,
         ),
         work_dir=work_dir,
         progress=progress,

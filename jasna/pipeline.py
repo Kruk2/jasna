@@ -404,6 +404,7 @@ class Pipeline:
                 max_gap=track_max_gap(self.max_detection_gap),
                 min_duration=self.min_detection_duration,
                 super_res=self.ltx_super_res,
+                vr_projector=self.vr_projector,
             )
         except Cancelled:
             log.info("LTX restoration cancelled")
@@ -440,6 +441,7 @@ class Pipeline:
             max_gap=track_max_gap(self.max_detection_gap),
             min_duration=self.min_detection_duration,
             super_res=self.ltx_super_res,
+            vr_projector=self.vr_projector,
         )
 
     def ltx_span(
