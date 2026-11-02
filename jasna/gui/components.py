@@ -470,7 +470,16 @@ class AutoHidingScrollableFrame(ctk.CTkScrollableFrame):
         # keeps show/hide geometry-neutral vertically; sticky="ns" sizes it.
         self._scrollbar.configure(height=8)
         self._parent_canvas.configure(yscrollcommand=self._update_scrollbar)
+        self.winfo_toplevel().bind("<Map>", self._rehide_scrollbar, add="+")
         self.after_idle(lambda: self._update_scrollbar(*self._parent_canvas.yview()))
+
+    def _rehide_scrollbar(self, _event=None) -> None:
+        # A scrollbar gridded while its window was off screen (the main window
+        # starts hidden) can stay drawn after grid_remove, so remove it again
+        # whenever the window is shown.
+        if not self._scrollbar_visible:
+            self._scrollbar.grid()
+            self._scrollbar.grid_remove()
 
     def scroll_to_top(self) -> None:
         self._parent_canvas.yview_moveto(0)

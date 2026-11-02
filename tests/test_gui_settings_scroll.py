@@ -49,3 +49,22 @@ def test_settings_scrollbar_only_appears_when_sections_overflow(tk_root, tmp_pat
     tk_root.update()
 
     assert not panel._scroll._scrollbar.winfo_ismapped()
+
+
+@pytest.fixture
+def opens_in_advanced(monkeypatch, tmp_path):
+    """A user who left the settings in the Advanced view, written before the app starts."""
+    monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    PresetManager().set_settings_view("advanced")
+
+
+def test_no_scrollbar_after_the_gpu_check_relays_out_a_tab_that_fits(opens_in_advanced, jasna_app) -> None:
+    from jasna.accelerator import AcceleratorVendor
+
+    jasna_app.geometry("1500x800")
+    jasna_app.update()
+    jasna_app._settings_panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=True)
+    jasna_app.update()
+
+    assert not jasna_app._settings_panel._scroll._scrollbar.winfo_ismapped()
