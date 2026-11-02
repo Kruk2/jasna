@@ -6,6 +6,7 @@ CLI_HELP: dict[str, str] = {
         "otherwise it checks your license online while it uses supporter models. "
         "Without --input, --stream or --benchmark, activate and exit."
     ),
+    "activation_status": "Show whether Jasna is activated and how many of your devices are in use, then exit.",
     "restoration_model_name": (
         "Restoration model for video: basicvsrpp (fast), ltx-basic (Basic Quality LTX: about 1.3x faster than ltx, "
         "slightly softer), ltx (Standard Quality LTX: more detail, much slower; "
