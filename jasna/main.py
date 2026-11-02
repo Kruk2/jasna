@@ -19,6 +19,7 @@ from jasna.os_utils import (
     check_required_executables,
     check_supported_gpu,
     check_windows_nvidia_sysmem_fallback_policy,
+    escape_unencodable_output,
     gpu_check_error,
     install_on_hard_disk,
 )
@@ -938,6 +939,7 @@ def _print_activation_status(parser: argparse.ArgumentParser) -> None:
 
 
 def main() -> None:
+    escape_unencodable_output(sys.stdout, sys.stderr)
     parser = build_parser()
     args = parser.parse_args()
     if args.license_code is not None:

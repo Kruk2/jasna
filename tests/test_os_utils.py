@@ -1,3 +1,4 @@
+import io
 import os
 import subprocess
 import sys
@@ -570,3 +571,14 @@ def test_exit_without_joining_threads_runs_atexit_handlers_and_skips_stuck_threa
 
     assert result.returncode == 0
     assert marker.read_text() == "released"
+
+
+def test_escaped_output_keeps_the_code_page_and_escapes_what_it_cannot_encode() -> None:
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252", newline="\n")
+
+    os_utils.escape_unencodable_output(stream)
+    print("Running post-export command for café ż.mp4", file=stream)
+    stream.flush()
+
+    assert raw.getvalue() == b"Running post-export command for caf\xe9 \\u017c.mp4\n"

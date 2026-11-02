@@ -196,6 +196,14 @@ def drop_console_window() -> None:
     _redirect_std_streams_to_null()
 
 
+def escape_unencodable_output(*streams) -> None:
+    """Keep each stream's encoding but write characters it cannot encode as escapes. A Windows
+    pipe uses the locale code page (e.g. cp1252), so printing a non-ASCII filename would crash."""
+    for stream in streams:
+        if stream is not None:
+            stream.reconfigure(errors="backslashreplace")
+
+
 def exit_without_joining_threads() -> None:
     """End the process without waiting for non-daemon threads that CUDA/TensorRT may leave running, after the atexit
     handlers a normal exit runs (freeing the online license slot, stopping LTX workers, removing code caches)."""
