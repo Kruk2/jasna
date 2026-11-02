@@ -1,6 +1,7 @@
 """Shared widget helpers for the settings sections."""
 
 import tkinter as tk
+from dataclasses import dataclass
 
 import customtkinter as ctk
 
@@ -89,3 +90,28 @@ def pack_rows(rows: list[tuple[tk.Misc, dict]], hidden: tuple[tk.Misc, ...]) -> 
     for row, options in rows:
         if row not in hidden:
             row.pack(**options)
+
+
+LEVELS = ("simple", "advanced", "expert")
+
+
+@dataclass(frozen=True)
+class Row:
+    """One packed settings row: the lowest view level that shows it and, when it only
+    matters for one restoration model, that model ("standard" or "ltx")."""
+
+    widget: tk.Misc
+    pack: dict
+    level: str
+    model: str | None = None
+
+
+def layout_rows(rows: list[Row], level: str, *, standard: bool, ltx: bool, hidden: tuple = ()) -> bool:
+    """Pack the rows that belong to ``level`` and the job's models; True when any is shown."""
+    used = {None: True, "standard": standard, "ltx": ltx}
+    shown = [
+        row for row in rows
+        if LEVELS.index(row.level) <= LEVELS.index(level) and used[row.model] and row.widget not in hidden
+    ]
+    pack_rows([(row.widget, row.pack) for row in rows], tuple(row.widget for row in rows if row not in shown))
+    return bool(shown)

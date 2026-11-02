@@ -11,8 +11,9 @@ from jasna.gui.settings_sections.widgets import (
     add_setting_label,
     ValueOptionMenu,
     create_slider_value_label,
+    Row,
     get_tooltip,
-    pack_rows,
+    layout_rows,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_cq
@@ -194,18 +195,52 @@ class EncodingSection:
         )
         lut_browse_btn.pack(side="right")
 
+        args_label_row = ctk.CTkFrame(inner, fg_color="transparent")
+        add_setting_label(args_label_row, "custom_args", "encoder_custom_args")
+        self._widgets["encoder_custom_args"] = ctk.CTkEntry(
+            inner, fg_color=Colors.BG_CARD, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("placeholder_encoder_args")
+        )
+
+        working_dir_row = ctk.CTkFrame(inner, fg_color="transparent")
+        add_setting_label(working_dir_row, "working_directory")
+        working_dir_input_row = ctk.CTkFrame(inner, fg_color="transparent")
+        self._widgets["working_directory"] = ctk.CTkEntry(
+            working_dir_input_row, fg_color=Colors.BG_CARD, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("working_directory_placeholder"),
+        )
+        self._widgets["working_directory"].pack(side="left", fill="x", expand=True, padx=(0, 4))
+        ctk.CTkButton(
+            working_dir_input_row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
+            fg_color=Colors.BG_CARD, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
+            command=self._browse_working_directory,
+        ).pack(side="right")
+
         row_gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
         label_gap = dict(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         input_gap = dict(fill="x", pady=(4, 0))
-        self._expert_rows = [
-            (sharpen_row, row_gap), (retarget_row, row_gap), (fmp4_row, row_gap),
-            (lut_row, label_gap), (lut_input_row, input_gap),
+        # File conflict, codec and quality above are always shown.
+        self._rows = [
+            Row(sharpen_row, row_gap, "advanced"),
+            Row(retarget_row, row_gap, "advanced"),
+            Row(fmp4_row, row_gap, "advanced"),
+            Row(lut_row, label_gap, "advanced"),
+            Row(lut_input_row, input_gap, "advanced"),
+            Row(args_label_row, label_gap, "expert"),
+            Row(self._widgets["encoder_custom_args"], input_gap, "expert"),
+            Row(working_dir_row, label_gap, "expert"),
+            Row(working_dir_input_row, input_gap, "expert"),
         ]
-        self.set_simple(False)
 
-    def set_simple(self, simple: bool) -> None:
-        """Simple view keeps file conflict, codec and quality."""
-        pack_rows(self._expert_rows, tuple(row for row, _options in self._expert_rows) if simple else ())
+    def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
+        layout_rows(self._rows, level, standard=standard, ltx=ltx)
+        return True
+
+    def _browse_working_directory(self):
+        directory = filedialog.askdirectory(title=t("dialog_select_working_directory"))
+        if directory:
+            self._widgets["working_directory"].delete(0, "end")
+            self._widgets["working_directory"].insert(0, directory)
 
     def _on_file_conflict_changed(self, value: str):
         if value == "overwrite":
@@ -271,6 +306,9 @@ class EncodingSection:
         )
         self._widgets["encoder_cq"].set(cq)
         self._widgets["encoder_cq_val"].configure(text=str(cq))
+        for key in ("encoder_custom_args", "working_directory"):
+            self._widgets[key].delete(0, "end")
+            self._widgets[key].insert(0, getattr(preset, key) or "")
         self._widgets["sharpen_strength"].set(preset.sharpen_strength)
         self._widgets["sharpen_strength_val"].configure(
             text=f"{preset.sharpen_strength:.2f}"
@@ -296,4 +334,6 @@ class EncodingSection:
             "retarget_high_fps": self._widgets["retarget_high_fps"].get() == 1,
             "fmp4": self._widgets["fmp4"].get() == 1,
             "lut_path": self._widgets["lut_path"].get().strip(),
+            "encoder_custom_args": self._widgets["encoder_custom_args"].get(),
+            "working_directory": self._widgets["working_directory"].get().strip(),
         }

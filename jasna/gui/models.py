@@ -266,7 +266,8 @@ class PresetManager:
             self._last_output_folder = data.get("last_output_folder", "")
             self._last_output_pattern = data.get("last_output_pattern", DEFAULT_OUTPUT_PATTERN)
             self._system_check_passed_version = data.get("system_check_passed_version", "")
-            self._settings_view = "advanced" if data.get("settings_view") == "advanced" else "simple"
+            view = data.get("settings_view")
+            self._settings_view = view if view in ("advanced", "expert") else "simple"
             
             for name, preset_dict in data.get("user_presets", {}).items():
                 try:
@@ -355,7 +356,7 @@ class PresetManager:
         self._save(last_output_pattern=self._last_output_pattern)
 
     def get_settings_view(self) -> str:
-        """``"simple"`` or ``"advanced"``; new users start with the simple view."""
+        """``"simple"``, ``"advanced"`` or ``"expert"``; new users start with the simple view."""
         return self._settings_view
 
     def set_settings_view(self, view: str):

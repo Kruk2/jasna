@@ -36,7 +36,7 @@ two different shots. **Scene Cut Detection** (`--scene-detection`, on by
 default) finds hard cuts and ends every clip there. It runs on the GPU and
 costs almost nothing.
 
-Turn it off (`--no-scene-detection`, or the switch in the **Expert** tab) only if
+Turn it off (`--no-scene-detection`, or the switch in the **Detection** tab, **Expert** view) only if
 clips are split where there is no real cut.
 
 ## 60 FPS to 30 FPS
@@ -101,7 +101,7 @@ close CQ values can give the same file.
 jasna --input in.mp4 --output out.mkv --cq 22
 ```
 
-**Custom Args** (`--encoder-settings`) is for other encoder options,
+**Custom Args** (**Expert** view, `--encoder-settings`) is for other encoder options,
 for example bitrate limits or keyframe interval. CQ can't be set there in the
 GUI; use the CQ control. All keys, ranges and defaults are in the
 [CLI reference](cli.md#encoding).
@@ -122,8 +122,8 @@ A comment the source video had is replaced.
 ## After the queue is done
 
 Run something when the whole queue is finished: **Shutdown PC** or a
-**Custom Command** (for example a script that sends you a message). Set it in
-the **Post-Export Action** section or in the CLI:
+**Custom Command** (for example a script that sends you a message, **Expert**
+view only). Set it in the **Post-Export Action** section or in the CLI:
 
 ```bash
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown
@@ -135,7 +135,7 @@ You can change or turn off this action while jobs are running. Before
 PC on. The CLI shuts down right away.
 
 To run a command after each finished video, use **Command After Each Video**
-or `--post-export-video-command`. Jasna waits until it ends. If the command
+(**Expert** view) or `--post-export-video-command`. Jasna waits until it ends. If the command
 fails, that video is marked as failed. The command runs in the output folder.
 
 Placeholders: `{input}`, `{output}`, `{output_dir}`, `{output_stem}`,

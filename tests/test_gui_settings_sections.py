@@ -9,7 +9,6 @@ from jasna.accelerator import AcceleratorVendor
 from jasna.gui.models import AppSettings, PresetManager
 from jasna.gui.settings_sections.detection import DetectionSection
 from jasna.gui.settings_sections.encoding import EncodingSection
-from jasna.gui.settings_sections.expert import ExpertSection
 from jasna.gui.settings_sections.image_restoration import ImageRestorationSection
 from jasna.gui.settings_sections.post_export import PostExportSection
 from jasna.gui.settings_sections.processing import ProcessingSection
@@ -132,9 +131,9 @@ def _detection_section_panel(panel_factory):
 
 
 @pytest.fixture
-def _expert_section_panel(panel_factory):
+def _processing_section_panel(panel_factory):
     panel = panel_factory()
-    return panel, _section(panel, ExpertSection)
+    return panel, _section(panel, ProcessingSection)
 
 
 def test_switching_detection_model_applies_recommended_threshold(_detection_section_panel) -> None:
@@ -223,8 +222,8 @@ def test_settings_panel_get_settings_is_locale_independent(panel_factory, gui_la
     assert panel._saved_preset_settings == panel.get_settings()
 
 
-def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty_in_steps_of_ten(_expert_section_panel) -> None:
-    panel, _expert = _expert_section_panel
+def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty_in_steps_of_ten(_processing_section_panel) -> None:
+    panel, _processing = _processing_section_panel
     slider = panel._widgets["max_clip_size"]
 
     slider.set(10)
@@ -235,17 +234,17 @@ def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty_in_steps_of_ten(
     assert slider.get() == 30
 
 
-def test_temporal_filter_sliders_stay_below_max_clip_size(_expert_section_panel) -> None:
-    panel, expert = _expert_section_panel
+def test_temporal_filter_sliders_stay_below_max_clip_size(_processing_section_panel) -> None:
+    panel, processing = _processing_section_panel
     sliders = [panel._widgets[key] for key in ("max_detection_gap", "min_detection_duration")]
     for slider in sliders:
         slider.set(10)
 
-    expert._on_max_clip_size_slider(10)
+    processing._on_max_clip_size_slider(10)
     assert [(slider.cget("to"), slider.get()) for slider in sliders] == [(9, 9), (9, 9)]
     assert panel._widgets["max_detection_gap_val"].cget("text") == "9"
 
-    expert._on_max_clip_size_slider(90)
+    processing._on_max_clip_size_slider(90)
     assert [(slider.cget("to"), slider.get()) for slider in sliders] == [(10, 9), (10, 9)]
 
 
@@ -278,34 +277,34 @@ def _select_ltx(panel) -> None:
 
 def test_ltx_hides_standard_only_settings_and_restores_them(panel_factory) -> None:
     panel = panel_factory(True)
-    panel.set_view("advanced")
+    panel.set_view("expert")
     processing = _section(panel, ProcessingSection).frame
     clip_row = panel._widgets["max_clip_size"].master
+    overlap_row = panel._widgets["temporal_overlap"].master
     ltx_overlap_row = panel._widgets["ltx_overlap"].master
-    assert _shown(processing) and _shown(clip_row) and not _shown(ltx_overlap_row)
+    assert _shown(processing) and _shown(clip_row) and _shown(overlap_row)
 
     _select_ltx(panel)
 
     assert panel.get_settings().restoration_model == "ltx"
-    assert not _shown(processing)
-    assert not _shown(clip_row)
+    assert _shown(processing) and _shown(panel._widgets["fp16_mode"].master)
+    assert not _shown(clip_row) and not _shown(overlap_row)
     assert not _shown(panel._widgets["compile_basicvsrpp"].master)
-    assert not _shown(panel._widgets["scene_detection"].master.master)
     assert _shown(ltx_overlap_row)
-    assert _shown(panel._widgets["fp16_mode"].master)
-    assert _shown(panel._widgets["max_detection_gap"].master)
     assert _shown(panel._model_section._ltx_options)
 
+    panel.set_view("advanced")
+    assert not _shown(processing) and not _shown(ltx_overlap_row)
+
     panel._widgets["ltx_auto_split"]._toggle()
-    assert _shown(processing) and _shown(clip_row) and _shown(ltx_overlap_row)
+    assert _shown(processing) and _shown(overlap_row)
     panel._widgets["ltx_auto_split"]._toggle()
-    assert not _shown(clip_row)
+    assert not _shown(processing)
 
     panel._model_section._cards["basicvsrpp"].radio.invoke()
 
-    assert _shown(processing) and _shown(clip_row) and not _shown(ltx_overlap_row)
+    assert _shown(processing) and _shown(overlap_row)
     assert not _shown(panel._model_section._ltx_options)
-
 
 def test_ltx_offers_only_rtx_super_res_unless_auto_split(panel_factory) -> None:
     panel = panel_factory(True)
@@ -492,7 +491,14 @@ def test_simple_view_hides_tuning_rows_and_keeps_their_values(panel_factory) -> 
     panel.show_tab("output")
 
     assert _shown(panel._widgets["sharpen_strength"].master)
+    assert not _shown(panel._widgets["post_export_video_command"])
+    assert not _shown(panel._widgets["working_directory"].master)
+
+    panel.set_view("expert")
+
     assert _shown(panel._widgets["post_export_video_command"])
+    assert _shown(panel._widgets["working_directory"].master)
+    assert _shown(panel._widgets["encoder_custom_args"])
 
 
 def test_simple_view_keeps_the_ltx_model_choice_and_hides_its_tuning(panel_factory) -> None:
@@ -517,7 +523,6 @@ def test_simple_view_keeps_the_ltx_model_choice_and_hides_its_tuning(panel_facto
         ("upscale", [SecondarySection]),
         ("output", [EncodingSection, PostExportSection]),
         ("images", [ImageRestorationSection]),
-        ("expert", [ExpertSection]),
     ],
 )
 def test_advanced_view_shows_only_the_chosen_tab(panel_factory, tab, expected) -> None:
@@ -556,3 +561,30 @@ def test_simple_view_offers_three_ltx_models_and_keeps_another_chosen_one(panel_
 
     assert panel._widgets["ltx_model"].cget("values") == [t(f"ltx_model_{model}") for model in offered]
     assert panel.get_settings().ltx_model == chosen
+
+
+@pytest.mark.parametrize(
+    ("view", "offered"),
+    [("advanced", ["none", "shutdown"]), ("expert", ["none", "shutdown", "command"])],
+)
+def test_running_a_command_after_the_queue_is_an_expert_choice(panel_factory, view, offered) -> None:
+    from jasna.gui.locales import t
+
+    panel = panel_factory()
+    panel.set_view(view)
+
+    assert panel._widgets["post_export_action"].cget("values") == [t(f"post_export_{value}") for value in offered]
+
+
+@pytest.mark.parametrize(
+    ("view", "shown"),
+    [("simple", False), ("advanced", False), ("expert", True)],
+)
+def test_detection_timing_and_tvai_workers_are_expert_rows(panel_factory, view, shown) -> None:
+    panel = panel_factory()
+    panel.set_view(view)
+    if view != "simple":
+        panel.show_tab("detection")
+
+    assert _shown(panel._widgets["max_detection_gap"].master) is shown
+    assert _shown(panel._widgets["tvai_workers"].master) is shown

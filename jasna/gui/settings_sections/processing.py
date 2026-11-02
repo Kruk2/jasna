@@ -1,21 +1,31 @@
-"""BasicVSR++ processing settings section (clip overlap and denoise)."""
+"""Processing settings section: clip length, overlap, denoise and GPU precision."""
 
 import customtkinter as ctk
 
 from jasna.gui.components import CollapsibleSection
+from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
+    Row,
     add_setting_label,
     ValueOptionMenu,
     create_slider_value_label,
+    layout_rows,
 )
 from jasna.gui.theme import Colors, Sizing
 
+# The sub-engines no longer depend on the clip length, so a long clip costs
+# activation memory only — high values stay usable on a large GPU.
+MIN_CLIP_SIZE = 10
+MAX_CLIP_SIZE = 720
+CLIP_SIZE_STEP = 10
+
 
 class ProcessingSection:
-    def __init__(self, parent, widgets: dict, on_modified):
+    def __init__(self, parent, widgets: dict, on_modified, on_max_clip_size_change):
         self._widgets = widgets
         self._on_modified = on_modified
+        self._on_max_clip_size_change = on_max_clip_size_change
 
         self.frame = CollapsibleSection(parent, t("section_processing"), expanded=True)
         content = self.frame.content
@@ -25,7 +35,6 @@ class ProcessingSection:
         inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
 
         overlap_row = ctk.CTkFrame(inner, fg_color="transparent")
-        overlap_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         add_setting_label(overlap_row, "temporal_overlap")
         self._widgets["temporal_overlap_val"] = create_slider_value_label(overlap_row, "8", 3, Colors.BG_PANEL)
         self._widgets["temporal_overlap_val"].pack(side="right")
@@ -38,7 +47,6 @@ class ProcessingSection:
         self._widgets["temporal_overlap"].set(8)
 
         denoise_row = ctk.CTkFrame(inner, fg_color="transparent")
-        denoise_row.pack(fill="x")
         add_setting_label(denoise_row, "denoise_strength")
         self._widgets["denoise_strength"] = ValueOptionMenu(
             denoise_row,
@@ -57,17 +65,78 @@ class ProcessingSection:
         self._widgets["denoise_strength"].pack(side="right")
         self._widgets["denoise_strength"].set_value("none")
 
+        clip_row = ctk.CTkFrame(inner, fg_color="transparent")
+        add_setting_label(clip_row, "max_clip_size")
+        self._widgets["max_clip_size_val"] = create_slider_value_label(clip_row, "90", 4, Colors.BG_PANEL)
+        self._widgets["max_clip_size_val"].pack(side="right")
+        self._widgets["max_clip_size"] = ctk.CTkSlider(
+            clip_row,
+            from_=MIN_CLIP_SIZE,
+            to=MAX_CLIP_SIZE,
+            number_of_steps=(MAX_CLIP_SIZE - MIN_CLIP_SIZE) // CLIP_SIZE_STEP,
+            command=self._on_max_clip_size_slider,
+            fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY,
+            button_color=Colors.PRIMARY, width=200,
+        )
+        self._widgets["max_clip_size"].pack(side="right", padx=(0, 8))
+        self._widgets["max_clip_size"].set(90)
+
+        self._toggles_row = ctk.CTkFrame(inner, fg_color="transparent")
+        fp16_frame = self._switch_card(self._toggles_row, "fp16_mode")
+        compile_frame = self._switch_card(self._toggles_row, "compile_basicvsrpp")
+
+        row_gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        self._rows = [
+            Row(overlap_row, row_gap, "advanced", "standard"),
+            Row(denoise_row, row_gap, "advanced", "standard"),
+            Row(clip_row, row_gap, "expert", "standard"),
+            Row(self._toggles_row, row_gap, "expert"),
+        ]
+        self._toggles = [
+            Row(fp16_frame, dict(side="left", fill="x", expand=True, padx=(0, 4)), "expert"),
+            Row(compile_frame, dict(side="right", fill="x", expand=True, padx=(4, 0)), "expert", "standard"),
+        ]
+
+    def _switch_card(self, master, key: str):
+        card = ctk.CTkFrame(master, fg_color=Colors.BG_CARD, corner_radius=6)
+        add_setting_label(card, key, in_card=True)
+        self._widgets[key] = CompactSwitch(card, self._on_modified, Colors.BG_CARD)
+        self._widgets[key].pack(side="right", padx=12, pady=8)
+        self._widgets[key].select()
+        return card
+
+    def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
+        any_toggle = layout_rows(self._toggles, level, standard=standard, ltx=ltx)
+        hidden = () if any_toggle else (self._toggles_row,)
+        return layout_rows(self._rows, level, standard=standard, ltx=ltx, hidden=hidden)
+
     def _on_temporal_overlap_slider(self, value: float):
         self._widgets["temporal_overlap_val"].configure(text=str(int(value)))
         self._on_modified()
+
+    def _on_max_clip_size_slider(self, value: float):
+        max_clip_size = int(value)
+        self._widgets["max_clip_size_val"].configure(text=str(max_clip_size))
+        self._on_modified()
+        self._on_max_clip_size_change(max_clip_size)
 
     def apply(self, preset):
         self._widgets["temporal_overlap"].set(preset.temporal_overlap)
         self._widgets["temporal_overlap_val"].configure(text=str(preset.temporal_overlap))
         self._widgets["denoise_strength"].set_value(preset.denoise_strength)
+        self._widgets["max_clip_size"].set(preset.max_clip_size)
+        self._widgets["max_clip_size_val"].configure(text=str(preset.max_clip_size))
+        for key in ("fp16_mode", "compile_basicvsrpp"):
+            if getattr(preset, key):
+                self._widgets[key].select()
+            else:
+                self._widgets[key].deselect()
 
     def collect(self) -> dict:
         return {
             "temporal_overlap": int(self._widgets["temporal_overlap"].get()),
             "denoise_strength": self._widgets["denoise_strength"].get_value(),
+            "max_clip_size": int(self._widgets["max_clip_size"].get()),
+            "fp16_mode": self._widgets["fp16_mode"].get() == 1,
+            "compile_basicvsrpp": self._widgets["compile_basicvsrpp"].get() == 1,
         }
