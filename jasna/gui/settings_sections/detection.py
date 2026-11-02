@@ -9,6 +9,7 @@ from jasna.gui.settings_sections.widgets import (
     Row,
     add_setting_label,
     ValueOptionMenu,
+    SLIDER_WIDTH,
     create_slider_value_label,
     layout_rows,
 )
@@ -26,8 +27,7 @@ class DetectionSection:
         content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
-        inner = ctk.CTkFrame(content, fg_color="transparent")
-        inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
+        inner = self.frame.body
 
         model_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(model_row, "detection_model")
@@ -48,13 +48,13 @@ class DetectionSection:
         threshold_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(threshold_row, "detection_threshold", "detection_score_threshold")
         self._widgets["detection_threshold_val"] = create_slider_value_label(
-            threshold_row, "0.35", 4, Colors.BG_PANEL
+            threshold_row, "0.35", Colors.BG_PANEL
         )
         self._widgets["detection_threshold_val"].pack(side="right")
         self._widgets["detection_score_threshold"] = ctk.CTkSlider(
             threshold_row, from_=0.0, to=1.0, number_of_steps=20,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=160, command=lambda v: self._widgets["detection_threshold_val"].configure(text=f"{v:.2f}")
+            width=SLIDER_WIDTH, command=lambda v: self._widgets["detection_threshold_val"].configure(text=f"{v:.2f}")
         )
         self._widgets["detection_score_threshold"].pack(side="right", padx=(0, 8))
         self._widgets["detection_score_threshold"].set(0.35)
@@ -104,13 +104,13 @@ class DetectionSection:
     def _filter_slider_row(self, inner, key: str):
         row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(row, key)
-        self._widgets[f"{key}_val"] = create_slider_value_label(row, "2", 3, Colors.BG_PANEL)
+        self._widgets[f"{key}_val"] = create_slider_value_label(row, "2", Colors.BG_PANEL)
         self._widgets[f"{key}_val"].pack(side="right")
         self._widgets[key] = ctk.CTkSlider(
             row, from_=0, to=TEMPORAL_FILTER_SLIDER_MAX,
             number_of_steps=TEMPORAL_FILTER_SLIDER_MAX,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=200, command=lambda v: self._on_slider_change(key, int(v))
+            width=SLIDER_WIDTH, command=lambda v: self._on_slider_change(key, int(v))
         )
         self._widgets[key].pack(side="right", padx=(0, 8))
         self._widgets[key].set(2)

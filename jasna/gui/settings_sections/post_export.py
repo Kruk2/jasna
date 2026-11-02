@@ -18,8 +18,7 @@ class PostExportSection:
         content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
-        inner = ctk.CTkFrame(content, fg_color="transparent")
-        inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
+        inner = self.frame.body
 
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
 

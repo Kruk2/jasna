@@ -7,7 +7,7 @@ from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.download_worker import start_download
-from jasna.gui.settings_sections.widgets import Row, add_setting_label, create_slider_value_label, layout_rows
+from jasna.gui.settings_sections.widgets import SLIDER_WIDTH, Row, add_setting_label, create_slider_value_label, layout_rows
 from jasna.gui.theme import Colors, Fonts, Sizing
 
 
@@ -22,12 +22,11 @@ class ImageRestorationSection:
         content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
-        inner = ctk.CTkFrame(content, fg_color="transparent")
-        inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
+        inner = self.frame.body
 
         info = ctk.CTkLabel(
             inner, text=t("image_restore_hint"), text_color=Colors.STATUS_PENDING,
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY), wraplength=320, justify="left",
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY), wraplength=320, justify="left", anchor="w",
         )
 
         # Model download (fixed location: model_weights/sd-15-jav)
@@ -56,13 +55,13 @@ class ImageRestorationSection:
         row_steps = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(row_steps, "image_restore_steps")
         self._widgets["image_restore_steps_val"] = create_slider_value_label(
-            row_steps, "25", 4, Colors.BG_PANEL
+            row_steps, "25", Colors.BG_PANEL
         )
         self._widgets["image_restore_steps_val"].pack(side="right")
         self._widgets["image_restore_steps"] = ctk.CTkSlider(
             row_steps, from_=5, to=60, number_of_steps=11,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=180, command=lambda v: self._on_slider_change("image_restore_steps", int(v)),
+            width=SLIDER_WIDTH, command=lambda v: self._on_slider_change("image_restore_steps", int(v)),
         )
         self._widgets["image_restore_steps"].pack(side="right", padx=(0, 8))
         self._widgets["image_restore_steps"].set(25)
@@ -71,13 +70,13 @@ class ImageRestorationSection:
         row_str = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(row_str, "image_restore_strength")
         self._widgets["image_restore_strength_val"] = create_slider_value_label(
-            row_str, "0.60", 4, Colors.BG_PANEL
+            row_str, "0.60", Colors.BG_PANEL
         )
         self._widgets["image_restore_strength_val"].pack(side="right")
         self._widgets["image_restore_strength"] = ctk.CTkSlider(
             row_str, from_=0.1, to=0.7, number_of_steps=12,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=180, command=lambda v: self._widgets["image_restore_strength_val"].configure(text=f"{v:.2f}"),
+            width=SLIDER_WIDTH, command=lambda v: self._widgets["image_restore_strength_val"].configure(text=f"{v:.2f}"),
         )
         self._widgets["image_restore_strength"].pack(side="right", padx=(0, 8))
         self._widgets["image_restore_strength"].set(0.6)
@@ -86,13 +85,13 @@ class ImageRestorationSection:
         row_var = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(row_var, "image_restore_variants")
         self._widgets["image_restore_variants_val"] = create_slider_value_label(
-            row_var, "1", 4, Colors.BG_PANEL
+            row_var, "1", Colors.BG_PANEL
         )
         self._widgets["image_restore_variants_val"].pack(side="right")
         self._widgets["image_restore_variants"] = ctk.CTkSlider(
             row_var, from_=1, to=8, number_of_steps=7,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=180, command=lambda v: self._on_slider_change("image_restore_variants", int(v)),
+            width=SLIDER_WIDTH, command=lambda v: self._on_slider_change("image_restore_variants", int(v)),
         )
         self._widgets["image_restore_variants"].pack(side="right", padx=(0, 8))
         self._widgets["image_restore_variants"].set(1)

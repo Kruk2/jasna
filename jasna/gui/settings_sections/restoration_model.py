@@ -103,8 +103,7 @@ class RestorationModelSection:
         content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
-        inner = ctk.CTkFrame(content, fg_color="transparent")
-        inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
+        inner = self.frame.body
 
         self._model = self._widgets["restoration_model"] = ctk.StringVar(value="basicvsrpp")
         self._cards_frame = ctk.CTkFrame(inner, fg_color="transparent")
@@ -181,7 +180,7 @@ class RestorationModelSection:
         auto_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         add_setting_label(auto_row, "ltx_auto_split", in_card=True)
         self._widgets["ltx_auto_split_val"] = create_slider_value_label(
-            auto_row, f"{LTX_AUTO_DEFAULT_PERCENT}%", 4, Colors.BG_CARD
+            auto_row, f"{LTX_AUTO_DEFAULT_PERCENT}%", Colors.BG_CARD
         )
         self._widgets["ltx_auto_split_val"].pack(side="right", padx=(0, 12))
         self._widgets["ltx_auto_split_percent"] = ctk.CTkSlider(
@@ -205,7 +204,7 @@ class RestorationModelSection:
         overlap_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         add_setting_label(overlap_row, "ltx_overlap", in_card=True)
         self._widgets["ltx_overlap_val"] = create_slider_value_label(
-            overlap_row, str(LTX_DEFAULT_OVERLAP), 3, Colors.BG_CARD
+            overlap_row, str(LTX_DEFAULT_OVERLAP), Colors.BG_CARD
         )
         self._widgets["ltx_overlap_val"].pack(side="right", padx=(0, 12))
         self._widgets["ltx_overlap"] = ctk.CTkSlider(
