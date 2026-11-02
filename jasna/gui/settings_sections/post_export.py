@@ -4,7 +4,7 @@ import customtkinter as ctk
 
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.locales import t
-from jasna.gui.settings_sections.widgets import add_setting_label, ValueOptionMenu, get_tooltip, pack_rows
+from jasna.gui.settings_sections.widgets import Row, ValueOptionMenu, add_setting_label, get_tooltip, layout_rows
 from jasna.gui.theme import Colors, Fonts, Sizing
 
 
@@ -12,7 +12,7 @@ class PostExportSection:
     def __init__(self, parent, widgets: dict, on_modified):
         self._widgets = widgets
         self._on_modified = on_modified
-        self._simple = False
+        self._level = "expert"
 
         self.frame = CollapsibleSection(parent, t("section_post_export_action"), expanded=True)
         content = self.frame.content
@@ -91,27 +91,29 @@ class PostExportSection:
         )
 
         self._rows = [
-            (row1, dict(fill="x")),
-            (self._command_frame, dict(fill="x")),
-            (video_command_label_row, dict(fill="x", pady=(Sizing.PADDING_MEDIUM, 4))),
-            (self._widgets["post_export_video_command"], dict(fill="x")),
+            Row(row1, dict(fill="x"), "simple"),
+            Row(self._command_frame, dict(fill="x"), "simple"),
+            Row(video_command_label_row, dict(fill="x", pady=(Sizing.PADDING_MEDIUM, 4)), "expert"),
+            Row(self._widgets["post_export_video_command"], dict(fill="x"), "expert"),
         ]
-        self._video_command_rows = (video_command_label_row, self._widgets["post_export_video_command"])
-        self._layout()
+        self._refresh()
 
-    def _layout(self) -> None:
-        hidden = self._video_command_rows if self._simple else ()
-        if self._widgets["post_export_action"].get_value() != "command":
-            hidden = (*hidden, self._command_frame)
-        pack_rows(self._rows, hidden)
+    def _refresh(self) -> None:
+        action = self._widgets["post_export_action"].get_value()
+        self._widgets["post_export_action"].offer(
+            [value for value in ("none", "shutdown", "command") if value != "command" or self._level == "expert" or action == "command"]
+        )
+        hidden = () if action == "command" else (self._command_frame,)
+        layout_rows(self._rows, self._level, standard=True, ltx=True, hidden=hidden)
 
-    def set_simple(self, simple: bool) -> None:
-        """Simple view keeps the queue-wide action and leaves out the per-video command."""
-        self._simple = simple
-        self._layout()
+    def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
+        """Running a command is for experts; a preset that already runs one keeps showing it."""
+        self._level = level
+        self._refresh()
+        return True
 
     def _on_action_changed(self, _value: str):
-        self._layout()
+        self._refresh()
         self._on_modified()
 
     def apply(self, preset):

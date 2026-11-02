@@ -142,7 +142,7 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
   Most videos have some, so a whole video can take up to about 3x longer. Needs about 12 GB of free VRAM (16 GB cards for
   Segment Editor ranges); otherwise Jasna restores them normally. CLI:
   `--ltx-large-canvas`.
-- **LTX Overlap** (in the **Expert** tab): frames shared between the chunks LTX
+- **LTX Overlap** (**Expert** view): frames shared between the chunks LTX
   restores, `17` by default. Fewer is faster when a mosaic stays on screen for
   more than 4 seconds; `33` is the older mode with more overlap. CLI:
   `--ltx-overlap 33`.

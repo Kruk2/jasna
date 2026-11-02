@@ -53,13 +53,13 @@ models slowly, and it warns you at startup.
   output file already exists: **Auto-Rename** (default), **Overwrite** or
   **Skip**.
 
-## Simple and Advanced
+## Simple, Advanced and Expert
 
 The switch under the preset bar picks how much you see. **Simple** shows the
 main choices: restoration model, file conflict, codec, quality and what to do
-when the queue is done. **Advanced** shows every setting in tabs. **Expert**
-holds speed and troubleshooting options most people never need. Settings you
-can't see still apply, and Jasna remembers your choice.
+when the queue is done. **Advanced** shows more settings in tabs. **Expert**
+adds speed and troubleshooting options most people never need, in the same
+tabs. Settings you can't see still apply, and Jasna remembers your choice.
 
 ## Presets
 

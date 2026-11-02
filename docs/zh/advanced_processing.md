@@ -28,7 +28,7 @@
 片段。它在 GPU 上运行，几乎没有开销。
 
 只有当片段在没有真正切换的地方被切开时，才关闭它（`--no-scene-detection`，或
-**专家**标签页中的开关）。
+**专家**视图中**检测**标签页的开关）。
 
 ## 60 FPS 降至 30 FPS
 
@@ -83,7 +83,7 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
 jasna --input in.mp4 --output out.mkv --cq 22
 ```
 
-**自定义参数**（`--encoder-settings`）用于其他编码器选项，例如码率上限或关键帧间隔。
+**自定义参数**（**专家**视图，`--encoder-settings`）用于其他编码器选项，例如码率上限或关键帧间隔。
 在 GUI 中不能在这里设置 CQ，请使用 CQ 控件。所有参数、范围和默认值见
 [CLI 参考](cli.md#编码)。
 
@@ -100,7 +100,7 @@ ffprobe -v error -show_entries format_tags=comment out.mkv
 
 ## 队列完成后
 
-整个队列完成后执行一个操作：**关闭电脑**或**自定义命令**（例如给你发消息的脚本）。
+整个队列完成后执行一个操作：**关闭电脑**或**自定义命令**（例如给你发消息的脚本，仅**专家**视图）。
 在**导出后操作**部分设置，或在 CLI 中：
 
 ```bash
@@ -111,7 +111,7 @@ jasna --input folder_in --output folder_out --post-export-action command --post-
 任务运行时也可以更改或关闭这个操作。**关闭电脑**前，GUI 会倒计时 60 秒。按**取消**
 可以不关机。CLI 会立即关机。
 
-要在每个视频完成后运行命令，请使用**每个视频完成后的命令**或
+要在每个视频完成后运行命令，请使用**每个视频完成后的命令**（**专家**视图）或
 `--post-export-video-command`。Jasna 会等它结束。如果命令失败，该视频会被标记为
 失败。命令在输出文件夹中运行。
 

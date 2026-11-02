@@ -7,7 +7,7 @@ from jasna.accelerator import AcceleratorVendor
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
-from jasna.gui.settings_sections.widgets import add_setting_label, create_slider_value_label, get_tooltip
+from jasna.gui.settings_sections.widgets import Row, add_setting_label, create_slider_value_label, get_tooltip, layout_rows
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.session_config import LTX_SECONDARY_RESTORATIONS
 
@@ -86,11 +86,9 @@ class SecondarySection:
 
         # TVAI ffmpeg path
         tvai_path_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
-        tvai_path_row.pack(fill="x", pady=(0, 8))
         add_setting_label(tvai_path_row, "ffmpeg_path", "tvai_ffmpeg_path")
 
         tvai_path_input_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
-        tvai_path_input_row.pack(fill="x", pady=(0, 8))
         self._widgets["tvai_ffmpeg_path"] = ctk.CTkEntry(
             tvai_path_input_row, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
             text_color=Colors.TEXT_PRIMARY
@@ -107,7 +105,6 @@ class SecondarySection:
 
         # TVAI model
         tvai_model_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
-        tvai_model_row.pack(fill="x", pady=(0, 8))
         add_setting_label(tvai_model_row, "model", "tvai_model")
         self._widgets["tvai_model"] = ctk.CTkOptionMenu(
             tvai_model_row, values=["iris-2", "iris-3", "prob-4", "nyx-1"],
@@ -120,7 +117,6 @@ class SecondarySection:
 
         # TVAI scale
         tvai_scale_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
-        tvai_scale_row.pack(fill="x", pady=(0, 8))
         add_setting_label(tvai_scale_row, "scale", "tvai_scale")
         self._widgets["tvai_scale"] = ctk.CTkOptionMenu(
             tvai_scale_row, values=["1x", "2x", "4x"],
@@ -133,7 +129,6 @@ class SecondarySection:
 
         # TVAI Denoise Operation
         tvai_denoise_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
-        tvai_denoise_row.pack(fill="x", pady=(0, 8))
         tvai_denoise_label = ctk.CTkLabel(
             tvai_denoise_row,
             text=t("tvai_denoise"),
@@ -163,7 +158,6 @@ class SecondarySection:
 
         # TVAI workers
         tvai_workers_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
-        tvai_workers_row.pack(fill="x")
         add_setting_label(tvai_workers_row, "workers", "tvai_workers")
         self._widgets["tvai_workers_val"] = create_slider_value_label(
             tvai_workers_row, "2", 2, Colors.BG_CARD
@@ -176,6 +170,16 @@ class SecondarySection:
         )
         self._widgets["tvai_workers"].pack(side="right", padx=(0, 8))
         self._widgets["tvai_workers"].set(2)
+
+        gap = dict(fill="x", pady=(0, 8))
+        self._tvai_rows = [
+            Row(tvai_path_row, gap, "advanced"),
+            Row(tvai_path_input_row, gap, "advanced"),
+            Row(tvai_model_row, gap, "expert"),
+            Row(tvai_scale_row, gap, "advanced"),
+            Row(tvai_denoise_row, gap, "advanced"),
+            Row(tvai_workers_row, dict(fill="x"), "expert"),
+        ]
 
         # RTX Super Res options (hidden by default)
         self._rtx_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
@@ -284,6 +288,11 @@ class SecondarySection:
                 self._on_secondary_changed()
         self._tvai_denoise_switch.configure(state=state)
         self._widgets["rtx_scale"].configure(state="disabled" if self._ltx_only else state)
+
+    def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
+        """The TVAI model and worker count are expert settings."""
+        layout_rows(self._tvai_rows, level, standard=standard, ltx=ltx)
+        return True
 
     def set_gpu_support(self, vendor: AcceleratorVendor) -> None:
         self._vendor = vendor

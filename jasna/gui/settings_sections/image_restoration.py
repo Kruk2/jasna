@@ -7,7 +7,7 @@ from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.download_worker import start_download
-from jasna.gui.settings_sections.widgets import add_setting_label, create_slider_value_label
+from jasna.gui.settings_sections.widgets import Row, add_setting_label, create_slider_value_label, layout_rows
 from jasna.gui.theme import Colors, Fonts, Sizing
 
 
@@ -29,11 +29,9 @@ class ImageRestorationSection:
             inner, text=t("image_restore_hint"), text_color=Colors.STATUS_PENDING,
             font=(Fonts.FAMILY, Fonts.SIZE_TINY), wraplength=320, justify="left",
         )
-        info.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         # Model download (fixed location: model_weights/sd-15-jav)
         row_dl = ctk.CTkFrame(inner, fg_color="transparent")
-        row_dl.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         dl_label = ctk.CTkLabel(row_dl, text=t("image_restore_model"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         dl_label.pack(side="left")
         self._widgets["image_restore_download_btn"] = ctk.CTkButton(
@@ -44,7 +42,6 @@ class ImageRestorationSection:
         self._widgets["image_restore_download_btn"].pack(side="right")
 
         row_interactive = ctk.CTkFrame(inner, fg_color="transparent")
-        row_interactive.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         self._widgets["image_restore_interactive_btn"] = ctk.CTkButton(
             row_interactive,
             text=t("image_restore_interactive"),
@@ -57,7 +54,6 @@ class ImageRestorationSection:
 
         # Steps slider (5-60, step 5)
         row_steps = ctk.CTkFrame(inner, fg_color="transparent")
-        row_steps.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         add_setting_label(row_steps, "image_restore_steps")
         self._widgets["image_restore_steps_val"] = create_slider_value_label(
             row_steps, "25", 4, Colors.BG_PANEL
@@ -73,7 +69,6 @@ class ImageRestorationSection:
 
         # Strength slider (0.1-0.7, step 0.05)
         row_str = ctk.CTkFrame(inner, fg_color="transparent")
-        row_str.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         add_setting_label(row_str, "image_restore_strength")
         self._widgets["image_restore_strength_val"] = create_slider_value_label(
             row_str, "0.60", 4, Colors.BG_PANEL
@@ -89,7 +84,6 @@ class ImageRestorationSection:
 
         # Variants slider (1-8, step 1)
         row_var = ctk.CTkFrame(inner, fg_color="transparent")
-        row_var.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         add_setting_label(row_var, "image_restore_variants")
         self._widgets["image_restore_variants_val"] = create_slider_value_label(
             row_var, "1", 4, Colors.BG_PANEL
@@ -105,10 +99,8 @@ class ImageRestorationSection:
 
         # Seed entry + FreeU toggle
         row_last = ctk.CTkFrame(inner, fg_color="transparent")
-        row_last.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
 
         seed_frame = ctk.CTkFrame(row_last, fg_color=Colors.BG_CARD, corner_radius=6)
-        seed_frame.pack(side="left", fill="x", expand=True, padx=(0, 4))
         add_setting_label(seed_frame, "image_restore_seed", in_card=True)
         self._widgets["image_restore_seed"] = ctk.CTkEntry(
             seed_frame, width=70, fg_color=Colors.BG_PANEL, text_color=Colors.TEXT_PRIMARY, border_color=Colors.BORDER_LIGHT,
@@ -117,7 +109,6 @@ class ImageRestorationSection:
         self._widgets["image_restore_seed"].insert(0, "0")
 
         freeu_frame = ctk.CTkFrame(row_last, fg_color=Colors.BG_CARD, corner_radius=6)
-        freeu_frame.pack(side="right", fill="x", expand=True, padx=(4, 0))
         add_setting_label(freeu_frame, "image_restore_freeu", in_card=True)
         self._widgets["image_restore_freeu"] = CompactSwitch(
             freeu_frame,
@@ -127,7 +118,28 @@ class ImageRestorationSection:
         self._widgets["image_restore_freeu"].pack(side="right", padx=12, pady=8)
         self._widgets["image_restore_freeu"].select()
 
+        gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        self._rows = [
+            Row(info, gap, "simple"),
+            Row(row_dl, gap, "simple"),
+            Row(row_interactive, gap, "simple"),
+            Row(row_steps, gap, "expert"),
+            Row(row_str, gap, "advanced"),
+            Row(row_var, gap, "advanced"),
+            Row(row_last, dict(fill="x", pady=(Sizing.PADDING_SMALL, 0)), "advanced"),
+        ]
+        self._last_cards = [
+            Row(seed_frame, dict(side="left", fill="x", expand=True, padx=(0, 4)), "advanced"),
+            Row(freeu_frame, dict(side="right", fill="x", expand=True, padx=(4, 0)), "expert"),
+        ]
+
         self._refresh_sd15_download_state()
+
+    def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
+        """Simple keeps the download and the interactive editor; steps and FreeU are expert settings."""
+        layout_rows(self._last_cards, level, standard=standard, ltx=ltx)
+        layout_rows(self._rows, level, standard=standard, ltx=ltx)
+        return True
 
     def _on_slider_change(self, key: str, value: int):
         self._widgets[f"{key}_val"].configure(text=str(value))

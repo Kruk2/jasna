@@ -20,11 +20,18 @@ from jasna.gui.settings_sections.widgets import (
     add_setting_label,
     create_slider_value_label,
     get_tooltip,
-    pack_rows,
+    Row,
+    layout_rows,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.ltx.model_files import LTX_MODELS
-from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
+from jasna.session_config import (
+    LTX_AUTO_DEFAULT_PERCENT,
+    LTX_DEFAULT_MODEL,
+    LTX_DEFAULT_OVERLAP,
+    LTX_DEFAULT_SEED,
+    LTX_OVERLAP_CHOICES,
+)
 
 _MODELS = ("basicvsrpp", "ltx")
 # The simple view leaves out the barely faster and the much slower LTX variants.
@@ -90,7 +97,7 @@ class RestorationModelSection:
         self._vendor: AcceleratorVendor | None = None
         self._enabled = True
         self._blackwell = False
-        self._simple = False
+        self._level = "expert"
 
         self.frame = CollapsibleSection(parent, t("section_restoration_model"), expanded=True)
         content = self.frame.content
@@ -195,6 +202,27 @@ class RestorationModelSection:
             Tooltip(self._widgets[key], get_tooltip("ltx_auto_split"))
         self._set_auto_split(False, LTX_AUTO_DEFAULT_PERCENT)
 
+        overlap_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
+        add_setting_label(overlap_row, "ltx_overlap", in_card=True)
+        self._widgets["ltx_overlap_val"] = create_slider_value_label(
+            overlap_row, str(LTX_DEFAULT_OVERLAP), 3, Colors.BG_CARD
+        )
+        self._widgets["ltx_overlap_val"].pack(side="right", padx=(0, 12))
+        self._widgets["ltx_overlap"] = ctk.CTkSlider(
+            overlap_row,
+            from_=LTX_OVERLAP_CHOICES[0],
+            to=LTX_OVERLAP_CHOICES[-1],
+            number_of_steps=len(LTX_OVERLAP_CHOICES) - 1,
+            fg_color=Colors.BG_PANEL,
+            progress_color=Colors.MODEL_LTX,
+            button_color=Colors.MODEL_LTX,
+            width=120,
+            command=self._on_overlap_slider,
+        )
+        self._widgets["ltx_overlap"].pack(side="right", padx=(0, 8), pady=8)
+        Tooltip(self._widgets["ltx_overlap"], get_tooltip("ltx_overlap"))
+        self._set_overlap(LTX_DEFAULT_OVERLAP)
+
         trial_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         add_setting_label(trial_row, "ltx_trial", in_card=True)
         self._widgets["ltx_trial"] = CompactSwitch(trial_row, self._on_ltx_choice_changed, Colors.BG_CARD)
@@ -210,16 +238,16 @@ class RestorationModelSection:
 
         note = dict(fill="x", padx=12, pady=(0, 8))
         self._option_rows = [
-            (model_row, dict(fill="x")),
-            (seed_row, dict(fill="x")),
-            (self._fast_row, dict(fill="x")),
-            (large_row, dict(fill="x")),
-            (auto_row, dict(fill="x")),
-            (trial_row, dict(fill="x")),
-            (self._trial_status, note),
-            (self._notice, note),
+            Row(model_row, dict(fill="x"), "simple"),
+            Row(self._fast_row, dict(fill="x"), "simple"),
+            Row(seed_row, dict(fill="x"), "advanced"),
+            Row(large_row, dict(fill="x"), "advanced"),
+            Row(auto_row, dict(fill="x"), "advanced"),
+            Row(overlap_row, dict(fill="x"), "expert"),
+            Row(trial_row, dict(fill="x"), "simple"),
+            Row(self._trial_status, note, "simple"),
+            Row(self._notice, note, "simple"),
         ]
-        self._expert_rows = (seed_row, self._fast_row, large_row, auto_row)
 
         self._refresh_widgets()
 
@@ -316,9 +344,9 @@ class RestorationModelSection:
         self._widgets["ltx_trial"].configure(state="normal" if editable and not locked else "disabled")
         chosen = self._ltx_model.get_value()
         self._ltx_model.offer(
-            [model for model in LTX_MODELS if not self._simple or model in SIMPLE_LTX_MODELS or model == chosen]
+            [model for model in LTX_MODELS if self._level != "simple" or model in SIMPLE_LTX_MODELS or model == chosen]
         )
-        hidden = list(self._expert_rows) if self._simple else []
+        hidden = []
         if not self._blackwell:
             hidden.append(self._fast_row)
         if self._trial():
@@ -330,7 +358,7 @@ class RestorationModelSection:
             self._notice.configure(text=t(reason))
         else:
             hidden.append(self._notice)
-        pack_rows(self._option_rows, tuple(hidden))
+        layout_rows(self._option_rows, self._level, standard=True, ltx=True, hidden=tuple(hidden))
 
     def _usable_model(self) -> str:
         """The chosen model, or BasicVSR++ when LTX cannot run; switches to the installed
@@ -368,10 +396,18 @@ class RestorationModelSection:
             self._set_fast(False)
         self.refresh()
 
-    def set_simple(self, simple: bool) -> None:
-        """Simple view keeps the LTX model and trial choice and leaves out the tuning rows."""
-        self._simple = simple
+    def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
+        self._level = level
         self._refresh_widgets()
+        return True
+
+    def _set_overlap(self, overlap: int) -> None:
+        self._widgets["ltx_overlap"].set(overlap)
+        self._widgets["ltx_overlap_val"].configure(text=str(overlap))
+
+    def _on_overlap_slider(self, value: float) -> None:
+        self._widgets["ltx_overlap_val"].configure(text=str(round(value)))
+        self._on_modified()
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
@@ -389,6 +425,7 @@ class RestorationModelSection:
         else:
             self._widgets["ltx_trial"].deselect()
         self._set_auto_split(preset.ltx_auto_split, preset.ltx_auto_split_percent)
+        self._set_overlap(preset.ltx_overlap)
         self._ltx_model.set_value(preset.ltx_model)
         self._model.set(preset.restoration_model if preset.restoration_model in _MODELS else "basicvsrpp")
         self._show_model(self._usable_model())
@@ -404,4 +441,5 @@ class RestorationModelSection:
             "ltx_trial": self._widgets["ltx_trial"].get() == 1,
             "ltx_auto_split": self._widgets["ltx_auto_split"].get() == 1,
             "ltx_auto_split_percent": round(self._widgets["ltx_auto_split_percent"].get()),
+            "ltx_overlap": round(self._widgets["ltx_overlap"].get()),
         }
