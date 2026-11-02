@@ -10,18 +10,25 @@ monitors with a different DPI. ``winfo_*`` stays physical while ``geometry()``/`
 multiply their width/height arguments by the factor and pass the ``+x+y`` offset through
 untouched.
 
+On Linux, :func:`activate_static_dpi` takes the factor from the desktop's ``Xft.dpi``
+resource instead (what GNOME/KDE text and display scaling set for X11 apps), shrunk the
+same way, and sets Tk's own scaling to match. X11 has no DPI virtualization, so the rules
+below hold there too.
+
 Three rules follow, and every helper here exists to keep them straight:
 
 - ``winfo_*`` values and ``+x+y`` offsets are physical.
 - Width/height handed to ``geometry()``/``minsize()`` are logical.
 - CTk widget options are logical; raw ``tkinter`` pixel options are physical.
 
-Off Windows the factor is exactly 1 and every function here is the identity.
+Without ``Xft.dpi`` on Linux, and on macOS, the factor is exactly 1 and every function here
+is the identity.
 """
 
 import logging
 import math
 import sys
+import tkinter
 
 import customtkinter as ctk
 
@@ -32,12 +39,15 @@ SCREEN_MARGIN = (40, 80)
 
 def activate_static_dpi(design_min: tuple[int, int]) -> None:
     """Fix process DPI awareness and one static CTk scaling factor, before any window exists."""
-    if sys.platform != "win32":
+    if sys.platform == "win32":
+        ctk.deactivate_automatic_dpi_awareness()
+        _windows_set_dpi_aware()
+        dpi = _windows_system_dpi()
+        screen = _windows_screen_size()
+    elif sys.platform.startswith("linux"):
+        dpi, screen = _linux_xft_dpi_and_screen()
+    else:
         return
-    ctk.deactivate_automatic_dpi_awareness()
-    _windows_set_dpi_aware()
-    dpi = _windows_system_dpi()
-    screen = _windows_screen_size()
     factor = _static_scaling(dpi, screen, design_min, SCREEN_MARGIN)
     ctk.set_widget_scaling(factor)
     ctk.set_window_scaling(factor)
@@ -58,6 +68,24 @@ def _static_scaling(
         screen[0] / (design_min[0] + margin[0]),
         screen[1] / (design_min[1] + margin[1]),
     )
+
+
+def xft_dpi_factor(raw_xft_dpi: str) -> float:
+    return float(raw_xft_dpi) / 96 if raw_xft_dpi else 1.0
+
+
+def _linux_xft_dpi_and_screen() -> tuple[float, tuple[int, int]]:
+    # Class "Xft" lets Tk's option database match the desktop's top-level Xft.dpi resource.
+    probe = tkinter.Tk(className="Xft")
+    raw_xft_dpi = probe.option_get("dpi", "Dpi")
+    if raw_xft_dpi:
+        # Tk turns CTk's pixel font sizes into points with this and Xft draws points at
+        # Xft.dpi, so matching them keeps text at the CTk factor. The value lives on the
+        # X display connection, which Tk keeps open for the CTk windows created later.
+        probe.tk.call("tk", "scaling", float(raw_xft_dpi) / 72)
+    screen = probe.winfo_screenwidth(), probe.winfo_screenheight()
+    probe.destroy()
+    return xft_dpi_factor(raw_xft_dpi), screen
 
 
 def _windows_set_dpi_aware() -> None:
