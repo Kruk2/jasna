@@ -511,8 +511,11 @@ def test_simple_view_keeps_the_ltx_model_choice_and_hides_its_tuning(panel_facto
     assert not _shown(panel._widgets["ltx_auto_split"].master)
 
     panel.set_view("advanced")
-    assert _shown(panel._widgets["ltx_seed"].master)
+    assert not _shown(panel._widgets["ltx_seed"].master)
     assert _shown(panel._widgets["ltx_auto_split"].master)
+
+    panel.set_view("expert")
+    assert _shown(panel._widgets["ltx_seed"].master)
 
 
 @pytest.mark.parametrize(

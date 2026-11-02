@@ -240,7 +240,7 @@ class RestorationModelSection:
         self._option_rows = [
             Row(model_row, dict(fill="x"), "simple"),
             Row(self._fast_row, dict(fill="x"), "simple"),
-            Row(seed_row, dict(fill="x"), "advanced"),
+            Row(seed_row, dict(fill="x"), "expert"),
             Row(large_row, dict(fill="x"), "advanced"),
             Row(auto_row, dict(fill="x"), "advanced"),
             Row(overlap_row, dict(fill="x"), "expert"),

@@ -146,7 +146,7 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
   restores, `17` by default. Fewer is faster when a mosaic stays on screen for
   more than 4 seconds; `33` is the older mode with more overlap. CLI:
   `--ltx-overlap 33`.
-- **Seed**: a different seed gives a slightly different result; the same seed
+- **Seed** (**Expert** view): a different seed gives a slightly different result; the same seed
   gives the same result. CLI: `--ltx-seed 7`.
 - **Trial mode**: runs LTX at full speed without the model or a license, so
   you can see how fast it is on your PC. The video is **not** restored.

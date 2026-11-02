@@ -89,7 +89,7 @@ class ProcessingSection:
         self._rows = [
             Row(overlap_row, row_gap, "advanced", "standard"),
             Row(denoise_row, row_gap, "advanced", "standard"),
-            Row(clip_row, row_gap, "expert", "standard"),
+            Row(clip_row, row_gap, "advanced", "standard"),
             Row(self._toggles_row, row_gap, "expert"),
         ]
         self._toggles = [

@@ -18,7 +18,7 @@ class ImageRestorationSection:
         self._show_toast = show_toast
         self._on_interactive = on_interactive
 
-        self.frame = CollapsibleSection(parent, t("section_image_restoration"), expanded=False)
+        self.frame = CollapsibleSection(parent, t("section_image_restoration"), expanded=True)
         content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
