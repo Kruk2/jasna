@@ -298,6 +298,8 @@ ZH = {
         "model_ltx_trial_only": "未安装 LTX 模型。只能使用试用模式。",
         "ltx_license_trial_title": "LTX 许可证",
         "ltx_license_trial_confirm": "LTX 需要许可证。改用试用模式运行？输出不会被修复。",
+        "ltx_blocked_title": "LTX 已锁定",
+        "ltx_blocked_text": "此许可证码的 LTX 已被锁定，因为有破解或修改过的 Jasna（例如 jasna-cn.exe）用它运行过。这类文件通常来自非官方卖家。\n\n1. 删除这些文件，只从 GitHub 下载 Jasna。\n2. 只通过 Jasna 里的卖家按钮购买许可证码。\n3. 在 GitHub 提交 issue 申请解锁，解锁后重新输入许可证码。",
         "toast_ltx_trial": "试用模式：输出不会被修复",
         "ltx_trial_stage": "{stage}（试用）",
         "segments_seed_tried_trial": "已试（试用）：",

@@ -298,6 +298,8 @@ EN = {
         "model_ltx_trial_only": "No LTX model installed. Only trial mode is available.",
         "ltx_license_trial_title": "LTX license",
         "ltx_license_trial_confirm": "LTX requires a license. Run in trial mode instead? Output won't be restored.",
+        "ltx_blocked_title": "LTX locked",
+        "ltx_blocked_text": "LTX is locked on this License code because a cracked or modified Jasna (such as jasna-cn.exe) ran with it. These files usually come from unofficial sellers.\n\n1. Delete them and download Jasna only from GitHub.\n2. Buy License codes only through the seller buttons in Jasna.\n3. Open an issue on GitHub to unlock the code, then enter your License code again.",
         "toast_ltx_trial": "Trial mode: output won't be restored",
         "ltx_trial_stage": "{stage} (trial)",
         "segments_seed_tried_trial": "Tried (trial):",

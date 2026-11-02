@@ -70,6 +70,15 @@ def run_unavailable_reason(
     return "model_ltx_not_downloaded" if state.downloadable else "model_ltx_not_installed"
 
 
+def license_blocked() -> bool:
+    """Whether the activation service locked LTX on this License code because a modified Jasna ran with it."""
+    if not protection_available():
+        return False
+    from jasna.protection.license_store import ltx_blocked
+
+    return ltx_blocked()
+
+
 def license_missing(directory: Path, model: LtxModelName, fast: bool) -> bool:
     """Whether the installed ``model`` needs a license this PC lacks. Verifies the stored
     license only; reads no model data."""

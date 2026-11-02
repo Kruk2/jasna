@@ -425,6 +425,18 @@ def test_start_offers_a_trial_when_the_license_is_missing(ltx_installed, jasna_a
     assert [settings.ltx_trial for settings in validated] == ([True] if accept else [])
 
 
+def test_start_explains_an_ltx_lock_instead_of_offering_a_trial(ltx_installed, jasna_app, monkeypatch, validated) -> None:
+    monkeypatch.setattr(ltx_models_module, "license_blocked", lambda: True)
+    asked = _answer(monkeypatch, yes=True)
+    warned: list[str] = []
+    monkeypatch.setattr(messagebox, "showwarning", lambda _title, message: warned.append(message))
+    _queue_job(jasna_app, replace(AppSettings(), restoration_model="ltx"))
+
+    jasna_app._on_start()
+
+    assert (warned, asked, validated) == ([t("ltx_blocked_text")], [], [])
+
+
 def test_start_with_a_trial_skips_the_license_offer(ltx_installed, jasna_app, monkeypatch, validated) -> None:
     monkeypatch.setattr(ltx_models_module, "license_missing", lambda *_args: True)
     asked = _answer(monkeypatch, yes=True)
