@@ -274,6 +274,24 @@ def _length_prefixed_units(data: bytes) -> list[bytes]:
     return units
 
 
+def write_variable_frame_rate_source(path: Path) -> Path:
+    """H.264 + AAC MP4 on a 30 fps timestamp grid that drops a varying share of frames,
+    so frame gaps alternate between 1/30 s and 2/30 s."""
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc2=size=160x96:rate=30:duration=4",
+            "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000:duration=4",
+            "-vf", "select='not(eq(mod(n,5),2))*not(eq(mod(n,7),4))'", "-fps_mode", "vfr",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "main",
+            "-g", "20", "-keyint_min", "20", "-sc_threshold", "0", "-bf", "3",
+            "-c:a", "aac", str(path),
+        ],
+        check=True,
+    )
+    return path
+
+
 def write_hrd_timing_sei_source(path: Path) -> Path:
     """29.97 fps H.264 + AAC MP4 with HRD buffering_period/pic_timing SEI whose samples
     end with the next picture's access unit delimiter and SEI, as some muxers store them."""

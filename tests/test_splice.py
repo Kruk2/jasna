@@ -313,14 +313,21 @@ def test_validation_rejects_unsupported_h264_profile() -> None:
         )
 
 
-def test_validation_rejects_vfr_and_active_retargeting() -> None:
-    with pytest.raises(SmartRenderCompatibilityError, match="constant-frame-rate"):
-        validate_smart_render(
-            _metadata(average_fps=29.0),
-            output_path="out.mp4",
-            codec="h264",
-            retarget_high_fps=False,
-        )
+def test_validation_accepts_variable_frame_rate() -> None:
+    metadata = _metadata(video_fps=90.0, average_fps=24.7, video_fps_exact=Fraction(90))
+    assert validate_smart_render(metadata, output_path="out.mp4", codec="h264", retarget_high_fps=False) == "h264"
+
+
+def test_variable_frame_rate_gop_size_counts_frames_at_the_mean_rate() -> None:
+    metadata = _metadata("hevc", video_fps=90.0, average_fps=24.0, video_fps_exact=Fraction(90))
+    index = KeyframeIndex((0, 2000, 4000), Fraction(1, 1000), 0, 6000)
+
+    settings = resolve_smart_encoder_settings("hevc", metadata, index, {}, vendor=AcceleratorVendor.NVIDIA)
+
+    assert settings == {"g": 48}
+
+
+def test_validation_rejects_active_retargeting() -> None:
     fps = Fraction(60_000, 1_001)
     with pytest.raises(SmartRenderCompatibilityError, match="frame-rate retargeting"):
         validate_smart_render(

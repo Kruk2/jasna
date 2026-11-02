@@ -190,10 +190,6 @@ def validate_smart_render(
         raise SmartRenderCompatibilityError(
             f"Smart rendering cannot match H.264 profile {metadata.profile!r}"
         )
-    if metadata.average_fps > 0 and metadata.video_fps > 0:
-        relative_delta = abs(metadata.average_fps - metadata.video_fps) / metadata.video_fps
-        if relative_delta > 0.001:
-            raise SmartRenderCompatibilityError("Smart rendering currently requires constant-frame-rate video")
     return input_codec
 
 
@@ -231,7 +227,7 @@ def _analyze_packet_reordering(packet_pts: tuple[int, ...] | list[int]) -> tuple
     return max_b_frames, uses_b_references
 
 
-def _source_gop_size(index: KeyframeIndex, video_fps: Fraction) -> int | None:
+def _source_gop_size(index: KeyframeIndex, mean_fps: float) -> int | None:
     intervals = tuple(
         current - previous
         for previous, current in zip(index.pts, index.pts[1:])
@@ -239,7 +235,7 @@ def _source_gop_size(index: KeyframeIndex, video_fps: Fraction) -> int | None:
     )
     if not intervals:
         return None
-    return max(1, round(max(intervals) * index.time_base * video_fps))
+    return max(1, round(max(intervals) * index.time_base * mean_fps))
 
 
 def _nvenc_h264_settings(
@@ -291,7 +287,7 @@ def resolve_smart_encoder_settings(
     vendor: AcceleratorVendor,
 ) -> dict[str, object]:
     resolved = dict(settings)
-    source_gop_size = _source_gop_size(index, metadata.video_fps_exact)
+    source_gop_size = _source_gop_size(index, metadata.mean_fps)
     if source_gop_size is not None:
         resolved["g"] = source_gop_size
 
@@ -327,7 +323,7 @@ def probe_keyframes(path: str | Path, metadata: VideoMetadata) -> KeyframeIndex:
         length_size, length_prefixed = _nal_framing(stream, codec)
         time_base = Fraction(stream.time_base)
         start_pts = resolve_video_start_pts(stream.start_time, metadata.start_pts)
-        frame_ticks = max(1, round(1 / (metadata.video_fps * time_base)))
+        frame_ticks = max(1, round(1 / (metadata.mean_fps * time_base)))
         packets_end: int | None = None
         for packet in container.demux(stream):
             if packet.pts is not None:

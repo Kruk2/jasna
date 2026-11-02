@@ -27,6 +27,7 @@ from jasna.segments import SegmentRange
 from factories import (
     write_double_adts_aac_source,
     write_hrd_timing_sei_source,
+    write_variable_frame_rate_source,
     write_non_utf8_metadata_source,
 )
 
@@ -238,6 +239,7 @@ def test_mixed_encoder_splice_decodes_with_exact_duration_and_audio(
         assert np.array_equal(output_frames[12 + frame_index], render_frames[frame_index])
 
 
+@pytest.mark.parametrize("write_source", [write_hrd_timing_sei_source, write_variable_frame_rate_source])
 @pytest.mark.parametrize(
     "selections",
     [
@@ -245,10 +247,8 @@ def test_mixed_encoder_splice_decodes_with_exact_duration_and_audio(
         [SegmentRange(1.1, 1.4), SegmentRange(3.1, 3.5)],
     ],
 )
-def test_splice_keeps_source_timestamps_of_hrd_timing_sei_source(
-    tmp_path: Path, selections: list[SegmentRange]
-) -> None:
-    source = write_hrd_timing_sei_source(tmp_path / "hrd.mp4")
+def test_splice_keeps_source_timestamps(tmp_path: Path, selections: list[SegmentRange], write_source) -> None:
+    source = write_source(tmp_path / "source.mp4")
     metadata = get_video_meta_data(str(source))
     index = probe_keyframes(source, metadata)
     plan = build_splice_plan(selections, index, duration=metadata.duration)
