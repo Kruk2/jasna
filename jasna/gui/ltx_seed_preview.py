@@ -100,7 +100,7 @@ def prepared_key(segment: SegmentRange, settings: AppSettings) -> tuple:
         segment.end,
         video_session_key(settings),
         settings.ltx_large_canvas,
-        settings.ltx_less_overlap,
+        settings.ltx_overlap,
     )
 
 

@@ -11,7 +11,7 @@ The clip and compilation settings are for BasicVSR++. LTX manages its memory by 
 
 Jasna restores mosaics in clips: groups of frames processed together.
 
-- **Max Clip Size**: the longest clip, in frames. Longer clips give a more
+- **Max Clip Size** (in the **Expert** tab): the longest clip, in frames. Longer clips give a more
   stable result but use more VRAM.
 - **Temporal Overlap**: smooths the places where two clips meet. More overlap
   takes more time. Above `20` it usually doesn't help.
@@ -21,8 +21,6 @@ Good start:
 - Use the biggest **Max Clip Size** that fits in your VRAM. Bigger clips are
   more stable *and* faster.
 - Set **Temporal Overlap** between `8` and `20`.
-- Keep **Enable Crossfade** on. It costs nothing, because it uses frames that are
-  already done.
 
 One 1080p video, overlap 8, RTX 5090. Your times will be different, but the
 trend is the same:
@@ -42,7 +40,7 @@ time doesn't get better, only VRAM goes up. 4K video needs about 1.5x more
 VRAM at the same clip size.
 
 ```bash
-jasna --input input.mp4 --output output.mkv --max-clip-size 90 --temporal-overlap 8 --enable-crossfade
+jasna --input input.mp4 --output output.mkv --max-clip-size 90 --temporal-overlap 8
 ```
 
 ## Out of VRAM?

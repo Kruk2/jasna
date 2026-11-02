@@ -67,7 +67,7 @@ def test_mixed_job_sums_ranges_per_model_with_every_ltx_seed():
     assert settings["basicvsrpp"]["secondary"] == {
         "name": "tvai", "model": "iris-2", "scale": 4, "args": "noise=0", "denoise": True,
     }
-    assert settings["basicvsrpp"]["denoise_step"] == "after_primary"
+    assert "denoise_step" not in settings["basicvsrpp"]
 
 
 def test_sbs_basicvsrpp_records_the_resolved_projection():

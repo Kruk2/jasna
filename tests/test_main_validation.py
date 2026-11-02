@@ -147,7 +147,7 @@ LTX_NEEDED = "needs --restoration-model-name ltx-basic, ltx, ltx-4step, ltx-8ste
         (["--ltx-trial"], (), f"--ltx-trial {LTX_NEEDED}"),
         (["--ltx-fast"], (), LTX_NEEDED),
         (["--ltx-large-canvas"], (), LTX_NEEDED),
-        (["--no-experimental-ltx-less-overlap"], (), LTX_NEEDED),
+        (["--ltx-overlap", "33"], (), LTX_NEEDED),
         (["--ltx-seed", "7"], (), LTX_NEEDED),
         (["--restoration-model-name", "ltx", "--no-compile-basicvsrpp"], (),
          "--compile-basicvsrpp needs --restoration-model-name basicvsrpp"),

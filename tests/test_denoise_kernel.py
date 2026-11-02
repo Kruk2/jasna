@@ -2,7 +2,7 @@ import pytest
 import torch
 
 import jasna.restorer.denoise as denoise
-from jasna.restorer.denoise import DenoiseStrength, apply_denoise_u8, spatial_denoise
+from jasna.restorer.denoise import DenoiseStrength, apply_denoise, spatial_denoise
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
@@ -55,8 +55,11 @@ def test_uint8_output_stays_within_one_code(torch_path, strength):
         0, 256, (6, 3, 256, 256), generator=generator, device=_device(), dtype=torch.uint8
     )
 
-    got = apply_denoise_u8(clip, strength)
-    reference = torch_path(lambda: apply_denoise_u8(clip, strength))
+    def denoise_u8():
+        return apply_denoise(clip.float().div(255.0), strength).mul(255.0).round().clamp(0, 255).to(torch.uint8)
+
+    got = denoise_u8()
+    reference = torch_path(denoise_u8)
 
     # The kernel sums the window in a different order than 25 chained tensor
     # ops, which is worth about 2e-7 and only matters where a sample sits on a

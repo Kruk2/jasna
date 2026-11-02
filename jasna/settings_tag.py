@@ -88,13 +88,10 @@ def job_settings(
             "tensorrt": config.compile_basicvsrpp,
             "max_clip_size": config.max_clip_size,
             "temporal_overlap": config.temporal_overlap,
-            "crossfade": config.enable_crossfade,
             "denoise": config.denoise_strength,
             "secondary": _secondary_settings(config),
             "vr": vr.resolved,
         }
-        if config.denoise_strength != "none":
-            basicvsrpp["denoise_step"] = config.denoise_step
         if vr.is_sbs:
             basicvsrpp["vr_projection"] = vr.projection
         settings["basicvsrpp"] = basicvsrpp

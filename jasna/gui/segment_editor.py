@@ -929,7 +929,7 @@ class SegmentEditor(ctk.CTkToplevel):
             frames=max(1, round(segment.duration * metadata.video_fps)),
             fps=float(metadata.video_fps),
             megapixels=metadata.video_width * metadata.video_height / 1e6,
-            window_hop=window_hop(settings.ltx_less_overlap),
+            window_hop=window_hop(settings.ltx_overlap),
         )
 
     def _refresh_ltx_render_button(self) -> None:

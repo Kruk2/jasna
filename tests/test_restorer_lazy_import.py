@@ -33,9 +33,9 @@ def test_bundle_present_import_does_not_load_torch():
 def test_lazy_exports_still_resolve():
     code = (
         "from jasna.restorer import RestorationPipeline, BasicvsrppMosaicRestorer, "
-        "DenoiseStep, DenoiseStrength\n"
+        "DenoiseStrength\n"
         "assert all(x is not None for x in "
-        "(RestorationPipeline, BasicvsrppMosaicRestorer, DenoiseStep, DenoiseStrength))\n"
+        "(RestorationPipeline, BasicvsrppMosaicRestorer, DenoiseStrength))\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

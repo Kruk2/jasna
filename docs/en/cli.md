@@ -57,16 +57,14 @@ Jasna uses `TMP` first, then `TEMP`. `TMPDIR` is not used.
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth`, or `model_weights/ltx-restore` for LTX | Restoration weights (a folder for LTX). |
 | `--ltx-fast` / `--no-ltx-fast` | off | LTX: about 1.4x faster, slightly less detail. RTX 50-series only; other GPUs stop with an error. |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | off | LTX: more detail on large mosaics. Most videos have some, so a whole video can take up to about 3x longer. Needs about 12 GB of free VRAM; with less, those mosaics are restored normally. |
-| `--experimental-ltx-less-overlap` / `--no-experimental-ltx-less-overlap` | on | LTX, experimental: about 13% faster when a mosaic stays on screen for more than 4 seconds. Turn it off for the older mode with more overlap. |
+| `--ltx-overlap` | `17` | LTX: frames shared between the chunks LTX restores: `17`, `25`, `33`, `41` or `49`. Fewer is faster when a mosaic stays on screen for more than 4 seconds; `33` is the older mode with more overlap. |
 | `--ltx-seed` | `20260923` | LTX: another seed gives a slightly different result; the same seed repeats it. |
 | `--ltx-trial` / `--no-ltx-trial` | off | LTX: test the speed without the model or a license. The video is not restored. |
 | `--ltx-auto-split` | — | LTX: big mosaics (at least this percent of the video height, e.g. `12`) with LTX, smaller ones with BasicVSR++. Works on folders. Cannot be combined with `--segments` or `--fmp4`. See [Segments](segments.md#cli---ltx-auto-split). |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | on | Prepares BasicVSR++ for your GPU: about 3x faster, almost no extra VRAM. The first run takes 15–60 minutes. NVIDIA only. See [Tuning](tuning.md). |
 | `--max-clip-size` | `90` | Frames restored together. Bigger is steadier and faster but uses more VRAM. Use the biggest that fits. |
 | `--temporal-overlap` | `8` | Frames shared by neighboring clips, to hide flicker where they meet. `8`–`20` works well; must be less than half of `--max-clip-size`. |
-| `--enable-crossfade` / `--no-enable-crossfade` | on | Cross-fade clip boundaries using already-processed frames; no extra GPU cost. |
 | `--denoise` | `none` | Removes noise in restored areas: `low`, `medium`, `high`. |
-| `--denoise-step` | `after_primary` | Remove noise before secondary restoration (`after_primary`) or after it (`after_secondary`). |
 
 The `--ltx-*` options need `--restoration-model-name ltx-basic`, `ltx`, `ltx-4step`, `ltx-8step` or `ltx-undistilled`.
 `--no-compile-basicvsrpp` works only with `basicvsrpp`.

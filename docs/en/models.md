@@ -23,7 +23,7 @@ detection quality, use `lada-yolo-v4`.
 
 Each model has its own default detection threshold (`rfdetr-v6`: 0.35,
 `rfdetr-v6-large` and `rfdetr-vr-v1`: 0.40). Change it with **Detection
-Threshold** in **Basic Processing**, or with `--detection-score-threshold`.
+Threshold** in the **Detection** tab, or with `--detection-score-threshold`.
 
 ```bash
 jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
@@ -142,9 +142,10 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
   Most videos have some, so a whole video can take up to about 3x longer. Needs about 12 GB of free VRAM (16 GB cards for
   Segment Editor ranges); otherwise Jasna restores them normally. CLI:
   `--ltx-large-canvas`.
-- **Less overlap (experimental, faster)**: on by default, about 13% faster when a
-  mosaic stays on screen for more than 4 seconds. Turn it off for the older mode with more overlap. CLI:
-  `--no-experimental-ltx-less-overlap`.
+- **LTX Overlap** (in the **Expert** tab): frames shared between the chunks LTX
+  restores, `17` by default. Fewer is faster when a mosaic stays on screen for
+  more than 4 seconds; `33` is the older mode with more overlap. CLI:
+  `--ltx-overlap 33`.
 - **Seed**: a different seed gives a slightly different result; the same seed
   gives the same result. CLI: `--ltx-seed 7`.
 - **Trial mode**: runs LTX at full speed without the model or a license, so

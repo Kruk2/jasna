@@ -25,7 +25,9 @@ from jasna.os_utils import (
 )
 from jasna.session_config import (
     LTX_DEFAULT_MODEL,
+    LTX_DEFAULT_OVERLAP,
     LTX_DEFAULT_SEED,
+    LTX_OVERLAP_CHOICES,
     LTX_SECONDARY_RESTORATIONS,
     LtxModelName,
     RestorationModelName,
@@ -79,7 +81,7 @@ def _session_config_from_args(
         restoration_model_name=CLI_RESTORATION_MODELS[args.restoration_model_name][0],
         restoration_model_path=restoration_model_path,
         ltx_large_canvas=bool(args.ltx_large_canvas),
-        ltx_window_hop=window_hop(bool(args.experimental_ltx_less_overlap)),
+        ltx_window_hop=window_hop(int(args.ltx_overlap)),
         ltx_seed=int(args.ltx_seed),
         ltx_fast=bool(args.ltx_fast),
         ltx_model=CLI_RESTORATION_MODELS[args.restoration_model_name][1],
@@ -88,9 +90,7 @@ def _session_config_from_args(
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
         max_clip_size=int(args.max_clip_size),
         temporal_overlap=int(args.temporal_overlap),
-        enable_crossfade=bool(args.enable_crossfade),
         denoise_strength=str(args.denoise).lower(),
-        denoise_step=str(args.denoise_step).lower(),
         secondary_restoration=str(args.secondary_restoration).lower(),
         tvai_ffmpeg_path=str(args.tvai_ffmpeg_path),
         tvai_model=str(args.tvai_model),
@@ -263,10 +263,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=CLI_HELP["ltx_large_canvas"],
     )
     restoration.add_argument(
-        "--experimental-ltx-less-overlap",
-        default=True,
-        action=argparse.BooleanOptionalAction,
-        help=CLI_HELP["experimental_ltx_less_overlap"],
+        "--ltx-overlap",
+        type=int,
+        default=LTX_DEFAULT_OVERLAP,
+        choices=LTX_OVERLAP_CHOICES,
+        help=CLI_HELP["ltx_overlap"],
     )
     restoration.add_argument(
         "--ltx-seed",
@@ -312,24 +313,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=CLI_HELP["temporal_overlap"],
     )
     restoration.add_argument(
-        "--enable-crossfade",
-        default=True,
-        action=argparse.BooleanOptionalAction,
-        help=CLI_HELP["enable_crossfade"],
-    )
-    restoration.add_argument(
         "--denoise",
         type=str,
         default="none",
         choices=["none", "low", "medium", "high"],
         help=CLI_HELP["denoise"],
-    )
-    restoration.add_argument(
-        "--denoise-step",
-        type=str,
-        default="after_primary",
-        choices=["after_primary", "after_secondary"],
-        help=CLI_HELP["denoise_step"],
     )
 
     secondary = parser.add_argument_group("2nd restoration")
@@ -903,7 +891,7 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
 
 
 LTX_ONLY_ARG_DESTS = (
-    "ltx_fast", "ltx_large_canvas", "experimental_ltx_less_overlap", "ltx_seed", "ltx_trial", "ltx_auto_split"
+    "ltx_fast", "ltx_large_canvas", "ltx_overlap", "ltx_seed", "ltx_trial", "ltx_auto_split"
 )
 BASICVSRPP_ONLY_ARG_DESTS = ("compile_basicvsrpp",)
 

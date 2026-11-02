@@ -135,8 +135,8 @@ def test_video_session_config_maps_ltx_settings() -> None:
     assert config.ltx_window_hop == 104
 
 
-def test_video_session_config_maps_less_overlap_off_to_the_shorter_window_hop() -> None:
-    config = _config(replace(AppSettings(), restoration_model="ltx", ltx_less_overlap=False))
+def test_video_session_config_maps_more_ltx_overlap_to_a_shorter_window_hop() -> None:
+    config = _config(replace(AppSettings(), restoration_model="ltx", ltx_overlap=33))
 
     assert config.ltx_window_hop == 88
 

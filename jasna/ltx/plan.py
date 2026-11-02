@@ -545,8 +545,8 @@ def support_box(group: RegionGroup, frame_w: int, frame_h: int) -> Box:
     )
 
 
-def window_hop(less_overlap: bool) -> int:
-    return LESS_OVERLAP_WINDOW_HOP if less_overlap else WINDOW_HOP
+def window_hop(overlap_frames: int) -> int:
+    return WINDOW_FRAMES - overlap_frames
 
 
 def window_starts(frames: int, window_hop: int) -> list[int]:

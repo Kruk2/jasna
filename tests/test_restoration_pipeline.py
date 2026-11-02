@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 
 from jasna.crop_buffer import RawCrop, extract_crop, scale_offsets, _torch_pad_reflect
-from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
+from jasna.restorer.denoise import DenoiseStrength
 from jasna.restorer.restoration_pipeline import RestorationPipeline
 from jasna.tracking.clip_tracker import TrackedClip
 
@@ -338,7 +338,7 @@ def test_restore_clip_with_denoise_strength(monkeypatch) -> None:
     assert diff > 0, "Denoise MEDIUM should produce different output from NONE"
 
 
-def test_restore_clip_denoise_step_after_primary_with_secondary_produces_valid_output(monkeypatch) -> None:
+def test_restore_clip_denoise_with_secondary_produces_valid_output(monkeypatch) -> None:
     import jasna.crop_buffer as cb
 
     monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
@@ -349,7 +349,6 @@ def test_restore_clip_denoise_step_after_primary_with_secondary_produces_valid_o
         restorer=_IdentityRestorer(),
         secondary_restorer=_Upscale2xSecondary(),
         denoise_strength=DenoiseStrength.MEDIUM,
-        denoise_step=DenoiseStep.AFTER_PRIMARY,
     )
 
     torch.manual_seed(42)
@@ -369,130 +368,6 @@ def test_restore_clip_denoise_step_after_primary_with_secondary_produces_valid_o
 
     assert len(restored.restored_frames) == T
     assert restored.restored_frames[0].shape == (3, 512, 512)
-
-
-def test_restore_clip_denoise_step_after_secondary_denoises_secondary_output(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
-
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-    pipeline_none = RestorationPipeline(  # type: ignore[arg-type]
-        restorer=_IdentityRestorer(),
-        secondary_restorer=_Upscale2xSecondary(),
-        denoise_strength=DenoiseStrength.NONE,
-        denoise_step=DenoiseStep.AFTER_SECONDARY,
-    )
-    pipeline_med = RestorationPipeline(  # type: ignore[arg-type]
-        restorer=_IdentityRestorer(),
-        secondary_restorer=_Upscale2xSecondary(),
-        denoise_strength=DenoiseStrength.MEDIUM,
-        denoise_step=DenoiseStep.AFTER_SECONDARY,
-    )
-
-    torch.manual_seed(123)
-    T = 3
-    frames = [torch.randint(0, 256, (3, 30, 40), dtype=torch.uint8) for _ in range(T)]
-    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
-    clip = TrackedClip(
-        track_id=0,
-        start_frame=0,
-        mask_resolution=(2, 2),
-        bboxes=[bbox] * T,
-        masks=[torch.zeros((2, 2), dtype=torch.bool)] * T,
-    )
-
-    raw_crops = _make_raw_crops(frames, clip)
-    restored_none = restore_clip(pipeline_none, clip, raw_crops, (30, 40), keep_start=0, keep_end=T)
-    restored_med = restore_clip(pipeline_med, clip, raw_crops, (30, 40), keep_start=0, keep_end=T)
-
-    diff = sum(
-        (a.float() - b.float()).abs().sum().item()
-        for a, b in zip(restored_none.restored_frames, restored_med.restored_frames)
-    )
-    assert diff > 0, "AFTER_SECONDARY with MEDIUM should differ from NONE"
-
-
-def test_restore_clip_denoise_step_after_primary_vs_after_secondary_differ_with_secondary(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
-
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-    pipeline_after_primary = RestorationPipeline(  # type: ignore[arg-type]
-        restorer=_IdentityRestorer(),
-        secondary_restorer=_Upscale2xSecondary(),
-        denoise_strength=DenoiseStrength.MEDIUM,
-        denoise_step=DenoiseStep.AFTER_PRIMARY,
-    )
-    pipeline_after_secondary = RestorationPipeline(  # type: ignore[arg-type]
-        restorer=_IdentityRestorer(),
-        secondary_restorer=_Upscale2xSecondary(),
-        denoise_strength=DenoiseStrength.MEDIUM,
-        denoise_step=DenoiseStep.AFTER_SECONDARY,
-    )
-
-    torch.manual_seed(456)
-    T = 3
-    frames = [torch.randint(0, 256, (3, 30, 40), dtype=torch.uint8) for _ in range(T)]
-    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
-    clip = TrackedClip(
-        track_id=0,
-        start_frame=0,
-        mask_resolution=(2, 2),
-        bboxes=[bbox] * T,
-        masks=[torch.zeros((2, 2), dtype=torch.bool)] * T,
-    )
-
-    raw_crops = _make_raw_crops(frames, clip)
-    restored_ap = restore_clip(pipeline_after_primary, clip, raw_crops, (30, 40), keep_start=0, keep_end=T)
-    restored_as = restore_clip(pipeline_after_secondary, clip, raw_crops, (30, 40), keep_start=0, keep_end=T)
-
-    diff = sum(
-        (a.float() - b.float()).abs().sum().item()
-        for a, b in zip(restored_ap.restored_frames, restored_as.restored_frames)
-    )
-    assert diff > 0, "AFTER_PRIMARY vs AFTER_SECONDARY with secondary should produce different output"
-
-
-def test_restore_clip_denoise_step_no_secondary_both_steps_denoise(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
-
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-    pipeline_after_primary = RestorationPipeline(  # type: ignore[arg-type]
-        restorer=_IdentityRestorer(),
-        denoise_strength=DenoiseStrength.MEDIUM,
-        denoise_step=DenoiseStep.AFTER_PRIMARY,
-    )
-    pipeline_after_secondary = RestorationPipeline(  # type: ignore[arg-type]
-        restorer=_IdentityRestorer(),
-        denoise_strength=DenoiseStrength.MEDIUM,
-        denoise_step=DenoiseStep.AFTER_SECONDARY,
-    )
-
-    torch.manual_seed(789)
-    T = 3
-    frames = [torch.randint(0, 256, (3, 30, 40), dtype=torch.uint8) for _ in range(T)]
-    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
-    clip = TrackedClip(
-        track_id=0,
-        start_frame=0,
-        mask_resolution=(2, 2),
-        bboxes=[bbox] * T,
-        masks=[torch.zeros((2, 2), dtype=torch.bool)] * T,
-    )
-
-    raw_crops = _make_raw_crops(frames, clip)
-    restored_ap = restore_clip(pipeline_after_primary, clip, raw_crops, (30, 40), keep_start=0, keep_end=T)
-    restored_as = restore_clip(pipeline_after_secondary, clip, raw_crops, (30, 40), keep_start=0, keep_end=T)
-
-    for a, b in zip(restored_ap.restored_frames, restored_as.restored_frames):
-        assert torch.allclose(a.float(), b.float(), atol=1e-5), "No secondary: both steps denoise same output"
 
 
 def test_secondary_num_workers_no_secondary() -> None:
@@ -555,7 +430,6 @@ def test_prepare_and_run_primary_with_denoise(monkeypatch) -> None:
     pipeline = RestorationPipeline(
         restorer=_IdentityRestorer(),  # type: ignore[arg-type]
         denoise_strength=DenoiseStrength.MEDIUM,
-        denoise_step=DenoiseStep.AFTER_PRIMARY,
     )
 
     result = pipeline.prepare_and_run_primary(clip, raw_crops, (30, 40), 0, 3, None)
@@ -684,45 +558,3 @@ def test_build_secondary_result(monkeypatch) -> None:
     assert sr.enlarged_bboxes == pr.enlarged_bboxes
 
 
-def test_build_secondary_result_with_denoise(monkeypatch) -> None:
-    clip, frames, raw_crops = _make_clip_and_frames(monkeypatch)
-    pipeline = RestorationPipeline(
-        restorer=_IdentityRestorer(),  # type: ignore[arg-type]
-        denoise_strength=DenoiseStrength.MEDIUM,
-        denoise_step=DenoiseStep.AFTER_SECONDARY,
-    )
-
-    pr = pipeline.prepare_and_run_primary(clip, raw_crops, (30, 40), 0, 3, None)
-    restored_frames = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8) for _ in range(3)]
-    sr = pipeline.build_secondary_result(pr, restored_frames)
-
-    assert len(sr.restored_frames) == 3
-    assert sr.restored_frames[0].dtype == torch.uint8
-
-
-
-
-
-def test_after_secondary_denoise_runs_once_per_clip(monkeypatch) -> None:
-    import jasna.restorer.restoration_pipeline as rp
-
-    calls = []
-    real_denoise = rp.apply_denoise_u8
-
-    def counting_denoise(frames, strength):
-        calls.append(frames.shape[0])
-        return real_denoise(frames, strength)
-
-    monkeypatch.setattr(rp, "apply_denoise_u8", counting_denoise)
-    clip, frames, raw_crops = _make_clip_and_frames(monkeypatch)
-    pipeline = RestorationPipeline(
-        restorer=_IdentityRestorer(),  # type: ignore[arg-type]
-        denoise_strength=DenoiseStrength.MEDIUM,
-        denoise_step=DenoiseStep.AFTER_SECONDARY,
-    )
-
-    pr = pipeline.prepare_and_run_primary(clip, raw_crops, (30, 40), 0, 3, None)
-    restored_frames = pipeline._run_secondary(pr.primary_raw, pr.keep_start, pr.keep_end)
-    pipeline.build_secondary_result(pr, restored_frames)
-
-    assert calls == [3]

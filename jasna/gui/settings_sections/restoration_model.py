@@ -171,12 +171,6 @@ class RestorationModelSection:
         self._widgets["ltx_large_canvas"].pack(side="right", padx=12, pady=8)
         Tooltip(self._widgets["ltx_large_canvas"], get_tooltip("ltx_large_canvas"))
 
-        overlap_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
-        add_setting_label(overlap_row, "ltx_less_overlap", in_card=True)
-        self._widgets["ltx_less_overlap"] = CompactSwitch(overlap_row, self._on_modified, Colors.BG_CARD)
-        self._widgets["ltx_less_overlap"].pack(side="right", padx=12, pady=8)
-        Tooltip(self._widgets["ltx_less_overlap"], get_tooltip("ltx_less_overlap"))
-
         auto_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         add_setting_label(auto_row, "ltx_auto_split", in_card=True)
         self._widgets["ltx_auto_split_val"] = create_slider_value_label(
@@ -220,13 +214,12 @@ class RestorationModelSection:
             (seed_row, dict(fill="x")),
             (self._fast_row, dict(fill="x")),
             (large_row, dict(fill="x")),
-            (overlap_row, dict(fill="x")),
             (auto_row, dict(fill="x")),
             (trial_row, dict(fill="x")),
             (self._trial_status, note),
             (self._notice, note),
         ]
-        self._expert_rows = (seed_row, self._fast_row, large_row, overlap_row, auto_row)
+        self._expert_rows = (seed_row, self._fast_row, large_row, auto_row)
 
         self._refresh_widgets()
 
@@ -391,10 +384,6 @@ class RestorationModelSection:
             self._widgets["ltx_large_canvas"].select()
         else:
             self._widgets["ltx_large_canvas"].deselect()
-        if preset.ltx_less_overlap:
-            self._widgets["ltx_less_overlap"].select()
-        else:
-            self._widgets["ltx_less_overlap"].deselect()
         if preset.ltx_trial:
             self._widgets["ltx_trial"].select()
         else:
@@ -412,7 +401,6 @@ class RestorationModelSection:
             "ltx_seed": parse_seed(self._widgets["ltx_seed"].get()),
             "ltx_fast": self._widgets["ltx_fast"].get() == 1,
             "ltx_large_canvas": self._widgets["ltx_large_canvas"].get() == 1,
-            "ltx_less_overlap": self._widgets["ltx_less_overlap"].get() == 1,
             "ltx_trial": self._widgets["ltx_trial"].get() == 1,
             "ltx_auto_split": self._widgets["ltx_auto_split"].get() == 1,
             "ltx_auto_split_percent": round(self._widgets["ltx_auto_split_percent"].get()),

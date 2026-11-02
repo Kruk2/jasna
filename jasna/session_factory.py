@@ -210,7 +210,7 @@ def _build_basicvsrpp_pipeline(
     from jasna.accelerator import is_amd_device
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-    from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
+    from jasna.restorer.denoise import DenoiseStrength
     from jasna.restorer.restoration_pipeline import RestorationPipeline
 
     model_path = config.model_path("basicvsrpp")
@@ -238,7 +238,6 @@ def _build_basicvsrpp_pipeline(
         ),
         secondary_restorer=_build_secondary_restorer(config, device),
         denoise_strength=DenoiseStrength(config.denoise_strength),
-        denoise_step=DenoiseStep(config.denoise_step),
     )
 
 

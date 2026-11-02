@@ -65,9 +65,7 @@ def test_cli_defaults_map_to_expected_config() -> None:
     assert config.compile_basicvsrpp is True
     assert config.max_clip_size == 90
     assert config.temporal_overlap == 8
-    assert config.enable_crossfade is True
     assert config.denoise_strength == "none"
-    assert config.denoise_step == "after_primary"
     assert config.secondary_restoration == "none"
     assert config.tvai_model == "iris-2"
     assert config.tvai_scale == 4
@@ -94,7 +92,6 @@ def test_cli_non_default_args_are_mapped() -> None:
             "--no-fp16",
             "--batch-size", "8",
             "--denoise", "high",
-            "--denoise-step", "after_secondary",
             "--secondary-restoration", "rtx-super-res",
             "--rtx-quality", "ultra",
             "--vr-mode", "sbs",
@@ -110,7 +107,6 @@ def test_cli_non_default_args_are_mapped() -> None:
     assert config.fp16 is False
     assert config.batch_size == 8
     assert config.denoise_strength == "high"
-    assert config.denoise_step == "after_secondary"
     assert config.secondary_restoration == "rtx-super-res"
     assert config.rtx_quality == "ultra"
     assert config.vr_mode == "sbs"
@@ -142,9 +138,9 @@ def test_cli_ltx_args_are_mapped() -> None:
     assert config.ltx_seed == 7
 
 
-def test_cli_less_overlap_is_on_by_default_and_steps_ltx_windows_by_104_frames() -> None:
+def test_cli_ltx_overlap_defaults_to_17_frames_and_sets_the_window_step() -> None:
     assert _cli_config(["--restoration-model-name", "ltx"]).ltx_window_hop == 104
-    more = _cli_config(["--restoration-model-name", "ltx", "--no-experimental-ltx-less-overlap"])
+    more = _cli_config(["--restoration-model-name", "ltx", "--ltx-overlap", "33"])
     assert more.ltx_window_hop == 88
 
 

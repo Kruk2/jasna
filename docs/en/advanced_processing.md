@@ -10,10 +10,6 @@ Restored areas can have some noise. **Denoise Strength**
 frame is not changed. Start with `low`, and go higher only if the noise is
 still visible.
 
-By default it runs before secondary restoration.
-`--denoise-step after_secondary` moves it to the end, just before the
-restored area goes back into the frame.
-
 Not used with LTX.
 
 ## Detection stability
@@ -40,7 +36,7 @@ two different shots. **Scene Cut Detection** (`--scene-detection`, on by
 default) finds hard cuts and ends every clip there. It runs on the GPU and
 costs almost nothing.
 
-Turn it off (`--no-scene-detection`, or the switch in **Advanced Processing**) only if
+Turn it off (`--no-scene-detection`, or the switch in the **Expert** tab) only if
 clips are split where there is no real cut.
 
 ## 60 FPS to 30 FPS

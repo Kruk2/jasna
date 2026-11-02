@@ -392,7 +392,6 @@ def test_raw_pass_forwards_seek_and_player_writer(monkeypatch) -> None:
         temporal_overlap=4,
         max_detection_gap=2,
         min_detection_duration=2,
-        enable_crossfade=True,
         scene_detection=False,
         vr_projector=None,
         job_detection_model=MagicMock(),

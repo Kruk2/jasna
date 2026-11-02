@@ -114,7 +114,7 @@ restored whole with LTX. Cannot be used with `--segments` or `--fmp4`.
 
 While Jasna puts the video together, it keeps temporary files in a hidden
 folder next to the output. To use another disk (faster or bigger), set
-**Working Directory** in the **Encoding** section, or:
+**Working Directory** in the **Expert** tab, or:
 
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
