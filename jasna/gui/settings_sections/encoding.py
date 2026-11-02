@@ -12,6 +12,7 @@ from jasna.gui.settings_sections.widgets import (
     ValueOptionMenu,
     create_slider_value_label,
     get_tooltip,
+    pack_rows,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_cq
@@ -31,13 +32,35 @@ class EncodingSection:
         self._widgets = widgets
         self._on_modified = on_modified
 
-        section = CollapsibleSection(parent, t("section_encoding"), expanded=False)
-        section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
-        content = section.content
+        self.frame = CollapsibleSection(parent, t("section_encoding"), expanded=True)
+        content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
         inner = ctk.CTkFrame(content, fg_color="transparent")
         inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
+
+        conflict_row = ctk.CTkFrame(inner, fg_color="transparent")
+        conflict_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        add_setting_label(conflict_row, "file_conflict")
+        self._widgets["conflict_warning"] = ctk.CTkLabel(
+            conflict_row, text="⚠️", text_color=Colors.STATUS_WARNING, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL)
+        )
+        Tooltip(self._widgets["conflict_warning"], t("file_conflict_overwrite_warning"))
+        self._widgets["file_conflict"] = ValueOptionMenu(
+            conflict_row,
+            options={
+                "auto_rename": t("file_conflict_auto_rename"),
+                "overwrite": t("file_conflict_overwrite"),
+                "skip": t("file_conflict_skip"),
+            },
+            command=self._on_file_conflict_changed,
+            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
+            width=140,
+        )
+        self._widgets["file_conflict"].pack(side="right")
+        self._widgets["file_conflict"].set_value("auto_rename")
 
         # Codec
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
@@ -87,7 +110,6 @@ class EncodingSection:
 
         # Sharpening
         sharpen_row = ctk.CTkFrame(inner, fg_color="transparent")
-        sharpen_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         add_setting_label(sharpen_row, "sharpen_strength")
 
@@ -106,7 +128,6 @@ class EncodingSection:
 
         # Optional exact 60/59.94 -> 30/29.97 frame-rate retargeting.
         retarget_row = ctk.CTkFrame(inner, fg_color="transparent")
-        retarget_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         retarget_label = ctk.CTkLabel(
             retarget_row,
             text=t("retarget_high_fps"),
@@ -132,7 +153,6 @@ class EncodingSection:
 
         # Fragmented MP4: output stays playable while it is written.
         fmp4_row = ctk.CTkFrame(inner, fg_color="transparent")
-        fmp4_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         fmp4_label = ctk.CTkLabel(
             fmp4_row,
             text=t("fmp4"),
@@ -158,7 +178,6 @@ class EncodingSection:
 
         # Custom args
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
-        row3.pack(fill="x")
 
         args_label = ctk.CTkLabel(row3, text=t("custom_args"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         args_label.pack(side="left", anchor="w")
@@ -167,7 +186,6 @@ class EncodingSection:
         Tooltip(args_tip, get_tooltip("encoder_custom_args"))
 
         args_row = ctk.CTkFrame(inner, fg_color="transparent")
-        args_row.pack(fill="x", pady=(4, 0))
         self._widgets["encoder_custom_args"] = ctk.CTkEntry(
             args_row, fg_color=Colors.BG_CARD, border_color=Colors.BORDER,
             text_color=Colors.TEXT_PRIMARY, placeholder_text=t("placeholder_encoder_args")
@@ -176,11 +194,9 @@ class EncodingSection:
 
         # LUT (color correction)
         lut_row = ctk.CTkFrame(inner, fg_color="transparent")
-        lut_row.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         add_setting_label(lut_row, "lut_path")
 
         lut_input_row = ctk.CTkFrame(inner, fg_color="transparent")
-        lut_input_row.pack(fill="x", pady=(4, 0))
         self._widgets["lut_path"] = ctk.CTkEntry(
             lut_input_row, fg_color=Colors.BG_CARD, border_color=Colors.BORDER,
             text_color=Colors.TEXT_PRIMARY, placeholder_text=t("lut_path_placeholder"),
@@ -195,11 +211,9 @@ class EncodingSection:
         lut_browse_btn.pack(side="right")
 
         working_dir_row = ctk.CTkFrame(inner, fg_color="transparent")
-        working_dir_row.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         add_setting_label(working_dir_row, "working_directory")
 
         working_dir_input_row = ctk.CTkFrame(inner, fg_color="transparent")
-        working_dir_input_row.pack(fill="x", pady=(4, 0))
         self._widgets["working_directory"] = ctk.CTkEntry(
             working_dir_input_row, fg_color=Colors.BG_CARD, border_color=Colors.BORDER,
             text_color=Colors.TEXT_PRIMARY, placeholder_text=t("working_directory_placeholder"),
@@ -212,6 +226,28 @@ class EncodingSection:
             command=self._browse_working_directory,
         )
         working_dir_browse_btn.pack(side="right")
+
+        row_gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        label_gap = dict(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+        input_gap = dict(fill="x", pady=(4, 0))
+        self._expert_rows = [
+            (sharpen_row, row_gap), (retarget_row, row_gap), (fmp4_row, row_gap),
+            (row3, dict(fill="x")), (args_row, input_gap),
+            (lut_row, label_gap), (lut_input_row, input_gap),
+            (working_dir_row, label_gap), (working_dir_input_row, input_gap),
+        ]
+        self.set_simple(False)
+
+    def set_simple(self, simple: bool) -> None:
+        """Simple view keeps file conflict, codec and quality."""
+        pack_rows(self._expert_rows, tuple(row for row, _options in self._expert_rows) if simple else ())
+
+    def _on_file_conflict_changed(self, value: str):
+        if value == "overwrite":
+            self._widgets["conflict_warning"].pack(side="right", padx=(0, 8))
+        else:
+            self._widgets["conflict_warning"].pack_forget()
+        self._on_modified()
 
     def _on_codec_changed(self, new_codec: str):
         self._cq_values[self._active_codec] = int(
@@ -251,6 +287,8 @@ class EncodingSection:
             self._widgets["working_directory"].insert(0, directory)
 
     def apply(self, preset):
+        self._widgets["file_conflict"].set_value(preset.file_conflict)
+        self._on_file_conflict_changed(self._widgets["file_conflict"].get_value())
         self._widgets["codec"].set_value(preset.codec)
         self._active_codec = self._widgets["codec"].get_value()
         self._cq_values = {
@@ -297,6 +335,7 @@ class EncodingSection:
 
     def collect(self) -> dict:
         return {
+            "file_conflict": self._widgets["file_conflict"].get_value(),
             "codec": self._widgets["codec"].get_value(),
             "encoder_cq": int(self._widgets["encoder_cq"].get()),
             "encoder_custom_args": self._widgets["encoder_custom_args"].get(),

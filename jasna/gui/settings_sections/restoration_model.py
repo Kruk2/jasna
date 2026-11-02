@@ -15,7 +15,13 @@ from jasna.gui.ltx_models import (
     run_unavailable_reason,
     trial_only,
 )
-from jasna.gui.settings_sections.widgets import ValueOptionMenu, add_setting_label, create_slider_value_label, get_tooltip
+from jasna.gui.settings_sections.widgets import (
+    ValueOptionMenu,
+    add_setting_label,
+    create_slider_value_label,
+    get_tooltip,
+    pack_rows,
+)
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.ltx.model_files import LTX_MODELS
 from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
@@ -81,10 +87,11 @@ class RestorationModelSection:
         self._ltx_models = ltx_models
         self._vendor: AcceleratorVendor | None = None
         self._enabled = True
+        self._blackwell = False
+        self._simple = False
 
-        section = CollapsibleSection(parent, t("section_restoration_model"), expanded=True)
-        section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
-        content = section.content
+        self.frame = CollapsibleSection(parent, t("section_restoration_model"), expanded=True)
+        content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
         inner = ctk.CTkFrame(content, fg_color="transparent")
@@ -110,7 +117,6 @@ class RestorationModelSection:
 
         self._ltx_options = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
         model_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
-        model_row.pack(fill="x")
         add_setting_label(model_row, "ltx_model", in_card=True)
         self._ltx_model = self._widgets["ltx_model"] = ValueOptionMenu(
             model_row,
@@ -129,7 +135,6 @@ class RestorationModelSection:
         self._ltx_model.set_value(LTX_DEFAULT_MODEL)
 
         seed_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
-        seed_row.pack(fill="x")
         add_setting_label(seed_row, "ltx_seed", in_card=True)
         self._new_seed_btn = NativeIconButton(
             seed_row,
@@ -159,22 +164,18 @@ class RestorationModelSection:
         Tooltip(self._widgets["ltx_fast"], get_tooltip("ltx_fast"))
 
         large_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
-        large_row.pack(fill="x")
         add_setting_label(large_row, "ltx_large_canvas", in_card=True)
         self._widgets["ltx_large_canvas"] = CompactSwitch(large_row, self._on_modified, Colors.BG_CARD)
         self._widgets["ltx_large_canvas"].pack(side="right", padx=12, pady=8)
         Tooltip(self._widgets["ltx_large_canvas"], get_tooltip("ltx_large_canvas"))
-        self._large_row = large_row
 
         overlap_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
-        overlap_row.pack(fill="x")
         add_setting_label(overlap_row, "ltx_less_overlap", in_card=True)
         self._widgets["ltx_less_overlap"] = CompactSwitch(overlap_row, self._on_modified, Colors.BG_CARD)
         self._widgets["ltx_less_overlap"].pack(side="right", padx=12, pady=8)
         Tooltip(self._widgets["ltx_less_overlap"], get_tooltip("ltx_less_overlap"))
 
         auto_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
-        auto_row.pack(fill="x")
         add_setting_label(auto_row, "ltx_auto_split", in_card=True)
         self._widgets["ltx_auto_split_val"] = create_slider_value_label(
             auto_row, f"{LTX_AUTO_DEFAULT_PERCENT}%", 4, Colors.BG_CARD
@@ -199,7 +200,6 @@ class RestorationModelSection:
         self._set_auto_split(False, LTX_AUTO_DEFAULT_PERCENT)
 
         trial_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
-        trial_row.pack(fill="x")
         add_setting_label(trial_row, "ltx_trial", in_card=True)
         self._widgets["ltx_trial"] = CompactSwitch(trial_row, self._on_ltx_choice_changed, Colors.BG_CARD)
         self._widgets["ltx_trial"].pack(side="right", padx=12, pady=8)
@@ -207,11 +207,24 @@ class RestorationModelSection:
         self._trial_status = ctk.CTkLabel(
             self._ltx_options, text="", text_color=Colors.STATUS_WARNING, font=(Fonts.FAMILY, Fonts.SIZE_SMALL), anchor="w"
         )
-        self._trial_row = trial_row
 
         self._notice = ctk.CTkLabel(
             self._ltx_options, text="", text_color=Colors.STATUS_WARNING, font=(Fonts.FAMILY, Fonts.SIZE_SMALL), anchor="w"
         )
+
+        note = dict(fill="x", padx=12, pady=(0, 8))
+        self._option_rows = [
+            (model_row, dict(fill="x")),
+            (seed_row, dict(fill="x")),
+            (self._fast_row, dict(fill="x")),
+            (large_row, dict(fill="x")),
+            (overlap_row, dict(fill="x")),
+            (auto_row, dict(fill="x")),
+            (trial_row, dict(fill="x")),
+            (self._trial_status, note),
+            (self._notice, note),
+        ]
+        self._expert_rows = (seed_row, self._fast_row, large_row, overlap_row, auto_row)
 
         self._refresh_widgets()
 
@@ -306,17 +319,19 @@ class RestorationModelSection:
         if locked:
             self._widgets["ltx_trial"].select()
         self._widgets["ltx_trial"].configure(state="normal" if editable and not locked else "disabled")
+        hidden = list(self._expert_rows) if self._simple else []
+        if not self._blackwell:
+            hidden.append(self._fast_row)
         if self._trial():
             self._trial_status.configure(text=t("model_ltx_trial_only" if locked else "ltx_trial_notice"))
-            self._trial_status.pack(fill="x", padx=12, pady=(0, 8), after=self._trial_row)
         else:
-            self._trial_status.pack_forget()
+            hidden.append(self._trial_status)
         reason = self.unavailable_reason()
         if reason:
             self._notice.configure(text=t(reason))
-            self._notice.pack(fill="x", padx=12, pady=(0, 8))
         else:
-            self._notice.pack_forget()
+            hidden.append(self._notice)
+        pack_rows(self._option_rows, tuple(hidden))
 
     def _usable_model(self) -> str:
         """The chosen model, or BasicVSR++ when LTX cannot run; switches to the installed
@@ -349,12 +364,15 @@ class RestorationModelSection:
 
     def set_gpu_support(self, *, vendor: AcceleratorVendor, blackwell: bool) -> None:
         self._vendor = vendor
-        if blackwell:
-            self._fast_row.pack(fill="x", before=self._large_row)
-        else:
+        self._blackwell = blackwell
+        if not blackwell:
             self._set_fast(False)
-            self._fast_row.pack_forget()
         self.refresh()
+
+    def set_simple(self, simple: bool) -> None:
+        """Simple view keeps the LTX model and trial choice and leaves out the tuning rows."""
+        self._simple = simple
+        self._refresh_widgets()
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled

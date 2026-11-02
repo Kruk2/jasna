@@ -472,6 +472,9 @@ class AutoHidingScrollableFrame(ctk.CTkScrollableFrame):
         self._parent_canvas.configure(yscrollcommand=self._update_scrollbar)
         self.after_idle(lambda: self._update_scrollbar(*self._parent_canvas.yview()))
 
+    def scroll_to_top(self) -> None:
+        self._parent_canvas.yview_moveto(0)
+
     def _update_scrollbar(self, first: str | float, last: str | float) -> None:
         self._scrollbar.set(first, last)
         should_show = float(first) > 0.0 or float(last) < 1.0

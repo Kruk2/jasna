@@ -7,8 +7,12 @@ import pytest
 from jasna import os_utils
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui.models import AppSettings, PresetManager
-from jasna.gui.settings_sections.basic import BasicSection
+from jasna.gui.settings_sections.detection import DetectionSection
 from jasna.gui.settings_sections.encoding import EncodingSection
+from jasna.gui.settings_sections.image_restoration import ImageRestorationSection
+from jasna.gui.settings_sections.post_export import PostExportSection
+from jasna.gui.settings_sections.processing import ProcessingSection
+from jasna.gui.settings_sections.restoration_model import RestorationModelSection
 from jasna.gui.settings_sections.secondary import SecondarySection
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
 from jasna.gui import ltx_models as ltx_models_module
@@ -118,35 +122,45 @@ def test_sections_collect_every_setting_except_runtime_ones(panel_factory) -> No
     assert collected == {f.name for f in fields(AppSettings)} - runtime_only
 
 
+def _section(panel, section_type):
+    return next(section for section in panel._sections if isinstance(section, section_type))
+
+
 @pytest.fixture
-def _basic_section_panel(panel_factory):
+def _detection_section_panel(panel_factory):
     panel = panel_factory()
-    return panel, next(section for section in panel._sections if isinstance(section, BasicSection))
+    return panel, _section(panel, DetectionSection)
 
 
-def test_switching_detection_model_applies_recommended_threshold(_basic_section_panel) -> None:
-    panel, basic = _basic_section_panel
+@pytest.fixture
+def _processing_section_panel(panel_factory):
+    panel = panel_factory()
+    return panel, _section(panel, ProcessingSection)
 
-    basic._on_detection_model_changed("rfdetr-v6-large")
+
+def test_switching_detection_model_applies_recommended_threshold(_detection_section_panel) -> None:
+    panel, detection = _detection_section_panel
+
+    detection._on_detection_model_changed("rfdetr-v6-large")
     assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.40)
 
-    basic._on_detection_model_changed("rfdetr-v6")
+    detection._on_detection_model_changed("rfdetr-v6")
     assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.35)
 
 
-def test_apply_reverts_missing_model_to_default_recommended(_basic_section_panel) -> None:
-    panel, basic = _basic_section_panel
+def test_apply_reverts_missing_model_to_default_recommended(_detection_section_panel) -> None:
+    panel, detection = _detection_section_panel
 
-    basic.apply(AppSettings(detection_model="rfdetr-v5", detection_score_threshold=0.6))
+    detection.apply(AppSettings(detection_model="rfdetr-v5", detection_score_threshold=0.6))
 
     assert panel._widgets["detection_model"].get() == "rfdetr-v6"
     assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.35)
 
 
-def test_apply_keeps_installed_model_and_threshold(_basic_section_panel) -> None:
-    panel, basic = _basic_section_panel
+def test_apply_keeps_installed_model_and_threshold(_detection_section_panel) -> None:
+    panel, detection = _detection_section_panel
 
-    basic.apply(AppSettings(detection_model="rfdetr-v6-large", detection_score_threshold=0.55))
+    detection.apply(AppSettings(detection_model="rfdetr-v6-large", detection_score_threshold=0.55))
 
     assert panel._widgets["detection_model"].get() == "rfdetr-v6-large"
     assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.55)
@@ -210,8 +224,8 @@ def test_settings_panel_get_settings_is_locale_independent(panel_factory, gui_la
     assert panel._saved_preset_settings == panel.get_settings()
 
 
-def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty_in_steps_of_ten(_basic_section_panel) -> None:
-    panel, _basic = _basic_section_panel
+def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty_in_steps_of_ten(_processing_section_panel) -> None:
+    panel, _processing = _processing_section_panel
     slider = panel._widgets["max_clip_size"]
 
     slider.set(10)
@@ -222,22 +236,22 @@ def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty_in_steps_of_ten(
     assert slider.get() == 30
 
 
-def test_temporal_filter_sliders_stay_below_max_clip_size(_basic_section_panel) -> None:
-    panel, basic = _basic_section_panel
+def test_temporal_filter_sliders_stay_below_max_clip_size(_processing_section_panel) -> None:
+    panel, processing = _processing_section_panel
     sliders = [panel._widgets[key] for key in ("max_detection_gap", "min_detection_duration")]
     for slider in sliders:
         slider.set(10)
 
-    basic._on_max_clip_size_slider(10)
+    processing._on_max_clip_size_slider(10)
     assert [(slider.cget("to"), slider.get()) for slider in sliders] == [(9, 9), (9, 9)]
     assert panel._widgets["max_detection_gap_val"].cget("text") == "9"
 
-    basic._on_max_clip_size_slider(90)
+    processing._on_max_clip_size_slider(90)
     assert [(slider.cget("to"), slider.get()) for slider in sliders] == [(10, 9), (10, 9)]
 
 
-def test_only_queue_wide_post_export_action_stays_editable_while_processing(_basic_section_panel) -> None:
-    panel, _basic = _basic_section_panel
+def test_only_queue_wide_post_export_action_stays_editable_while_processing(panel_factory) -> None:
+    panel = panel_factory()
 
     panel.set_enabled(False)
 
@@ -292,8 +306,10 @@ def test_ltx_offers_only_rtx_super_res_unless_auto_split(panel_factory) -> None:
     panel = panel_factory(True)
     radios = panel._secondary_section._engine_radios
     _select_ltx(panel)
+    panel.set_view("advanced")
+    panel.show_tab("upscale")
 
-    assert panel._secondary_section._section.winfo_manager()
+    assert panel._secondary_section.frame.winfo_manager()
     assert radios["tvai"].cget("state") == panel._widgets["rtx_scale"].cget("state") == "disabled"
     assert radios["rtx-super-res"].cget("state") == "normal"
     assert panel._secondary_section._ltx_only_note.winfo_manager()
@@ -365,6 +381,7 @@ def test_ltx_without_model_files_runs_as_a_trial(panel_factory, monkeypatch) -> 
 
 def test_gpu_support_disables_ltx_and_shows_fast_mode_on_blackwell(panel_factory) -> None:
     panel = panel_factory(True)
+    panel.set_view("advanced")
     section = panel._model_section
     section.apply(AppSettings(restoration_model="ltx", ltx_fast=True))
 
@@ -449,3 +466,71 @@ def test_disabling_settings_keeps_unavailable_ltx_disabled(panel_factory) -> Non
 
     assert panel._model_section._cards["ltx"].radio.cget("state") == "disabled"
     assert panel._model_section._cards["basicvsrpp"].radio.cget("state") == "normal"
+
+
+def _shown(widget) -> bool:
+    return bool(widget.winfo_manager())
+
+
+def test_simple_view_hides_tuning_rows_and_keeps_their_values(panel_factory) -> None:
+    panel = panel_factory()
+    panel.set_view("advanced")
+    _apply(panel, _NON_DEFAULT_SETTINGS)
+
+    panel.set_view("simple")
+
+    assert panel.get_settings() == _NON_DEFAULT_SETTINGS
+    assert _shown(panel._widgets["codec"].master) and _shown(panel._widgets["file_conflict"].master)
+    assert _shown(panel._widgets["post_export_command"].master)
+    assert not _shown(panel._widgets["sharpen_strength"].master)
+    assert not _shown(panel._widgets["post_export_video_command"])
+    assert not _shown(_section(panel, DetectionSection).frame)
+    assert not _shown(panel._tab_bar)
+
+    panel.set_view("advanced")
+    panel.show_tab("output")
+
+    assert _shown(panel._widgets["sharpen_strength"].master)
+    assert _shown(panel._widgets["post_export_video_command"])
+
+
+def test_simple_view_keeps_the_ltx_model_choice_and_hides_its_tuning(panel_factory) -> None:
+    panel = panel_factory(True)
+    _select_ltx(panel)
+
+    panel.set_view("simple")
+    assert _shown(panel._widgets["ltx_model"].master)
+    assert not _shown(panel._widgets["ltx_seed"].master)
+    assert not _shown(panel._widgets["ltx_auto_split"].master)
+
+    panel.set_view("advanced")
+    assert _shown(panel._widgets["ltx_seed"].master)
+    assert _shown(panel._widgets["ltx_auto_split"].master)
+
+
+@pytest.mark.parametrize(
+    ("tab", "expected"),
+    [
+        ("model", [RestorationModelSection, ProcessingSection]),
+        ("detection", [DetectionSection]),
+        ("upscale", [SecondarySection]),
+        ("output", [EncodingSection, PostExportSection]),
+        ("images", [ImageRestorationSection]),
+    ],
+)
+def test_advanced_view_shows_only_the_chosen_tab(panel_factory, tab, expected) -> None:
+    panel = panel_factory()
+    panel.set_view("advanced")
+
+    panel.show_tab(tab)
+
+    assert _shown(panel._tab_bar)
+    assert [type(section) for section in panel._sections if _shown(section.frame)] == expected
+
+
+def test_the_settings_view_is_remembered(panel_factory) -> None:
+    assert not _shown(panel_factory()._tab_bar)
+
+    panel_factory().set_view("advanced")
+
+    assert _shown(panel_factory()._tab_bar)
