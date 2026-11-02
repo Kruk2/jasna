@@ -177,8 +177,13 @@ class _BatchPrefetcher:
         self._thread.join()
 
 
-# VALI aborts open/reads after 3 s by default; a spun-down HDD needs longer to wake.
-_VALI_IO_TIMEOUT_MS = "60000"
+_VALI_OPTIONS = {
+    # VALI aborts open/reads after 3 s by default; a spun-down HDD needs longer to wake.
+    "timeout": "60000",
+    # cuvid keeps 3 spare surfaces but holds up to 4 frames for display; an H.264
+    # SPS without a reorder limit then lets a later frame overwrite a waiting one.
+    "extra_hw_frames": "1",
+}
 
 
 class _ValiFrameSource:
@@ -219,7 +224,7 @@ class _ValiFrameSource:
         try:
             self.decoder = vali.PyDecoder(
                 file,
-                {"timeout": _VALI_IO_TIMEOUT_MS},
+                _VALI_OPTIONS,
                 gpu_id=device.index or 0,
                 stream=self.stream.cuda_stream,
             )

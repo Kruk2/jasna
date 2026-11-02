@@ -11,7 +11,7 @@ import torch
 
 import jasna.media.video_decoder as module
 from jasna.accelerator import AcceleratorVendor
-from factories import video_metadata
+from factories import video_metadata, write_unbounded_reorder_h264_source
 
 TEST_CLIP = Path("assets/test_clip1_1080p.mp4")
 
@@ -353,6 +353,28 @@ def test_vali_backend_matches_pyav_hw_output(monkeypatch) -> None:
     pyav_batch, pyav_pts = first_batch("pyav-hw")
     assert vali_pts == pyav_pts
     assert torch.equal(vali_batch, pyav_batch)
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available() or not _vali_fork_available(),
+    reason="needs a GPU and the python_vali fork",
+)
+def test_vali_keeps_frame_order_when_the_sps_sets_no_reorder_limit(monkeypatch, tmp_path) -> None:
+    from jasna.media.probe import get_video_meta_data
+
+    path = str(write_unbounded_reorder_h264_source(tmp_path / "unbounded.mp4"))
+    metadata = get_video_meta_data(path)
+    device = torch.device("cuda", 0)
+
+    def frame_levels(backend):
+        monkeypatch.setenv("JASNA_DECODE_BACKEND", backend)
+        with module.VideoReader(path, batch_size=8, device=device, metadata=metadata) as reader:
+            return torch.cat([batch.float().mean(dim=(1, 2, 3)) for batch, _pts in reader.frames()]).cpu()
+
+    vali_levels = frame_levels("vali")
+    software_levels = frame_levels("pyav-sw")
+    assert vali_levels.shape == software_levels.shape
+    torch.testing.assert_close(vali_levels, software_levels, atol=2, rtol=0)
 
 
 def test_vali_source_seek_with_stride_reanchors_at_seek(monkeypatch) -> None:
