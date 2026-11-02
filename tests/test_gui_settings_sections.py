@@ -296,9 +296,11 @@ def test_ltx_offers_only_rtx_super_res_unless_auto_split(panel_factory) -> None:
     assert panel._secondary_section._section.winfo_manager()
     assert radios["tvai"].cget("state") == panel._widgets["rtx_scale"].cget("state") == "disabled"
     assert radios["rtx-super-res"].cget("state") == "normal"
+    assert panel._secondary_section._ltx_only_note.winfo_manager()
 
     panel._widgets["ltx_auto_split"]._toggle()
     assert radios["tvai"].cget("state") == panel._widgets["rtx_scale"].cget("state") == "normal"
+    assert not panel._secondary_section._ltx_only_note.winfo_manager()
 
 
 @pytest.mark.parametrize("auto_split,expected", [(False, "none"), (True, "unet-4x")])

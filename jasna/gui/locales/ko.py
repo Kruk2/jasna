@@ -443,6 +443,7 @@ KO = {
         "secondary_tvai_hint": "고품질, 느림",
         "secondary_rtx_super_res": "RTX Super Res",
         "secondary_rtx_hint": "보통 품질, 매우 빠름",
+        "secondary_ltx_only_note": "LTX에서는 RTX Super Res만 쓸 수 있습니다. \"큰 모자이크만 LTX\"를 켜거나 BasicVSR++를 쓰면 다른 것도 고를 수 있습니다.",
         "rtx_scale": "배율",
         "rtx_quality": "품질",
         "rtx_denoise": "노이즈 제거",

@@ -74,6 +74,12 @@ class SecondarySection:
         self._engine_radios = {"none": none_rb, "unet-4x": unet4x_rb, "tvai": tvai_rb, "rtx-super-res": rtx_rb}
         Tooltip(rtx_rb, get_tooltip("secondary_rtx"))
 
+        self._engines_frame = engines_frame
+        self._ltx_only_note = ctk.CTkLabel(
+            inner, text=t("secondary_ltx_only_note"), text_color=Colors.STATUS_PENDING,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), anchor="w", justify="left",
+        )
+
         # TVAI options (hidden by default)
         self._tvai_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
 
@@ -288,6 +294,10 @@ class SecondarySection:
     def set_ltx_only(self, ltx_only: bool) -> None:
         """LTX without auto split: only RTX Super Res, always 2x."""
         self._ltx_only = ltx_only
+        if ltx_only:
+            self._ltx_only_note.pack(fill="x", after=self._engines_frame)
+        else:
+            self._ltx_only_note.pack_forget()
         self.set_enabled(self._enabled)
 
     def apply(self, preset):

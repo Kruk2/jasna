@@ -443,6 +443,7 @@ TH = {
         "secondary_tvai_hint": "คุณภาพสูง, ช้า",
         "secondary_rtx_super_res": "RTX Super Res",
         "secondary_rtx_hint": "คุณภาพพอใช้, เร็วมาก",
+        "secondary_ltx_only_note": "เมื่อใช้ LTX จะใช้ได้แค่ RTX Super Res เปิด \"ใช้ LTX เฉพาะโมเสกใหญ่\" หรือใช้ BasicVSR++ เพื่อเลือกตัวอื่น",
         "rtx_scale": "อัตราขยาย",
         "rtx_quality": "คุณภาพ",
         "rtx_denoise": "ลดสัญญาณรบกวน",
