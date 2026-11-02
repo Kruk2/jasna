@@ -1,6 +1,7 @@
 """Builders shared by tests that need a SessionConfig, a Pipeline, or test media."""
 from __future__ import annotations
 
+import re
 import struct
 import subprocess
 import sys
@@ -311,6 +312,54 @@ def write_hrd_timing_sei_source(path: Path) -> Path:
                 packet = rewritten
             packet.stream = output
             dst.mux(packet)
+    plain.unlink()
+    return path
+
+
+def _sps_without_bitstream_restriction(sps: bytes, flag_bit: int) -> bytes:
+    """``sps`` cut at its bitstream_restriction_flag (a bit offset into the RBSP),
+    which is set to 0 and followed by the RBSP stop bit."""
+    rbsp = re.sub(rb"\x00\x00\x03", b"\x00\x00", sps)
+    bits = "".join(f"{byte:08b}" for byte in rbsp)[:flag_bit] + "01"
+    bits += "0" * (-len(bits) % 8)
+    cut = bytes(int(bits[i:i + 8], 2) for i in range(0, len(bits), 8))
+    return re.sub(rb"\x00\x00(?=[\x00-\x03])", b"\x00\x00\x03", cut)
+
+
+def write_unbounded_reorder_h264_source(path: Path) -> Path:
+    """352x288 level 1.1 H.264 MP4 with three B-frames whose SPS leaves out
+    bitstream_restriction, so a decoder must hold the level's whole DPB for
+    reordering. Every frame is a flat gray level of its own."""
+    ffmpeg = resolve_executable("ffmpeg")
+    plain = path.with_name(f"{path.stem}-plain.mp4")
+    subprocess.run(
+        [
+            ffmpeg, "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i",
+            "color=black:size=352x288:rate=30:duration=1.6,format=gray,geq=lum='mod(N*23,200)+20',format=yuv420p",
+            "-c:v", "libx264", "-preset", "ultrafast", "-profile:v", "main", "-level", "1.1",
+            "-x264-params", "bframes=3:b-pyramid=0:b-adapt=0:ref=4:keyint=12:scenecut=0",
+            str(plain),
+        ],
+        check=True,
+    )
+    trace = subprocess.run(
+        [ffmpeg, "-hide_banner", "-i", str(plain), "-c", "copy", "-bsf:v", "trace_headers",
+         "-frames:v", "1", "-f", "null", "-"],
+        capture_output=True, text=True, check=True,
+    ).stderr
+    flag_bit = int(re.search(r"(\d+)\s+bitstream_restriction_flag", trace).group(1))
+    with av.open(str(plain)) as src, av.open(str(path), "w") as dst:
+        video = src.streams.video[0]
+        avcc = bytes(video.codec_context.extradata)
+        sps_end = 8 + int.from_bytes(avcc[6:8], "big")
+        sps = _sps_without_bitstream_restriction(avcc[8:sps_end], flag_bit)
+        output = dst.add_stream_from_template(video)
+        output.codec_context.extradata = avcc[:6] + len(sps).to_bytes(2, "big") + sps + avcc[sps_end:]
+        for packet in src.demux(video):
+            if packet.size:
+                packet.stream = output
+                dst.mux(packet)
     plain.unlink()
     return path
 
