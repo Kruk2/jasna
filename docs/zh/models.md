@@ -68,6 +68,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   | 基础、良好、高画质或顶级画质，额外 | 每个再加约 13 GB |
 
   如果无法访问 Hugging Face（例如在中国），Jasna 会自动使用 hf-mirror.com。
+  下载中断后再次开始，会从中断处继续。
   仍然下载失败？见[手动下载 LTX](#手动下载-ltx)。
 
 LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时降噪会关闭，二次修复只能用 RTX Super Res。使用**仅大马赛克用 LTX**（`--ltx-auto-split`）时，由 BasicVSR++ 修复的较小马赛克仍会使用所有二次修复和降噪。

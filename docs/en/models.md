@@ -76,7 +76,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   | Basic, Good, High or Top Quality, on top | about 13 GB more each |
 
   If Hugging Face can't be reached (for example in China), Jasna uses
-  hf-mirror.com automatically. Download still fails? See
+  hf-mirror.com automatically. If the download stops, start it again: it
+  continues where it stopped. Download still fails? See
   [Downloading LTX yourself](#downloading-ltx-yourself).
 
 LTX does not work with VR180 side-by-side videos or streaming. Denoising is
