@@ -9,6 +9,7 @@ from jasna.gui.settings_sections.widgets import (
     Row,
     add_setting_label,
     ValueOptionMenu,
+    SLIDER_WIDTH,
     create_slider_value_label,
     layout_rows,
 )
@@ -31,17 +32,16 @@ class ProcessingSection:
         content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
-        inner = ctk.CTkFrame(content, fg_color="transparent")
-        inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
+        inner = self.frame.body
 
         overlap_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(overlap_row, "temporal_overlap")
-        self._widgets["temporal_overlap_val"] = create_slider_value_label(overlap_row, "8", 3, Colors.BG_PANEL)
+        self._widgets["temporal_overlap_val"] = create_slider_value_label(overlap_row, "8", Colors.BG_PANEL)
         self._widgets["temporal_overlap_val"].pack(side="right")
         self._widgets["temporal_overlap"] = ctk.CTkSlider(
             overlap_row, from_=0, to=30, number_of_steps=30,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=200, command=self._on_temporal_overlap_slider,
+            width=SLIDER_WIDTH, command=self._on_temporal_overlap_slider,
         )
         self._widgets["temporal_overlap"].pack(side="right", padx=(0, 8))
         self._widgets["temporal_overlap"].set(8)
@@ -67,7 +67,7 @@ class ProcessingSection:
 
         clip_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(clip_row, "max_clip_size")
-        self._widgets["max_clip_size_val"] = create_slider_value_label(clip_row, "90", 4, Colors.BG_PANEL)
+        self._widgets["max_clip_size_val"] = create_slider_value_label(clip_row, "90", Colors.BG_PANEL)
         self._widgets["max_clip_size_val"].pack(side="right")
         self._widgets["max_clip_size"] = ctk.CTkSlider(
             clip_row,
@@ -76,7 +76,7 @@ class ProcessingSection:
             number_of_steps=(MAX_CLIP_SIZE - MIN_CLIP_SIZE) // CLIP_SIZE_STEP,
             command=self._on_max_clip_size_slider,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY,
-            button_color=Colors.PRIMARY, width=200,
+            button_color=Colors.PRIMARY, width=SLIDER_WIDTH,
         )
         self._widgets["max_clip_size"].pack(side="right", padx=(0, 8))
         self._widgets["max_clip_size"].set(90)

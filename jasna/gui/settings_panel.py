@@ -283,6 +283,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._scroll = AutoHidingScrollableFrame(
             self,
             fg_color="transparent",
+            corner_radius=0,
             scrollbar_button_color=Colors.BORDER_LIGHT,
             scrollbar_button_hover_color=Colors.BORDER_LIGHT,
         )

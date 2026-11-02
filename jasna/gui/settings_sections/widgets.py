@@ -29,19 +29,19 @@ def add_setting_label(row, label_key: str, tooltip_key: str | None = None, *, in
     Tooltip(tip, get_tooltip(tooltip_key or label_key))
 
 
-def create_slider_value_label(
-    master,
-    text: str,
-    width: int,
-    background: str,
-) -> tk.Label:
+# One slider length and one right-aligned value column keep the rows lined up.
+SLIDER_WIDTH = 200
+
+
+def create_slider_value_label(master, text: str, background: str) -> tk.Label:
     return tk.Label(
         master,
         text=text,
         foreground=Colors.TEXT_PRIMARY,
         background=background,
         font=(Fonts.FAMILY, scaling.raw_tk_font_size(master, Fonts.SIZE_NORMAL)),
-        width=width,
+        width=4,
+        anchor="e",
         borderwidth=0,
         highlightthickness=0,
     )

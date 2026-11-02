@@ -10,6 +10,7 @@ from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
     add_setting_label,
     ValueOptionMenu,
+    SLIDER_WIDTH,
     create_slider_value_label,
     Row,
     get_tooltip,
@@ -37,8 +38,7 @@ class EncodingSection:
         content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
-        inner = ctk.CTkFrame(content, fg_color="transparent")
-        inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
+        inner = self.frame.body
 
         conflict_row = ctk.CTkFrame(inner, fg_color="transparent")
         conflict_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
@@ -94,7 +94,7 @@ class EncodingSection:
         initial_cq = self._cq_values[self._active_codec]
         initial_spec = encoder_cq_spec(self._active_codec, self._cq_vendor)
         self._widgets["encoder_cq_val"] = create_slider_value_label(
-            row2, str(initial_cq), 3, Colors.BG_PANEL
+            row2, str(initial_cq), Colors.BG_PANEL
         )
         self._widgets["encoder_cq_val"].pack(side="right")
         self._widgets["encoder_cq"] = ctk.CTkSlider(
@@ -103,7 +103,7 @@ class EncodingSection:
             to=initial_spec.maximum,
             number_of_steps=initial_spec.maximum - initial_spec.minimum,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=160,
+            width=SLIDER_WIDTH,
             command=self._on_cq_changed,
         )
         self._widgets["encoder_cq"].pack(side="right", padx=(0, 8))
@@ -115,13 +115,13 @@ class EncodingSection:
         add_setting_label(sharpen_row, "sharpen_strength")
 
         self._widgets["sharpen_strength_val"] = create_slider_value_label(
-            sharpen_row, "0.00", 4, Colors.BG_PANEL
+            sharpen_row, "0.00", Colors.BG_PANEL
         )
         self._widgets["sharpen_strength_val"].pack(side="right")
         self._widgets["sharpen_strength"] = ctk.CTkSlider(
             sharpen_row, from_=0.0, to=1.0, number_of_steps=20,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=160,
+            width=SLIDER_WIDTH,
             command=lambda v: self._widgets["sharpen_strength_val"].configure(text=f"{v:.2f}")
         )
         self._widgets["sharpen_strength"].pack(side="right", padx=(0, 8))

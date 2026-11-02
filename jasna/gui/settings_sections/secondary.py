@@ -23,8 +23,7 @@ class SecondarySection:
         content = self.frame.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
-        inner = ctk.CTkFrame(content, fg_color="transparent")
-        inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
+        inner = self.frame.body
 
         # Engine selection (radio-like)
         self._widgets["secondary_var"] = ctk.StringVar(value="none")
@@ -160,7 +159,7 @@ class SecondarySection:
         tvai_workers_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         add_setting_label(tvai_workers_row, "workers", "tvai_workers")
         self._widgets["tvai_workers_val"] = create_slider_value_label(
-            tvai_workers_row, "2", 2, Colors.BG_CARD
+            tvai_workers_row, "2", Colors.BG_CARD
         )
         self._widgets["tvai_workers_val"].pack(side="right")
         self._widgets["tvai_workers"] = ctk.CTkSlider(

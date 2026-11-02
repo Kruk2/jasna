@@ -526,6 +526,8 @@ class CollapsibleSection(ctk.CTkFrame):
             fg_color=Colors.BG_PANEL,
             corner_radius=0,
         )
+        self._body = ctk.CTkFrame(self._content, fg_color="transparent")
+        self._body.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
         if expanded:
             self._content.pack(fill="x", pady=(2, 0))
         
@@ -542,7 +544,11 @@ class CollapsibleSection(ctk.CTkFrame):
             self._content.pack_forget()
             
     def set_header_shown(self, shown: bool) -> None:
-        """Without its header the section is always open."""
+        """Without its header the section is always open and its rows line up with the frame edges."""
+        self._body.pack_configure(
+            padx=Sizing.PADDING_MEDIUM if shown else 0,
+            pady=Sizing.PADDING_MEDIUM if shown else (0, Sizing.PADDING_SMALL),
+        )
         self._header.pack_forget()
         self._content.pack_forget()
         if shown:
@@ -553,6 +559,11 @@ class CollapsibleSection(ctk.CTkFrame):
     @property
     def content(self) -> ctk.CTkFrame:
         return self._content
+
+    @property
+    def body(self) -> ctk.CTkFrame:
+        """Padded frame inside the content for the section's rows."""
+        return self._body
 
 
 class Toast(ctk.CTkFrame):
