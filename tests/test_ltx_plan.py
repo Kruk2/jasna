@@ -1,5 +1,6 @@
 import hashlib
 
+import cv2
 import numpy as np
 import pytest
 import torch
@@ -135,6 +136,83 @@ def test_a_lasting_split_gets_its_own_camera_with_a_handover():
     assert piece.polygons[0] is piece.polygons[LEAD_IN_FRAMES]
     window = piece.windows[1]
     assert window.crops[200 - window.start].side <= PLAN_CANVAS
+
+
+def _rectangle(x1: int, y1: int, x2: int, y2: int) -> Region:
+    return Region((x1, y1, x2, y2), np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32))
+
+
+def _outline(*points: tuple[int, int]) -> Region:
+    polygon = np.array(points, dtype=np.int32)
+    (x1, y1), (x2, y2) = polygon.min(axis=0), polygon.max(axis=0)
+    return Region((float(x1), float(y1), float(x2), float(y2)), polygon)
+
+
+def _plan(frames: list[list[Region]]):
+    return plan_video(frames, set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
+
+
+def _widest_crop(plan) -> int:
+    return max(crop.side for window in plan.windows for crop in window.crops)
+
+
+def _mask(polygons) -> np.ndarray:
+    mask = np.zeros((1080, 1920), dtype=np.uint8)
+    for polygon in polygons:
+        cv2.fillPoly(mask, [np.asarray(polygon, dtype=np.int32)], 1)
+    return mask.astype(bool)
+
+
+_LEFT, _RIGHT, _BOTH = _rectangle(200, 300, 400, 500), _rectangle(420, 300, 620, 500), _rectangle(200, 300, 620, 500)
+
+
+def test_a_detection_briefly_spanning_two_mosaics_keeps_both_cameras():
+    apart = [[_LEFT, _RIGHT] for _ in range(300)]
+    spanned = apart[:150] + [[_BOTH] for _ in range(20)] + [[_LEFT, _RIGHT, _BOTH] for _ in range(5)] + apart[175:]
+    plans = _plan(spanned)
+    assert [(p.start, p.stop) for p in plans] == [(0, 300), (0, 300)]
+    assert all(set(p.presence) == {1.0} for p in plans)
+    for plan, alone in zip(plans, _plan(apart), strict=True):
+        assert _widest_crop(plan) <= 1.02 * _widest_crop(alone)
+    for frame in (150, 160, 172):
+        left, right = (_mask(p.polygons[frame]) for p in plans)
+        assert not (left & right).any()
+        assert np.array_equal(left | right, _mask([_BOTH.polygon]))
+
+
+def test_a_mosaic_breaking_up_beside_another_keeps_both_tracks():
+    """For a few frames a piece of the big mosaic comes glued to its neighbour, then one detection covers both."""
+    mosaic, neighbour = _rectangle(560, 580, 1780, 1080), _rectangle(1490, 250, 1920, 700)
+    piece, rest = _rectangle(600, 625, 1170, 915), _rectangle(1220, 580, 1780, 1080)
+    glued = _outline((1220, 580), (1490, 580), (1490, 250), (1920, 250), (1920, 700), (1780, 700), (1780, 1080), (1220, 1080))
+    both = _outline((560, 580), (1490, 580), (1490, 250), (1920, 250), (1920, 700), (1780, 700), (1780, 1080), (560, 1080))
+    apart = [[mosaic, neighbour] for _ in range(300)]
+    plans = _plan(apart[:150] + [[piece, rest, neighbour]] + [[piece, glued] for _ in range(6)] + [[both]] + apart[158:])
+    assert [(p.start, p.stop) for p in plans] == [(0, 300), (0, 300)]
+    assert all(set(p.presence) == {1.0} for p in plans)
+    for plan, alone in zip(plans, _plan(apart), strict=True):
+        assert _widest_crop(plan) <= 1.02 * _widest_crop(alone)
+
+
+def test_a_lasting_merge_still_hands_over():
+    plans = _plan([[_LEFT, _RIGHT] for _ in range(150)] + [[_BOTH] for _ in range(200)])
+    assert [(p.start, p.stop) for p in plans] == [(0, 150 + BLEND_FRAMES), (0, 350)]
+    assert plans[0].presence[-1] < 1.0
+    assert set(plans[1].presence) == {1.0}
+
+
+def test_a_mosaic_seen_for_a_few_frames_gets_no_part_of_a_spanning_detection():
+    frames = [[_LEFT] for _ in range(100)] + [[_LEFT, _RIGHT] for _ in range(5)] + [[_BOTH] for _ in range(10)] + [[_LEFT, _RIGHT] for _ in range(185)]
+    outlines = [_mask(p.polygons[110 - p.start]) for p in _plan(frames) if p.start <= 110 < p.stop]
+    assert any(np.array_equal(outline, _mask([_BOTH.polygon])) for outline in outlines)
+
+
+def test_a_small_detection_inside_a_mosaic_keeps_its_own_outline():
+    """The mosaic around the small detection is missed now and then; its neighbour overlaps it."""
+    mosaic, neighbour, inner = _rectangle(700, 140, 860, 300), _rectangle(820, 200, 940, 320), _rectangle(775, 195, 801, 221)
+    plans = _plan([[neighbour, inner] if t % 40 in (10, 11) else [mosaic, neighbour, inner] for t in range(300)])
+    widths = [max(np.ptp(np.concatenate(polygons)[:, 0]) for polygons in p.polygons) for p in plans]
+    assert min(widths) == 26
 
 
 def test_handover_leads_stop_at_cuts_and_hand_back_to_a_covering_track():
@@ -355,7 +433,7 @@ def _plan_digest(plans) -> str:
 def test_plan_video_output_matches_the_recorded_plan():
     regions, cuts = _random_video(0, 4000)
     plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, stereo=None, large_canvas=True, window_hop=window_hop(17), max_gap=MAX_GAP, min_duration=0)
-    assert _plan_digest(plans) == "1099f21ad72e3a86d0a9e3b1e2d94dc4b126535674cfdddf8d70d4c3e12f3e30"
+    assert _plan_digest(plans) == "bbaab08c30508a52859c74c20a360fe6c9ddcdcc0d5605d6657e7816d30962e0"
 
 
 def test_gap_fill_keeps_outlines_inside_the_frame_when_boxes_leave_it():
