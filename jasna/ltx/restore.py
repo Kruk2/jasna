@@ -74,11 +74,13 @@ LARGE_CANVAS_MIN_TOTAL_BYTES = 15 << 30
 SEGMENT_DECODE_BUDGETS = (
     (22 << 30, {PLAN_CANVAS: 8 << 30, LARGE_CANVAS: 16 << 30}),
     (15 << 30, {PLAN_CANVAS: 8 << 30, LARGE_CANVAS: 10 << 30}),
-    (7 << 30, {PLAN_CANVAS: 6 << 30, LARGE_CANVAS: 8 << 30}),
+    (9 << 30, {PLAN_CANVAS: 6 << 30, LARGE_CANVAS: 8 << 30}),
+    (7 << 30, {PLAN_CANVAS: 5 << 30, LARGE_CANVAS: 8 << 30}),
     (0, {PLAN_CANVAS: 11 << 29, LARGE_CANVAS: 8 << 30}),
 )
 """(least total VRAM, decode budget per canvas): 8 GiB decodes a 512 window in one tile,
-16 GiB a 768 window; 5.5 GiB leaves a 6 GB card room for the rest of the job (768 px
+16 GiB a 768 window; 5 GiB keeps an 8 GB card's whole job under 7 GiB while BasicVSR++
+and NVENC share it (#697), 5.5 GiB leaves a 6 GB card room for the rest of the job (768 px
 windows need 15 GiB, see ``segment_large_canvas``)."""
 DECODE_BUDGET_STEP_BYTES = 512 << 20
 WHOLE_VIDEO_PTS = (-(1 << 63), (1 << 63) - 1)
