@@ -5,6 +5,11 @@ into their track, and each track gets one zooming camera sliced into windows at 
 (104 with less overlap). Windows of a track are denoised together and share their
 overlapping latent frames.
 
+A group covering the last outlines of two or more established tracks that show up apart
+again within half a window (one detection spanning neighbouring mosaics, or a piece of
+one mosaic glued to its neighbour) is cut between them by nearest outline
+(``share_groups``) instead of widening one track and ending or swapping the other.
+
 A continuation stays its own track when folding it would cost its camera
 ``SEPARATE_GAIN`` sharpness for at least a window (``worth_separating``), and a track is
 cut where its size changes for good (``restart_cameras``). A track starting inside
@@ -22,9 +27,11 @@ from __future__ import annotations
 import bisect
 import functools
 import itertools
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
+import cv2
 import numpy as np
 
 from jasna.ltx.camera import (
@@ -56,6 +63,12 @@ BLEND_FRAMES = 16
 LARGE_CANVAS = 768
 LARGE_CANVAS_MIN_SIDE = 640
 FEATHER_FRACTION = 0.028
+SHARE_COVER = 0.3
+SHARE_OWN = 0.1
+SHARE_MIN_FRAMES = 16
+SHARE_HORIZON = WINDOW_FRAMES // 2
+OUTLINE_SCALE = 4
+SCRAP_SHARE = 0.01
 
 
 @dataclass(frozen=True)
@@ -76,6 +89,11 @@ class RegionGroup:
     def extent(self) -> Box:
         """Bounds of the polygon points."""
         return _extent(self.polygons)
+
+    @functools.cached_property
+    def largest_area(self) -> float:
+        """Area of the largest polygon, at most the area of the outline."""
+        return max(abs(cv2.contourArea(np.asarray(polygon, dtype=np.float32))) for polygon in self.polygons)
 
 
 @dataclass
@@ -237,11 +255,166 @@ def track_max_gap(max_detection_gap: int) -> int:
     return max(MAX_GAP, max_detection_gap)
 
 
+class _Raster:
+    """Outlines rasterized ``OUTLINE_SCALE`` times coarser on one grid covering ``extents``."""
+
+    def __init__(self, extents: Sequence[Box]) -> None:
+        self.x0 = math.floor(min(extent[0] for extent in extents))
+        self.y0 = math.floor(min(extent[1] for extent in extents))
+        self.x1 = math.ceil(max(extent[2] for extent in extents)) + 1
+        self.y1 = math.ceil(max(extent[3] for extent in extents)) + 1
+        self.shape = ((self.y1 - self.y0) // OUTLINE_SCALE + 2, (self.x1 - self.x0) // OUTLINE_SCALE + 2)
+
+    def touches(self, box: Box) -> bool:
+        return box[0] < self.x1 and box[2] > self.x0 and box[1] < self.y1 and box[3] > self.y0
+
+    def mask(self, polygons: Sequence[Polygon]) -> np.ndarray:
+        """uint8 cells inside any of ``polygons`` (one fill each, so overlaps stay filled)."""
+        mask = np.zeros(self.shape, dtype=np.uint8)
+        origin = np.array((self.x0, self.y0), dtype=np.float64)
+        for polygon in polygons:
+            cell_polygon = ((np.asarray(polygon, dtype=np.float64) - origin) / OUTLINE_SCALE).round().astype(np.int32)
+            cv2.fillPoly(mask, [cell_polygon], 1)
+        return mask
+
+    def pixels(self, grid: np.ndarray, x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
+        """``grid`` values over the pixels ``x0..x1``, ``y0..y1`` (half-open) inside the raster,
+        each pixel taking its nearest cell as ``mask`` rounds polygon points."""
+        half = OUTLINE_SCALE // 2
+        top, left = (y0 - self.y0 + half) // OUTLINE_SCALE, (x0 - self.x0 + half) // OUTLINE_SCALE
+        bottom, right = (y1 - 1 - self.y0 + half) // OUTLINE_SCALE + 1, (x1 - 1 - self.x0 + half) // OUTLINE_SCALE + 1
+        block = grid[top:bottom, left:right].repeat(OUTLINE_SCALE, axis=0).repeat(OUTLINE_SCALE, axis=1)
+        row = y0 - self.y0 - top * OUTLINE_SCALE + half
+        col = x0 - self.x0 - left * OUTLINE_SCALE + half
+        return block[row : row + y1 - y0, col : col + x1 - x0].copy()
+
+
+def _covered(mask: np.ndarray, outline: np.ndarray) -> float:
+    """Share of the cells of ``outline`` inside ``mask``."""
+    area = np.count_nonzero(outline)
+    return np.count_nonzero(mask & outline) / area if area else 0.0
+
+
+def _seen_apart(raster: _Raster, outlines: Sequence[np.ndarray], ahead: Sequence[Sequence[RegionGroup]]) -> list[bool]:
+    """Per outline: whether a frame of ``ahead`` covers it (``SHARE_COVER``) with groups that
+    cover none of the other outlines."""
+    apart = [False] * len(outlines)
+    for groups in ahead:
+        holds = [
+            [_covered(mask, outline) >= SHARE_COVER for outline in outlines]
+            for mask in (raster.mask(group.polygons) for group in groups if raster.touches(group.extent))
+        ]
+        for k in range(len(outlines)):
+            holders = [held for held in holds if held[k]]
+            if holders and not any(held[j] for held in holders for j in range(len(outlines)) if j != k):
+                apart[k] = True
+        if all(apart):
+            break
+    return apart
+
+
+def _cut(group: RegionGroup, raster: _Raster, outlines: Sequence[np.ndarray]) -> list[RegionGroup | None]:
+    """The group's outlines cut so each pixel goes to the nearest of ``outlines`` (signed
+    distance on the coarse grid); a cut piece under ``SCRAP_SHARE`` of its outline stays with
+    that outline's largest part. One part per outline, None when it gets no pixel."""
+    nearest_cell = np.argmin(
+        [cv2.distanceTransform(1 - outline, cv2.DIST_L2, 3) - cv2.distanceTransform(outline, cv2.DIST_L2, 3) for outline in outlines],
+        axis=0,
+    ).astype(np.uint8)
+    outside = len(outlines)
+    pieces: list[list[Polygon]] = [[] for _ in outlines]
+    for polygon in group.polygons:
+        owners = np.unique(nearest_cell[raster.mask((polygon,)) > 0])
+        if len(owners) == 1:
+            pieces[owners[0]].append(polygon)
+            continue
+        left, top, right, bottom = _extent((polygon,))
+        x0, y0, x1, y1 = math.floor(left), math.floor(top), math.ceil(right) + 1, math.ceil(bottom) + 1
+        inside = np.zeros((y1 - y0, x1 - x0), dtype=np.uint8)
+        cv2.fillPoly(inside, [np.asarray(polygon, dtype=np.float64).round().astype(np.int32) - (x0, y0)], 1)
+        nearest = raster.pixels(nearest_cell, x0, y0, x1, y1)
+        nearest[inside == 0] = outside
+        counts = np.bincount(nearest.ravel(), minlength=outside + 1)[:outside]
+        largest = int(counts.argmax())
+        for k in np.flatnonzero(counts):
+            if k == largest:
+                continue
+            _, labels, stats, _ = cv2.connectedComponentsWithStats((nearest == k).view(np.uint8), connectivity=8)
+            scrap = stats[:, cv2.CC_STAT_AREA] < SCRAP_SHARE * counts.sum()
+            scrap[0] = False
+            nearest[scrap[labels]] = largest
+        if np.count_nonzero(nearest == largest) == counts.sum():
+            pieces[largest].append(polygon)
+            continue
+        for k in range(outside):
+            contours, _ = cv2.findContours((nearest == k).view(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            pieces[k].extend(contour[:, 0, :] + np.array((x0, y0), dtype=np.int32) for contour in contours if len(contour) >= 3)
+    return [RegionGroup(_extent(found), tuple(found)) if found else None for found in pieces]
+
+
+def _may_share(group: RegionGroup, last: RegionGroup) -> bool:
+    """Whether the outline bounds overlap enough for ``_share``'s outline tests to pass."""
+    overlap = _intersection(group.extent, last.extent)
+    return overlap >= SHARE_COVER * last.largest_area and overlap >= SHARE_OWN * group.largest_area
+
+
+def _share(
+    group: RegionGroup, tracks: Sequence[Track], ahead: Sequence[Sequence[RegionGroup]]
+) -> tuple[list[tuple[Track, RegionGroup]], RegionGroup | None] | None:
+    """``share_groups`` for one group and the tracks near it, None when it is not shared."""
+    raster = _Raster([group.extent, *(track.frames[track.last].extent for track in tracks)])
+    group_mask = raster.mask(group.polygons)
+    owners = []
+    for track in tracks:
+        outline = raster.mask(track.frames[track.last].polygons)
+        if _covered(group_mask, outline) >= SHARE_COVER and _covered(outline, group_mask) >= SHARE_OWN:
+            owners.append((track, outline))
+    outlines = [outline for _, outline in owners]
+    if len(owners) < 2 or any(_covered(a, b) >= CONTINUATION_COVER for a, b in itertools.permutations(outlines, 2)):
+        return None
+    apart = _seen_apart(raster, outlines, ahead)
+    if not any(apart):
+        return None
+    parts = _cut(group, raster, outlines)
+    given = [(track, part) for (track, _), part, alone in zip(owners, parts, apart) if alone and part is not None]
+    rest = [polygon for part, alone in zip(parts, apart) if not alone and part is not None for polygon in part.polygons]
+    return given, RegionGroup(_extent(rest), tuple(rest)) if rest else None
+
+
+def share_groups(
+    groups: Sequence[RegionGroup], tracks: Sequence[Track], ahead: Sequence[Sequence[RegionGroup]]
+) -> tuple[list[tuple[Track, RegionGroup]], list[RegionGroup]]:
+    """Cut each group shared by tracks seen on at least ``SHARE_MIN_FRAMES`` frames: it covers
+    ``SHARE_COVER`` of their last outlines, each of those covers ``SHARE_OWN`` of it, and no two
+    overlap by ``CONTINUATION_COVER`` (one mosaic). A track seen apart again within ``ahead``
+    takes its part (``_cut``); the parts of the others stay one group. Returns the parts given
+    to tracks and the groups left to link."""
+    established = [track for track in tracks if len(track.frames) >= SHARE_MIN_FRAMES]
+    given: list[tuple[Track, RegionGroup]] = []
+    remaining: list[RegionGroup] = []
+    for group in groups:
+        near = [
+            track
+            for track in established
+            if all(track is not taken for taken, _ in given) and _may_share(group, track.frames[track.last])
+        ]
+        shared = _share(group, near, ahead) if len(near) >= 2 else None
+        if shared is None:
+            remaining.append(group)
+            continue
+        parts, rest = shared
+        given.extend(parts)
+        if rest is not None:
+            remaining.append(rest)
+    return given, remaining
+
+
 def build_tracks(
     groups_per_frame: Sequence[Sequence[RegionGroup]], cuts: set[int], max_gap: int
 ) -> list[Track]:
     """Greedy best-IoU linking; a track tolerates ``max_gap`` missing frames and never
-    crosses a scene cut (``cuts`` holds first-frame-after-cut indices)."""
+    crosses a scene cut (``cuts`` holds first-frame-after-cut indices). A group shared by
+    tracks is first cut between them (``share_groups``, looking ``SHARE_HORIZON`` frames ahead)."""
     sorted_cuts = sorted(cuts)
     tracks: list[Track] = []
     active: list[Track] = []
@@ -251,15 +424,20 @@ def build_tracks(
             for track in active
             if frame_idx - track.last - 1 <= max_gap and not _cut_between(sorted_cuts, track.last, frame_idx)
         ]
+        ahead_stop = min(_first_cut_after(sorted_cuts, frame_idx, len(groups_per_frame)), frame_idx + 1 + SHARE_HORIZON)
+        given, groups = share_groups(groups, active, groups_per_frame[frame_idx + 1 : ahead_stop])
+        for track, part in given:
+            track.frames[frame_idx] = part
+        linkable = [track for track in active if frame_idx not in track.frames]
         candidates: list[tuple[float, int, int]] = []
-        if active and groups:
+        if linkable and groups:
             iou = compute_iou_matrix(
-                np.asarray([track.frames[track.last].box for track in active], dtype=np.float64),
+                np.asarray([track.frames[track.last].box for track in linkable], dtype=np.float64),
                 np.asarray([group.box for group in groups], dtype=np.float64),
             )
             candidates = [
                 (float(iou[ti, gi]), ti, gi)
-                for ti in range(len(active))
+                for ti in range(len(linkable))
                 for gi in range(len(groups))
                 if iou[ti, gi] >= LINK_IOU
             ]
@@ -269,7 +447,7 @@ def build_tracks(
         for _, ti, gi in candidates:
             if ti in used_tracks or gi in used_groups:
                 continue
-            active[ti].frames[frame_idx] = groups[gi]
+            linkable[ti].frames[frame_idx] = groups[gi]
             used_tracks.add(ti)
             used_groups.add(gi)
         for gi, group in enumerate(groups):
@@ -280,12 +458,16 @@ def build_tracks(
     return tracks
 
 
+def _intersection(a: Box, b: Box) -> float:
+    width = min(a[2], b[2]) - max(a[0], b[0])
+    height = min(a[3], b[3]) - max(a[1], b[1])
+    return max(0.0, width) * max(0.0, height)
+
+
 def _cover(outer: Box, inner: Box) -> float:
     """Intersection of two boxes over the area of ``inner``."""
-    width = min(outer[2], inner[2]) - max(outer[0], inner[0])
-    height = min(outer[3], inner[3]) - max(outer[1], inner[1])
     area = (inner[2] - inner[0]) * (inner[3] - inner[1])
-    return max(0.0, width) * max(0.0, height) / area if area > 0 else 0.0
+    return _intersection(outer, inner) / area if area > 0 else 0.0
 
 
 def _fold(into: dict[int, RegionGroup], frames: dict[int, RegionGroup]) -> dict[int, RegionGroup]:
