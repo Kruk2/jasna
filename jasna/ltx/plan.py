@@ -25,6 +25,7 @@ import itertools
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
+import cv2
 import numpy as np
 
 from jasna.ltx.camera import (
@@ -237,11 +238,50 @@ def track_max_gap(max_detection_gap: int) -> int:
     return max(MAX_GAP, max_detection_gap)
 
 
+def _side(box: Box) -> float:
+    return max(box[2] - box[0], box[3] - box[1])
+
+
+def split_spanning(group: RegionGroup, tracks: Sequence[Track]) -> list[RegionGroup]:
+    """A group holding the last boxes of two or more separate tracks (cover >=
+    ``CONTINUATION_COVER``, neither box that far inside another), ``SEPARATE_GAIN`` wider than the
+    widest of them and continuing no other track (IoU >= ``LINK_IOU``), cut so each outline
+    pixel goes to the nearest of those boxes. One detection spanning separate mosaics (and
+    whatever lies between them) would otherwise fold them into one wide, blurry track."""
+    last_boxes = [track.frames[track.last].box for track in tracks]
+    boxes = [box for box in last_boxes if _cover(group.box, box) >= CONTINUATION_COVER]
+    if len(boxes) < 2 or _side(group.box) < SEPARATE_GAIN * max(_side(box) for box in boxes):
+        return [group]
+    others = [box for box in last_boxes if _cover(group.box, box) < CONTINUATION_COVER]
+    if others and compute_iou_matrix(np.asarray([group.box], dtype=np.float64), np.asarray(others, dtype=np.float64)).max() >= LINK_IOU:
+        return [group]
+    if any(max(_cover(a, b), _cover(b, a)) >= CONTINUATION_COVER for a, b in itertools.combinations(boxes, 2)):
+        return [group]
+    x0, y0, x1, y1 = (int(np.floor(v)) for v in group.extent)
+    outline = np.zeros((y1 - y0 + 1, x1 - x0 + 1), dtype=np.uint8)
+    for polygon in group.polygons:
+        cv2.fillPoly(outline, [np.asarray(polygon, dtype=np.float64).round().astype(np.int32) - (x0, y0)], 1)
+    ys, xs = np.mgrid[y0 : y1 + 1, x0 : x1 + 1]
+    distances = [
+        np.hypot(np.maximum.reduce([bx1 - xs, xs - bx2, 0 * xs]), np.maximum.reduce([by1 - ys, ys - by2, 0 * ys]))
+        for bx1, by1, bx2, by2 in boxes
+    ]
+    nearest = np.argmin(distances, axis=0)
+    parts = []
+    for index in range(len(boxes)):
+        contours, _ = cv2.findContours(outline * (nearest == index), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        polygons = tuple(contour[:, 0, :] + np.array((x0, y0), dtype=np.int32) for contour in contours if len(contour) >= 3)
+        if polygons:
+            parts.append(RegionGroup(_extent(polygons), polygons))
+    return parts
+
+
 def build_tracks(
     groups_per_frame: Sequence[Sequence[RegionGroup]], cuts: set[int], max_gap: int
 ) -> list[Track]:
     """Greedy best-IoU linking; a track tolerates ``max_gap`` missing frames and never
-    crosses a scene cut (``cuts`` holds first-frame-after-cut indices)."""
+    crosses a scene cut (``cuts`` holds first-frame-after-cut indices). A group spanning
+    separate tracks is first cut between them (``split_spanning``)."""
     sorted_cuts = sorted(cuts)
     tracks: list[Track] = []
     active: list[Track] = []
@@ -251,6 +291,7 @@ def build_tracks(
             for track in active
             if frame_idx - track.last - 1 <= max_gap and not _cut_between(sorted_cuts, track.last, frame_idx)
         ]
+        groups = [part for group in groups for part in split_spanning(group, active)]
         candidates: list[tuple[float, int, int]] = []
         if active and groups:
             iou = compute_iou_matrix(
