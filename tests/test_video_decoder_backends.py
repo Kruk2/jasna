@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from contextlib import closing
+from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -156,6 +157,26 @@ def test_frames_before_the_stream_start_are_dropped_before_the_stride() -> None:
     # AMF decoders still return those frames.
     shown = module._shown_frames(iter([-1024, -512, 0, 512, 1024]), lambda pts: pts, 0, 2)
     assert list(shown) == [0, 1024]
+
+
+@pytest.mark.parametrize(
+    ("time_base", "start_pts", "keyframe_pts", "frame_duration"),
+    [
+        # Issue #709: 0.7 µs past a whole microsecond on a 1/10000000 time base.
+        (Fraction(1, 10_000_000), 0, 15_066_374_667, 333_333),
+        (Fraction(1, 10_000_000), 6_666_667, 40_666_667, 333_333),
+        (Fraction(1, 90_000), 0, 135_135, 3003),
+        (Fraction(1, 1000), 0, 4067, 33),
+    ],
+)
+def test_vali_seek_lands_on_the_span_first_frame(
+    time_base, start_pts, keyframe_pts, frame_duration
+) -> None:
+    seek_ts = float((keyframe_pts - start_pts) * time_base)
+    seconds = module._vali_seek_seconds(seek_ts, start_pts, time_base)
+    # VALI's TsFromTime: round to whole µs, then rescale to the stream time base.
+    target_pts = round(Fraction(round(seconds * 1_000_000), 1_000_000) / time_base)
+    assert keyframe_pts - frame_duration < target_pts <= keyframe_pts
 
 
 def test_unknown_backend_raises(monkeypatch) -> None:
