@@ -111,8 +111,9 @@ jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto
 
 ## 作業ディレクトリ
 
-動画を組み立てる間、Jasna は出力の隣の隠しフォルダーに一時ファイルを
-置きます。別のディスク（より速い、またはより大きい）を使うには、
+Jasna は完成した部分を出力の隣の隠しフォルダー `.jasna-resume` に置きます（数 GB
+になる場合があります）。動画が完了すると削除されます。一時停止や失敗の場合は残るので、
+同じ設定でもう一度実行すると続きから処理します。別のディスク（より速い、またはより大きい）を使うには、
 **出力**タブ（**エキスパート**表示）で**作業ディレクトリ**を設定するか、次のように
 指定します:
 
@@ -120,6 +121,4 @@ jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
 ```
 
-LTX の保存済み進行状況もここに置かれます（隠しフォルダー `.jasna-resume`、数 GB
-になる場合があります）。動画が完了すると削除されます。一時停止したジョブを再開するときは、
-同じ作業フォルダーを使ってください。
+一時停止や失敗したジョブを再開するときは、同じ作業フォルダーを使ってください。

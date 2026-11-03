@@ -1,5 +1,5 @@
-"""Parent-owned checkpoints for offline LTX jobs: their storage and fingerprints. Which job a
-checkpoint belongs to is derived by ``jasna.session_factory``."""
+"""Parent-owned checkpoints for offline LTX and segment jobs: their storage and fingerprints.
+Which job a checkpoint belongs to is derived by ``jasna.session_factory``."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ T = TypeVar("T")
 class ResumeMismatchError(ValueError):
     def __init__(self, directory: Path) -> None:
         self.directory = directory
-        super().__init__(f"Saved LTX progress no longer matches the input, settings or app version: {directory}")
+        super().__init__(f"Saved progress no longer matches the input, settings or app version: {directory}")
 
     def discard(self) -> None:
         shutil.rmtree(self.directory)
@@ -62,8 +62,12 @@ def resume_directory(config: SessionConfig, output: Path) -> Path:
     return config.working_dir / f".{output.stem}.{output_key}.jasna-resume"
 
 
+def _has_ltx_work(render: Path) -> bool:
+    return any(any(render.glob(pattern)) for pattern in ("ltx/*.plans.npz", "ltx/*.pt"))
+
+
 def _has_render_work(render: Path) -> bool:
-    return any(any(render.glob(pattern)) for pattern in ("ltx/*.plans.npz", "ltx/*.pt", "segments/*-raw.nut"))
+    return _has_ltx_work(render) or any(render.glob("segments/*-raw.nut"))
 
 
 def has_saved_work(root: Path) -> bool:
@@ -156,8 +160,9 @@ def segments_from_json(data) -> tuple[SegmentRange, ...]:
 
 
 class ResumeJob:
-    """The checkpoint of one output: the restored work of a job, and the LTX auto split it
-    was planned from. ``splice_plan`` None is a job that restores the whole video."""
+    """The checkpoint of one output: the restored work of a job (LTX latents and finished
+    segment fragments), and the LTX auto split it was planned from. ``splice_plan`` None is
+    a job that restores the whole video."""
 
     def __init__(self, config: SessionConfig, source: Path, output: Path, metadata, splice_plan: SplicePlan | None):
         self.root = resume_directory(config, output)
@@ -174,9 +179,9 @@ class ResumeJob:
     def prepare(self) -> None:
         manifest = read_json(self.directory / "job.json")
         if manifest is not None and manifest["fingerprint"] == self.fingerprint:
-            log.info("Resuming saved LTX progress for %s", self.output.name)
+            log.info("Resuming saved progress for %s", self.output.name)
             return
-        if self.matches():
+        if self.matches() and _has_ltx_work(self.directory):
             log.info("Output settings changed for %s; reusing saved LTX work and redoing the rest", self.output.name)
             if (self.directory / "segments").exists():
                 shutil.rmtree(self.directory / "segments")

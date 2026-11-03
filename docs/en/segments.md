@@ -112,14 +112,14 @@ restored whole with LTX. Cannot be used with `--segments` or `--fmp4`.
 
 ## Working Directory
 
-While Jasna puts the video together, it keeps temporary files in a hidden
-folder next to the output. To use another disk (faster or bigger), set
+Jasna keeps the finished parts of the video in a hidden `.jasna-resume` folder
+next to the output (can be several GB). It is deleted when the video finishes.
+If the job is paused or fails, the parts stay, so the next run with the same
+settings continues. To use another disk (faster or bigger), set
 **Working Directory** in the **Output** tab (**Expert** view), or:
 
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
 ```
 
-LTX also keeps its saved progress there (a hidden `.jasna-resume` folder, can
-be several GB). It is deleted when the video finishes. To continue a paused
-job, keep the same Working Directory.
+To continue a paused or failed job, keep the same Working Directory.

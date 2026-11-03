@@ -506,6 +506,20 @@ def test_output_only_change_keeps_latents_and_redoes_fragments(job):
         assert find_resume_output(changed, source, output, ()) == output
 
 
+def test_output_only_change_asks_before_redoing_fragments_without_ltx_work(job):
+    config, source, output, metadata = job
+    config = replace(config, restoration_model_name="basicvsrpp")
+    plan = _plan((SegmentRange(1, 2),))
+    checkpoint = ResumeJob(config, source, output, metadata, plan)
+    checkpoint.prepare()
+    fragment = checkpoint.directory / "segments" / "0000-raw.nut"
+    fragment.parent.mkdir()
+    fragment.write_bytes(b"restored")
+    with pytest.raises(ResumeMismatchError):
+        ResumeJob(replace(config, codec="av1"), source, output, metadata, plan).prepare()
+    assert fragment.read_bytes() == b"restored"
+
+
 def test_changed_plan_keeps_latents_and_redoes_fragments(job):
     config, source, output, metadata = job
     segments = (SegmentRange(1, 2),)

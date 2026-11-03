@@ -31,7 +31,7 @@ models slowly, and it warns you at startup.
 - **▶** (start) continues a paused queue from its pending items. Finished items
   stay finished. After the queue finishes, press ▶ to process everything again
   with your current settings.
-- **Ⅱ** (pause) appears for jobs using LTX. It asks first, then keeps saved work
+- **Ⅱ** (pause) appears for jobs using LTX or ranges. It asks first, then keeps saved work
   and puts the current item back to **Pending**. Press **▶** to continue.
   If the input, settings or Jasna version changed, Jasna asks before replacing saved work;
   **No** keeps it and skips that video.

@@ -735,7 +735,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         output_pattern = self._queue_panel.get_output_pattern()
         settings = self._settings_panel.get_settings()
 
-        from jasna.gui.validation import any_job_uses_ltx, validate_gui_start
+        from jasna.gui.validation import any_job_uses_ltx, job_is_resumable, validate_gui_start
 
         if self._settings_panel.ltx_unavailable_reason() == "model_ltx_not_downloaded" and any_job_uses_ltx(
             jobs, settings
@@ -806,7 +806,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._queue_panel.reset_jobs_for_run()
         
         self._status_pill.set_status("PROCESSING", Colors.STATUS_PROCESSING)
-        self._control_bar.set_resumable(any_job_uses_ltx(jobs, settings))
+        self._control_bar.set_resumable(any(job_is_resumable(job, settings) for job in jobs))
         self._control_bar.set_running(True)
         self._video_player_btn.configure(state="disabled")
         
