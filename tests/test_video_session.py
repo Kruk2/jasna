@@ -29,6 +29,9 @@ pytestmark = pytest.mark.usefixtures("nvidia_vendor")
         ({"vr_mode": "off"}, True),
         ({"vr_mode": "sbs-fisheye"}, True),
         ({"vr_projection": "fisheye"}, True),
+        ({"ltx_vae_encoder": "full"}, False),
+        ({"ltx_vae_decoder": "half"}, False),
+        ({"decode_backend": "pyav-sw"}, True),
     ],
 )
 def test_video_session_key_tracks_only_session_fields(changes, same_session) -> None:

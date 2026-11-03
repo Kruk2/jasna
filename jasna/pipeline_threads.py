@@ -22,6 +22,7 @@ from jasna.pipeline_timing import LoopTimer
 from jasna.progressbar import Progressbar
 from jasna.restorer import RestorationPipeline
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
+from jasna.session_config import DecodeBackendName
 from jasna.tracking.clip_tracker import ClipTracker
 from jasna.tracking.scene_detector import SceneCutDetector
 from jasna.vr180 import StereoLayout
@@ -38,6 +39,7 @@ class FrameWriter(Protocol):
 def decode_detect_loop(
     *,
     input_video: str,
+    decode_backend: DecodeBackendName,
     batch_size: int,
     device: torch.device,
     metadata,
@@ -83,6 +85,7 @@ def decode_detect_loop(
                 device=device,
                 metadata=metadata,
                 frame_stride=frame_stride,
+                decode_backend=decode_backend,
             ) as reader,
             torch.inference_mode(),
         ):
@@ -322,6 +325,7 @@ def secondary_restore_loop(
 def blend_encode_loop(
     *,
     input_video: str,
+    decode_backend: DecodeBackendName,
     batch_size: int,
     device: torch.device,
     metadata,
@@ -350,6 +354,7 @@ def blend_encode_loop(
             device=device,
             metadata=metadata,
             frame_stride=frame_stride,
+            decode_backend=decode_backend,
         ) as reader2:
             frame_gen = _flat_frames(reader2)
             secondary_done = False
@@ -703,6 +708,7 @@ def run_restoration_pass(
         threading.Thread(
             target=lambda: decode_detect_loop(
                 input_video=str(pipeline.input_video),
+                decode_backend=pipeline.decode_backend,
                 batch_size=pipeline.batch_size,
                 device=device,
                 metadata=metadata,
@@ -748,6 +754,7 @@ def run_restoration_pass(
         threading.Thread(
             target=lambda: blend_encode_loop(
                 input_video=str(pipeline.input_video),
+                decode_backend=pipeline.decode_backend,
                 batch_size=pipeline.batch_size,
                 device=device,
                 metadata=metadata,

@@ -114,7 +114,7 @@ def job_fingerprints(
 
     stat = source.stat()
     settings = asdict(config)
-    for key in ("disable_progress", "working_dir"):
+    for key in ("disable_progress", "working_dir", "decode_backend"):
         del settings[key]
     ranges = resolve_restorations(
         splice_plan.segments if splice_plan is not None else (),
@@ -125,7 +125,11 @@ def job_fingerprints(
     if "ltx" in models and not config.ltx_trial:
         latent_models["ltx"] = [
             _model_identity(path) for path in bundle_paths(
-                config.model_path("ltx"), config.ltx_model, fast=config.ltx_fast
+                config.model_path("ltx"),
+                config.ltx_model,
+                fast=config.ltx_fast,
+                encoder=config.ltx_vae_encoder,
+                decoder=config.ltx_vae_decoder,
             )
         ]
     latents = _digest({

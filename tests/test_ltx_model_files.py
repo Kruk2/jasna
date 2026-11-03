@@ -50,7 +50,7 @@ def test_every_model_choice_has_its_own_transformer_file():
     assert bundle_names("undistilled", fast=True)[1:] == bundle_names("distilled", fast=False)[1:]
 
 
-def test_fast_models_default_to_the_distilled_vae_quality_models_to_the_full_one_and_env_overrides(monkeypatch):
+def test_fast_models_default_to_the_distilled_vae_quality_models_to_the_full_one_and_a_choice_overrides():
     transformer = bundle_names("distilled1", fast=False)[0]
     assert bundle_names("distilled1", fast=False) == (
         transformer, "vae.safetensors", "vae-decoder-max.safetensors", "vae-encoder-half.safetensors")
@@ -60,16 +60,13 @@ def test_fast_models_default_to_the_distilled_vae_quality_models_to_the_full_one
         assert bundle_names(model, fast=False)[1:] == ("vae.safetensors", "vae-decoder-full.safetensors")
     assert set(model_files.DEFAULT_VAES) == set(model_files.LTX_MODELS)
 
-    monkeypatch.setenv("JASNA_LTX_VAE_ENCODER", "full")
-    monkeypatch.setenv("JASNA_LTX_VAE_DECODER", "half")
-    assert bundle_names("distilled1", fast=False) == (transformer, "vae.safetensors", "vae-decoder-half.safetensors")
-    monkeypatch.setenv("JASNA_LTX_VAE_ENCODER", "max")
-    assert bundle_names("distilled1", fast=False)[3] == "vae-encoder-max.safetensors"
-    assert LtxModelFiles(*map(Path, bundle_names("distilled1", fast=False))).video_encoder.name == (
-        "vae-encoder-max.safetensors")
-    monkeypatch.setenv("JASNA_LTX_VAE_DECODER", "quarter")
-    with pytest.raises(ValueError, match="JASNA_LTX_VAE_DECODER='quarter' is not one of full, half, max"):
-        bundle_names("distilled1", fast=False)
+    assert bundle_names("distilled1", fast=False, encoder="full", decoder="half") == (
+        transformer, "vae.safetensors", "vae-decoder-half.safetensors")
+    assert bundle_names("distilled1", fast=False, encoder="max")[2:] == (
+        "vae-decoder-max.safetensors", "vae-encoder-max.safetensors")
+    assert bundle_names("distilled", fast=False, decoder="max")[1:] == ("vae.safetensors", "vae-decoder-max.safetensors")
+    names = bundle_names("distilled1", fast=False, encoder="max", decoder="half")
+    assert LtxModelFiles(*map(Path, names)).video_encoder.name == "vae-encoder-max.safetensors"
 
 
 def test_every_vae_choice_is_a_published_download():

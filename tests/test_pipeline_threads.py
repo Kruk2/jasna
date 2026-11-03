@@ -57,6 +57,7 @@ def _decode(reader, *, process=_register_frames, metadata=None, **overrides):
     metadata_queue = Queue(maxsize=999)
     arguments = dict(
         input_video="fake.mkv",
+        decode_backend="auto",
         batch_size=2,
         device=torch.device("cpu"),
         metadata=metadata or video_metadata(num_frames=100),
@@ -236,6 +237,7 @@ def _blend_encode(*, pending_tracks=None, encode_items=(), error_holder=None, ca
     ):
         blend_encode_loop(
             input_video="fake.mkv",
+            decode_backend="auto",
             batch_size=1,
             device=torch.device("cpu"),
             metadata=video_metadata(),

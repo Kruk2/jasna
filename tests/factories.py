@@ -49,6 +49,8 @@ def session_config(**overrides) -> SessionConfig:
         ltx_seed=0,
         ltx_fast=False,
         ltx_model="distilled",
+        ltx_vae_encoder="auto",
+        ltx_vae_decoder="auto",
         ltx_trial=False,
         ltx_auto_split_percent=None,
         compile_basicvsrpp=True,
@@ -76,6 +78,7 @@ def session_config(**overrides) -> SessionConfig:
         fmp4=False,
         sharpen_strength=0.0,
         tvai_denoise=False,
+        decode_backend="auto",
     )
     base.update(overrides)
     return SessionConfig(**base)

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from jasna import __version__
-from jasna.ltx.model_files import LTX_MODEL_BRANCH
+from jasna.ltx.model_files import LTX_MODEL_BRANCH, resolved_vaes
 from jasna.segments import SegmentRange
 from jasna.session_config import RestorationModelName, SessionConfig
 
@@ -96,9 +96,12 @@ def job_settings(
             basicvsrpp["vr_projection"] = vr.projection
         settings["basicvsrpp"] = basicvsrpp
     if "ltx" in models:
+        vae_encoder, vae_decoder = resolved_vaes(config.ltx_model, config.ltx_vae_encoder, config.ltx_vae_decoder)
         ltx: dict[str, object] = {
             "weights": ltx_weights,
             "weights_release": LTX_MODEL_BRANCH,
+            "vae_encoder": vae_encoder,
+            "vae_decoder": vae_decoder,
             "window_hop": config.ltx_window_hop,
             "large_canvas": ltx_large_canvas,
         }

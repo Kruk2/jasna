@@ -62,14 +62,14 @@ def test_model_key_names_each_model_choice() -> None:
 
 def test_availability_without_downloads(tmp_path) -> None:
     _install(tmp_path, "distilled", fast=False)
-    state = read_install_state(tmp_path)
+    state = read_install_state(tmp_path, "auto", "auto")
 
     assert not state.downloadable
     assert state.installed("distilled", False) and not state.installed("distilled", True)
     assert card_unavailable_reason(NVIDIA) is None
     assert card_unavailable_reason(AMD) is None
     assert card_unavailable_reason(CPU) == "model_ltx_needs_nvidia"
-    assert not trial_only(state) and trial_only(read_install_state(tmp_path / "empty"))
+    assert not trial_only(state) and trial_only(read_install_state(tmp_path / "empty", "auto", "auto"))
     assert run_unavailable_reason(state, "undistilled", False, NVIDIA, trial=False) == "model_ltx_not_installed"
     assert run_unavailable_reason(state, "undistilled", False, NVIDIA, trial=True) is None
     assert run_unavailable_reason(state, "distilled", False, None, trial=False) is None
@@ -78,7 +78,7 @@ def test_availability_without_downloads(tmp_path) -> None:
 
 
 def test_availability_with_downloads(tmp_path, downloadable) -> None:
-    state = read_install_state(tmp_path)
+    state = read_install_state(tmp_path, "auto", "auto")
 
     assert state.downloadable
     assert not trial_only(state)
@@ -86,10 +86,22 @@ def test_availability_with_downloads(tmp_path, downloadable) -> None:
 
 
 def test_amd_uses_normal_licensed_model_downloads(tmp_path, downloadable) -> None:
-    state = read_install_state(tmp_path)
+    state = read_install_state(tmp_path, "auto", "auto")
     assert not trial_only(state)
     assert state.usable("distilled2", False)
     assert run_unavailable_reason(state, "distilled2", False, AMD, trial=False) == "model_ltx_not_downloaded"
+
+
+def test_vae_choice_decides_which_files_a_model_needs(tmp_path) -> None:
+    _install(tmp_path, "distilled2", fast=False)
+    models = LtxModels(tmp_path, _NowCalls(), lambda: None)
+    assert models.state.installed("distilled2", False)
+    assert not ltx_models_module.license_missing(tmp_path, "distilled2", False, "auto", "auto")
+
+    models.set_vaes("full", "full")
+
+    assert [file.name for file in models.state.missing[("distilled2", False)]] == ["vae-decoder-full.safetensors.enc"]
+    assert ltx_models_module.license_missing(tmp_path, "distilled2", False, "full", "full")
 
 
 def _answer(monkeypatch, yes: bool) -> list[str]:
@@ -477,7 +489,7 @@ def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch, downlo
 
     directory = tmp_path / "ltx"
     _install(directory, "distilled", fast=False)
-    assert not ltx_models_module.license_missing(directory, "distilled", False)
+    assert not ltx_models_module.license_missing(directory, "distilled", False, "auto", "auto")
 
     def refuse(*_args, **_kwargs):
         raise LicenseError("No license found.")
@@ -485,7 +497,7 @@ def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch, downlo
     monkeypatch.setattr(model_files, "needs_license", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(ltx_models_module, "read_license_info", lambda: (True, True))
     monkeypatch.setattr("jasna.protection.protected_tensors.check_saved_ltx_license", refuse)
-    assert ltx_models_module.license_missing(directory, "distilled", False)
+    assert ltx_models_module.license_missing(directory, "distilled", False, "auto", "auto")
 
 
 def test_the_progress_stage_is_marked_as_a_trial(tk_root) -> None:

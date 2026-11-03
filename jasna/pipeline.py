@@ -144,6 +144,7 @@ class Pipeline:
         self.max_detection_gap = config.max_detection_gap
         self.min_detection_duration = config.min_detection_duration
         self.scene_detection = config.scene_detection
+        self.decode_backend = config.decode_backend
         self.vr_mode = config.vr_mode
         self.vr_projection = config.vr_projection
         self.detection_model = session.detection_model_for(config)
@@ -369,6 +370,7 @@ class Pipeline:
                     batch_size=self.batch_size,
                     device=self.device,
                     frame_stride=frame_rate.frame_stride,
+                    decode_backend=self.decode_backend,
                     seek_ts=None,
                     end_pts=None,
                 ),
@@ -448,6 +450,7 @@ class Pipeline:
                 batch_size=self.batch_size,
                 device=self.device,
                 frame_stride=1,
+                decode_backend=self.decode_backend,
                 seek_ts=index.seconds_for_pts(span.start_pts),
                 end_pts=span.end_pts,
             ),
@@ -510,6 +513,7 @@ class Pipeline:
             batch_size=self.batch_size,
             device=self.device,
             frame_stride=1,
+            decode_backend=self.decode_backend,
             seek_ts=index.seconds_for_pts(span.start_pts),
             end_pts=span.end_pts,
         )

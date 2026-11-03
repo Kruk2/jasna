@@ -30,6 +30,9 @@ VrProjectionName = Literal["auto", "raw", "fisheye", "gnomonic"]
 RtxQualityName = Literal["low", "medium", "high", "ultra"]
 RtxLevelName = Literal["none", "low", "medium", "high", "ultra"]
 CodecName = Literal["hevc", "h264", "av1"]
+LtxVaeName = Literal["auto", "full", "half", "max"]
+"""An LTX video encoder or decoder size; "auto" is the model's own default."""
+DecodeBackendName = Literal["auto", "vali", "pyav-hw", "pyav-sw"]
 
 
 @dataclass(frozen=True)
@@ -50,6 +53,8 @@ class SessionConfig:
     ltx_seed: int
     ltx_fast: bool
     ltx_model: LtxModelName
+    ltx_vae_encoder: LtxVaeName
+    ltx_vae_decoder: LtxVaeName
     ltx_trial: bool
     ltx_auto_split_percent: float | None
     compile_basicvsrpp: bool
@@ -77,6 +82,7 @@ class SessionConfig:
     fmp4: bool
     sharpen_strength: float
     tvai_denoise: bool
+    decode_backend: DecodeBackendName
 
     def model_path(self, name: RestorationModelName) -> Path:
         """``restoration_model_path`` belongs to the job's model; another model loads from its

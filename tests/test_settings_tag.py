@@ -33,6 +33,16 @@ def test_whole_video_ltx_records_the_canvas_the_run_used_and_no_basicvsrpp():
     assert settings["output"]["lut"] == "warm.cube"
 
 
+def test_ltx_records_the_vae_sizes_auto_resolved_to():
+    config = session_config(restoration_model_name="ltx", ltx_model="distilled2", ltx_vae_decoder="full")
+
+    ltx = job_settings(
+        config, models=frozenset({"ltx"}), segments=None, vr=FLAT, ltx_weights=WEIGHTS, ltx_large_canvas=False
+    )["ltx"]
+
+    assert (ltx["vae_encoder"], ltx["vae_decoder"]) == ("half", "full")
+
+
 def test_mixed_job_sums_ranges_per_model_with_every_ltx_seed():
     config = session_config(
         restoration_model_name="ltx",

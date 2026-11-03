@@ -91,9 +91,9 @@ def test_latents_ignore_part_files_and_load_only_weights(tmp_path):
     assert store.has(3)
 
 
-def test_fingerprint_ignores_progress_and_working_directory(job, tmp_path):
+def test_fingerprint_ignores_progress_working_directory_and_decoder(job, tmp_path):
     config, source, output, metadata = job
-    changed = replace(config, disable_progress=True, working_dir=tmp_path / "scratch")
+    changed = replace(config, disable_progress=True, working_dir=tmp_path / "scratch", decode_backend="pyav-sw")
     assert job_fingerprints(config, source, output, metadata, None) == job_fingerprints(changed, source, output, metadata, None)
 
 
@@ -215,6 +215,14 @@ def test_fingerprint_detects_changes(job, monkeypatch, change):
     else:
         metadata = SimpleNamespace(num_frames=120, time_base=Fraction(1, 24), duration=5.0)
     assert job_fingerprints(config, source, output, metadata, _plan(ranges)) != original
+
+
+def test_another_ltx_encoder_changes_the_saved_latents_key(job):
+    config, source, output, metadata = job
+    (config.model_path("ltx") / "vae-encoder-half.safetensors").write_bytes(b"half encoder")
+    latents = job_fingerprints(config, source, output, metadata, None)[1]
+
+    assert job_fingerprints(replace(config, ltx_vae_encoder="half"), source, output, metadata, None)[1] != latents
 
 
 def test_latents_follow_the_detection_gap_only_where_ltx_tracks_use_it(job):

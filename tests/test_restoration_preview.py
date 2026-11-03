@@ -265,6 +265,7 @@ def test_preview_pass_forwards_scene_detection(monkeypatch) -> None:
     command = worker._commands.get_nowait()
     pipeline = SimpleNamespace(
         input_video=Path("video.mp4"),
+        decode_backend="auto",
         device=torch.device("cpu"),
         restoration_pipeline=SimpleNamespace(secondary_num_workers=1),
         max_clip_size=settings.max_clip_size,

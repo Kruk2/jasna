@@ -12,7 +12,6 @@ import http.client
 import json
 import logging
 import math
-import os
 import ssl
 import stat
 import urllib.error
@@ -26,7 +25,7 @@ import certifi
 
 from jasna._frozen import is_frozen
 from jasna.os_utils import commit_file
-from jasna.session_config import LtxModelName
+from jasna.session_config import LtxModelName, LtxVaeName
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +68,6 @@ VAE_ENCODERS = {"full": _VAE_NAME, "half": "vae-encoder-half.safetensors", "max"
 # (decode -41 % / -61 %).
 VAE_DECODERS = {"full": "vae-decoder-full.safetensors", "half": "vae-decoder-half.safetensors",
                 "max": "vae-decoder-max.safetensors"}
-VAE_ENCODER_ENV, VAE_DECODER_ENV = "JASNA_LTX_VAE_ENCODER", "JASNA_LTX_VAE_DECODER"
 # (encoder, decoder) per model. In human A/Bs on real clips the full VAE is slightly sharper than the half encoder
 # with the max decoder, which saves 14-29 % of a 1-step job but only 8-14 % of a 4-step one: the fast models take
 # the distilled VAE, the quality models the full one (benchmarks/2026-10-28_ltx_vae_choices.md).
@@ -287,31 +285,39 @@ def open_tensors(path: Path | PlaceholderTensors):
     return open_ltx_tensors(path)
 
 
-def _vae_choice(env: str, choices: dict[str, str], default: str) -> str:
-    choice = os.environ.get(env, default)
-    if choice not in choices:
-        raise ValueError(f"{env}={choice!r} is not one of {', '.join(choices)}")
-    return choices[choice]
-
-
-def bundle_names(model: LtxModelName, *, fast: bool) -> tuple[str, ...]:
-    """(transformer, vae, decoder[, video encoder]) file names of one model choice; the encoder is
-    named only when it is not the VAE's own. ``JASNA_LTX_VAE_ENCODER`` (full / half / max) and
-    ``JASNA_LTX_VAE_DECODER`` (full / half / max) override the model's ``DEFAULT_VAES``."""
+def resolved_vaes(model: LtxModelName, encoder: LtxVaeName, decoder: LtxVaeName) -> tuple[str, str]:
+    """The (encoder, decoder) sizes a job runs with: "auto" is the model's ``DEFAULT_VAES``."""
     default_encoder, default_decoder = DEFAULT_VAES[model]
-    encoder = _vae_choice(VAE_ENCODER_ENV, VAE_ENCODERS, default_encoder)
-    decoder = _vae_choice(VAE_DECODER_ENV, VAE_DECODERS, default_decoder)
-    return (_TRANSFORMER_NAMES[(model, fast)], _VAE_NAME, decoder, *((encoder,) if encoder != _VAE_NAME else ()))
+    return (default_encoder if encoder == "auto" else encoder, default_decoder if decoder == "auto" else decoder)
 
 
-def bundle_paths(directory: Path, model: LtxModelName, *, fast: bool) -> list[Path]:
-    paths = [directory / name for name in bundle_names(model, fast=fast)]
+def bundle_names(
+    model: LtxModelName, *, fast: bool, encoder: LtxVaeName = "auto", decoder: LtxVaeName = "auto"
+) -> tuple[str, ...]:
+    """(transformer, vae, decoder[, video encoder]) file names of one model choice; the encoder is
+    named only when it is not the VAE's own."""
+    encoder, decoder = resolved_vaes(model, encoder, decoder)
+    encoder_name = VAE_ENCODERS[encoder]
+    return (
+        _TRANSFORMER_NAMES[(model, fast)], _VAE_NAME, VAE_DECODERS[decoder],
+        *((encoder_name,) if encoder_name != _VAE_NAME else ()),
+    )
+
+
+def bundle_paths(
+    directory: Path, model: LtxModelName, *, fast: bool, encoder: LtxVaeName = "auto", decoder: LtxVaeName = "auto"
+) -> list[Path]:
+    paths = [directory / name for name in bundle_names(model, fast=fast, encoder=encoder, decoder=decoder)]
     return [path.with_name(path.name + ".enc") if is_frozen() or not path.is_file() else path for path in paths]
 
 
-def needs_license(directory: Path, model: LtxModelName, *, fast: bool) -> bool:
+def needs_license(
+    directory: Path, model: LtxModelName, *, fast: bool, encoder: LtxVaeName = "auto", decoder: LtxVaeName = "auto"
+) -> bool:
     """Whether this model choice runs from the protected (``.enc``) files, which need a license."""
-    return any(path.suffix == ".enc" for path in bundle_paths(directory, model, fast=fast))
+    return any(
+        path.suffix == ".enc" for path in bundle_paths(directory, model, fast=fast, encoder=encoder, decoder=decoder)
+    )
 
 
 def _current_model_file(path: Path) -> bool:
@@ -358,18 +364,29 @@ class LtxModelFiles:
         return self.transformer.name.removesuffix(".enc")
 
     @classmethod
-    def placeholder(cls, model: LtxModelName, *, fast: bool) -> LtxModelFiles:
+    def placeholder(
+        cls, model: LtxModelName, *, fast: bool, encoder: LtxVaeName = "auto", decoder: LtxVaeName = "auto"
+    ) -> LtxModelFiles:
         """Random weights shaped like ``model``'s files, for the trial: runs every pass at
         full cost with no model files and no license, and restores nothing."""
+        names = bundle_names(model, fast=fast, encoder=encoder, decoder=decoder)[1:]
         return cls(
             PlaceholderTensors("nvfp4" if fast else "int8", model),
-            *(PlaceholderTensors(name.removesuffix(".safetensors"), model) for name in bundle_names(model, fast=fast)[1:]),
+            *(PlaceholderTensors(name.removesuffix(".safetensors"), model) for name in names),
         )
 
     @classmethod
-    def from_dir(cls, directory: Path, model: LtxModelName, *, fast: bool) -> LtxModelFiles:
+    def from_dir(
+        cls,
+        directory: Path,
+        model: LtxModelName,
+        *,
+        fast: bool,
+        encoder: LtxVaeName = "auto",
+        decoder: LtxVaeName = "auto",
+    ) -> LtxModelFiles:
         """The bundle of ``model``; ``fast`` picks its NVFP4 transformer over the INT8 one."""
-        paths = bundle_paths(directory, model, fast=fast)
+        paths = bundle_paths(directory, model, fast=fast, encoder=encoder, decoder=decoder)
         if any(path.suffix == ".enc" for path in paths):
             from jasna.license_api import require_protection
 
@@ -392,10 +409,12 @@ def bundle_present(directory: Path) -> bool:
     return any(model_installed(directory, model, fast=fast) for model in LTX_MODELS for fast in (False, True))
 
 
-def missing_downloads(directory: Path, model: LtxModelName, *, fast: bool) -> list[DownloadableFile]:
+def missing_downloads(
+    directory: Path, model: LtxModelName, *, fast: bool, encoder: LtxVaeName = "auto", decoder: LtxVaeName = "auto"
+) -> list[DownloadableFile]:
     """The files this model choice still needs, as published (``.enc`` in releases)."""
     missing = []
-    for path in bundle_paths(directory, model, fast=fast):
+    for path in bundle_paths(directory, model, fast=fast, encoder=encoder, decoder=decoder):
         if not _current_model_file(path):
             entry = LTX_DOWNLOADS[path.name.removesuffix(".enc")]
             missing.append(DownloadableFile(path.name, entry.size_bytes, entry.sha256))

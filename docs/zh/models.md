@@ -109,6 +109,10 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
 | VAE（基础画质、标准画质） | `vae.safetensors.enc`、`vae-encoder-half.safetensors.enc` 和 `vae-decoder-max.safetensors.enc` |
 | VAE（良好画质、高画质、顶级画质） | `vae.safetensors.enc` 和 `vae-decoder-full.safetensors.enc` |
 
+选了别的 **LTX 编码器**或 **LTX 解码器**？请下载对应的 `vae-encoder-half`、`vae-encoder-max`
+（完整是 `vae.safetensors.enc`）或 `vae-decoder-full`、`vae-decoder-half`、`vae-decoder-max`
+（`.safetensors.enc`）。
+
 把这些文件都放到 Jasna 文件夹里的 `model_weights/ltx-restore`（没有
 `ltx-restore` 文件夹就新建一个）。文件名保持原样，包括 `.enc`。重新开始 LTX
 任务，Jasna 就不会再要求下载。
@@ -132,8 +136,10 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
   你的电脑上有多快。视频**不会**被修复。CLI：`--ltx-trial`。
 - **仅大马赛克用 LTX**：大马赛克用 LTX，其余用更快的 BasicVSR++。长视频能省很多
   时间。见[只修复视频的一部分](segments.md#cli---ltx-auto-split)。
-- **VAE**（高级）：基础画质和标准画质使用更小、更快的 VAE 文件，其他画质使用完整的 VAE 文件。
-  要更改，见[高级环境变量](tuning.md#高级环境变量)。
+- **LTX 编码器**和 **LTX 解码器**（**专家**视图）：**完整**最清晰也最慢，**半量**更快，**极速**最快，
+  画面稍柔和。**自动**（默认）在基础画质和标准画质下用半量编码器和极速解码器，其他画质用完整。
+  如果快速模型看起来比 Jasna 0.11.3 更柔和，两个都选完整。还没下载的选项会在点击开始时下载。
+  CLI：见[高级环境变量](tuning.md#高级环境变量)。
 
 要预览 LTX，请打开[区间编辑器](segments.md)，选择一个区间，选 LTX，再打开
 **修复预览**。视频播放器总是使用 BasicVSR++。

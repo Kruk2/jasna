@@ -153,8 +153,8 @@ python -m jasna                                    # GUI
 python -m jasna --input in.mp4 --output out.mp4    # CLI (see docs/en/cli.md)
 ```
 
-`JASNA_DECODE_BACKEND=vali|pyav-hw|pyav-sw` forces a decoder; the default
-`auto` prefers VALI on NVIDIA.
+`JASNA_DECODE_BACKEND=vali|pyav-hw|pyav-sw` forces a decoder on the CLI (the GUI
+has **Video Decoder** in the Expert view); the default `auto` prefers VALI on NVIDIA.
 
 ## Tests
 
