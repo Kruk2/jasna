@@ -1,9 +1,9 @@
 # Cloud GPUs (RunPod, Vast, Docker)
 
 You can run Jasna on a rented GPU with the Linux NVIDIA version, from the
-command line. Your License code works there: the machine counts as one of your
-3 devices only while Jasna runs, and it needs internet while you use supporter
-models. GitHub source checkouts can't use supporter models.
+command line. Your License code works there. In a container or virtual machine
+Jasna always works online, so the machine counts as one of your 3 devices only
+while Jasna runs, and it needs internet while you use supporter models. GitHub source checkouts can't use supporter models.
 
 ## What you need
 

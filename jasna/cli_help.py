@@ -3,7 +3,8 @@
 CLI_HELP: dict[str, str] = {
     "license_code": (
         "Activate with your License code. On a computer with a TPM 2.0 security chip, Jasna then works offline; "
-        "otherwise it checks your license online while it uses supporter models. "
+        "otherwise, and always in a Linux container or virtual machine, it checks your license online while it "
+        "uses supporter models. "
         "Without --input, --stream or --benchmark, activate and exit."
     ),
     "activation_status": "Show whether Jasna is activated and how many of your devices are in use, then exit.",

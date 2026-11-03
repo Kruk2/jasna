@@ -137,9 +137,10 @@ your license by itself:
   offline from then on. On Windows, a permission prompt may appear once; this
   is a one-time license check for offline use. If you decline it, Jasna checks
   online instead; enter your License code again to switch to offline.
-- **Other PCs, rented GPUs and Docker**: Jasna checks your license online while
-  it uses supporter models, so keep the PC connected. If the connection stays
-  down, the queue stops. Start it again once you are back online.
+- **Other PCs, rented GPUs, and Linux in a container (Docker, distrobox) or
+  virtual machine**: Jasna checks your license online while it uses supporter
+  models, so keep the PC connected. If the connection stays down, the queue
+  stops. Start it again once you are back online.
 
 Good to know:
 
@@ -160,10 +161,6 @@ Good to know:
   `sudo usermod -aG tss $USER`. Restart the PC and activate again to work
   offline. On NixOS, first add `security.tpm2.enable = true;` and put your
   user in the `tss` group in `configuration.nix`.
-- Linux in distrobox or toolbox: the container must use the host's TPM group.
-  Inside it, `ls -ln /dev/tpmrm0` shows the group number; if `id` does not list
-  that number, create the container again with
-  `--additional-flags "--group-add <number>"`, then activate again.
 - "No maker certificate" on an AMD PC: update the BIOS. Older AMD security chip
   firmware often has no certificate. If that does not help, Jasna works online.
 - Moved from an older Jasna? Your activation carries over on the first job. If

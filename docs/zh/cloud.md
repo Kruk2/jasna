@@ -1,6 +1,7 @@
 # 云 GPU（RunPod、Vast、Docker）
 
-租用的 GPU 也能用命令行运行 Linux NVIDIA 版 Jasna，许可证码同样可用：只有 Jasna 运行时
+租用的 GPU 也能用命令行运行 Linux NVIDIA 版 Jasna，许可证码同样可用：
+在容器或虚拟机里 Jasna 总是在线使用，因此只有 Jasna 运行时
 这台机器才占用 3 个设备名额中的 1 个，使用支持者模型时需要联网。GitHub 源码版不能使用
 支持者模型。
 
