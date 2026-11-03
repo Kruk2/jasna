@@ -165,7 +165,7 @@ Jasna 是免费的。你的支持用于训练新模型，主要是租用 GPU。�
 - **有 TPM 2.0 安全芯片的电脑**（大多数 Windows 11 电脑）：在线激活一次后，Jasna
   可以离线使用。这台电脑占用 3 个名额中的 1 个。Windows 可能会请求一次权限。
   更换主板或重置安全芯片算新电脑。
-- **其他电脑、租用的 GPU 和 Docker**：使用支持者模型时需要联网。只有 Jasna
+- **其他电脑、租用的 GPU，以及在容器（Docker、distrobox）或虚拟机里的 Linux**：使用支持者模型时需要联网。只有 Jasna
   运行时才占用设备名额。见[云 GPU](docs/zh/cloud.md)。
 - 有安全芯片的 Linux：如需离线使用，请运行 `sudo usermod -aG tss $USER`，
   重启电脑后再激活一次。

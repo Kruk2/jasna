@@ -171,9 +171,9 @@ in use, open **Activate Jasna** again.
   activation, Jasna works offline. The PC keeps one of your 3 slots. Windows
   may ask for permission once. A new motherboard or a security chip reset
   counts as a new PC.
-- **Other PCs, rented GPUs and Docker**: Jasna needs internet while it uses
-  supporter models. A device counts only while Jasna runs. See
-  [Cloud GPUs](docs/en/cloud.md).
+- **Other PCs, rented GPUs, and Linux in a container (Docker, distrobox) or
+  virtual machine**: Jasna needs internet while it uses supporter models. A
+  device counts only while Jasna runs. See [Cloud GPUs](docs/en/cloud.md).
 - Linux with a security chip: to use it offline, run
   `sudo usermod -aG tss $USER`, restart the PC and activate again.
 

@@ -37,6 +37,8 @@ def test_cli_rejects_retired_options(monkeypatch, arguments):
 
 ACTIVATION_MESSAGES = [
     (None, ("license_offline_active",)),
+    ("virtual", ("license_lease_active", "license_virtual_online")),
+    ("unreachable", ("license_lease_active", "license_offline_unreachable")),
     ("missing", ("license_lease_active", "license_tpm_missing")),
     ("denied", ("license_lease_active", "license_tss_hint")),
     ("uncertified", ("license_lease_active", "license_tpm_uncertified")),
