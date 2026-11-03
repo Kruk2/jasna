@@ -286,8 +286,12 @@ def test_retarget_high_fps_halves_the_rate_for_readers_encoder_and_progress():
     assert progress_cls.call_args.kwargs["video_fps"] == 30.0
 
 
-def test_fmp4_is_dropped_for_segment_processing():
-    p = _pipeline(fmp4=True, segments=(SegmentRange(0.0, 1.0),))
+def test_fmp4_is_dropped_for_segment_processing(tmp_path):
+    p = _pipeline(
+        fmp4=True, segments=(SegmentRange(0.0, 1.0),),
+        input_video=tmp_path / "in.mp4", output_video=tmp_path / "out.mp4",
+    )
+    p.input_video.touch()
 
     with (
         patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),

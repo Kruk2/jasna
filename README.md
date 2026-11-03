@@ -215,7 +215,7 @@ Standard (default), Good (about 1.5x slower), High (about 2.5x slower) and Top
 (about 5x slower). See
 [Choosing models](docs/en/models.md#restoration-model).
 
-LTX jobs can pause and continue. See
+LTX jobs and jobs with ranges can pause and continue. See
 [Pause and continue](docs/en/models.md#pause-and-continue).
 
 ### Command line

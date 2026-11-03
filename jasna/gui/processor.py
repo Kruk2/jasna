@@ -239,14 +239,14 @@ class Processor:
         if snapshot is None:
             return
         segments = snapshot.segments
-        from jasna.gui.validation import any_job_uses_ltx
+        from jasna.gui.validation import job_is_resumable
 
         self._log("INFO", f"Started processing {job.filename}")
         self._progress(ProgressUpdate(
             job_id=job.id,
             status=JobStatus.PROCESSING,
             message=f"Starting {job.filename}",
-            resumable=not media_files.is_image(job.path) and any_job_uses_ltx([job], self._settings),
+            resumable=job_is_resumable(job, self._settings),
         ))
         
         input_path = job.path
@@ -317,9 +317,9 @@ class Processor:
             self._progress(ProgressUpdate(
                 job_id=job.id,
                 status=JobStatus.SKIPPED,
-                message="Saved LTX work kept",
+                message="Saved work kept",
             ))
-            self._log("WARNING", f"Skipped {job.filename}: saved LTX work kept")
+            self._log("WARNING", f"Skipped {job.filename}: saved work kept")
 
         except LicenseCheckStopped as e:
             job.status = JobStatus.ERROR
@@ -430,7 +430,7 @@ class Processor:
         if self._stop_event.is_set():
             raise ProcessingStopped("Processing stopped")
         if answer.result():
-            self._log("INFO", "Replacing saved LTX progress after confirmation")
+            self._log("INFO", "Replacing saved progress after confirmation")
         return answer.result()
 
     def _run_video_pipeline(

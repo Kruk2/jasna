@@ -1,4 +1,5 @@
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -147,7 +148,7 @@ def test_changed_progress_requires_confirmation_and_declining_skips_only_that_jo
 
 
 @pytest.mark.parametrize("file_conflict", ["auto_rename", "skip"])
-@pytest.mark.parametrize("ranges", ["editor", "auto_split", "none"])
+@pytest.mark.parametrize("ranges", ["editor", "auto_split", "none", "basicvsrpp_editor"])
 def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conflict, ranges):
     """The processor's saved-work lookup derives the job exactly as running it does, also
     when ranges keep a source codec other than the chosen one."""
@@ -184,10 +185,12 @@ def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conf
     resumed = []
 
     def restore(pipeline, _metadata):
-        latent = pipeline.resume.directory / "ltx" / "000000.0-1-0.reference.pt"
-        resumed.append(latent.exists())
-        latent.parent.mkdir(parents=True, exist_ok=True)
-        latent.write_bytes(b"latent")
+        work = pipeline.resume.directory / (
+            "segments/0000-raw.nut" if ranges == "basicvsrpp_editor" else "ltx/000000.0-1-0.reference.pt"
+        )
+        resumed.append(work.exists())
+        work.parent.mkdir(parents=True, exist_ok=True)
+        work.write_bytes(b"work")
         if len(resumed) == 1:
             pipeline.cancel()
 
@@ -203,10 +206,10 @@ def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conf
     )
     processor._prepare_job_detector = MagicMock()
     job.path.touch()
-    if ranges == "editor":
+    if ranges in ("editor", "basicvsrpp_editor"):
         job.segments = (SegmentRange(2.5, 3.0),)
     processor._settings = AppSettings(
-        restoration_model="ltx", ltx_auto_split=ranges == "auto_split", codec="av1", encoder_cq=38,
+        restoration_model="basicvsrpp" if ranges == "basicvsrpp_editor" else "ltx", ltx_auto_split=ranges == "auto_split", codec="av1", encoder_cq=38,
         vr_mode="off", file_conflict=file_conflict,
     )
 
@@ -241,6 +244,23 @@ def test_control_bar_shows_pause_for_ltx_and_uses_pause_confirmation(tk_root, mo
 
     bar.set_resumable(False)
     assert bar._stop_btn.cget("text") == "■"
+
+
+@pytest.mark.parametrize(
+    ("name", "model", "segments", "resumable"),
+    [
+        ("clip.mp4", "basicvsrpp", (), False),
+        ("clip.mp4", "basicvsrpp", ((1.0, 2.0),), True),
+        ("clip.mp4", "ltx", (), True),
+        ("photo.png", "ltx", (), False),
+    ],
+)
+def test_ltx_and_segment_video_jobs_pause_instead_of_stopping(name, model, segments, resumable):
+    from jasna.gui.validation import job_is_resumable
+    from jasna.segments import SegmentRange
+
+    job = JobItem(path=Path(name), segments=tuple(SegmentRange(*times) for times in segments))
+    assert job_is_resumable(job, AppSettings(restoration_model=model)) is resumable
 
 
 @pytest.mark.parametrize("cancel_before_show", [False, True])

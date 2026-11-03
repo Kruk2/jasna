@@ -5,9 +5,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
-from contextlib import nullcontext
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import psutil
@@ -95,28 +93,29 @@ class _FragmentFrameWriter(_OfflineFrameWriter):
 
 
 class _FragmentDir:
-    """The raw fragment of each splice span. In a checkpoint (``durable``) a fragment is
+    """The raw fragment of each splice span, kept in the job's checkpoint: a fragment is
     written as ``partial(i)`` and becomes ``final(i)`` only once complete and on disk, so a
     restart skips exactly the finished ones."""
 
-    def __init__(self, directory: Path, *, durable: bool) -> None:
+    def __init__(self, directory: Path) -> None:
         self.directory = directory
-        self.durable = durable
 
     def final(self, span_index: int) -> Path:
         return self.directory / f"{span_index:04d}-raw.nut"
 
     def partial(self, span_index: int) -> Path:
-        return self.directory / f"{span_index:04d}-partial.nut" if self.durable else self.final(span_index)
+        return self.directory / f"{span_index:04d}-partial.nut"
 
     def done(self, span_index: int) -> bool:
         return self.final(span_index).is_file()
 
     def commit(self, span_index: int) -> None:
-        if self.durable:
-            with self.partial(span_index).open("r+b") as stream:
-                os.fsync(stream.fileno())
-            commit_file(self.partial(span_index), self.final(span_index))
+        # An encoder opens its file on the first frame, so a span that decoded nothing has none.
+        if not self.partial(span_index).is_file():
+            raise RuntimeError(f"Smart-render span {span_index} wrote no video frames")
+        with self.partial(span_index).open("r+b") as stream:
+            os.fsync(stream.fileno())
+        commit_file(self.partial(span_index), self.final(span_index))
 
 
 class Pipeline:
@@ -619,51 +618,46 @@ class Pipeline:
                 fragment_encoder(fragments, span_index, span), lambda: fragments.commit(span_index)
             )
 
-        directory = (
-            nullcontext(self.resume.directory / "segments") if self.resume is not None
-            else TemporaryDirectory(dir=work_root, prefix=f".{self.output_video.stem}.segments-")
-        )
+        fragments = _FragmentDir(self.resume.directory / "segments")
         try:
-            with directory as directory_name:
-                fragments = _FragmentDir(Path(directory_name), durable=self.resume is not None)
-                fragments.directory.mkdir(parents=True, exist_ok=True)
-                for span_index, span in enumerate(plan.spans):
-                    if self._cancel_event.is_set():
-                        return
-                    if fragments.done(span_index):
-                        if span in standard_spans:
-                            progress.update(_span_frames(span, index, metadata))
-                    elif span.kind == "copy":
-                        create_copy_fragment(
-                            self.input_video, span, index, fragments.partial(span_index), codec=self.codec
-                        )
-                        fragments.commit(span_index)
-                    elif span.kind == "reencode":
-                        self._reencode_span(
-                            metadata, index, span, fragment_writer(fragments, span_index, span)(), progress
-                        )
-                    elif span not in ltx_spans:
-                        self._run_pass(
-                            metadata=metadata,
-                            encoder_ctx=fragment_encoder(fragments, span_index, span),
-                            progress=progress,
-                            seek_ts=index.seconds_for_pts(span.start_pts),
-                            end_pts=span.end_pts,
-                            effect_ranges=span.effect_ranges,
-                            output_frame_count=max(1, round(_span_seconds(span, index) * metadata.video_fps)),
-                        )
-                        if not self._cancel_event.is_set():
-                            fragments.commit(span_index)
-                pending_ltx = [
-                    (span, segments_of[span], fragment_writer(fragments, span_index, span))
-                    for span_index, span in enumerate(plan.spans)
-                    if span in ltx_spans and not fragments.done(span_index)
-                ]
-                if pending_ltx:
-                    self._run_ltx_spans(ltx_render, metadata, index, pending_ltx, work_root, ltx_callback)
+            fragments.directory.mkdir(parents=True, exist_ok=True)
+            for span_index, span in enumerate(plan.spans):
                 if self._cancel_event.is_set():
                     return
-                self._assemble(fragments, plan, comment)
+                if fragments.done(span_index):
+                    if span in standard_spans:
+                        progress.update(_span_frames(span, index, metadata))
+                elif span.kind == "copy":
+                    create_copy_fragment(
+                        self.input_video, span, index, fragments.partial(span_index), codec=self.codec
+                    )
+                    fragments.commit(span_index)
+                elif span.kind == "reencode":
+                    self._reencode_span(
+                        metadata, index, span, fragment_writer(fragments, span_index, span)(), progress
+                    )
+                elif span not in ltx_spans:
+                    self._run_pass(
+                        metadata=metadata,
+                        encoder_ctx=fragment_encoder(fragments, span_index, span),
+                        progress=progress,
+                        seek_ts=index.seconds_for_pts(span.start_pts),
+                        end_pts=span.end_pts,
+                        effect_ranges=span.effect_ranges,
+                        output_frame_count=max(1, round(_span_seconds(span, index) * metadata.video_fps)),
+                    )
+                    if not self._cancel_event.is_set():
+                        fragments.commit(span_index)
+            pending_ltx = [
+                (span, segments_of[span], fragment_writer(fragments, span_index, span))
+                for span_index, span in enumerate(plan.spans)
+                if span in ltx_spans and not fragments.done(span_index)
+            ]
+            if pending_ltx:
+                self._run_ltx_spans(ltx_render, metadata, index, pending_ltx, work_root, ltx_callback)
+            if self._cancel_event.is_set():
+                return
+            self._assemble(fragments, plan, comment)
         finally:
             progress.close(ensure_completed_bar=True)
 
@@ -685,9 +679,10 @@ class Pipeline:
         self.validate_metadata(metadata)
         require_encodable_size(vendor_for_device(self.device), self.codec, metadata.video_width, metadata.video_height)
         self.configure_vr(metadata)
-        uses_ltx = "ltx" in job_models(self.restoration_model_name, self.segments)
-        auto_split = self.restoration_model_name == "ltx" and self.config.ltx_auto_split_percent is not None
-        if uses_ltx or auto_split or (resume_directory(self.config, self.output_video) / "render").exists():
+        if (
+            self.segments or self.restoration_model_name == "ltx"
+            or (resume_directory(self.config, self.output_video) / "render").exists()
+        ):
             self.resume = ResumeJob(self.config, self.input_video, self.output_video, metadata, self.splice_plan)
             self.resume.prepare()
         if self.segments:

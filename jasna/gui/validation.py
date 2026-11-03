@@ -3,6 +3,7 @@ from pathlib import Path
 
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.locales import t
+from jasna.media.media_files import is_image
 from jasna.segments import job_models
 
 
@@ -12,6 +13,12 @@ def _uses_ltx(job: JobItem, settings: AppSettings) -> bool:
 
 def any_job_uses_ltx(jobs: list[JobItem], settings: AppSettings) -> bool:
     return any(_uses_ltx(job, settings) for job in jobs)
+
+
+def job_is_resumable(job: JobItem, settings: AppSettings) -> bool:
+    """Whether a stopped run keeps the job's finished work: LTX and segment jobs save it,
+    whole-video BasicVSR++ jobs and images do not."""
+    return not is_image(job.path) and (bool(job.snapshot_segments()) or _uses_ltx(job, settings))
 
 
 def validate_gui_start(settings: AppSettings, jobs: list[JobItem], *, ltx_available: bool) -> list[str]:

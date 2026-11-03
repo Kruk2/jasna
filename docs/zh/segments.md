@@ -94,12 +94,12 @@ jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto
 
 ## 工作目录
 
-Jasna 拼接视频时，会把临时文件放在输出旁边的隐藏文件夹中。要使用另一块磁盘
+Jasna 会把已完成的部分放在输出旁边的隐藏文件夹 `.jasna-resume` 中（可能占用数 GB），
+视频完成后删除。暂停或失败时会保留，用相同设置再次运行即可继续。要使用另一块磁盘
 （更快或更大），请在**输出**标签页（**专家**视图）设置**工作目录**，或使用：
 
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
 ```
 
-LTX 保存的进度也放在这里（隐藏文件夹 `.jasna-resume`，可能占用数 GB），视频完成后删除。
-继续已暂停的任务时，请使用同一工作目录。
+继续已暂停或失败的任务时，请使用同一工作目录。

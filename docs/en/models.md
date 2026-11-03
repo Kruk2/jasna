@@ -91,14 +91,14 @@ exclusions. Add it again when you put a new Jasna version in a new folder.
 
 ### Pause and continue
 
-LTX saves its progress as it goes. Press **Ⅱ** to pause and **▶** to continue.
+LTX jobs and jobs with ranges save their progress as they go. Press **Ⅱ** to pause and **▶** to continue.
 After closing Jasna, add the same video again with the same output and settings;
 in the command line, run the same command again.
 
-The last unfinished part may be restored again. If you changed the input,
-the detection or LTX settings, or updated Jasna, it asks before starting over.
-Changing only codec, quality, color LUT or sharpening keeps the saved work.
-BasicVSR++ jobs do not resume.
+The last unfinished part may be restored again. If you changed the input or
+settings, or updated Jasna, it asks before starting over. Changing only codec,
+quality, color LUT or sharpening keeps the saved LTX work and redoes the rest.
+BasicVSR++ jobs without ranges do not resume.
 
 ### Downloading LTX yourself
 

@@ -26,7 +26,7 @@ FOUR_SPANS = (
 ONE_RENDER = (SpliceSpan("copy", 0, 60), SpliceSpan("render", 60, 120, ((75, 90),)), SpliceSpan("copy", 120, 240))
 
 
-def _smart_pipeline(tmp_path, segments, spans, *, max_b_frames=0, **overrides) -> Pipeline:
+def _segment_pipeline(tmp_path, segments, spans, *, max_b_frames=0, **overrides) -> Pipeline:
     settings = dict(
         input_video=tmp_path / "input.mp4",
         output_video=tmp_path / "output.mp4",
@@ -51,6 +51,15 @@ def _smart_pipeline(tmp_path, segments, spans, *, max_b_frames=0, **overrides) -
     return pipeline
 
 
+def _smart_pipeline(tmp_path, segments, spans, **kwargs) -> Pipeline:
+    """A segment pipeline with its checkpoint prepared, as ``run`` prepares it."""
+    pipeline = _segment_pipeline(tmp_path, segments, spans, **kwargs)
+    pipeline.input_video.touch()
+    pipeline.resume = ResumeJob(pipeline.config, pipeline.input_video, pipeline.output_video, METADATA, pipeline.splice_plan)
+    pipeline.resume.prepare()
+    return pipeline
+
+
 @contextmanager
 def _smart_run(vendor=AcceleratorVendor.NVIDIA):
     """Patch out decoding, encoding and the restorers; yields their mocks by name."""
@@ -68,6 +77,8 @@ def _smart_run(vendor=AcceleratorVendor.NVIDIA):
         patch.object(Pipeline, "ltx_segment_render", return_value=MagicMock(large_canvas=True)),
         patch.object(Pipeline, "_reencode_span") as reencode_span,
     ):
+        copy_fragment.side_effect = lambda _source, _span, _index, path, **_kwargs: path.write_bytes(b"copy")
+        run_pass.side_effect = lambda **_kwargs: Path(encoder.call_args.args[0]).write_bytes(b"restored")
         yield dict(
             encoder=encoder, progressbar=progressbar, copy_fragment=copy_fragment, concatenate=concatenate,
             mux=mux, run_full=run_full, run_pass=run_pass, run_ltx_spans=run_ltx_spans, reencode_span=reencode_span,
@@ -107,8 +118,34 @@ def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
     with _smart_run() as mocks:
         pipeline._run_smart(METADATA)
 
-    assert mocks["mux"].call_args.args[0].parent.parent == tmp_path / "scratch"
+    assert mocks["mux"].call_args.args[0].is_relative_to(tmp_path / "scratch")
     assert (tmp_path / "out").is_dir()
+
+
+def test_a_failed_basicvsrpp_segment_job_keeps_its_finished_parts_for_the_next_run(tmp_path) -> None:
+    first, rerun = (_segment_pipeline(tmp_path, (SegmentRange(2.5, 3.0),), ONE_RENDER) for _ in range(2))
+    first.input_video.touch()
+
+    with patch("jasna.pipeline.get_video_meta_data", return_value=METADATA), _smart_run() as mocks:
+        mocks["concatenate"].side_effect = [RuntimeError("assembly failed"), None]
+        with pytest.raises(RuntimeError, match="assembly failed"):
+            first.run()
+        rerun.run()
+
+    assert (mocks["run_pass"].call_count, mocks["copy_fragment"].call_count) == (1, 2)
+    mocks["mux"].assert_called_once()
+    assert rerun.completed and not rerun.resume.root.exists()
+
+
+def test_smart_run_stops_at_a_span_that_wrote_no_frames(tmp_path) -> None:
+    pipeline = _smart_pipeline(tmp_path, (SegmentRange(2.5, 3.0),), ONE_RENDER)
+
+    with _smart_run() as mocks, pytest.raises(RuntimeError, match="span 1 wrote no video frames"):
+        mocks["run_pass"].side_effect = None
+        pipeline._run_smart(METADATA)
+
+    assert mocks["copy_fragment"].call_count == 1
+    mocks["mux"].assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -191,6 +228,9 @@ def test_a_render_span_resolving_to_two_models_is_rejected(tmp_path) -> None:
 
 @pytest.mark.parametrize("look", [{"sharpen_strength": 0.4}, {"lut_path": "look.cube"}], ids=["sharpen", "lut"])
 def test_a_job_with_a_look_encodes_the_parts_between_ranges_again_so_the_look_covers_them(tmp_path, look) -> None:
+    if "lut_path" in look:
+        (tmp_path / look["lut_path"]).write_bytes(b"0 0 0\n")
+        look = {"lut_path": str(tmp_path / look["lut_path"])}
     pipeline = _smart_pipeline(tmp_path, (SegmentRange(2.5, 3.0), SegmentRange(6.5, 7.0, LTX)), FOUR_SPANS, **look)
     pipeline.splice_plan = pipeline.splice_plan.reencoding_copies()
 
@@ -216,7 +256,7 @@ def test_a_span_that_cannot_be_copied_is_encoded_again_without_restoring(tmp_pat
 
 
 def test_reencoded_span_writes_every_decoded_frame_and_closes_its_writer(tmp_path) -> None:
-    pipeline = _smart_pipeline(tmp_path, (), (), batch_size=2)
+    pipeline = _segment_pipeline(tmp_path, (), (), batch_size=2)
     batches = [(torch.zeros(2, 3, 4, 4), [60, 61]), (torch.zeros(1, 3, 4, 4), [62])]
     writer, progress = MagicMock(), MagicMock()
 
@@ -260,9 +300,6 @@ def test_run_routes_by_the_job_model_and_segments(tmp_path, model, segments, exp
 def test_ltx_smart_resume_keeps_completed_fragments_and_retries_partial_span(tmp_path):
     segments = (SegmentRange(2.5, 3.0, LTX), SegmentRange(6.5, 7.0))
     pipeline = _smart_pipeline(tmp_path, segments, FOUR_SPANS)
-    pipeline.input_video.touch()
-    pipeline.resume = ResumeJob(pipeline.config, pipeline.input_video, pipeline.output_video, METADATA, pipeline.splice_plan)
-    pipeline.resume.prepare()
     partial = pipeline.resume.directory / "segments" / "0001-partial.nut"
     completed = partial.with_name("0001-raw.nut")
     restored = []
