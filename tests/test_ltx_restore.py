@@ -394,7 +394,7 @@ def test_segment_decode_budget_follows_the_gpu_size_not_free_vram(monkeypatch):
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (1, 1))
     gib = 1 << 30
     for total_gib, budget_512, budget_768 in (
-        (5.8, 5.5, 8), (7.8, 6, 8), (11.7, 6, 8), (15.5, 8, 10), (21.9, 8, 10), (23.6, 8, 16), (31.8, 8, 16)
+        (5.8, 5.5, 8), (7.8, 5, 8), (9.8, 6, 8), (11.7, 6, 8), (15.5, 8, 10), (21.9, 8, 10), (23.6, 8, 16), (31.8, 8, 16)
     ):
         budget = restore.segment_decode_budget(int(total_gib * gib))
         assert (budget(512), budget(768)) == (budget_512 * gib, budget_768 * gib)
