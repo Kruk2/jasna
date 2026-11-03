@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import threading
 from fractions import Fraction
@@ -122,6 +123,13 @@ def _shown_frames(
         if index % frame_stride == 0:
             yield frame
         index += 1
+
+
+def _vali_seek_seconds(seek_ts: float, start_pts: int, time_base: Fraction) -> float:
+    """VALI seeks in absolute stream seconds and rounds them to whole microseconds, so a
+    target rounded up past a frame on a finer time base skips that frame (issue #709).
+    Floor to the microsecond: VALI then returns the first frame at or after the target."""
+    return math.floor((seek_ts + float(start_pts * time_base)) * 1_000_000) / 1_000_000
 
 
 class _BatchPrefetcher:
@@ -288,10 +296,9 @@ class _ValiFrameSource:
         if seek_ts == 0 and self._first_pts is not None:
             seek_ts = None
         if seek_ts is not None:
-            start_seconds = float(
-                self.metadata.start_pts * self.metadata.time_base
+            seek_ctx = self._vali.SeekContext(
+                seek_ts=_vali_seek_seconds(seek_ts, self.metadata.start_pts, self.metadata.time_base)
             )
-            seek_ctx = self._vali.SeekContext(seek_ts=seek_ts + start_seconds)
         shown = _shown_frames(
             self._decoded_pts(seek_ctx), lambda pts: pts, self.metadata.start_pts, self.frame_stride
         )
