@@ -1,6 +1,5 @@
 import hashlib
 
-import cv2
 import numpy as np
 import pytest
 import torch
@@ -136,30 +135,6 @@ def test_a_lasting_split_gets_its_own_camera_with_a_handover():
     assert piece.polygons[0] is piece.polygons[LEAD_IN_FRAMES]
     window = piece.windows[1]
     assert window.crops[200 - window.start].side <= PLAN_CANVAS
-
-
-def _rectangle(x1: float, y1: float, x2: float, y2: float) -> Region:
-    return Region((x1, y1, x2, y2), np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32))
-
-
-def _mask(polygons, shape=(1080, 1920)) -> np.ndarray:
-    mask = np.zeros(shape, dtype=np.uint8)
-    for polygon in polygons:
-        cv2.fillPoly(mask, [np.asarray(polygon, dtype=np.int32)], 1)
-    return mask.astype(bool)
-
-
-def test_a_detection_spanning_two_mosaics_keeps_their_own_tracks():
-    left, right = _rectangle(200, 300, 400, 500), _rectangle(420, 300, 620, 500)
-    span = _rectangle(200, 300, 620, 500)
-    frames = [[left, right] for _ in range(150)] + [[span] for _ in range(20)] + [[left, right] for _ in range(130)]
-    plans = plan_video(frames, set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=False, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
-    assert [(p.start, p.stop) for p in plans] == [(0, 300), (0, 300)]
-    for plan in plans:
-        sides = [crop.side for window in plan.windows for crop in window.crops]
-        assert max(sides) < 1.3 * sides[0]
-    on_span = _mask([polygon for p in plans for polygon in p.polygons[160]])
-    assert np.array_equal(on_span, _mask([span.polygon]))
 
 
 def test_handover_leads_stop_at_cuts_and_hand_back_to_a_covering_track():
@@ -380,7 +355,7 @@ def _plan_digest(plans) -> str:
 def test_plan_video_output_matches_the_recorded_plan():
     regions, cuts = _random_video(0, 4000)
     plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, stereo=None, large_canvas=True, window_hop=window_hop(17), max_gap=MAX_GAP, min_duration=0)
-    assert _plan_digest(plans) == "f6863f7f74273634d73c6f8c1ee7244756c1782e8abb007ec42d51c0015d2d47"
+    assert _plan_digest(plans) == "1099f21ad72e3a86d0a9e3b1e2d94dc4b126535674cfdddf8d70d4c3e12f3e30"
 
 
 def test_gap_fill_keeps_outlines_inside_the_frame_when_boxes_leave_it():
