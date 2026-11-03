@@ -8,6 +8,8 @@ import shutil
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
+from fractions import Fraction
 from functools import partial
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -95,27 +97,51 @@ async function changeVideo(){
 """.replace("__FIRST_BYTE_MS__", str(int((SEGMENT_WAIT_SECONDS + 5) * 1000)))
 
 
-def _generate_vod_playlist(
-    total_duration: float,
-    segment_duration: float,
-    start_segment: int = 0,
-) -> tuple[str, int]:
-    segment_count = max(1, math.ceil(total_duration / segment_duration))
-    last_seg_duration = total_duration - (segment_count - 1) * segment_duration
-    if last_seg_duration <= 0:
-        last_seg_duration = segment_duration
+@dataclass(frozen=True)
+class SegmentTimeline:
+    """Segments as the encoder cuts them: one GOP of whole frames each, so at 29.97 fps a 4 s
+    segment lasts 4.004 s. The playlist, seeks and the encoder all place segments with it."""
 
+    fps: Fraction
+    frames_per_segment: int
+    frame_count: int
+
+    @classmethod
+    def for_video(cls, metadata: VideoMetadata, segment_duration: float) -> SegmentTimeline:
+        fps = metadata.video_fps_exact
+        # A GOP never shorter than -hls_time makes the muxer cut every segment at exactly one GOP.
+        frames_per_segment = math.ceil(fps * Fraction(str(segment_duration)))
+        return cls(fps, frames_per_segment, metadata.num_frames)
+
+    @property
+    def segment_count(self) -> int:
+        return max(1, math.ceil(self.frame_count / self.frames_per_segment))
+
+    def start_time(self, segment: int) -> float:
+        return float(segment * self.frames_per_segment / self.fps)
+
+    def duration(self, segment: int) -> float:
+        frames = min(self.frames_per_segment, self.frame_count - segment * self.frames_per_segment)
+        return float(frames / self.fps)
+
+    def segment_at(self, seconds: float) -> int:
+        return math.floor(Fraction(str(seconds)) * self.fps / self.frames_per_segment)
+
+
+def _generate_vod_playlist(timeline: SegmentTimeline, start_segment: int = 0) -> tuple[str, int]:
+    segment_count = timeline.segment_count
     first = max(0, min(start_segment, segment_count - 1))
+    # HLS checks each EXTINF rounded to the nearest second against the target, so 4.004 s keeps 4.
+    target_duration = math.floor(timeline.frames_per_segment / timeline.fps + Fraction(1, 2))
     lines = [
         "#EXTM3U",
         "#EXT-X-VERSION:3",
-        f"#EXT-X-TARGETDURATION:{math.ceil(segment_duration)}",
+        f"#EXT-X-TARGETDURATION:{target_duration}",
         "#EXT-X-PLAYLIST-TYPE:VOD",
         f"#EXT-X-MEDIA-SEQUENCE:{first}",
     ]
     for i in range(first, segment_count):
-        dur = segment_duration if i < segment_count - 1 else last_seg_duration
-        lines.append(f"#EXTINF:{dur:.3f},")
+        lines.append(f"#EXTINF:{timeline.duration(i):.3f},")
         lines.append(f"seg_{i:05d}.ts")
     lines.append("#EXT-X-ENDLIST")
     lines.append("")
@@ -184,7 +210,7 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
                 return
             start_seconds = self._parse_query_float("start")
             if start_seconds > 0:
-                start_seg = int(start_seconds / self._state.segment_duration)
+                start_seg = self._state.timeline.segment_at(start_seconds)
                 playlist = self._state.playlist_text_from(start_seg)
             else:
                 playlist = self._state.playlist_text
@@ -276,7 +302,7 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             )
             if same_video:
                 if start > 0:
-                    target_seg = int(start / self._state.segment_duration)
+                    target_seg = self._state.timeline.segment_at(start)
                     self._state.request_seek(target_seg, new_playback=True)
                 self._send_json({"status": "ready"})
             else:
@@ -358,10 +384,12 @@ class HlsStreamingServer:
         self.metadata: VideoMetadata | None = None
         self.segments_dir: Path | None = None
         self.segment_count: int = 0
+        self.timeline: SegmentTimeline | None = None
         self._vod_playlist: str = ""
         self._finished = False
 
         self._pending_video: Path | None = None
+        self._initial_start_seconds = 0.0
         self.initial_start_segment = 0
         self.playback_epoch = 0
         self._current_video_path: Path | None = None
@@ -396,7 +424,7 @@ class HlsStreamingServer:
 
     def select_video(self, path: Path, start: float) -> None:
         self._pending_video = path
-        self.initial_start_segment = max(0, int(start / self.segment_duration))
+        self._initial_start_seconds = max(0.0, start)
         with self._seek_lock:
             self.playback_epoch += 1
         self._current_video_path = path
@@ -413,15 +441,15 @@ class HlsStreamingServer:
         return self._pending_video
 
     def load_video(self, metadata: VideoMetadata) -> None:
+        self.timeline = SegmentTimeline.for_video(metadata, self.segment_duration)
         self.metadata = metadata
         if self.segments_dir is None:
             self.segments_dir = Path(tempfile.mkdtemp(prefix="jasna_hls_"))
             atexit.register(shutil.rmtree, str(self.segments_dir), True)
-        self._vod_playlist, self.segment_count = _generate_vod_playlist(
-            total_duration=metadata.duration,
-            segment_duration=self.segment_duration,
+        self._vod_playlist, self.segment_count = _generate_vod_playlist(self.timeline)
+        self.initial_start_segment = min(
+            self.timeline.segment_at(self._initial_start_seconds), self.segment_count - 1
         )
-        self.initial_start_segment = min(self.initial_start_segment, self.segment_count - 1)
         self._finished = False
         self.video_change.clear()
         self.seek_requested.clear()
@@ -452,7 +480,7 @@ class HlsStreamingServer:
     def playlist_text_from(self, start_segment: int) -> str:
         if start_segment <= 0 or self.metadata is None:
             return self.playlist_text
-        text, _ = _generate_vod_playlist(self.metadata.duration, self.segment_duration, start_segment)
+        text, _ = _generate_vod_playlist(self.timeline, start_segment)
         return text.replace(".ts\n", f".ts?epoch={self.playback_epoch}\n")
 
     def mark_finished(self) -> None:
@@ -503,7 +531,7 @@ class HlsStreamingServer:
         return f"http://localhost:{self.port}/stream.m3u8"
 
     def segment_start_time(self, segment_index: int) -> float:
-        return segment_index * self.segment_duration
+        return self.timeline.start_time(segment_index)
 
     def request_seek(
         self,

@@ -17,7 +17,7 @@ import torch
 
 from factories import video_metadata
 from jasna.os_utils import resolve_executable
-from jasna.streaming import SEGMENT_WAIT_SECONDS, HlsStreamingServer, _generate_vod_playlist
+from jasna.streaming import SEGMENT_WAIT_SECONDS, HlsStreamingServer, SegmentTimeline, _generate_vod_playlist
 from jasna.streaming_encoder import StreamingEncodeError, StreamingEncoder, _browser_audio_args
 from jasna.streaming_pipeline import _StreamingFrameWriter
 
@@ -48,19 +48,51 @@ def _server(tmp_path=None, segment_duration: float = 4.0, **kwargs) -> HlsStream
 # Playlist and server state
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize(("duration", "count"), [(20.0, 5), (10.5, 3), (2.0, 1), (12.0, 3)])
-def test_vod_playlist_has_one_segment_per_started_segment_duration(duration, count):
-    assert _generate_vod_playlist(total_duration=duration, segment_duration=4.0)[1] == count
+def _playlist_durations(fps, frame_count: int, segment_duration: float = 4.0) -> list[float]:
+    timeline = SegmentTimeline.for_video(video_metadata(fps=fps, num_frames=frame_count), segment_duration)
+    text, count = _generate_vod_playlist(timeline)
+    durations = [float(d) for d in re.findall(r"#EXTINF:([\d.]+),\nseg_\d+\.ts", text)]
+    assert count == len(durations)
+    return durations
+
+
+@pytest.mark.parametrize(
+    ("fps", "frame_count", "count", "first", "last"),
+    [
+        (Fraction(30000, 1001), 12000, 100, 4.004, 4.004),
+        (Fraction(24000, 1001), 9600, 100, 4.004, 4.004),
+        (Fraction(60000, 1001), 24000, 100, 4.004, 4.004),
+        (Fraction(25), 10050, 101, 4.0, 2.0),
+        (Fraction(30), 12030, 101, 4.0, 1.0),
+    ],
+)
+def test_playlist_lists_the_whole_gop_segments_the_encoder_cuts(fps, frame_count, count, first, last):
+    durations = _playlist_durations(fps, frame_count)
+
+    assert (len(durations), durations[0], durations[-1]) == (count, first, last)
 
 
 def test_vod_playlist_lists_every_segment_with_a_short_last_one():
-    text, _ = _generate_vod_playlist(total_duration=10.0, segment_duration=4.0)
+    timeline = SegmentTimeline.for_video(video_metadata(fps=30, num_frames=300), 4.0)
+    text, _ = _generate_vod_playlist(timeline)
 
     assert text.startswith("#EXTM3U")
     assert "#EXT-X-PLAYLIST-TYPE:VOD" in text and text.rstrip().endswith("#EXT-X-ENDLIST")
     assert re.findall(r"#EXTINF:([\d.]+),\n(seg_\d+\.ts)", text) == [
         ("4.000", "seg_00000.ts"), ("4.000", "seg_00001.ts"), ("2.000", "seg_00002.ts"),
     ]
+
+
+@pytest.mark.parametrize(
+    "fps", [Fraction(30000, 1001), Fraction(24000, 1001), Fraction(60000, 1001), Fraction(25), Fraction(30)]
+)
+@pytest.mark.parametrize("segment", [0, 1, 37, 99])
+def test_a_segment_start_time_maps_back_to_that_segment(fps, segment):
+    timeline = SegmentTimeline.for_video(video_metadata(fps=fps, num_frames=100_000), 4.0)
+    start = timeline.start_time(segment)
+
+    assert timeline.segment_at(start) == segment
+    assert timeline.segment_at(start + timeline.duration(segment) - 0.01) == segment
 
 
 def test_loading_and_unloading_a_video():
@@ -398,6 +430,15 @@ def test_every_segment_is_one_gop(tmp_path, fps, duration, frames):
     assert _encoder(tmp_path, segment_duration=duration, video_fps_exact=fps).frames_per_segment == frames
 
 
+@pytest.mark.parametrize("fps", [Fraction(30000, 1001), Fraction(24000, 1001), Fraction(25)])
+def test_a_pass_starts_where_the_playlist_puts_its_first_segment(tmp_path, fps):
+    command = _ffmpeg_command(tmp_path, start_number=10, audio_codec="aac", video_fps_exact=fps)
+    listed_start = sum(_playlist_durations(fps, 100_000)[:10])
+
+    assert float(_option(command, "-ss")) == pytest.approx(listed_start, abs=1e-3)
+    assert float(_option(command, "-output_ts_offset")) == pytest.approx(listed_start, abs=1e-3)
+
+
 def test_writer_counts_segments_like_the_muxer(tmp_path):
     encoder = _encoder(tmp_path, segment_duration=2.0, video_fps_exact=Fraction(30000, 1001))
     server = MagicMock()
@@ -704,11 +745,17 @@ def test_options_preflight(serve):
 
 
 @pytest.mark.parametrize(
-    ("query", "first_segment"),
-    [("?start=40.0", 10), ("", 0), ("?start=0", 0)],
+    ("query", "fps", "first_segment"),
+    [
+        ("?start=40.0", Fraction(30), 10),
+        ("", Fraction(30), 0),
+        ("?start=0", Fraction(30), 0),
+        ("?start=40.04", Fraction(30000, 1001), 10),
+        ("?start=40.0", Fraction(30000, 1001), 9),
+    ],
 )
-def test_manifest_starts_at_the_requested_time(serve, query, first_segment):
-    _, port = serve(metadata=_metadata(duration=120.0))
+def test_manifest_starts_at_the_requested_time(serve, query, fps, first_segment):
+    _, port = serve(metadata=video_metadata(fps=fps, num_frames=3600))
 
     status, body, _ = _http(port, f"/stream.m3u8{query}")
 
@@ -871,7 +918,8 @@ def test_opening_a_new_video_waits_for_its_first_segment(serve, video_file, firs
     assert response_status == status
     if first_segment:
         assert body["status"] == "ready"
-        assert server.initial_start_segment == 10
+        server.load_video(video_metadata(fps=Fraction(30000, 1001), num_frames=3600))
+        assert server.initial_start_segment == 9
     else:
         assert "error" in body
 

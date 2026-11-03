@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import logging
-import math
 import os
 import queue
 import subprocess
 import threading
-from fractions import Fraction
 from pathlib import Path
 
 import torch
@@ -16,6 +14,7 @@ from jasna.media.lut import GpuLutApplier, parse_cube_file
 from jasna.media.audio_utils import aac_reencode_args, needs_audio_reencode, source_audio_codec
 from jasna.media.probe import VideoMetadata
 from jasna.os_utils import find_executable, subprocess_no_window_kwargs
+from jasna.streaming import SegmentTimeline
 
 log = logging.getLogger(__name__)
 
@@ -53,8 +52,8 @@ class StreamingEncoder:
         self._width = metadata.video_width
         self._height = metadata.video_height
         self._fps = metadata.video_fps_exact
-        # A GOP never shorter than -hls_time makes the muxer cut every segment at exactly one GOP.
-        self.frames_per_segment = math.ceil(metadata.video_fps_exact * Fraction(str(segment_duration)))
+        self._timeline = SegmentTimeline.for_video(metadata, segment_duration)
+        self.frames_per_segment = self._timeline.frames_per_segment
         self._frame_bytes = self._width * self._height * 3
 
         gpu_idx = 0
@@ -144,7 +143,7 @@ class StreamingEncoder:
         log.debug("[stream-enc] stopped")
 
     def _launch_ffmpeg(self, start_number: int) -> None:
-        seek_time = start_number * self.segment_duration
+        seek_time = self._timeline.start_time(start_number)
         fps_str = f"{self._fps.numerator}/{self._fps.denominator}"
 
         cmd: list[str] = [self._ffmpeg, '-y', '-hide_banner', '-loglevel', 'warning']
