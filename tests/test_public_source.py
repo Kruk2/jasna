@@ -90,8 +90,8 @@ operations = (lambda: open_tensors(Path('missing.enc')),
               lambda: LtxModelFiles.from_dir(Path('missing'), 'distilled', fast=False),
               lambda: _read_checkpoint(Path('missing')))
 """ + _ASSERT_EVERY_OPERATION_NEEDS_PROTECTION + """
-assert license_missing(Path('missing'), 'distilled', False)
-assert not read_install_state(Path('missing')).downloadable
+assert license_missing(Path('missing'), 'distilled', False, 'auto', 'auto')
+assert not read_install_state(Path('missing'), 'auto', 'auto').downloadable
 """)
     assert result.returncode == 0, result.stderr
 

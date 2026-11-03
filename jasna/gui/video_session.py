@@ -30,6 +30,8 @@ def video_session_key(settings: AppSettings) -> tuple:
         settings.restoration_model,
         settings.ltx_model,
         settings.ltx_fast,
+        settings.ltx_vae_encoder,
+        settings.ltx_vae_decoder,
         settings.ltx_trial,
     )
     if settings.secondary_restoration == "tvai":
@@ -86,6 +88,8 @@ def video_session_config(
         ltx_seed=int(settings.ltx_seed),
         ltx_fast=bool(settings.ltx_fast),
         ltx_model=settings.ltx_model,
+        ltx_vae_encoder=settings.ltx_vae_encoder,
+        ltx_vae_decoder=settings.ltx_vae_decoder,
         ltx_trial=bool(settings.ltx_trial),
         ltx_auto_split_percent=float(settings.ltx_auto_split_percent) if settings.ltx_auto_split else None,
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
@@ -99,6 +103,7 @@ def video_session_config(
         tvai_args=settings.tvai_args,
         tvai_workers=int(settings.tvai_workers),
         tvai_denoise=bool(settings.tvai_denoise and secondary_restoration == "tvai"),
+        decode_backend=settings.decode_backend,
         rtx_scale=int(settings.rtx_scale),
         rtx_quality=settings.rtx_quality.lower(),
         rtx_denoise=settings.rtx_denoise.lower(),

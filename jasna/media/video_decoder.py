@@ -1,6 +1,5 @@
 import logging
 import math
-import os
 import threading
 from fractions import Fraction
 from queue import Full, Queue
@@ -23,21 +22,19 @@ from jasna.media.container_utils import demux_video
 from jasna.media.probe import VideoMetadata, resolve_video_start_pts
 from jasna.media.cuda_kernel import create_stream, destroy_stream
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
+from jasna.session_config import DecodeBackendName
 
 log = logging.getLogger(__name__)
 
 CORRUPT_PACKET_TOLERANCE = 10
 
-# Decode backend selection through `JASNA_DECODE_BACKEND`:
+# Decode backends (`SessionConfig.decode_backend`):
 # - "auto":    NVIDIA tries VALI first and falls back to PyAV hwaccel, then PyAV
 #              software, when VALI cannot open or decode the first frame. AMD
 #              keeps its AMF -> software escalation.
 # - "vali":    VALI only; any failure raises (NVIDIA only).
 # - "pyav-hw": skip VALI, use the PyAV hwaccel path with its software fallback.
 # - "pyav-sw": force FFmpeg software decoding with GPU upload on every vendor.
-DECODE_BACKEND_ENV = "JASNA_DECODE_BACKEND"
-_DECODE_BACKENDS = ("auto", "vali", "pyav-hw", "pyav-sw")
-
 # PyAV's avcodec_find_decoder returns libdav1d for AV1, which carries no NVDEC
 # hwaccel config, so av.open silently decodes AV1 in software. Force the native
 # FFmpeg av1 decoder, which does carry the CUDA hwaccel config. Keyed by codec
@@ -53,16 +50,6 @@ _CODECS_SKIPPING_VALI = frozenset({"vc1"})
 
 class VideoDecodeError(RuntimeError):
     pass
-
-
-def _decode_backend() -> str:
-    backend = os.environ.get(DECODE_BACKEND_ENV, "auto")
-    if backend not in _DECODE_BACKENDS:
-        raise ValueError(
-            f"Unknown decode backend {backend!r} from {DECODE_BACKEND_ENV}, "
-            f"expected {_DECODE_BACKENDS}"
-        )
-    return backend
 
 
 def _cuda_hwaccel(device: torch.device) -> HWAccel:
@@ -354,6 +341,7 @@ class VideoReader:
         metadata: VideoMetadata,
         *,
         frame_stride: int = 1,
+        decode_backend: DecodeBackendName = "auto",
     ):
         frame_stride = int(frame_stride)
         if frame_stride <= 0:
@@ -363,6 +351,7 @@ class VideoReader:
         self.batch_size = batch_size
         self.metadata = metadata
         self.frame_stride = frame_stride
+        self.decode_backend = decode_backend
         self.vendor = vendor_for_device(device)
         self._decoder_ctx = None
         self._vali_source: _ValiFrameSource | None = None
@@ -371,7 +360,7 @@ class VideoReader:
 
     def __enter__(self):
         current_stream(self.device)
-        backend = _decode_backend()
+        backend = self.decode_backend
         if backend == "vali" or (
             backend == "auto" and self.metadata.codec_name not in _CODECS_SKIPPING_VALI
         ):

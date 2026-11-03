@@ -89,16 +89,14 @@ class TestSeekBehavior:
 
     @pytest.mark.parametrize("backend", ["auto", "vali", "pyav-hw", "pyav-sw"])
     @pytest.mark.parametrize("seek_ts", [None, 0.0])
-    def test_every_backend_reads_exactly_the_shown_frames_of_a_mid_gop_cut(self, tmp_path, monkeypatch, backend, seek_ts):
+    def test_every_backend_reads_exactly_the_shown_frames_of_a_mid_gop_cut(self, tmp_path, backend, seek_ts):
         if backend == "vali" and torch.version.hip is not None:
             pytest.skip("VALI decodes with NVDEC")
         import subprocess
 
         import av
-        from jasna.media.video_decoder import DECODE_BACKEND_ENV
         from jasna.os_utils import resolve_executable
 
-        monkeypatch.setenv(DECODE_BACKEND_ENV, backend)
         full = tmp_path / "full.mp4"
         cut = tmp_path / "cut.mp4"
         ffmpeg = [resolve_executable("ffmpeg"), "-y", "-loglevel", "error"]
@@ -110,6 +108,9 @@ class TestSeekBehavior:
         subprocess.run([*ffmpeg, "-ss", "1.5", "-i", str(full), "-c", "copy", str(cut)], check=True)
         with av.open(str(cut)) as container:
             shown_pts = [frame.pts for frame in container.decode(video=0)]
-        with VideoReader(str(cut), batch_size=8, device=torch.device("cuda:0"), metadata=get_video_meta_data(str(cut))) as reader:
+        metadata = get_video_meta_data(str(cut))
+        with VideoReader(
+            str(cut), batch_size=8, device=torch.device("cuda:0"), metadata=metadata, decode_backend=backend
+        ) as reader:
             pts = [int(p) for _, batch_pts in reader.frames(seek_ts=seek_ts) for p in batch_pts]
         assert pts == shown_pts

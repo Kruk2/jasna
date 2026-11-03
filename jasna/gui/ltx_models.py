@@ -12,7 +12,7 @@ from jasna.gui.queues import MainThreadCalls
 from jasna.ltx import model_files
 from jasna.ltx.model_files import LTX_MODELS, DownloadableFile, download_size_text
 from jasna.license_api import protection_available
-from jasna.session_config import LtxModelName
+from jasna.session_config import LtxModelName, LtxVaeName
 
 Variant = tuple[LtxModelName, bool]
 
@@ -26,7 +26,8 @@ def model_key(restoration_model: str, ltx_model: str) -> str:
 
 @dataclass(frozen=True)
 class LtxInstallState:
-    """The files each (model, fast) variant still needs, and whether they can be downloaded."""
+    """The files each (model, fast) variant still needs with the chosen VAE, and whether they can
+    be downloaded."""
 
     missing: Mapping[Variant, tuple[DownloadableFile, ...]]
     downloadable: bool
@@ -38,10 +39,15 @@ class LtxInstallState:
         return self.downloadable or self.installed(model, fast)
 
 
-def read_install_state(directory: Path) -> LtxInstallState:
+def read_install_state(directory: Path, encoder: LtxVaeName, decoder: LtxVaeName) -> LtxInstallState:
     variants = [(model, fast) for model in LTX_MODELS for fast in (False, True)]
     return LtxInstallState(
-        {(model, fast): tuple(model_files.missing_downloads(directory, model, fast=fast)) for model, fast in variants},
+        {
+            (model, fast): tuple(
+                model_files.missing_downloads(directory, model, fast=fast, encoder=encoder, decoder=decoder)
+            )
+            for model, fast in variants
+        },
         protection_available(),
     )
 
@@ -79,15 +85,18 @@ def license_blocked() -> bool:
     return ltx_blocked()
 
 
-def license_missing(directory: Path, model: LtxModelName, fast: bool) -> bool:
+def license_missing(
+    directory: Path, model: LtxModelName, fast: bool, encoder: LtxVaeName, decoder: LtxVaeName
+) -> bool:
     """Whether the installed ``model`` needs a license this PC lacks. Verifies the stored
     license only; reads no model data."""
     if not protection_available():
-        return not all((directory / name).is_file() for name in model_files.bundle_names(model, fast=fast))
+        names = model_files.bundle_names(model, fast=fast, encoder=encoder, decoder=decoder)
+        return not all((directory / name).is_file() for name in names)
     from jasna.protection import ProtectionError
 
     try:
-        if model_files.needs_license(directory, model, fast=fast):
+        if model_files.needs_license(directory, model, fast=fast, encoder=encoder, decoder=decoder):
             if not read_license_info()[0]:
                 return True
             from jasna.protection.protected_tensors import check_saved_ltx_license
@@ -107,12 +116,19 @@ class LtxModels:
         self._main_thread = main_thread
         self._on_change = on_change
         self.directory = directory
-        self.state = read_install_state(directory)
+        self._vaes: tuple[LtxVaeName, LtxVaeName] = ("auto", "auto")
+        self.state = read_install_state(directory, *self._vaes)
         self.percent: int | None = None
 
     @property
     def downloading(self) -> bool:
         return self.percent is not None
+
+    def set_vaes(self, encoder: LtxVaeName, decoder: LtxVaeName) -> None:
+        """Check the files of this VAE choice from now on."""
+        if (encoder, decoder) != self._vaes:
+            self._vaes = (encoder, decoder)
+            self.state = read_install_state(self._directory, encoder, decoder)
 
     def ensure(self, model: LtxModelName, fast: bool, *, on_ready: Callable[[], None]) -> bool:
         """True when the variant is installed, or the user agreed to download it and the
@@ -151,7 +167,7 @@ class LtxModels:
         from tkinter import messagebox
 
         self.percent = None
-        self.state = read_install_state(self._directory)
+        self.state = read_install_state(self._directory, *self._vaes)
         self._on_change()
         if error:
             messagebox.showerror(t("ltx_download_title"), t("ltx_download_failed", message=error))

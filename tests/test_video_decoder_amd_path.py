@@ -152,12 +152,12 @@ def _write_clip(path, encoder: str, pix_fmt: str, options: dict[str, str], frame
         container.mux(stream.encode(None))
 
 
-def _decode_all(path, backend: str, monkeypatch) -> tuple[torch.Tensor, list[int], str | None]:
+def _decode_all(path, backend: str) -> tuple[torch.Tensor, list[int], str | None]:
     from jasna.media.probe import get_video_meta_data
 
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", backend)
     batches, pts = [], []
-    with module.VideoReader(str(path), 4, torch.device("cuda:0"), get_video_meta_data(str(path))) as reader:
+    metadata = get_video_meta_data(str(path))
+    with module.VideoReader(str(path), 4, torch.device("cuda:0"), metadata, decode_backend=backend) as reader:
         for batch, batch_pts in reader.frames():
             batches.append(batch.cpu())
             pts += batch_pts
@@ -177,12 +177,12 @@ def _decode_all(path, backend: str, monkeypatch) -> tuple[torch.Tensor, list[int
         ("libsvtav1", "yuv420p", {}, "av1_amf"),
     ],
 )
-def test_amf_decodes_like_software(tmp_path, monkeypatch, encoder, pix_fmt, options, amf_decoder):
+def test_amf_decodes_like_software(tmp_path, encoder, pix_fmt, options, amf_decoder):
     path = tmp_path / "clip.mp4"
     _write_clip(path, encoder, pix_fmt, options, 12)
 
-    amf_frames, amf_pts, decoder = _decode_all(path, "auto", monkeypatch)
-    sw_frames, sw_pts, _ = _decode_all(path, "pyav-sw", monkeypatch)
+    amf_frames, amf_pts, decoder = _decode_all(path, "auto")
+    sw_frames, sw_pts, _ = _decode_all(path, "pyav-sw")
 
     assert decoder == amf_decoder
     assert amf_pts == sw_pts

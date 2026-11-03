@@ -114,6 +114,8 @@ class AppSettings:
     ltx_trial: bool = False
     ltx_auto_split: bool = False
     ltx_auto_split_percent: int = LTX_AUTO_DEFAULT_PERCENT
+    ltx_vae_encoder: str = "auto"  # auto, full, half, max
+    ltx_vae_decoder: str = "auto"  # auto, full, half, max
 
     # Basic processing
     batch_size: int = 4
@@ -122,6 +124,7 @@ class AppSettings:
     vr_mode: str = "auto"
     vr_projection: str = "auto"
     fp16_mode: bool = True
+    decode_backend: str = "auto"  # auto, vali, pyav-hw, pyav-sw
     
     # Denoising
     denoise_strength: str = "none"  # none, low, medium, high

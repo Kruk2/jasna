@@ -61,10 +61,8 @@ def test_placeholders_are_deterministic_and_finite():
 
 
 @pytest.mark.parametrize("encoder_choice,decoder_choice", [("half", "max"), ("max", "half"), ("full", "full")])
-def test_placeholder_vae_loads_into_the_encoder_and_decoder(monkeypatch, encoder_choice, decoder_choice):
-    monkeypatch.setenv("JASNA_LTX_VAE_ENCODER", encoder_choice)
-    monkeypatch.setenv("JASNA_LTX_VAE_DECODER", decoder_choice)
-    files = LtxModelFiles.placeholder("distilled", fast=False)
+def test_placeholder_vae_loads_into_the_encoder_and_decoder(encoder_choice, decoder_choice):
+    files = LtxModelFiles.placeholder("distilled", fast=False, encoder=encoder_choice, decoder=decoder_choice)
     encoder = load_video_encoder(files.vae, torch.device("cpu"), files.encoder)
     decoder = load_video_decoder(files.vae, files.tuned_decoder, torch.device("cpu"))
     with torch.no_grad():

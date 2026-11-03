@@ -124,6 +124,10 @@ the others).
 | VAE, Basic or Standard Quality | `vae.safetensors.enc`, `vae-encoder-half.safetensors.enc` and `vae-decoder-max.safetensors.enc` |
 | VAE, Good, High or Top Quality | `vae.safetensors.enc` and `vae-decoder-full.safetensors.enc` |
 
+Picked another **LTX Encoder** or **LTX Decoder**? Get `vae-encoder-half`, `vae-encoder-max`
+(Full is `vae.safetensors.enc`) or `vae-decoder-full`, `vae-decoder-half`, `vae-decoder-max`
+(`.safetensors.enc`) to match.
+
 Put them all in `model_weights/ltx-restore` inside your Jasna folder (create the
 `ltx-restore` folder if it is missing). Keep the file names exactly as they are,
 including `.enc`. Start the LTX job again; Jasna will not ask to download.
@@ -154,8 +158,11 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
 - **LTX only for big mosaics**: big mosaics get LTX, the rest the faster
   BasicVSR++. Saves a lot of time on long videos. See
   [Restoring only parts of a video](segments.md#cli---ltx-auto-split).
-- **VAE** (advanced): Basic and Standard Quality use smaller, faster VAE files; the others use the
-  full ones. To change this, see [environment variables](tuning.md#environment-variables-advanced).
+- **LTX Encoder** and **LTX Decoder** (**Expert** view): **Full** is the sharpest and slowest,
+  **Half** is faster, **Max** is the fastest and a little softer. **Auto** (default) uses the Half
+  encoder and Max decoder for Basic and Standard Quality, Full for the others. Pick Full for both if
+  the fast models look softer than in Jasna 0.11.3. A choice you don't have yet is downloaded when
+  you press Start. CLI: see [environment variables](tuning.md#environment-variables-advanced).
 
 To preview LTX, open the [Segment Editor](segments.md), select a range,
 choose LTX and turn on **Restore preview**. The Video Player always uses

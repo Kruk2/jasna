@@ -122,6 +122,10 @@ Jasna 0.11.3 以前では `main` ブランチを使ってください。
 | VAE（基本画質・標準画質） | `vae.safetensors.enc`、`vae-encoder-half.safetensors.enc`、`vae-decoder-max.safetensors.enc` |
 | VAE（良好画質・高画質・最高画質） | `vae.safetensors.enc`、`vae-decoder-full.safetensors.enc` |
 
+別の **LTX エンコーダー**や **LTX デコーダー**を選んだ場合は、それに合わせて `vae-encoder-half`、`vae-encoder-max`
+（フルは `vae.safetensors.enc`）または `vae-decoder-full`、`vae-decoder-half`、`vae-decoder-max`
+（`.safetensors.enc`）を取得してください。
+
 すべて Jasna フォルダー内の `model_weights/ltx-restore` に置きます（`ltx-restore`
 フォルダーがなければ作成）。ファイル名は `.enc` を含めてそのままにしてください。
 LTX のジョブをもう一度始めると、ダウンロードの確認は出ません。
@@ -150,8 +154,11 @@ LTX のジョブをもう一度始めると、ダウンロードの確認は出�
 - **大きなモザイクだけ LTX**: 大きなモザイクは LTX、それ以外は高速な
   BasicVSR++ で復元します。長い動画では時間を大きく節約できます。
   [動画の一部だけを復元する](segments.md#cli---ltx-auto-split)を参照してください。
-- **VAE**（上級者向け）: 基本画質・標準画質は小さく高速な VAE ファイルを、それ以外は通常の VAE ファイルを使います。
-  変更するには[上級者向けの環境変数](tuning.md#上級者向けの環境変数)を参照してください。
+- **LTX エンコーダー**と **LTX デコーダー**（**エキスパート**表示）: **フル**は最も鮮明で最も遅く、
+  **ハーフ**は速く、**マックス**は最速で少しやわらかい仕上がりです。**自動**（既定）は基本画質・標準画質で
+  ハーフのエンコーダーとマックスのデコーダー、それ以外でフルを使います。高速なモデルが Jasna 0.11.3 より
+  やわらかく見える場合は、両方フルを選んでください。まだない選択肢は、開始を押したときにダウンロードされます。
+  CLI: [上級者向けの環境変数](tuning.md#上級者向けの環境変数)を参照してください。
 
 LTX をプレビューするには、[区間エディター](segments.md)を開いて区間を選び、
 LTX を選んで**復元プレビュー**をオンにします。動画プレーヤーは常に

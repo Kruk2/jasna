@@ -2,8 +2,8 @@
 
 Runs ``MosaicScanWorker``'s scan (detection only, ``stride_seconds=0.0`` =
 every frame, results collected into one preallocated GPU tensor) once per
-(clip, backend) in a subprocess with
-``JASNA_DECODE_BACKEND`` set. Detector build and
+(clip, backend) in a subprocess with ``AppSettings.decode_backend`` set.
+Detector build and
 engine compilation happen before the timed section; the reported wall time
 covers decode + detection + the final CPU sync only.
 
@@ -26,12 +26,10 @@ DEFAULT_CLIP_DIR = REPO_ROOT / "assets" / "benchmark"
 BACKENDS = ("vali", "pyav-hw", "pyav-sw")
 
 RUNNER_SHIM = """
-import os
 import queue
 import sys
 import time
 
-os.environ["JASNA_DECODE_BACKEND"] = sys.argv[1]
 path = sys.argv[2]
 
 from jasna.media.probe import get_video_meta_data
@@ -39,7 +37,7 @@ from jasna.gui.models import AppSettings
 from jasna.gui.mosaic_scan import MosaicScanWorker, ScanCompleted
 
 metadata = get_video_meta_data(path)
-worker = MosaicScanWorker(path, metadata, AppSettings(), stride_seconds=0.0)
+worker = MosaicScanWorker(path, metadata, AppSettings(decode_backend=sys.argv[1]), stride_seconds=0.0)
 detector = worker._build_detector()
 start = time.perf_counter()
 worker._scan(detector)

@@ -301,7 +301,7 @@ class SettingsPanel(ctk.CTkFrame):
             self._on_restoration_model_changed,
             ltx_models=ltx_models,
         )
-        processing_section = ProcessingSection(
+        self._processing_section = ProcessingSection(
             self._scroll, self._widgets, self._mark_modified, self._sync_temporal_filter_limits
         )
         detection_section = DetectionSection(self._scroll, self._widgets, self._mark_modified)
@@ -316,7 +316,7 @@ class SettingsPanel(ctk.CTkFrame):
         encoding_section = EncodingSection(self._scroll, self._widgets, self._mark_modified)
         post_export_section = PostExportSection(self._scroll, self._widgets, self._mark_modified)
         self._tab_sections = {
-            "model": [self._model_section, processing_section],
+            "model": [self._model_section, self._processing_section],
             "detection": [detection_section],
             "upscale": [self._secondary_section],
             "output": [encoding_section, post_export_section],
@@ -343,6 +343,7 @@ class SettingsPanel(ctk.CTkFrame):
 
     def set_gpu_support(self, *, vendor: AcceleratorVendor, blackwell: bool):
         self._model_section.set_gpu_support(vendor=vendor, blackwell=blackwell)
+        self._processing_section.set_gpu_support(vendor)
         self._secondary_section.set_gpu_support(vendor)
         self._update_modified_indicator()
 

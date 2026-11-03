@@ -473,6 +473,7 @@ class MosaicScanWorker:
                     device,
                     metadata,
                     frame_stride=frame_stride,
+                    decode_backend=self.settings.decode_backend,
                 )
                 with reader:
                     start_pts = reader.start_pts
@@ -631,6 +632,7 @@ class MosaicScanWorker:
             batch_size,
             device,
             metadata,
+            decode_backend=self.settings.decode_backend,
         )
         with reader:
             batch_and_pts = next(reader.frames(seek_ts=command.seconds), None)

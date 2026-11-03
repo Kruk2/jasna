@@ -17,21 +17,16 @@ from factories import video_metadata, write_unbounded_reorder_h264_source
 TEST_CLIP = Path("assets/test_clip1_1080p.mp4")
 
 
-@pytest.fixture(autouse=True)
-def _clear_decode_backend_env(monkeypatch) -> None:
-    monkeypatch.delenv(module.DECODE_BACKEND_ENV, raising=False)
-
-
 def _metadata():
     return video_metadata(
         fps=30, num_frames=30, video_file="input.mp4", video_width=16, video_height=16, codec_name="h264"
     )
 
 
-def _reader(monkeypatch, vendor: AcceleratorVendor) -> module.VideoReader:
+def _reader(monkeypatch, vendor: AcceleratorVendor, backend: str = "auto") -> module.VideoReader:
     monkeypatch.setattr(module, "vendor_for_device", lambda _device: vendor)
     monkeypatch.setattr(module, "current_stream", lambda _device: None)
-    return module.VideoReader("input.mp4", 4, torch.device("cuda:0"), _metadata())
+    return module.VideoReader("input.mp4", 4, torch.device("cuda:0"), _metadata(), decode_backend=backend)
 
 
 def _fake_container(is_hwaccel: bool) -> MagicMock:
@@ -49,8 +44,6 @@ def _fake_container(is_hwaccel: bool) -> MagicMock:
 
 
 def test_auto_backend_falls_back_to_pyav_when_vali_fails(monkeypatch, caplog) -> None:
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
-
     def broken_vali(*args, **kwargs):
         raise module.VideoDecodeError("vali is broken")
 
@@ -64,34 +57,23 @@ def test_auto_backend_falls_back_to_pyav_when_vali_fails(monkeypatch, caplog) ->
     assert "hwaccel" in module.av.open.call_args.kwargs
 
 
-@pytest.mark.parametrize("backend", module._DECODE_BACKENDS)
-def test_decode_backend_env_override(monkeypatch, backend: str) -> None:
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
-    monkeypatch.setenv(module.DECODE_BACKEND_ENV, backend)
-    assert module._decode_backend() == backend
-
-
 def test_forced_vali_backend_raises_on_failure(monkeypatch) -> None:
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", "vali")
-
     def broken_vali(*args, **kwargs):
         raise RuntimeError("no decoder")
 
     monkeypatch.setattr(module, "_ValiFrameSource", broken_vali)
-    reader = _reader(monkeypatch, AcceleratorVendor.NVIDIA)
+    reader = _reader(monkeypatch, AcceleratorVendor.NVIDIA, "vali")
     with pytest.raises(module.VideoDecodeError, match="no decoder"):
         reader.__enter__()
 
 
 def test_forced_vali_backend_requires_nvidia(monkeypatch) -> None:
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", "vali")
-    reader = _reader(monkeypatch, AcceleratorVendor.AMD)
+    reader = _reader(monkeypatch, AcceleratorVendor.AMD, "vali")
     with pytest.raises(module.VideoDecodeError, match="NVIDIA"):
         reader.__enter__()
 
 
 def test_auto_backend_skips_vali_on_amd(monkeypatch) -> None:
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
     vali_factory = MagicMock()
     monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
     monkeypatch.setattr(module.av, "open", MagicMock(return_value=_fake_container(False)))
@@ -104,13 +86,12 @@ def test_auto_backend_skips_vali_on_amd(monkeypatch) -> None:
 
 
 def test_pyav_sw_backend_skips_hwaccel_and_amf(monkeypatch) -> None:
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", "pyav-sw")
     vali_factory = MagicMock()
     monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
     for vendor in (AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD):
         container = _fake_container(False)
         monkeypatch.setattr(module.av, "open", MagicMock(return_value=container))
-        reader = _reader(monkeypatch, vendor)
+        reader = _reader(monkeypatch, vendor, "pyav-sw")
         amf_setup = MagicMock()
         monkeypatch.setattr(reader, "_setup_amf_decoder", amf_setup)
         nvdec_setup = MagicMock()
@@ -124,7 +105,6 @@ def test_pyav_sw_backend_skips_hwaccel_and_amf(monkeypatch) -> None:
 
 
 def test_auto_backend_decodes_vc1_with_pyav_hwaccel(monkeypatch) -> None:
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
     vali_factory = MagicMock()
     monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
     monkeypatch.setattr(module.av, "open", MagicMock(return_value=_fake_container(True)))
@@ -177,13 +157,6 @@ def test_vali_seek_lands_on_the_span_first_frame(
     # VALI's TsFromTime: round to whole µs, then rescale to the stream time base.
     target_pts = round(Fraction(round(seconds * 1_000_000), 1_000_000) / time_base)
     assert keyframe_pts - frame_duration < target_pts <= keyframe_pts
-
-
-def test_unknown_backend_raises(monkeypatch) -> None:
-    monkeypatch.setenv(module.DECODE_BACKEND_ENV, "cpu-only")
-    reader = _reader(monkeypatch, AcceleratorVendor.NVIDIA)
-    with pytest.raises(ValueError, match="JASNA_DECODE_BACKEND"):
-        reader.__enter__()
 
 
 class _FakeVali:
@@ -356,16 +329,15 @@ def _vali_fork_available() -> bool:
     not torch.cuda.is_available() or not TEST_CLIP.exists() or not _vali_fork_available(),
     reason="needs a GPU, the test clip and the python_vali fork",
 )
-def test_vali_backend_matches_pyav_hw_output(monkeypatch) -> None:
+def test_vali_backend_matches_pyav_hw_output() -> None:
     from jasna.media.probe import get_video_meta_data
 
     metadata = get_video_meta_data(str(TEST_CLIP))
     device = torch.device("cuda", 0)
 
     def first_batch(backend):
-        monkeypatch.setenv("JASNA_DECODE_BACKEND", backend)
         with module.VideoReader(
-            str(TEST_CLIP), batch_size=4, device=device, metadata=metadata
+            str(TEST_CLIP), batch_size=4, device=device, metadata=metadata, decode_backend=backend
         ) as reader:
             batch, pts = next(reader.frames())
             return batch.clone(), pts
@@ -380,7 +352,7 @@ def test_vali_backend_matches_pyav_hw_output(monkeypatch) -> None:
     not torch.cuda.is_available() or not _vali_fork_available(),
     reason="needs a GPU and the python_vali fork",
 )
-def test_vali_keeps_frame_order_when_the_sps_sets_no_reorder_limit(monkeypatch, tmp_path) -> None:
+def test_vali_keeps_frame_order_when_the_sps_sets_no_reorder_limit(tmp_path) -> None:
     from jasna.media.probe import get_video_meta_data
 
     path = str(write_unbounded_reorder_h264_source(tmp_path / "unbounded.mp4"))
@@ -388,8 +360,7 @@ def test_vali_keeps_frame_order_when_the_sps_sets_no_reorder_limit(monkeypatch, 
     device = torch.device("cuda", 0)
 
     def frame_levels(backend):
-        monkeypatch.setenv("JASNA_DECODE_BACKEND", backend)
-        with module.VideoReader(path, batch_size=8, device=device, metadata=metadata) as reader:
+        with module.VideoReader(path, batch_size=8, device=device, metadata=metadata, decode_backend=backend) as reader:
             return torch.cat([batch.float().mean(dim=(1, 2, 3)) for batch, _pts in reader.frames()]).cpu()
 
     vali_levels = frame_levels("vali")
@@ -411,14 +382,15 @@ def test_vali_source_seek_with_stride_reanchors_at_seek(monkeypatch) -> None:
     reason="needs a GPU, the test clip and the python_vali fork",
 )
 @pytest.mark.parametrize("backend", ["vali", "pyav-hw", "pyav-sw"])
-def test_batch_written_after_queued_work_of_a_non_default_consumer_stream(monkeypatch, backend: str) -> None:
+def test_batch_written_after_queued_work_of_a_non_default_consumer_stream(backend: str) -> None:
     from jasna.media.probe import get_video_meta_data
 
     metadata = get_video_meta_data(str(TEST_CLIP))
     device = torch.device("cuda", 0)
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", backend)
     with (
-        module.VideoReader(str(TEST_CLIP), batch_size=4, device=device, metadata=metadata) as reader,
+        module.VideoReader(
+            str(TEST_CLIP), batch_size=4, device=device, metadata=metadata, decode_backend=backend
+        ) as reader,
         closing(reader.frames()) as frames,
     ):
         next(frames)
@@ -427,7 +399,9 @@ def test_batch_written_after_queued_work_of_a_non_default_consumer_stream(monkey
     consumer = torch.cuda.Stream(device)
     with (
         torch.cuda.stream(consumer),
-        module.VideoReader(str(TEST_CLIP), batch_size=4, device=device, metadata=metadata) as reader,
+        module.VideoReader(
+            str(TEST_CLIP), batch_size=4, device=device, metadata=metadata, decode_backend=backend
+        ) as reader,
         closing(reader.frames()) as frames,
     ):
         next(frames)

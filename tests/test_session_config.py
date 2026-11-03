@@ -138,6 +138,24 @@ def test_cli_ltx_args_are_mapped() -> None:
     assert config.ltx_seed == 7
 
 
+def test_cli_takes_the_vae_and_video_decoder_from_the_environment(monkeypatch) -> None:
+    monkeypatch.setenv("JASNA_LTX_VAE_ENCODER", "full")
+    monkeypatch.setenv("JASNA_LTX_VAE_DECODER", "half")
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "pyav-sw")
+
+    config = _cli_config()
+
+    assert (config.ltx_vae_encoder, config.ltx_vae_decoder, config.decode_backend) == ("full", "half", "pyav-sw")
+
+
+@pytest.mark.parametrize("name", ["JASNA_LTX_VAE_ENCODER", "JASNA_LTX_VAE_DECODER", "JASNA_DECODE_BACKEND"])
+def test_cli_rejects_an_unknown_environment_choice(monkeypatch, name) -> None:
+    monkeypatch.setenv(name, "quarter")
+
+    with pytest.raises(ValueError, match=f"{name}='quarter' is not one of auto, "):
+        _cli_config()
+
+
 def test_cli_ltx_overlap_defaults_to_17_frames_and_sets_the_window_step() -> None:
     assert _cli_config(["--restoration-model-name", "ltx"]).ltx_window_hop == 104
     more = _cli_config(["--restoration-model-name", "ltx", "--ltx-overlap", "33"])
@@ -168,6 +186,9 @@ def test_gui_config_maps_settings_fields() -> None:
         tvai_scale=2,
         denoise_strength="low",
         scene_detection=False,
+        ltx_vae_encoder="max",
+        ltx_vae_decoder="full",
+        decode_backend="pyav-hw",
     )
     config = _gui_config(settings)
 
@@ -179,6 +200,7 @@ def test_gui_config_maps_settings_fields() -> None:
     assert config.tvai_scale == 2
     assert config.denoise_strength == "low"
     assert config.scene_detection is False
+    assert (config.ltx_vae_encoder, config.ltx_vae_decoder, config.decode_backend) == ("max", "full", "pyav-hw")
     assert config.disable_progress is True
 
 

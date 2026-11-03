@@ -1,7 +1,7 @@
 """Restoration model choice (BasicVSR++ or LTX) and the LTX options."""
 
 import random
-from typing import Callable
+from typing import Callable, get_args
 
 import customtkinter as ctk
 
@@ -31,6 +31,7 @@ from jasna.session_config import (
     LTX_DEFAULT_OVERLAP,
     LTX_DEFAULT_SEED,
     LTX_OVERLAP_CHOICES,
+    LtxVaeName,
 )
 
 _MODELS = ("basicvsrpp", "ltx")
@@ -218,6 +219,8 @@ class RestorationModelSection:
         Tooltip(self._widgets["ltx_overlap"], get_tooltip("ltx_overlap"))
         self._set_overlap(LTX_DEFAULT_OVERLAP)
 
+        vae_rows = [self._vae_row(f"ltx_vae_{part}") for part in ("encoder", "decoder")]
+
         trial_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         add_setting_label(trial_row, "ltx_trial", in_card=True)
         self._widgets["ltx_trial"] = CompactSwitch(trial_row, self._on_ltx_choice_changed, Colors.BG_CARD)
@@ -239,12 +242,42 @@ class RestorationModelSection:
             Row(large_row, dict(fill="x"), "advanced"),
             Row(auto_row, dict(fill="x"), "advanced"),
             Row(overlap_row, dict(fill="x"), "expert"),
+            *(Row(row, dict(fill="x"), "expert") for row in vae_rows),
             Row(trial_row, dict(fill="x"), "simple"),
             Row(self._trial_status, note, "simple"),
             Row(self._notice, note, "simple"),
         ]
 
         self._refresh_widgets()
+
+    def _vae_row(self, key: str):
+        row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
+        add_setting_label(row, key, in_card=True)
+        self._widgets[key] = ValueOptionMenu(
+            row,
+            options={choice: t(f"ltx_vae_{choice}") for choice in get_args(LtxVaeName)},
+            command=lambda _choice: self._on_vae_changed(),
+            fg_color=Colors.BG_PANEL,
+            button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT,
+            dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY,
+            text_color=Colors.TEXT_PRIMARY,
+            width=160,
+        )
+        self._widgets[key].pack(side="right", padx=12, pady=8)
+        self._widgets[key].set_value("auto")
+        return row
+
+    def _use_chosen_vaes(self) -> None:
+        self._ltx_models.set_vaes(
+            self._widgets["ltx_vae_encoder"].get_value(), self._widgets["ltx_vae_decoder"].get_value()
+        )
+
+    def _on_vae_changed(self) -> None:
+        self._use_chosen_vaes()
+        self.refresh()
+        self._on_modified()
 
     def _fast(self) -> bool:
         return self._widgets["ltx_fast"].get() == 1
@@ -331,7 +364,8 @@ class RestorationModelSection:
             text=t(reason) if reason else t("model_ltx_description"),
             text_color=Colors.STATUS_WARNING if reason else Colors.STATUS_PENDING,
         )
-        self._ltx_model.configure(state="normal" if editable else "disabled")
+        for key in ("ltx_model", "ltx_vae_encoder", "ltx_vae_decoder"):
+            self._widgets[key].configure(state="normal" if editable else "disabled")
         self._new_seed_btn.configure(state="normal" if self._enabled else "disabled")
         locked = trial_only(state)
         if locked:
@@ -422,6 +456,9 @@ class RestorationModelSection:
         self._set_auto_split(preset.ltx_auto_split, preset.ltx_auto_split_percent)
         self._set_overlap(preset.ltx_overlap)
         self._ltx_model.set_value(preset.ltx_model)
+        self._widgets["ltx_vae_encoder"].set_value(preset.ltx_vae_encoder)
+        self._widgets["ltx_vae_decoder"].set_value(preset.ltx_vae_decoder)
+        self._use_chosen_vaes()
         self._model.set(preset.restoration_model if preset.restoration_model in _MODELS else "basicvsrpp")
         self._show_model(self._usable_model())
         self._refresh_download()
@@ -437,4 +474,6 @@ class RestorationModelSection:
             "ltx_auto_split": self._widgets["ltx_auto_split"].get() == 1,
             "ltx_auto_split_percent": round(self._widgets["ltx_auto_split_percent"].get()),
             "ltx_overlap": round(self._widgets["ltx_overlap"].get()),
+            "ltx_vae_encoder": self._widgets["ltx_vae_encoder"].get_value(),
+            "ltx_vae_decoder": self._widgets["ltx_vae_decoder"].get_value(),
         }

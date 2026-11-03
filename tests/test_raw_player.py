@@ -382,6 +382,7 @@ def test_raw_pass_forwards_seek_and_player_writer(monkeypatch) -> None:
     monkeypatch.setattr(pipeline_threads, "VramOffloader", MagicMock())
     pipeline = SimpleNamespace(
         input_video=Path("video.mp4"),
+        decode_backend="auto",
         device=torch.device("cpu"),
         restoration_pipeline=SimpleNamespace(
             secondary_num_workers=1,

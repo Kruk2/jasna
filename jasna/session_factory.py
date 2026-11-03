@@ -265,9 +265,17 @@ def _ltx_model_files(
         from jasna.ltx.model_files import LTX_TRIAL_NOTICE
 
         logger.warning(LTX_TRIAL_NOTICE)
-        files = LtxModelFiles.placeholder(config.ltx_model, fast=config.ltx_fast)
+        files = LtxModelFiles.placeholder(
+            config.ltx_model, fast=config.ltx_fast, encoder=config.ltx_vae_encoder, decoder=config.ltx_vae_decoder
+        )
     else:
-        files = LtxModelFiles.from_dir(config.model_path("ltx"), config.ltx_model, fast=config.ltx_fast)
+        files = LtxModelFiles.from_dir(
+            config.model_path("ltx"),
+            config.ltx_model,
+            fast=config.ltx_fast,
+            encoder=config.ltx_vae_encoder,
+            decoder=config.ltx_vae_decoder,
+        )
     ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),
@@ -375,6 +383,7 @@ def ltx_auto_split(
             stereo=stereo,
             batch_size=config.batch_size,
             device=session.device,
+            decode_backend=config.decode_backend,
             disable_progress=config.disable_progress,
             on_progress=on_progress,
         )

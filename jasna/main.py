@@ -1,9 +1,10 @@
 import argparse
 import logging
+import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 from jasna import __version__
 from jasna.cli_help import CLI_HELP
@@ -29,7 +30,9 @@ from jasna.session_config import (
     LTX_DEFAULT_SEED,
     LTX_OVERLAP_CHOICES,
     LTX_SECONDARY_RESTORATIONS,
+    DecodeBackendName,
     LtxModelName,
+    LtxVaeName,
     RestorationModelName,
     SessionConfig,
 )
@@ -53,6 +56,13 @@ def batch_size_from_args(args: argparse.Namespace) -> int:
     from jasna.mosaic.detection_registry import default_detection_batch_size
 
     return int(args.batch_size) if args.batch_size is not None else default_detection_batch_size(args.device)
+
+
+def _env_choice(name: str, choices: tuple[str, ...]) -> str:
+    value = os.environ.get(name, "auto")
+    if value not in choices:
+        raise ValueError(f"{name}={value!r} is not one of {', '.join(choices)}")
+    return value
 
 
 def _session_config_from_args(
@@ -85,6 +95,8 @@ def _session_config_from_args(
         ltx_seed=int(args.ltx_seed),
         ltx_fast=bool(args.ltx_fast),
         ltx_model=CLI_RESTORATION_MODELS[args.restoration_model_name][1],
+        ltx_vae_encoder=_env_choice("JASNA_LTX_VAE_ENCODER", get_args(LtxVaeName)),
+        ltx_vae_decoder=_env_choice("JASNA_LTX_VAE_DECODER", get_args(LtxVaeName)),
         ltx_trial=bool(args.ltx_trial),
         ltx_auto_split_percent=args.ltx_auto_split,
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
@@ -98,6 +110,7 @@ def _session_config_from_args(
         tvai_args=str(args.tvai_args),
         tvai_workers=int(args.tvai_workers),
         tvai_denoise=bool(args.tvai_denoise),
+        decode_backend=_env_choice("JASNA_DECODE_BACKEND", get_args(DecodeBackendName)),
         rtx_scale=int(args.rtx_scale),
         rtx_quality=str(args.rtx_quality).lower(),
         rtx_denoise=str(args.rtx_denoise).lower(),
@@ -864,7 +877,13 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
         print(LTX_TRIAL_NOTICE)
         return
     directory = config.model_path("ltx")
-    missing = missing_downloads(directory, config.ltx_model, fast=config.ltx_fast)
+    missing = missing_downloads(
+        directory,
+        config.ltx_model,
+        fast=config.ltx_fast,
+        encoder=config.ltx_vae_encoder,
+        decoder=config.ltx_vae_decoder,
+    )
     if not missing:
         return
     from jasna.license_api import require_protection

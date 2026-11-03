@@ -58,6 +58,7 @@ from jasna.ltx.super_res import LtxSuperRes, enlarged_windows, upscaled_crop
 from jasna.models.ltx_vae import decode_latent
 from jasna.mosaic.detections import Detections
 from jasna.progressbar import StageProgress
+from jasna.session_config import DecodeBackendName
 from jasna.tensor_utils import half_dtype
 from jasna.tracking.scene_detector import SceneCutDetector
 from jasna.vr180 import StereoLayout
@@ -449,6 +450,7 @@ def video_frames(
     batch_size: int,
     device: torch.device,
     frame_stride: int,
+    decode_backend: DecodeBackendName,
     seek_ts: float | None,
     end_pts: int | None,
 ) -> FrameSource:
@@ -457,7 +459,9 @@ def video_frames(
     from jasna.media.video_decoder import VideoReader
 
     def frames() -> FrameBatches:
-        with VideoReader(str(path), batch_size, device, metadata, frame_stride=frame_stride) as reader:
+        with VideoReader(
+            str(path), batch_size, device, metadata, frame_stride=frame_stride, decode_backend=decode_backend
+        ) as reader:
             for batch, pts in reader.frames(seek_ts):
                 if end_pts is None:
                     yield batch, pts

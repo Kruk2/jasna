@@ -187,7 +187,9 @@ def test_build_pipeline_loads_a_segment_model_the_session_lacks() -> None:
         build_pipeline(session_config(), session, Path("in.mp4"), Path("out.mp4"), segments=segments)
         build_pipeline(session_config(), session, Path("in.mp4"), Path("out.mp4"), segments=segments)
 
-    from_dir.assert_called_once_with(default_restoration_model_path("ltx"), "distilled", fast=False)
+    from_dir.assert_called_once_with(
+        default_restoration_model_path("ltx"), "distilled", fast=False, encoder="auto", decoder="auto"
+    )
     assert session.ltx_files is from_dir.return_value
 
 

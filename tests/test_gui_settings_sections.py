@@ -11,7 +11,7 @@ from jasna.gui.settings_sections.detection import DetectionSection
 from jasna.gui.settings_sections.encoding import EncodingSection
 from jasna.gui.settings_sections.image_restoration import ImageRestorationSection
 from jasna.gui.settings_sections.post_export import PostExportSection
-from jasna.gui.settings_sections.processing import ProcessingSection
+from jasna.gui.settings_sections.processing import ProcessingSection, decode_backends
 from jasna.gui.settings_sections.restoration_model import RestorationModelSection
 from jasna.gui.settings_sections.secondary import SecondarySection
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
@@ -92,6 +92,7 @@ _NON_DEFAULT_SETTINGS = AppSettings(
     post_export_video_command="remux {output}",
     file_conflict="skip",
     working_directory="/scratch",
+    decode_backend="pyav-sw",
 )
 
 
@@ -99,7 +100,17 @@ _NON_DEFAULT_SETTINGS = AppSettings(
     "settings",
     [
         _NON_DEFAULT_SETTINGS,
-        replace(AppSettings(), restoration_model="ltx", ltx_seed=99, ltx_large_canvas=True, ltx_overlap=33, encoder_cq=28),
+        replace(
+            AppSettings(),
+            restoration_model="ltx",
+            ltx_seed=99,
+            ltx_large_canvas=True,
+            ltx_overlap=33,
+            ltx_vae_encoder="full",
+            ltx_vae_decoder="half",
+            decode_backend="vali",
+            encoder_cq=28,
+        ),
     ],
     ids=["standard", "ltx"],
 )
@@ -371,6 +382,19 @@ def test_amd_secondary_choices_and_busy_state(panel_factory, monkeypatch, tmp_pa
     assert radios["unet-4x"].cget("state") == "disabled"
     panel._secondary_section.set_enabled(True)
     assert radios["tvai"].cget("state") == "normal"
+
+
+def test_amd_offers_only_the_decoders_it_can_use_and_drops_vali(panel_factory) -> None:
+    panel = panel_factory()
+    _apply(panel, replace(AppSettings(), decode_backend="vali"))
+
+    panel.set_gpu_support(vendor=AcceleratorVendor.AMD, blackwell=False)
+
+    assert panel.get_settings().decode_backend == "auto"
+    _apply(panel, replace(AppSettings(), decode_backend="vali"))
+    assert panel.get_settings().decode_backend == "auto"
+    assert decode_backends(AcceleratorVendor.NVIDIA)[1:] == ("vali", "pyav-hw", "pyav-sw")
+    assert decode_backends(AcceleratorVendor.AMD) == ("auto", "pyav-sw")
 
 
 def test_ltx_without_model_files_runs_as_a_trial(panel_factory, monkeypatch) -> None:

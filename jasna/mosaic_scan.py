@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from jasna.segments import SegmentRange, SegmentRestoration, normalize_segments
+from jasna.session_config import DecodeBackendName
 
 if TYPE_CHECKING:
     from jasna.vr180 import StereoLayout
@@ -163,6 +164,7 @@ def scan_mosaic_sizes(
     stereo: StereoLayout | None,
     batch_size: int,
     device,
+    decode_backend: DecodeBackendName,
     disable_progress: bool,
     on_progress: Callable[[float], None],
 ) -> MosaicSamples:
@@ -182,7 +184,9 @@ def scan_mosaic_sizes(
     scores: list[float] = []
     sizes: list[float] = []
     total = max(1, int(metadata.num_frames) // frame_stride)
-    reader = VideoReader(str(path), batch_size, device, metadata, frame_stride=frame_stride)
+    reader = VideoReader(
+        str(path), batch_size, device, metadata, frame_stride=frame_stride, decode_backend=decode_backend
+    )
     with reader, tqdm(total=total, desc="Mosaic scan", unit="sample", disable=disable_progress) as bar:
         for batch, pts_list in reader.frames():
             count = len(pts_list)

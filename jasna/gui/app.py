@@ -754,7 +754,13 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             if license_blocked():
                 messagebox.showwarning(t("ltx_blocked_title"), t("ltx_blocked_text"))
                 return
-            if license_missing(self._ltx_models.directory, settings.ltx_model, settings.ltx_fast):
+            if license_missing(
+                self._ltx_models.directory,
+                settings.ltx_model,
+                settings.ltx_fast,
+                settings.ltx_vae_encoder,
+                settings.ltx_vae_decoder,
+            ):
                 if messagebox.askyesno(t("ltx_license_trial_title"), t("ltx_license_trial_confirm")):
                     self._settings_panel.set_ltx_trial(True)
                     self._on_start()

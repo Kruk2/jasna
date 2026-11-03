@@ -77,8 +77,7 @@ def test_b_frame_asf_from_other_codecs_keeps_ffmpeg_timestamps(tmp_path):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
-def test_video_reader_starts_vc1_asf_at_first_timestamp(tmp_path, monkeypatch):
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", "pyav-sw")
+def test_video_reader_starts_vc1_asf_at_first_timestamp(tmp_path):
     path = tmp_path / "vc1.wmv"
     _write_vc1_asf(path)
     metadata = VideoMetadata(
@@ -97,7 +96,7 @@ def test_video_reader_starts_vc1_asf_at_first_timestamp(tmp_path, monkeypatch):
         num_frames=FRAME_COUNT,
         is_10bit=False,
     )
-    with VideoReader(str(path), 4, torch.device("cuda:0"), metadata) as reader:
+    with VideoReader(str(path), 4, torch.device("cuda:0"), metadata, decode_backend="pyav-sw") as reader:
         pts = [p for _, batch_pts in reader.frames() for p in batch_pts]
 
     assert pts == [i * FRAME_MS for i in range(FRAME_COUNT)]

@@ -145,9 +145,9 @@ def test_gui_activation_keeps_exact_ltx_entitlements(lease_api, monkeypatch, tmp
     monkeypatch.setattr(license_store, "is_licensed", lambda: True)
     monkeypatch.setattr(lease, "saved_models", lambda: ["ltx-2.5-v3"])
     assert not model_files.model_installed(tmp_path, "distilled", fast=False)
-    assert not ltx_models.license_missing(tmp_path, "distilled", False)
+    assert not ltx_models.license_missing(tmp_path, "distilled", False, "auto", "auto")
     monkeypatch.setattr(lease, "saved_models", lambda: ["unet-4x"])
-    assert ltx_models.license_missing(tmp_path, "distilled", False)
+    assert ltx_models.license_missing(tmp_path, "distilled", False, "auto", "auto")
 
 
 @pytest.fixture

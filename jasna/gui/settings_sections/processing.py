@@ -1,7 +1,10 @@
-"""Processing settings section: clip length, overlap, denoise and GPU precision."""
+"""Processing settings section: clip length, overlap, denoise, video decoder and GPU precision."""
+
+from typing import get_args
 
 import customtkinter as ctk
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
@@ -13,12 +16,21 @@ from jasna.gui.settings_sections.widgets import (
     layout_rows,
 )
 from jasna.gui.theme import Colors, Sizing
+from jasna.session_config import DecodeBackendName
 
 # The sub-engines no longer depend on the clip length, so a long clip costs
 # activation memory only — high values stay usable on a large GPU.
 MIN_CLIP_SIZE = 10
 MAX_CLIP_SIZE = 720
 CLIP_SIZE_STEP = 10
+
+
+def decode_backends(vendor: AcceleratorVendor | None) -> tuple[DecodeBackendName, ...]:
+    """The decoders this GPU can use (all until it is known): VALI is NVIDIA only, and on AMD the
+    FFmpeg hardware decoder is what Auto uses anyway."""
+    if vendor in (None, AcceleratorVendor.NVIDIA):
+        return get_args(DecodeBackendName)
+    return ("auto", "pyav-sw")
 
 
 class ProcessingSection:
@@ -76,6 +88,21 @@ class ProcessingSection:
         self._widgets["max_clip_size"].pack(side="right", padx=(0, 8))
         self._widgets["max_clip_size"].set(90)
 
+        decode_row = ctk.CTkFrame(inner, fg_color="transparent")
+        add_setting_label(decode_row, "decode_backend")
+        self._decode_backends = decode_backends(None)
+        self._widgets["decode_backend"] = ValueOptionMenu(
+            decode_row,
+            options={backend: t(f"decode_backend_{backend.replace('-', '_')}") for backend in self._decode_backends},
+            command=lambda _value: self._on_modified(),
+            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
+            width=140,
+        )
+        self._widgets["decode_backend"].pack(side="right")
+        self._widgets["decode_backend"].set_value("auto")
+
         self._toggles_row = ctk.CTkFrame(inner, fg_color="transparent")
         fp16_frame = self._switch_card(self._toggles_row, "fp16_mode")
         compile_frame = self._switch_card(self._toggles_row, "compile_basicvsrpp")
@@ -85,6 +112,7 @@ class ProcessingSection:
             Row(overlap_row, row_gap, "advanced", "standard"),
             Row(denoise_row, row_gap, "advanced", "standard"),
             Row(clip_row, row_gap, "advanced", "standard"),
+            Row(decode_row, row_gap, "expert"),
             Row(self._toggles_row, row_gap, "expert"),
         ]
         self._toggles = [
@@ -99,6 +127,14 @@ class ProcessingSection:
         self._widgets[key].pack(side="right", padx=12, pady=8)
         self._widgets[key].select()
         return card
+
+    def _set_decode_backend(self, backend: str) -> None:
+        self._widgets["decode_backend"].set_value(backend if backend in self._decode_backends else "auto")
+
+    def set_gpu_support(self, vendor: AcceleratorVendor) -> None:
+        self._decode_backends = decode_backends(vendor)
+        self._widgets["decode_backend"].offer(self._decode_backends)
+        self._set_decode_backend(self._widgets["decode_backend"].get_value())
 
     def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
         any_toggle = layout_rows(self._toggles, level, standard=standard, ltx=ltx)
@@ -121,6 +157,7 @@ class ProcessingSection:
         self._widgets["denoise_strength"].set_value(preset.denoise_strength)
         self._widgets["max_clip_size"].set(preset.max_clip_size)
         self._widgets["max_clip_size_val"].configure(text=str(preset.max_clip_size))
+        self._set_decode_backend(preset.decode_backend)
         for key in ("fp16_mode", "compile_basicvsrpp"):
             if getattr(preset, key):
                 self._widgets[key].select()
@@ -132,6 +169,7 @@ class ProcessingSection:
             "temporal_overlap": int(self._widgets["temporal_overlap"].get()),
             "denoise_strength": self._widgets["denoise_strength"].get_value(),
             "max_clip_size": int(self._widgets["max_clip_size"].get()),
+            "decode_backend": self._widgets["decode_backend"].get_value(),
             "fp16_mode": self._widgets["fp16_mode"].get() == 1,
             "compile_basicvsrpp": self._widgets["compile_basicvsrpp"].get() == 1,
         }

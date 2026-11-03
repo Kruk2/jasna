@@ -60,8 +60,7 @@ def _churn_default_stream(stop: threading.Event, device: torch.device) -> None:
         torch.cuda.current_stream(device).synchronize()
 
 
-def test_amd_decode_encode_round_trip_survives_default_stream_churn(tmp_path, monkeypatch):
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
+def test_amd_decode_encode_round_trip_survives_default_stream_churn(tmp_path):
     device = torch.device("cuda:0")
     source = tmp_path / "source.mp4"
     output = tmp_path / "output.mp4"
