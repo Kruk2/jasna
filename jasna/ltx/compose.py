@@ -2,8 +2,9 @@
 
 Frames are ``[3, H, W]`` uint8 RGB tensors. A window paints only its own track's
 feathered mask and never a pixel inside another track's mask; outside every mask the
-source stays bit-exact. A track in a handover (presence below 1) also paints over the
-other tracks' masks and takes that share of its feathered area from them.
+source stays bit-exact. A track in a handover (presence below 1), or overlapping a
+wider-cropped full-presence track, also paints over the other tracks' masks and takes that
+share of its feathered area from them.
 """
 
 from __future__ import annotations
@@ -121,7 +122,7 @@ def crop_edge_ramp(box: tuple[int, int, int, int], shape: tuple[int, int], feath
     return torch.minimum(axis(y1, y2, height)[:, None], axis(x1, x2, width)[None, :])
 
 
-def polygon_mask(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tuple[int, int], device: torch.device) -> torch.Tensor:
+def polygon_mask_array(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tuple[int, int]) -> np.ndarray:
     """Bool ``[h, w]`` union of ``polygons`` inside the region at ``offset`` (x, y)."""
     mask = np.zeros(shape, dtype=np.uint8)
     for polygon in polygons:
@@ -129,7 +130,11 @@ def polygon_mask(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tu
             contour = np.asarray(polygon, dtype=np.float32).round().astype(np.int32) - np.asarray(offset, dtype=np.int32)
             # One fillPoly call per polygon: a single call uses the even-odd rule and punches holes where polygons overlap.
             cv2.fillPoly(mask, [contour], 255)
-    return torch.from_numpy(mask).to(device) > 0
+    return mask > 0
+
+
+def polygon_mask(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tuple[int, int], device: torch.device) -> torch.Tensor:
+    return torch.from_numpy(polygon_mask_array(polygons, shape, offset)).to(device)
 
 
 def masked_median(difference: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -159,6 +164,21 @@ class Candidate:
     presence: float
 
 
+def handing_presence(tracks: dict[int, Candidate], masks: dict[int, np.ndarray]) -> dict[int, float]:
+    """The tracks that take their feathered area from the others, with their share: one in a
+    handover (presence below 1), and a full-presence track whose mask overlaps a wider-cropped
+    full-presence one. A handover child so keeps its area once its presence reaches 1 while the
+    wider track it took over from still covers it."""
+    full = [track for track, c in tracks.items() if c.presence == 1.0]
+    takes_over = {
+        track
+        for track in full
+        for other in full
+        if tracks[other].crop.side > tracks[track].crop.side and (masks[track] & masks[other]).any()
+    }
+    return {track: c.presence for track, c in tracks.items() if c.presence < 1.0 or track in takes_over}
+
+
 def composite_frame(
     source: torch.Tensor, candidates: Sequence[Candidate], *, feather: int, projector: RegionProjector | None
 ) -> torch.Tensor:
@@ -174,7 +194,9 @@ def composite_frame(
     shape = (y3 - y0, x3 - x0)
     device = source.device
     tracks = {c.track: c for c in live}
-    rois = {track: polygon_mask(c.polygons, shape, (x0, y0), device) for track, c in tracks.items()}
+    masks = {track: polygon_mask_array(c.polygons, shape, (x0, y0)) for track, c in tracks.items()}
+    handing = handing_presence(tracks, masks)
+    rois = {track: torch.from_numpy(mask).to(device) for track, mask in masks.items()}
     feathered = {track: feather_alpha(roi, feather) for track, roi in rois.items()}
     if len(rois) == 1:
         (union,), (union_feathered,) = rois.values(), feathered.values()
@@ -195,12 +217,11 @@ def composite_frame(
         restored[:, y1:y2, x1:x2] = restored_crop
         edge = torch.where(roi, covered.float(), ramp)
         alpha = feathered[candidate.track] * edge * candidate.weight
-        if candidate.presence == 1.0:
+        if candidate.track not in handing:
             alpha = alpha * (roi | ~union).float()
         ring = (covered & outside)[y1:y2, x1:x2]
         offset = masked_median(region[:, y1:y2, x1:x2] - restored_crop, ring) * COLOUR_MATCH_STRENGTH
         layers.append((candidate, restored + offset[:, None, None], alpha))
-    handing = {track: c.presence for track, c in tracks.items() if c.presence < 1.0}
     shares = {
         track: sum(alpha for c, _, alpha in layers if c.track == track).clamp(max=1.0) * presence
         for track, presence in handing.items()
