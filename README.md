@@ -161,8 +161,8 @@ GitHub.
 ### How to activate
 
 1. Support on one of the pages above. You get a **License code**.
-2. In Jasna, open **Activate Jasna**, enter the License code and press
-   **Activate**.
+2. In Jasna, open **Activate Jasna**, enter the License code, choose
+   **This is my PC** or **Rented or shared PC** and press **Activate**.
 
 One License code works on **3 devices at the same time**. To see how many are
 in use, open **Activate Jasna** again.

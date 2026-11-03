@@ -375,6 +375,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=CLI_HELP["license_code"],
     )
     license_group.add_argument(
+        "--online",
+        action="store_true",
+        help=CLI_HELP["online"],
+    )
+    license_group.add_argument(
         "--activation-status",
         action="store_true",
         help=CLI_HELP["activation_status"],
@@ -930,6 +935,8 @@ def main() -> None:
     escape_unencodable_output(sys.stdout, sys.stderr)
     parser = build_parser()
     args = parser.parse_args()
+    if args.online and args.license_code is None:
+        parser.error("--online needs --license-code")
     if args.license_code is not None:
         from jasna.license_api import ProtectionUnavailableError, require_protection
 
@@ -943,7 +950,7 @@ def main() -> None:
         # Activation warnings always show, as they did before logging was configured; --log-level can add more.
         _configure_logging(min(getattr(logging, args.log_level.upper()), logging.WARNING))
         try:
-            result = lease.activate_license_code(args.license_code)
+            result = lease.activate_license_code(args.license_code, try_offline=not args.online)
         except (ProtectionError, OSError) as exc:
             parser.exit(1, f"Activation error: {exc}\n")
         print(lease.activated_message(result.online_reason))

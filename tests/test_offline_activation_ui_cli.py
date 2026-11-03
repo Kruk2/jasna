@@ -45,6 +45,7 @@ ACTIVATION_MESSAGES = [
     ("untrusted", ("license_lease_active", "license_tpm_unusable")),
     ("failed", ("license_lease_active", "license_tpm_unusable")),
     ("declined", ("license_lease_active", "license_offline_retry")),
+    ("chosen", ("license_lease_active",)),
 ]
 
 
@@ -62,7 +63,7 @@ def test_cli_license_code_activates_says_why_it_works_online_and_exits_before_gp
     monkeypatch.setattr(main, "_check_system", lambda args: pytest.fail("GPU check ran"))
     monkeypatch.setattr(main, "_configure_runtime", lambda args: pytest.fail("Runtime setup ran"))
     main.main()
-    lease_api.assert_called_once_with(code)
+    lease_api.assert_called_once_with(code, try_offline=True)
     output = capsys.readouterr()
     assert output.out == "\n".join(t(key) for key in messages) + "\n"
     assert code not in output.out + output.err
@@ -79,7 +80,7 @@ def test_cli_activation_logs_follow_the_log_level_and_always_show_warnings(monke
     request.addfinalizer(functools.partial(logging.getLogger().setLevel, logging.getLogger().level))
     probe = logging.getLogger("jasna.protection.lease.probe")
 
-    def activate(code):
+    def activate(code, try_offline):
         probe.info("probe info")
         probe.warning("probe warning")
         return lease.Activated([], "uncertified")
@@ -98,7 +99,7 @@ def test_cli_license_code_activates_before_processing(monkeypatch, lease_api, tm
     monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", "JL1-code", "--input", str(photo), "--output", "out.png"])
 
     def stop_before_gpu(args):
-        lease_api.assert_called_once_with("JL1-code")
+        lease_api.assert_called_once_with("JL1-code", try_offline=True)
         raise RuntimeError("activated before processing")
 
     monkeypatch.setattr(main, "_check_system", stop_before_gpu)
@@ -128,7 +129,7 @@ def test_activation_worker_runs_io_and_errors_off_the_main_thread(lease_api):
     result = []
     error = OSError("config volume unavailable")
     lease_api.side_effect = error
-    thread = start_lease_activation("JL1-code", lambda value, exc: result.append((value, exc, threading.get_ident())))
+    thread = start_lease_activation("JL1-code", True, lambda value, exc: result.append((value, exc, threading.get_ident())))
     thread.join(timeout=3)
     assert result == [(None, error, thread.ident)]
     assert thread.ident != threading.get_ident()
@@ -157,7 +158,7 @@ def controlled_activation_workers(monkeypatch):
     pending = SimpleNamespace(info=[], activation=[], devices=[])
     monkeypatch.setattr(activation_worker, "start_license_info", lambda done: pending.info.append(done))
     monkeypatch.setattr(activation_worker, "start_device_count", lambda done: pending.devices.append(done))
-    monkeypatch.setattr(activation_worker, "start_lease_activation", lambda code, done: pending.activation.append((code, done)))
+    monkeypatch.setattr(activation_worker, "start_lease_activation", lambda code, try_offline, done: pending.activation.append((code, done)))
     return pending
 
 
@@ -228,10 +229,39 @@ def test_lease_dialog_activates_with_the_license_code_only(tk_root, lease_api, s
     dialog._code.insert(0, "  JL1-code  ")
     dialog._activate_button.invoke()
     settle_activation(dialog)
-    lease_api.assert_called_once_with("JL1-code")
+    lease_api.assert_called_once_with("JL1-code", True)
     assert dialog._status.cget("text") == "\n".join(t(key) for key in messages)
     assert dialog._code.get() == ""
     assert callback_threads == [threading.get_ident()]
+
+
+def test_cli_online_activates_online_and_needs_a_license_code(monkeypatch, lease_api, capsys):
+    from jasna import main
+
+    monkeypatch.setattr(sys, "argv", ["jasna", "--online"])
+    with pytest.raises(SystemExit) as exc:
+        main.main()
+    assert exc.value.code == 2 and "--online needs --license-code" in capsys.readouterr().err
+    monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", "JL1-code", "--online"])
+    main.main()
+    lease_api.assert_called_once_with("JL1-code", try_offline=False)
+
+
+def test_lease_dialog_activates_online_when_chosen_and_explains_an_offline_pc(tk_root, lease_api, settle_activation):
+    from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import t
+    from jasna.protection import lease
+
+    lease_api.side_effect = lease.LeaseError("already_offline")
+    dialog = LicenseDialog(tk_root, on_activated=lambda: pytest.fail("refused activation reported success"))
+    settle_activation(dialog)
+    dialog._code.insert(0, "JL1-code")
+    dialog._mode_buttons[1].invoke()
+    dialog._activate_button.invoke()
+    settle_activation(dialog)
+    lease_api.assert_called_once_with("JL1-code", False)
+    assert dialog._status.cget("text") == t("license_problem_already_offline")
+    assert dialog._code.get() == "JL1-code"
 
 
 @pytest.mark.parametrize(("code", "message"), [("network_error", "license_lease_network_error"),

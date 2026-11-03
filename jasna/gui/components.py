@@ -304,6 +304,13 @@ class LicenseDialog(ctk.CTkToplevel):
         )
         self._code.pack(fill="x", pady=(0, 10))
         attach_entry_context_menu(self._code)
+        self._try_offline = ctk.BooleanVar(value=True)
+        self._mode_buttons = [
+            ctk.CTkRadioButton(outer, text=t(key), variable=self._try_offline, value=value, text_color=Colors.TEXT_PRIMARY)
+            for key, value in (("license_mode_offline", True), ("license_mode_online", False))
+        ]
+        for button in self._mode_buttons:
+            button.pack(anchor="w", pady=(0, 6))
         self._activate_button = ctk.CTkButton(
             outer, text=t("license_activate"),
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
@@ -336,7 +343,8 @@ class LicenseDialog(ctk.CTkToplevel):
 
     def _set_busy(self, busy, *, lock_inputs=False):
         self._activate_button.configure(state="disabled" if busy else "normal")
-        self._code.configure(state="disabled" if busy and lock_inputs else "normal")
+        for widget in (self._code, *self._mode_buttons):
+            widget.configure(state="disabled" if busy and lock_inputs else "normal")
 
     def _resize(self):
         self.update_idletasks()
@@ -388,17 +396,21 @@ class LicenseDialog(ctk.CTkToplevel):
                                text_color=Colors.TEXT_PRIMARY)
         activation_worker.start_lease_activation(
             self._code.get().strip(),
+            self._try_offline.get(),
             lambda result, error: self._post_result(self._lease_activation_done, result, error),
         )
 
     def _lease_activation_done(self, result, error):
         from jasna.protection.activation import ActivationServiceError
-        from jasna.protection.lease import activated_message
+        from jasna.protection.lease import LeaseError, activated_message
 
         self._set_busy(False)
         if isinstance(error, ActivationServiceError):
             code = "license_lease_network_error" if error.code in ("network_error", "invalid_response") else f"license_service_{error.code}"
             self._show_error(t(code))
+            return
+        if isinstance(error, LeaseError):
+            self._show_error(t(f"license_problem_{error.code}"))
             return
         if error is not None:
             self._show_error(str(error))
