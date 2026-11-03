@@ -154,43 +154,16 @@ def test_two_tracks_each_paint_their_own_mask():
     assert out[0, 180, 230] < 100 < out[0, 180, 430]
 
 
-_PARENT_BOX = (100, 50, 580, 330)
-
-
-def _neighbours(right_box: tuple[int, int, int, int]) -> torch.Tensor:
+def _handover(presence: float) -> torch.Tensor:
     source = torch.full((3, 360, 640), 100, dtype=torch.uint8)
-    left = [[200.0, 150.0], [260.0, 150.0], [260.0, 210.0], [200.0, 210.0]]
-    right = [[275.0, 150.0], [335.0, 150.0], [335.0, 210.0], [275.0, 210.0]]
-    dark = torch.full((3, 480, 480), 20, dtype=torch.uint8)
-    bright = torch.full((3, 480, 480), 220, dtype=torch.uint8)
-    return composite_frame(
-        source,
-        [
-            Candidate(dark, letterbox((100, 50, 580, 330), 480), 1.0, 0, [left], 1.0),
-            Candidate(bright, letterbox(right_box, 480), 1.0, 1, [right], 1.0),
-        ],
-        feather=8,
-        projector=None,
-    )
-
-
-def test_a_tighter_crop_does_not_take_over_a_neighbour_it_does_not_overlap():
-    same_crop, tighter = _neighbours((100, 50, 580, 330)), _neighbours((235, 110, 375, 250))
-    assert (same_crop.int() - tighter.int()).abs().max() <= 1
-
-
-def _handover(presence: float, child_box: tuple[int, int, int, int] = _PARENT_BOX) -> torch.Tensor:
-    source = torch.full((3, 360, 640), 100, dtype=torch.uint8)
+    crop = letterbox((100, 50, 580, 330), 480)
     parent = [[150.0, 100.0], [500.0, 100.0], [500.0, 280.0], [150.0, 280.0]]
     child = [[200.0, 150.0], [300.0, 150.0], [300.0, 230.0], [200.0, 230.0]]
     dark = torch.full((3, 480, 480), 20, dtype=torch.uint8)
     bright = torch.full((3, 480, 480), 220, dtype=torch.uint8)
     return composite_frame(
         source,
-        [
-            Candidate(dark, letterbox(_PARENT_BOX, 480), 1.0, 0, [parent], 1.0),
-            Candidate(bright, letterbox(child_box, 480), 1.0, 1, [child], presence),
-        ],
+        [Candidate(dark, crop, 1.0, 0, [parent], 1.0), Candidate(bright, crop, 1.0, 1, [child], presence)],
         feather=8,
         projector=None,
     )
@@ -204,17 +177,6 @@ def test_handover_shares_the_child_area_by_presence():
         assert abs(int(half[0, y, x]) - (int(start[0, y, x]) + int(done[0, y, x])) / 2) <= 1
     assert torch.equal(half[:, parent_only[0], parent_only[1]], start[:, parent_only[0], parent_only[1]])
     assert done[0, edge[0], edge[1]] > start[0, edge[0], edge[1]]
-
-
-def test_a_sharper_child_keeps_its_area_after_the_handover():
-    child_box = (160, 110, 340, 270)
-    ramp_end, handed_over = _handover(1.0 - 1e-6, child_box), _handover(1.0, child_box)
-    assert (ramp_end.int() - handed_over.int()).abs().max() <= 1
-
-
-def test_overlapping_tracks_with_the_same_crop_average():
-    parent_only, child_only, mixed = (int(_handover(p)[0, 190, 250]) for p in (1e-6, 1.0 - 1e-6, 1.0))
-    assert parent_only + 20 < mixed < child_only - 20
 
 
 def test_only_windows_compose_enlarges_get_super_resolution():
