@@ -76,13 +76,13 @@ def start_device_count(on_done) -> threading.Thread:
     return _start(count, on_done)
 
 
-def start_lease_activation(code: str, on_done) -> threading.Thread:
-    """Calls ``on_done(Activated, error)``: works offline on PCs with a TPM, otherwise checks online."""
+def start_lease_activation(code: str, try_offline: bool, on_done) -> threading.Thread:
+    """Calls ``on_done(Activated, error)``: with ``try_offline``, works offline on PCs with a TPM; otherwise checks online."""
 
     def activate():
         require_protection()
         from jasna.protection import lease
 
-        return lease.activate_license_code(code)
+        return lease.activate_license_code(code, try_offline)
 
     return _start(activate, on_done)

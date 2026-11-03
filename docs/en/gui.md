@@ -130,15 +130,16 @@ fail, install the driver and AMF from [Quick start](../../README.md#quick-start)
 Supporter models (UNet 4x, SD 1.5, LTX) need activation. Open **Activate Jasna** in
 the header.
 
-Enter your **License code** and click **Activate**. Jasna picks how it checks
-your license by itself:
+Enter your **License code**, choose **This is my PC** (default) or **Rented or
+shared PC**, and click **Activate**:
 
-- **PC with a TPM 2.0 security chip** (most Windows 11 PCs): Jasna works
-  offline from then on. On Windows, a permission prompt may appear once; this
+- **This is my PC**, with a TPM 2.0 security chip (most Windows 11 PCs): Jasna
+  works offline from then on and keeps one of your 3 slots for good. On Windows, a permission prompt may appear once; this
   is a one-time license check for offline use. If you decline it, Jasna checks
   online instead; enter your License code again to switch to offline.
-- **Other PCs, rented GPUs, and Linux in a container (Docker, distrobox) or
-  virtual machine**: Jasna checks your license online while it uses supporter
+- **Rented or shared PC**, PCs without a chip, and Linux in a container
+  (Docker, distrobox) or virtual machine: Jasna uses a slot only while it runs.
+  Pick this for a PC you will wipe or give back. Jasna checks your license online while it uses supporter
   models, so keep the PC connected. If the connection stays down, the queue
   stops. Start it again once you are back online.
 
