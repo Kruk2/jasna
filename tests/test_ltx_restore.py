@@ -329,10 +329,11 @@ def test_decode_window_converts_a_float32_decode(monkeypatch):
     assert frames[:, 0, 0, 0].tolist() == [0, 128, 255]
 
 
-def _two_window_composer(monkeypatch, decode, composite):
+def _composer(monkeypatch, decode, composite, starts=(0, 3)):
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
-    windows = (Window(0, 0, 0, 13, (crop,) * 13, 0), Window(1, 0, 3, 13, (crop,) * 13, 1))
-    plan = restore.TrackPlan(0, 0, ((),) * 16, (1.0,) * 16, windows, 3)
+    windows = tuple(Window(index, 0, start, 13, (crop,) * 13, index) for index, start in enumerate(starts))
+    frames = starts[-1] + 13
+    plan = restore.TrackPlan(0, 0, ((),) * frames, (1.0,) * frames, windows, 3)
     monkeypatch.setattr(restore, "_decode_window", decode)
     monkeypatch.setattr(restore, "composite_frame", composite)
     decodes = ThreadPoolExecutor(max_workers=1)
@@ -357,13 +358,36 @@ def test_composer_decodes_the_next_window_while_earlier_frames_are_composited(mo
             started_before_its_start.append(second_started.wait(timeout=5))
         return torch.stack([c.canvas for c in candidates]).max(0).values
 
-    composer, decodes = _two_window_composer(monkeypatch, decode, composite)
+    composer, decodes = _composer(monkeypatch, decode, composite)
     try:
         out = [int(composer.frame(torch.full((3, 4, 4), i, dtype=torch.uint8))[0, 0, 0]) for i in range(16)]
     finally:
         decodes.shutdown()
     assert started_before_its_start == [True]
     assert out == [0, 0, 0] + [1] * 13
+
+
+def test_composer_decodes_two_windows_ahead_of_the_frames(monkeypatch):
+    third_started = threading.Event()
+    started_before_the_second_window = []
+
+    def decode(decoder, latent, seed, canvas, budget, device):
+        if latent == 2:
+            third_started.set()
+        return torch.full((13, 3, 4, 4), latent, dtype=torch.uint8)
+
+    def composite(source, candidates, *, feather, projector):
+        if int(source[0, 0, 0]) == 2:
+            started_before_the_second_window.append(third_started.wait(timeout=5))
+        return torch.stack([c.canvas for c in candidates]).max(0).values
+
+    composer, decodes = _composer(monkeypatch, decode, composite, starts=(0, 3, 6))
+    try:
+        out = [int(composer.frame(torch.full((3, 4, 4), i, dtype=torch.uint8))[0, 0, 0]) for i in range(19)]
+    finally:
+        decodes.shutdown()
+    assert started_before_the_second_window == [True]
+    assert out == [0] * 3 + [1] * 3 + [2] * 13
 
 
 def test_composer_decodes_nothing_before_its_first_frame(monkeypatch):
@@ -373,7 +397,7 @@ def test_composer_decodes_nothing_before_its_first_frame(monkeypatch):
         decoded.append(latent)
         return torch.full((13, 3, 4, 4), latent, dtype=torch.uint8)
 
-    composer, decodes = _two_window_composer(monkeypatch, decode, lambda source, candidates, *, feather: source)
+    composer, decodes = _composer(monkeypatch, decode, lambda source, candidates, *, feather: source)
     decodes.shutdown()
     assert decoded == []
 
@@ -382,7 +406,7 @@ def test_composer_raises_a_failed_window_decode(monkeypatch):
     def decode(decoder, latent, seed, canvas, budget, device):
         raise RuntimeError("decode failed")
 
-    composer, decodes = _two_window_composer(monkeypatch, decode, lambda source, candidates, *, feather: source)
+    composer, decodes = _composer(monkeypatch, decode, lambda source, candidates, *, feather: source)
     try:
         with pytest.raises(RuntimeError, match="decode failed"):
             composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8))

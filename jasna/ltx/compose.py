@@ -171,7 +171,8 @@ def polygon_mask(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tu
         # One fillPoly call per polygon: a single call uses the even-odd rule and punches holes where polygons overlap.
         cv2.fillPoly(patch, [contour], 255)
     mask = torch.zeros(shape, dtype=torch.bool, device=device)
-    mask[y1:y2, x1:x2] = torch.from_numpy(patch).to(device) > 0
+    # Non-blocking: the driver stages a small pageable source before returning, without waiting for queued kernels.
+    mask[y1:y2, x1:x2] = torch.from_numpy(patch).to(device, non_blocking=True) > 0
     return mask
 
 
@@ -210,9 +211,8 @@ def composite_frame(
         return source
     _, height, width = source.shape
     reach = 2 * feather + 1
-    crops = [c.crop.crop_box for c in live]
-    every_crop = (min(b[0] for b in crops), min(b[1] for b in crops), max(b[2] for b in crops), max(b[3] for b in crops))
-    x0, y0, x3, y3 = _grown(every_crop, reach, (height, width))
+    x1s, y1s, x2s, y2s = zip(*(c.crop.crop_box for c in live))
+    x0, y0, x3, y3 = _grown((min(x1s), min(y1s), max(x2s), max(y2s)), reach, (height, width))
     shape = (y3 - y0, x3 - x0)
     device = source.device
     tracks = {c.track: c for c in live}

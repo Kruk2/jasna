@@ -77,7 +77,7 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
     assert len(writes) == 6 and all(priority < 0 for priority in writes)
 
 
-def test_decoded_windows_wait_in_host_memory_and_composite_on_the_gpu(monkeypatch):
+def test_decoded_windows_wait_in_host_memory_and_upload_without_waiting_for_the_gpu(monkeypatch):
     import contextlib
     import threading
     from types import SimpleNamespace
@@ -110,8 +110,37 @@ def test_decoded_windows_wait_in_host_memory_and_composite_on_the_gpu(monkeypatc
             [plan], None, SimpleNamespace(get=lambda index: torch.zeros(1)), seed=0, feather=1,
             budget=lambda canvas: 1, device=device, bar=bar, decodes=decodes, stream=torch.cuda.Stream(device), super_res=None, projector=None,
         )
-        for _ in range(6):
-            composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))
+        composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))
+        torch.cuda.set_sync_debug_mode("error")
+        try:
+            for _ in range(5):
+                composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))
+        finally:
+            torch.cuda.set_sync_debug_mode("default")
     finally:
         decodes.shutdown()
     assert canvases == ["cuda"] * 6
+
+
+def test_composite_frame_queues_its_work_without_waiting_for_the_gpu():
+    from jasna.ltx.camera import letterbox
+    from jasna.ltx.compose import Candidate, composite_frame
+
+    device = torch.device("cuda")
+    generator = torch.Generator(device=device).manual_seed(0)
+    source = torch.randint(0, 256, (3, 360, 640), dtype=torch.uint8, generator=generator, device=device)
+    canvas = torch.randint(0, 256, (3, 256, 256), dtype=torch.uint8, generator=generator, device=device)
+    left = [[150.0, 120.0], [230.0, 120.0], [230.0, 200.0], [150.0, 200.0]]
+    right = [[420.0, 140.0], [500.0, 140.0], [500.0, 220.0]]
+    candidates = [
+        Candidate(canvas, letterbox((100, 60, 300, 260), 256), 1.0, 0, [left], 1.0),
+        Candidate(canvas, letterbox((380, 80, 560, 300), 256), 0.6, 1, [right], 0.5),
+    ]
+    expected = composite_frame(source, candidates, feather=8, projector=None)
+    torch.cuda.set_sync_debug_mode("error")
+    try:
+        out = composite_frame(source, candidates, feather=8, projector=None)
+    finally:
+        torch.cuda.set_sync_debug_mode("default")
+    assert torch.equal(out, expected)
+    assert not torch.equal(out, source)
