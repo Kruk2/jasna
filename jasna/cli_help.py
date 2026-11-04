@@ -10,7 +10,7 @@ CLI_HELP: dict[str, str] = {
     "online": "With --license-code: check the license online instead of working offline. Use it on rented or shared PCs, where an offline activation would keep one of your 3 devices.",
     "activation_status": "Show whether Jasna is activated and how many of your devices are in use, then exit.",
     "restoration_model_name": (
-        "Restoration model for video: basicvsrpp (fast), ltx-basic (Basic Quality LTX: about 1.3x faster than ltx, "
+        "Restoration model for video: basicvsrpp (fast), ltx-basic (Basic Quality LTX: about 1.7x faster than ltx, "
         "slightly softer), ltx (Standard Quality LTX: more detail, much slower; "
         "NVIDIA RTX or AMD Radeon RX 7000/9000; recommended), ltx-4step (Good Quality: a bit more detail, about 1.5x slower than ltx), "
         "ltx-8step (High Quality: more detail, about 2.5x slower than ltx) or ltx-undistilled (Top Quality: "
