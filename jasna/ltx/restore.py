@@ -83,6 +83,9 @@ SEGMENT_DECODE_BUDGETS = (
 and NVENC share it (#697), 5.5 GiB leaves a 6 GB card room for the rest of the job (768 px
 windows need 15 GiB, see ``segment_large_canvas``)."""
 DECODE_BUDGET_STEP_BYTES = 512 << 20
+DECODE_AHEAD = 2
+"""Windows a compose pass keeps decoding or decoded ahead of the frames; each waits in host
+memory (~95 MB at 512 px)."""
 WHOLE_VIDEO_PTS = (-(1 << 63), (1 << 63) - 1)
 SPEED_TEST_FRAMES = WINDOW_FRAMES + WINDOW_HOP
 """Two windows per track: the speed profile leaves out each canvas's cold first window."""
@@ -788,23 +791,23 @@ class _SegmentComposer:
             self._stream.synchronize()
         return video
 
-    def _decode_next(self) -> None:
-        """Start decoding the next window in start order, so it decodes while the frames
-        before its start are composited and written."""
-        window = next(self._decode_order, None)
-        if window is not None:
+    def _decode_ahead(self) -> None:
+        """Queue the next windows in start order until ``DECODE_AHEAD`` are decoding or wait
+        unused, so they decode back to back while the frames before their starts are
+        composited and written."""
+        while len(self._decoding) < DECODE_AHEAD and (window := next(self._decode_order, None)) is not None:
             self._decoding[window.index] = self._decodes.submit(self._decode, window)
 
     def _decoded_window(self, window: Window) -> torch.Tensor:
         with self._bar.waiting():
             video = self._decoding.pop(window.index).result()
-        self._decode_next()
+        self._decode_ahead()
         return video
 
     def frame(self, frame: torch.Tensor) -> torch.Tensor:
         frame_idx = self._frame_idx
         if frame_idx == 0:
-            self._decode_next()
+            self._decode_ahead()
         while self._upcoming is not None and self._upcoming.start == frame_idx:
             self._covering.append(self._upcoming)
             self._upcoming = next(self._pending, None)
@@ -817,7 +820,7 @@ class _SegmentComposer:
                 self._decoded[window.index] = self._decoded_window(window)
             local = frame_idx - window.start
             track = self._tracks[window.index]
-            canvas, crop = self._decoded[window.index][local].to(self._device), window.crops[local]
+            canvas, crop = self._decoded[window.index][local].to(self._device, non_blocking=True), window.crops[local]
             if window.index in self._upscaled:
                 canvas, crop = self._super_res.upscale(canvas), upscaled_crop(crop)
             candidates.append(
@@ -852,7 +855,7 @@ def compose_span(
     projector: RegionProjector | None,
 ) -> None:
     """Write every frame of ``span``: segment frames composited, the rest unchanged. Windows
-    decode one ahead on a thread; on CUDA on a stream of their own, below the priority of the
+    decode ``DECODE_AHEAD`` ahead on a thread; on CUDA on a stream of their own, below the priority of the
     frames' stream, whose short kernels would otherwise queue behind the decode's."""
     feather = feather_pixels(frame_h)
     decodes = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxDecode")
