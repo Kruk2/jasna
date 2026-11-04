@@ -53,11 +53,11 @@ def crop_to_canvas(frame: torch.Tensor, crop: CropFrame, projector: RegionProjec
 def _area_weights(out_size: int, in_size: int, device: torch.device) -> torch.Tensor:
     """``[out, in]`` pixel-area resampling weights (OpenCV INTER_AREA for downscaling)."""
     scale = in_size / out_size
-    starts = torch.arange(out_size, dtype=torch.float64) * scale
-    edges = torch.arange(in_size + 1, dtype=torch.float64)
+    starts = torch.arange(out_size, dtype=torch.float64, device=device) * scale
+    edges = torch.arange(in_size + 1, dtype=torch.float64, device=device)
     lo = torch.maximum(starts[:, None], edges[None, :-1])
     hi = torch.minimum(starts[:, None] + scale, edges[None, 1:])
-    return ((hi - lo).clamp(min=0) / scale).to(device=device, dtype=torch.float32)
+    return ((hi - lo).clamp(min=0) / scale).float()
 
 
 def canvas_to_source(
@@ -98,13 +98,16 @@ def feather_alpha(mask: torch.Tensor, feather: int, box: tuple[int, int, int, in
     holds every set pixel; the alpha is 0 farther than ``2*feather`` px from it, so only the box
     grown by ``2*feather+1`` px is computed (the extra px keeps the reflect-101 border of the
     cut-out in the zeros)."""
-    height, width = mask.shape
-    reach = 2 * feather + 1
-    x1, y1, x2, y2 = box
-    x1, y1, x2, y2 = max(x1 - reach, 0), max(y1 - reach, 0), min(x2 + reach, width), min(y2 + reach, height)
+    x1, y1, x2, y2 = _grown(box, 2 * feather + 1, mask.shape)
     alpha = torch.zeros(mask.shape, dtype=torch.float32, device=mask.device)
     alpha[y1:y2, x1:x2] = _dilate_and_blur(mask[y1:y2, x1:x2], feather)
     return alpha
+
+
+def _grown(box: tuple[int, int, int, int], reach: int, shape: tuple[int, int]) -> tuple[int, int, int, int]:
+    height, width = shape
+    x1, y1, x2, y2 = box
+    return max(x1 - reach, 0), max(y1 - reach, 0), min(x2 + reach, width), min(y2 + reach, height)
 
 
 def _dilate_and_blur(mask: torch.Tensor, feather: int) -> torch.Tensor:
@@ -116,11 +119,18 @@ def _dilate_and_blur(mask: torch.Tensor, feather: int) -> torch.Tensor:
     return F.conv2d(x, kernel.view(1, 1, -1, 1))[0, 0]
 
 
-def crop_edge_ramp(box: tuple[int, int, int, int], shape: tuple[int, int], feather: int, device: torch.device) -> torch.Tensor:
+def crop_edge_ramp(
+    box: tuple[int, int, int, int],
+    shape: tuple[int, int],
+    feather: int,
+    window: tuple[int, int, int, int],
+    device: torch.device,
+) -> torch.Tensor:
     """1 inside the crop, falling to 0 over ``feather`` px at every crop edge that is not the
-    region border, 0 outside."""
+    region border, 0 outside; only its ``window`` (x1, y1, x2, y2) of the region."""
     height, width = shape
     x1, y1, x2, y2 = box
+    wx1, wy1, wx2, wy2 = window
 
     def axis(low: int, high: int, size: int) -> torch.Tensor:
         centre = torch.arange(size, dtype=torch.float32, device=device) + 0.5
@@ -131,7 +141,7 @@ def crop_edge_ramp(box: tuple[int, int, int, int], shape: tuple[int, int], feath
             ramp = torch.minimum(ramp, (high - centre) / max(feather, 1))
         return ramp.clamp(0.0, 1.0)
 
-    return torch.minimum(axis(y1, y2, height)[:, None], axis(x1, x2, width)[None, :])
+    return torch.minimum(axis(y1, y2, height)[wy1:wy2, None], axis(x1, x2, width)[None, wx1:wx2])
 
 
 def _contours(polygons: Sequence[Polygon], offset: tuple[int, int]) -> list[np.ndarray]:
@@ -200,61 +210,66 @@ def composite_frame(
         return source
     _, height, width = source.shape
     reach = 2 * feather + 1
-    x0 = max(min(c.crop.crop_box[0] for c in live) - reach, 0)
-    y0 = max(min(c.crop.crop_box[1] for c in live) - reach, 0)
-    x3 = min(max(c.crop.crop_box[2] for c in live) + reach, width)
-    y3 = min(max(c.crop.crop_box[3] for c in live) + reach, height)
+    crops = [c.crop.crop_box for c in live]
+    every_crop = (min(b[0] for b in crops), min(b[1] for b in crops), max(b[2] for b in crops), max(b[3] for b in crops))
+    x0, y0, x3, y3 = _grown(every_crop, reach, (height, width))
     shape = (y3 - y0, x3 - x0)
     device = source.device
     tracks = {c.track: c for c in live}
     rois = {track: polygon_mask(c.polygons, shape, (x0, y0), device) for track, c in tracks.items()}
-    feathered = {
-        track: feather_alpha(rois[track], feather, polygon_box(c.polygons, shape, (x0, y0))) for track, c in tracks.items()
-    }
-    if len(rois) == 1:
-        (union,), (union_feathered,) = rois.values(), feathered.values()
-    else:
-        union = torch.stack(list(rois.values())).any(dim=0)
-        every_polygon = [polygon for c in tracks.values() for polygon in c.polygons]
-        union_feathered = feather_alpha(union, feather, polygon_box(every_polygon, shape, (x0, y0)))
-    outside = union_feathered <= 0.0
+    boxes = {track: polygon_box(c.polygons, shape, (x0, y0)) for track, c in tracks.items()}
+    feathered = {track: feather_alpha(rois[track], feather, boxes[track]) for track in tracks}
+    union = torch.stack(list(rois.values())).any(dim=0)
+    # Outside the feather of the union exactly where outside every track's: the dilation and the
+    # positive blur kernel of a union are the union of each track's.
+    outside = torch.stack([alpha <= 0.0 for alpha in feathered.values()]).all(dim=0)
     region = source[:, y0:y3, x0:x3].float()
     layers = []
     for candidate in live:
         roi = rois[candidate.track]
         x1, y1, x2, y2 = candidate.crop.crop_box
         x1, y1, x2, y2 = x1 - x0, y1 - y0, x2 - x0, y2 - y0
-        ramp = crop_edge_ramp((x1, y1, x2, y2), shape, feather, device)
+        # Alpha is 0 outside the crop and outside the track's feathered box, so a layer paints only their overlap.
+        fx1, fy1, fx2, fy2 = _grown(boxes[candidate.track], reach, shape)
+        px1, py1 = max(x1, fx1), max(y1, fy1)
+        px2, py2 = max(min(x2, fx2), px1), max(min(y2, fy2), py1)
+        ramp = crop_edge_ramp((x1, y1, x2, y2), shape, feather, (px1, py1, px2, py2), device)
         covered = ramp > 0.0
         restored_crop = canvas_to_source(candidate.canvas, candidate.crop, source, projector)
-        restored = region.clone()
-        restored[:, y1:y2, x1:x2] = restored_crop
+        roi = roi[py1:py2, px1:px2]
         edge = torch.where(roi, covered.float(), ramp)
-        alpha = feathered[candidate.track] * edge * candidate.weight
+        alpha = feathered[candidate.track][py1:py2, px1:px2] * edge * candidate.weight
         if candidate.presence == 1.0:
-            alpha = alpha * (roi | ~union).float()
-        ring = (covered & outside)[y1:y2, x1:x2]
+            alpha = alpha * (roi | ~union[py1:py2, px1:px2]).float()
+        # The ramp is positive on the whole crop, so the colour ring is all of its feather-free pixels.
+        ring = outside[y1:y2, x1:x2]
         offset = masked_median(region[:, y1:y2, x1:x2] - restored_crop, ring) * COLOUR_MATCH_STRENGTH
-        layers.append((candidate, restored + offset[:, None, None], alpha))
+        restored = restored_crop[:, py1 - y1 : py2 - y1, px1 - x1 : px2 - x1] + offset[:, None, None]
+        layers.append((candidate, (px1, py1, px2, py2), restored, alpha))
     handing = {track: c.presence for track, c in tracks.items() if c.presence < 1.0}
-    shares = {
-        track: sum(alpha for c, _, alpha in layers if c.track == track).clamp(max=1.0) * presence
-        for track, presence in handing.items()
-    }
-    accumulator = torch.zeros_like(region)
-    total = torch.zeros(shape, dtype=torch.float32, device=device)
-    for candidate, restored, alpha in layers:
+    shares = {}
+    for track, presence in handing.items():
+        share = torch.zeros(shape, dtype=torch.float32, device=device)
+        for candidate, (px1, py1, px2, py2), _, alpha in layers:
+            if candidate.track == track:
+                share[py1:py2, px1:px2] += alpha
+        shares[track] = share.clamp(max=1.0) * presence
+    bx1, by1 = min(box[0] for _, box, _, _ in layers), min(box[1] for _, box, _, _ in layers)
+    bx2, by2 = max(box[2] for _, box, _, _ in layers), max(box[3] for _, box, _, _ in layers)
+    accumulator = torch.zeros((3, by2 - by1, bx2 - bx1), dtype=torch.float32, device=device)
+    total = torch.zeros((by2 - by1, bx2 - bx1), dtype=torch.float32, device=device)
+    for candidate, (px1, py1, px2, py2), restored, alpha in layers:
         if candidate.track in handing:
             alpha = alpha * candidate.presence
         else:
             for share in shares.values():
-                alpha = alpha * (1.0 - share)
-        accumulator += restored * alpha
-        total += alpha
+                alpha = alpha * (1.0 - share[py1:py2, px1:px2])
+        accumulator[:, py1 - by1 : py2 - by1, px1 - bx1 : px2 - bx1] += restored * alpha
+        total[py1 - by1 : py2 - by1, px1 - bx1 : px2 - bx1] += alpha
     over = total > 1.0
     accumulator = torch.where(over, accumulator / total, accumulator)
     total = torch.where(over, torch.ones_like(total), total)
-    blended = accumulator + region * (1.0 - total)
+    blended = accumulator + region[:, by1:by2, bx1:bx2] * (1.0 - total)
     out = source.clone()
-    out[:, y0:y3, x0:x3] = blended.round_().clamp_(0, 255).to(torch.uint8)
+    out[:, y0 + by1 : y0 + by2, x0 + bx1 : x0 + bx2] = blended.round_().clamp_(0, 255).to(torch.uint8)
     return out
