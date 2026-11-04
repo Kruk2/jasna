@@ -91,6 +91,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | `could not reach the license service` or `lost the connection` | Check the machine's internet, then start again. |
 | `No activation found` or `Activate Jasna with your License code` | Run the `export` line, then start Jasna again, or activate again. |
 | `unsafe Jasna launch environment` | Start it with `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` |
+| `LTX worker could not start` … `could not verify this library or module` | This machine (for example RunPod) can't run LTX. Use Vast. |
 
 `Bit depth 10 ... not supported` is OK. Jasna reads that video a bit
 slower, that's all.

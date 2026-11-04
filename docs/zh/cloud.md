@@ -81,5 +81,6 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | `could not reach the license service` 或 `lost the connection` | 检查机器的网络，然后重新开始。 |
 | `No activation found` 或 `Activate Jasna with your License code` | 先运行 `export` 那一行，再重新启动 Jasna，或者重新激活。 |
 | `unsafe Jasna launch environment` | 用 `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` 启动。 |
+| `LTX worker could not start` … `could not verify this library or module` | 这台机器(比如 RunPod)不能运行 LTX。请用 Vast。 |
 
 看到 `Bit depth 10 ... not supported` 没关系，只是这个视频读得慢一点。
