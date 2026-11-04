@@ -12,6 +12,7 @@ from jasna.ltx.compose import (
     crop_to_canvas,
     feather_alpha,
     masked_median,
+    polygon_box,
     polygon_mask,
 )
 
@@ -27,8 +28,31 @@ def test_feather_alpha_matches_opencv():
     feather = 12
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * feather + 1,) * 2)
     expected = cv2.GaussianBlur(cv2.dilate(mask, kernel).astype(np.float32) / 255.0, (2 * feather + 1,) * 2, 0.0)
-    actual = feather_alpha(torch.from_numpy(mask > 0), feather).numpy()
+    actual = feather_alpha(torch.from_numpy(mask > 0), feather, (110, 60, 191, 141)).numpy()
     assert np.abs(actual - expected).max() < 1e-5
+
+
+_REGION_POLYGONS = [
+    [[80, 40], [110, 40], [110, 70], [80, 70]],
+    [[0, 0], [30, 0], [30, 30], [0, 30]],
+    [[170, 90], [199, 90], [199, 119], [170, 119]],
+    [[150, 50], [197, 50], [197, 80], [150, 80]],
+    [[24, 30], [60, 30], [60, 94], [24, 94]],
+    [[25, 30], [60, 30], [60, 95], [25, 95]],
+    [[26, 26], [60, 26], [60, 93], [26, 93]],
+    [[-40, 60], [90, 10], [240, 150]],
+    [[0, 0], [199, 0], [199, 119], [0, 119]],
+]
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA"))])
+@pytest.mark.parametrize("polygon", _REGION_POLYGONS)
+def test_feather_alpha_inside_the_polygon_box_equals_the_whole_region(device, polygon):
+    shape, feather = (120, 200), 12
+    mask = polygon_mask([polygon], shape, (0, 0), torch.device(device))
+    whole = feather_alpha(mask, feather, (0, 0, shape[1], shape[0]))
+    assert whole.any()
+    assert torch.equal(feather_alpha(mask, feather, polygon_box([polygon], shape, (0, 0))), whole)
 
 
 def test_crop_round_trip_at_unit_scale():
@@ -231,3 +255,12 @@ def test_vr_projected_crops_change_only_what_the_restoration_changed(kind, layou
     assert moved[dy + 180, dx + 160]
     ys, xs = torch.nonzero(moved, as_tuple=True)
     assert xs.min() >= dx + 60 and xs.max() < dx + 260 and ys.min() >= dy + 80 and ys.max() < dy + 280
+
+
+@pytest.mark.parametrize("polygon", _REGION_POLYGONS)
+def test_polygon_mask_fills_what_opencv_fills_on_the_whole_region(polygon):
+    shape, (dx, dy) = (120, 200), (7, 5)
+    expected = np.zeros(shape, dtype=np.uint8)
+    cv2.fillPoly(expected, [np.array(polygon, dtype=np.int32)], 255)
+    mask = polygon_mask([[[x + dx, y + dy] for x, y in polygon]], shape, (dx, dy), torch.device("cpu"))
+    assert np.array_equal(mask.numpy(), expected > 0)

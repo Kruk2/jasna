@@ -81,18 +81,6 @@ def _ellipse_structuring_element(radius: int) -> np.ndarray:
 
 
 @functools.cache
-def _ellipse_levels(radius: int) -> tuple[tuple[int, int], ...]:
-    """``(half width, vertical reach)`` per distinct row width of the ellipse: its rows are
-    centred runs that narrow away from the middle, so the dilation is the union of one
-    horizontal-then-vertical window pass per width."""
-    widths = [radius - int(np.flatnonzero(row)[0]) for row in _ellipse_structuring_element(radius)]
-    return tuple(
-        (width, max(abs(dy - radius) for dy, row_width in enumerate(widths) if row_width >= width))
-        for width in sorted(set(widths))
-    )
-
-
-@functools.cache
 def _ellipse_row_reach(radius: int, device: torch.device) -> torch.Tensor:
     """Per horizontal distance ``0..radius``, the farthest row offset whose ellipse row still
     spans it; one more entry, far below zero, for anything farther."""
@@ -101,10 +89,11 @@ def _ellipse_row_reach(radius: int, device: torch.device) -> torch.Tensor:
     return torch.tensor(reach + [-(1 << 30)], dtype=torch.int32, device=device)
 
 
-def _scan_dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
-    """A pixel at row distance ``d`` from its row's nearest set pixel covers the rows within
-    ``reach[d]`` of it; both distances come from running max/min scans, so the cost does not
-    grow with the radius."""
+def dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
+    """Bool ``[H, W]`` mask dilated on its own device; same pixels as ``cv2.dilate`` with a
+    ``MORPH_ELLIPSE`` kernel of ``2*radius+1``. A pixel at row distance ``d`` from its row's
+    nearest set pixel covers the rows within ``reach[d]`` of it; both distances come from
+    running max/min scans, so the cost and the kernel launches do not grow with the radius."""
     height, width = mask.shape
     cols = torch.arange(width, dtype=torch.int32, device=mask.device)
     left = torch.where(mask, cols, -2 * width - radius).cummax(1).values
@@ -115,27 +104,6 @@ def _scan_dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
     from_above = (reach + rows).cummax(1).values - rows
     from_below = (reach - rows).flip(1).cummax(1).values.flip(1) + rows
     return (torch.maximum(from_above, from_below) >= 0).t()
-
-
-def _any_in_window(x: torch.Tensor, half: int, dim: int) -> torch.Tensor:
-    padding = (half, half) if dim == 1 else (0, 0, half, half)
-    return _moving_average(F.pad(x, padding), 2 * half + 1, dim) > 0
-
-
-def _prefix_dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
-    x = mask.float()
-    out = torch.zeros_like(mask)
-    for half_width, reach in _ellipse_levels(radius):
-        out |= _any_in_window(_any_in_window(x, half_width, 1).float(), reach, 0)
-    return out
-
-
-def dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
-    """Bool ``[H, W]`` mask dilated on its own device; same pixels as ``cv2.dilate`` with a
-    ``MORPH_ELLIPSE`` kernel of ``2*radius+1``."""
-    if is_nvidia_device(mask.device):
-        return _scan_dilate_ellipse(mask, radius)
-    return _prefix_dilate_ellipse(mask, radius)
 
 
 def create_blend_mask(

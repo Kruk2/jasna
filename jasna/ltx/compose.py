@@ -92,9 +92,22 @@ def _gaussian(radius: int, device: torch.device) -> torch.Tensor:
     return torch.from_numpy(kernel).to(device)
 
 
-def feather_alpha(mask: torch.Tensor, feather: int) -> torch.Tensor:
+def feather_alpha(mask: torch.Tensor, feather: int, box: tuple[int, int, int, int]) -> torch.Tensor:
     """Dilate a bool ``[H, W]`` mask by an ellipse of ``feather`` px and Gaussian-blur it
-    (kernel ``2*feather+1``, reflect-101 border) into a [0, 1] alpha."""
+    (kernel ``2*feather+1``, reflect-101 border) into a [0, 1] alpha. ``box`` (x1, y1, x2, y2)
+    holds every set pixel; the alpha is 0 farther than ``2*feather`` px from it, so only the box
+    grown by ``2*feather+1`` px is computed (the extra px keeps the reflect-101 border of the
+    cut-out in the zeros)."""
+    height, width = mask.shape
+    reach = 2 * feather + 1
+    x1, y1, x2, y2 = box
+    x1, y1, x2, y2 = max(x1 - reach, 0), max(y1 - reach, 0), min(x2 + reach, width), min(y2 + reach, height)
+    alpha = torch.zeros(mask.shape, dtype=torch.float32, device=mask.device)
+    alpha[y1:y2, x1:x2] = _dilate_and_blur(mask[y1:y2, x1:x2], feather)
+    return alpha
+
+
+def _dilate_and_blur(mask: torch.Tensor, feather: int) -> torch.Tensor:
     dilated = dilate_ellipse(mask, feather)[None, None]
     kernel = _gaussian(feather, mask.device)
     x = F.pad(dilated.float(), (feather, feather, 0, 0), mode="reflect")
@@ -121,15 +134,35 @@ def crop_edge_ramp(box: tuple[int, int, int, int], shape: tuple[int, int], feath
     return torch.minimum(axis(y1, y2, height)[:, None], axis(x1, x2, width)[None, :])
 
 
+def _contours(polygons: Sequence[Polygon], offset: tuple[int, int]) -> list[np.ndarray]:
+    origin = np.asarray(offset, dtype=np.int32)
+    return [np.asarray(p, dtype=np.float32).round().astype(np.int32) - origin for p in polygons if len(p) >= 3]
+
+
+def polygon_box(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tuple[int, int]) -> tuple[int, int, int, int]:
+    """(x1, y1, x2, y2) inside the ``[h, w]`` region at ``offset`` holding every pixel of
+    ``polygons``; known on the host, so cropping by it needs no GPU sync."""
+    height, width = shape
+    contours = _contours(polygons, offset)
+    if not contours:
+        return 0, 0, 0, 0
+    points = np.concatenate(contours)
+    x1, y1 = np.clip(points.min(axis=0), 0, (width, height)).tolist()
+    x2, y2 = np.clip(points.max(axis=0) + 1, 0, (width, height)).tolist()
+    return x1, y1, x2, y2
+
+
 def polygon_mask(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tuple[int, int], device: torch.device) -> torch.Tensor:
-    """Bool ``[h, w]`` union of ``polygons`` inside the region at ``offset`` (x, y)."""
-    mask = np.zeros(shape, dtype=np.uint8)
-    for polygon in polygons:
-        if len(polygon) >= 3:
-            contour = np.asarray(polygon, dtype=np.float32).round().astype(np.int32) - np.asarray(offset, dtype=np.int32)
-            # One fillPoly call per polygon: a single call uses the even-odd rule and punches holes where polygons overlap.
-            cv2.fillPoly(mask, [contour], 255)
-    return torch.from_numpy(mask).to(device) > 0
+    """Bool ``[h, w]`` union of ``polygons`` inside the region at ``offset`` (x, y); only their
+    ``polygon_box`` is filled on the host and uploaded."""
+    x1, y1, x2, y2 = polygon_box(polygons, shape, offset)
+    patch = np.zeros((y2 - y1, x2 - x1), dtype=np.uint8)
+    for contour in _contours(polygons, (offset[0] + x1, offset[1] + y1)):
+        # One fillPoly call per polygon: a single call uses the even-odd rule and punches holes where polygons overlap.
+        cv2.fillPoly(patch, [contour], 255)
+    mask = torch.zeros(shape, dtype=torch.bool, device=device)
+    mask[y1:y2, x1:x2] = torch.from_numpy(patch).to(device) > 0
+    return mask
 
 
 def masked_median(difference: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -175,12 +208,15 @@ def composite_frame(
     device = source.device
     tracks = {c.track: c for c in live}
     rois = {track: polygon_mask(c.polygons, shape, (x0, y0), device) for track, c in tracks.items()}
-    feathered = {track: feather_alpha(roi, feather) for track, roi in rois.items()}
+    feathered = {
+        track: feather_alpha(rois[track], feather, polygon_box(c.polygons, shape, (x0, y0))) for track, c in tracks.items()
+    }
     if len(rois) == 1:
         (union,), (union_feathered,) = rois.values(), feathered.values()
     else:
         union = torch.stack(list(rois.values())).any(dim=0)
-        union_feathered = feather_alpha(union, feather)
+        every_polygon = [polygon for c in tracks.values() for polygon in c.polygons]
+        union_feathered = feather_alpha(union, feather, polygon_box(every_polygon, shape, (x0, y0)))
     outside = union_feathered <= 0.0
     region = source[:, y0:y3, x0:x3].float()
     layers = []
