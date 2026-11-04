@@ -8,10 +8,9 @@ import torch.nn.functional as F
 
 from jasna.tracking.blending import (
     _box_blur,
-    _scan_dilate_ellipse,
-    _prefix_dilate_ellipse,
     create_bbox_blend_mask,
     create_blend_mask,
+    dilate_ellipse,
 )
 
 
@@ -154,32 +153,14 @@ def test_bbox_blend_mask_same_res_mask_matches_reference_exactly() -> None:
     assert torch.allclose(out, ref, atol=1e-5)
 
 
-@pytest.mark.parametrize("dilate", [_scan_dilate_ellipse, _prefix_dilate_ellipse])
 @pytest.mark.parametrize("radius", [1, 2, 3, 12, 20, 30])
 @pytest.mark.parametrize("density", [0.01, 0.3])
-def test_dilate_ellipse_matches_opencv(dilate, radius: int, density: float) -> None:
+def test_dilate_ellipse_matches_opencv(radius: int, density: float) -> None:
     rng = np.random.default_rng(radius)
     mask = (rng.random((150, 230)) < density).astype(np.uint8) * 255
     mask[0, 5] = mask[149, 229] = 255
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1,) * 2)
 
-    actual = dilate(torch.from_numpy(mask > 0), radius).numpy()
+    actual = dilate_ellipse(torch.from_numpy(mask > 0), radius).numpy()
 
     assert np.array_equal(actual, cv2.dilate(mask, kernel) > 0)
-
-
-def test_dilate_ellipse_uses_scans_only_for_nvidia(monkeypatch) -> None:
-    import jasna.tracking.blending as module
-
-    mask = torch.ones((8, 8), dtype=torch.bool)
-    scan = MagicMock(return_value=mask)
-    prefix = MagicMock(return_value=mask)
-    monkeypatch.setattr(module, "_scan_dilate_ellipse", scan)
-    monkeypatch.setattr(module, "_prefix_dilate_ellipse", prefix)
-
-    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: False)
-    module.dilate_ellipse(mask, 3)
-    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: True)
-    module.dilate_ellipse(mask, 3)
-
-    assert prefix.call_count == 1 and scan.call_count == 1
