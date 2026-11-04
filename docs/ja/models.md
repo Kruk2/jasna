@@ -103,7 +103,7 @@ Jasna を更新した場合は、最初からやり直す前に確認します�
 Jasna でのダウンロードが何度も失敗する場合は、ブラウザで
 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.1)
 （または [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.1)）から
-ファイルを取得してください。必要なのは選んだモデルのファイルと、その VAE ファイルです（基本画質・標準画質は 4 ファイル、
+ファイルを取得してください。必要なのは選んだモデルのファイルと、その VAE ファイルです（基本画質は 4 ファイル、
 それ以外は 3 ファイル）。
 Jasna 0.11.3 以前では `main` ブランチを使ってください。
 
@@ -119,8 +119,8 @@ Jasna 0.11.3 以前では `main` ブランチを使ってください。
 | 高画質 + 高速モード | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
 | 最高画質 | `ltx-restore-alpha1-int8.safetensors.enc` |
 | 最高画質 + 高速モード | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
-| VAE（基本画質・標準画質） | `vae.safetensors.enc`、`vae-encoder-half.safetensors.enc`、`vae-decoder-max.safetensors.enc` |
-| VAE（良好画質・高画質・最高画質） | `vae.safetensors.enc`、`vae-decoder-full.safetensors.enc` |
+| VAE（基本画質） | `vae.safetensors.enc`、`vae-encoder-half.safetensors.enc`、`vae-decoder-max.safetensors.enc` |
+| VAE（標準画質・良好画質・高画質・最高画質） | `vae.safetensors.enc`、`vae-decoder-full.safetensors.enc` |
 
 別の **LTX エンコーダー**や **LTX デコーダー**を選んだ場合は、それに合わせて `vae-encoder-half`、`vae-encoder-max`
 （フルは `vae.safetensors.enc`）または `vae-decoder-full`、`vae-decoder-half`、`vae-decoder-max`
@@ -133,7 +133,7 @@ LTX のジョブをもう一度始めると、ダウンロードの確認は出�
 ### LTX のオプション
 
 - **モデル**: **基本画質**、**標準画質**（デフォルト、おすすめ）、**良好画質**、**高画質**、**最高画質**。
-  基本画質は標準画質より約 1.3 倍速く、少しやわらかい仕上がりです。良好画質は少し精細で約 1.5 倍遅くなります。高画質は
+  基本画質は標準画質より約 1.7 倍速く、少しやわらかい仕上がりです。良好画質は少し精細で約 1.5 倍遅くなります。高画質は
   より精細で約 2.5 倍遅くなります。最高画質は高画質より少し良く、約 5 倍遅く、
   通常は不要です。RTX 5090 では、標準画質は動画の長さの約 1〜2 倍の時間がかかります。
   CLI: `--restoration-model-name ltx-basic`（基本）、`ltx`（標準）、`ltx-4step`（良好）、`ltx-8step`（高画質）、`ltx-undistilled`（最高）。
@@ -155,9 +155,9 @@ LTX のジョブをもう一度始めると、ダウンロードの確認は出�
   BasicVSR++ で復元します。長い動画では時間を大きく節約できます。
   [動画の一部だけを復元する](segments.md#cli---ltx-auto-split)を参照してください。
 - **LTX エンコーダー**と **LTX デコーダー**（**エキスパート**表示）: **フル**は最も鮮明で最も遅く、
-  **ハーフ**は速く、**マックス**は最速で少しやわらかい仕上がりです。**自動**（既定）は基本画質・標準画質で
-  ハーフのエンコーダーとマックスのデコーダー、それ以外でフルを使います。高速なモデルが Jasna 0.11.3 より
-  やわらかく見える場合は、両方フルを選んでください。まだない選択肢は、開始を押したときにダウンロードされます。
+  **ハーフ**は速く、**マックス**は最速で少しやわらかい仕上がりです。**自動**（既定）は基本画質で
+  ハーフのエンコーダーとマックスのデコーダー、それ以外でフルを使います。基本画質がやわらかすぎる場合は、
+  両方フルを選んでください。まだない選択肢は、開始を押したときにダウンロードされます。
   CLI: [上級者向けの環境変数](tuning.md#上級者向けの環境変数)を参照してください。
 
 LTX をプレビューするには、[区間エディター](segments.md)を開いて区間を選び、

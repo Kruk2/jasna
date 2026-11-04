@@ -50,13 +50,12 @@ def test_every_model_choice_has_its_own_transformer_file():
     assert bundle_names("undistilled", fast=True)[1:] == bundle_names("distilled", fast=False)[1:]
 
 
-def test_fast_models_default_to_the_distilled_vae_quality_models_to_the_full_one_and_a_choice_overrides():
+def test_basic_defaults_to_the_distilled_vae_the_others_to_the_full_one_and_a_choice_overrides():
     transformer = bundle_names("distilled1", fast=False)[0]
     assert bundle_names("distilled1", fast=False) == (
         transformer, "vae.safetensors", "vae-decoder-max.safetensors", "vae-encoder-half.safetensors")
 
-    assert bundle_names("distilled2", fast=True)[2:] == ("vae-decoder-max.safetensors", "vae-encoder-half.safetensors")
-    for model in ("distilled4", "distilled", "undistilled"):
+    for model in ("distilled2", "distilled4", "distilled", "undistilled"):
         assert bundle_names(model, fast=False)[1:] == ("vae.safetensors", "vae-decoder-full.safetensors")
     assert set(model_files.DEFAULT_VAES) == set(model_files.LTX_MODELS)
 

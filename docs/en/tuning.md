@@ -89,8 +89,8 @@ These are for troubleshooting and testing. The defaults are best for most people
 
 | Variable | Values | What it does |
 | --- | --- | --- |
-| `JASNA_LTX_VAE_ENCODER` | `auto` (default), `full`, `half`, `max` | Command line only, the app has **LTX Encoder** (see [LTX options](models.md#ltx-options)). Picks the LTX video encoder: `half` and `max` are faster and a little softer. `auto`: `half` for Basic and Standard Quality, `full` for the others. |
-| `JASNA_LTX_VAE_DECODER` | `auto` (default), `full`, `half`, `max` | Command line only, the app has **LTX Decoder**. Picks the LTX video decoder: `half` and `max` are faster and a little softer. `auto`: `max` for Basic and Standard Quality, `full` for the others. |
+| `JASNA_LTX_VAE_ENCODER` | `auto` (default), `full`, `half`, `max` | Command line only, the app has **LTX Encoder** (see [LTX options](models.md#ltx-options)). Picks the LTX video encoder: `half` and `max` are faster and a little softer. `auto`: `half` for Basic Quality, `full` for the others. |
+| `JASNA_LTX_VAE_DECODER` | `auto` (default), `full`, `half`, `max` | Command line only, the app has **LTX Decoder**. Picks the LTX video decoder: `half` and `max` are faster and a little softer. `auto`: `max` for Basic Quality, `full` for the others. |
 | `JASNA_DECODE_BACKEND` | `auto` (default), `vali`, `pyav-hw`, `pyav-sw` | Command line only, the app has **Video Decoder** (**Model** tab, **Expert** view). Picks how Jasna reads the input video. Try `pyav-sw` (slower) if a video fails to open or shows broken frames. `vali` is NVIDIA only. |
 | `JASNA_TRT_CUDAGRAPHS` | `1` (default), `0` | NVIDIA: `0` turns off a speed-up of compiled BasicVSR++. Try it if you get GPU errors. |
 | `JASNA_AMD_GRAPHS` | `1` (default), `0` | AMD: `0` turns off a BasicVSR++ speed-up. Try it if you get GPU errors or run out of VRAM. |

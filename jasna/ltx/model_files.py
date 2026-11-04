@@ -69,11 +69,11 @@ VAE_ENCODERS = {"full": _VAE_NAME, "half": "vae-encoder-half.safetensors", "max"
 VAE_DECODERS = {"full": "vae-decoder-full.safetensors", "half": "vae-decoder-half.safetensors",
                 "max": "vae-decoder-max.safetensors"}
 # (encoder, decoder) per model. In human A/Bs on real clips the full VAE is slightly sharper than the half encoder
-# with the max decoder, which saves 14-29 % of a 1-step job but only 8-14 % of a 4-step one: the fast models take
-# the distilled VAE, the quality models the full one (benchmarks/2026-10-28_ltx_vae_choices.md).
+# with the max decoder, which saves 14-29 % of a 1-step job but only 8-14 % of a 4-step one: Basic, the speed
+# choice, takes the distilled VAE, the others the full one (benchmarks/2026-10-28_ltx_vae_choices.md).
 DEFAULT_VAES: dict[LtxModelName, tuple[str, str]] = {
     "distilled1": ("half", "max"),
-    "distilled2": ("half", "max"),
+    "distilled2": ("full", "full"),
     "distilled4": ("full", "full"),
     "distilled": ("full", "full"),
     "undistilled": ("full", "full"),

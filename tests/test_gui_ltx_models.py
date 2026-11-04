@@ -93,15 +93,15 @@ def test_amd_uses_normal_licensed_model_downloads(tmp_path, downloadable) -> Non
 
 
 def test_vae_choice_decides_which_files_a_model_needs(tmp_path) -> None:
-    _install(tmp_path, "distilled2", fast=False)
+    _install(tmp_path, "distilled1", fast=False)
     models = LtxModels(tmp_path, _NowCalls(), lambda: None)
-    assert models.state.installed("distilled2", False)
-    assert not ltx_models_module.license_missing(tmp_path, "distilled2", False, "auto", "auto")
+    assert models.state.installed("distilled1", False)
+    assert not ltx_models_module.license_missing(tmp_path, "distilled1", False, "auto", "auto")
 
     models.set_vaes("full", "full")
 
-    assert [file.name for file in models.state.missing[("distilled2", False)]] == ["vae-decoder-full.safetensors.enc"]
-    assert ltx_models_module.license_missing(tmp_path, "distilled2", False, "full", "full")
+    assert [file.name for file in models.state.missing[("distilled1", False)]] == ["vae-decoder-full.safetensors.enc"]
+    assert ltx_models_module.license_missing(tmp_path, "distilled1", False, "full", "full")
 
 
 def _answer(monkeypatch, yes: bool) -> list[str]:

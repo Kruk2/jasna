@@ -91,7 +91,7 @@ LTX 任务和带区间的任务会边处理边保存进度。用 **Ⅱ** 暂停�
 如果在 Jasna 里下载一直失败，可以用浏览器从
 [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.1)
 （或 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.1)）
-下载。需要你所选模型的文件和它的 VAE 文件（基础画质和标准画质共 4 个文件，其他画质共 3 个）。
+下载。需要你所选模型的文件和它的 VAE 文件（基础画质共 4 个文件，其他画质共 3 个）。
 Jasna 0.11.3 或更早版本请使用 `main` 分支。
 
 | 你选的模型 | 文件 |
@@ -106,8 +106,8 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
 | 高画质 + 快速模式 | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
 | 顶级画质 | `ltx-restore-alpha1-int8.safetensors.enc` |
 | 顶级画质 + 快速模式 | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
-| VAE（基础画质、标准画质） | `vae.safetensors.enc`、`vae-encoder-half.safetensors.enc` 和 `vae-decoder-max.safetensors.enc` |
-| VAE（良好画质、高画质、顶级画质） | `vae.safetensors.enc` 和 `vae-decoder-full.safetensors.enc` |
+| VAE（基础画质） | `vae.safetensors.enc`、`vae-encoder-half.safetensors.enc` 和 `vae-decoder-max.safetensors.enc` |
+| VAE（标准画质、良好画质、高画质、顶级画质） | `vae.safetensors.enc` 和 `vae-decoder-full.safetensors.enc` |
 
 选了别的 **LTX 编码器**或 **LTX 解码器**？请下载对应的 `vae-encoder-half`、`vae-encoder-max`
 （完整是 `vae.safetensors.enc`）或 `vae-decoder-full`、`vae-decoder-half`、`vae-decoder-max`
@@ -119,7 +119,7 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
 
 ### LTX 选项
 
-- **模型**：**基础画质**、**标准画质**（默认，推荐）、**良好画质**、**高画质**或**顶级画质**。基础画质比标准画质快约 1.3 倍，画面稍柔和；
+- **模型**：**基础画质**、**标准画质**（默认，推荐）、**良好画质**、**高画质**或**顶级画质**。基础画质比标准画质快约 1.7 倍，画面稍柔和；
   良好画质细节稍多，慢约 1.5 倍；高画质细节更多，慢约 2.5 倍；
   顶级画质比高画质稍好，慢约 5 倍，通常不值得。在 RTX 5090 上，标准画质耗时约为视频长度的 1–2 倍。
   CLI：`--restoration-model-name ltx-basic`（基础）、`ltx`（标准）、`ltx-4step`（良好）、`ltx-8step`（高画质）或 `ltx-undistilled`（顶级）。
@@ -137,8 +137,8 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
 - **仅大马赛克用 LTX**：大马赛克用 LTX，其余用更快的 BasicVSR++。长视频能省很多
   时间。见[只修复视频的一部分](segments.md#cli---ltx-auto-split)。
 - **LTX 编码器**和 **LTX 解码器**（**专家**视图）：**完整**最清晰也最慢，**半量**更快，**极速**最快，
-  画面稍柔和。**自动**（默认）在基础画质和标准画质下用半量编码器和极速解码器，其他画质用完整。
-  如果快速模型看起来比 Jasna 0.11.3 更柔和，两个都选完整。还没下载的选项会在点击开始时下载。
+  画面稍柔和。**自动**（默认）在基础画质下用半量编码器和极速解码器，其他画质用完整。
+  如果基础画质看起来太柔和，两个都选完整。还没下载的选项会在点击开始时下载。
   CLI：见[高级环境变量](tuning.md#高级环境变量)。
 
 要预览 LTX，请打开[区间编辑器](segments.md)，选择一个区间，选 LTX，再打开

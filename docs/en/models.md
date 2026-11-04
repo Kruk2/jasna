@@ -106,8 +106,8 @@ If the download in Jasna keeps failing, get the files in your browser from
 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.1)
 (or [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.1)).
 For Jasna 0.11.3 or older, use the `main` branch instead.
-You need the file of the model you picked plus its VAE files (4 files for Basic and Standard Quality, 3 for
-the others).
+You need the file of the model you picked plus its VAE files (4 files for Basic Quality, 3 for the
+others).
 
 | You picked | Files |
 | --- | --- |
@@ -121,8 +121,8 @@ the others).
 | High Quality + Fast mode | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
 | Top Quality | `ltx-restore-alpha1-int8.safetensors.enc` |
 | Top Quality + Fast mode | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
-| VAE, Basic or Standard Quality | `vae.safetensors.enc`, `vae-encoder-half.safetensors.enc` and `vae-decoder-max.safetensors.enc` |
-| VAE, Good, High or Top Quality | `vae.safetensors.enc` and `vae-decoder-full.safetensors.enc` |
+| VAE, Basic Quality | `vae.safetensors.enc`, `vae-encoder-half.safetensors.enc` and `vae-decoder-max.safetensors.enc` |
+| VAE, Standard, Good, High or Top Quality | `vae.safetensors.enc` and `vae-decoder-full.safetensors.enc` |
 
 Picked another **LTX Encoder** or **LTX Decoder**? Get `vae-encoder-half`, `vae-encoder-max`
 (Full is `vae.safetensors.enc`) or `vae-decoder-full`, `vae-decoder-half`, `vae-decoder-max`
@@ -135,7 +135,7 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
 ### LTX options
 
 - **Model**: **Basic Quality**, **Standard Quality** (default, recommended), **Good Quality**, **High Quality** or
-  **Top Quality**. Basic Quality is about 1.3x faster than Standard Quality and slightly softer. Good Quality has a bit more detail and is
+  **Top Quality**. Basic Quality is about 1.7x faster than Standard Quality and slightly softer. Good Quality has a bit more detail and is
   about 1.5x slower. High Quality has more detail and is about 2.5x slower. Top Quality is
   slightly better than High Quality and about 5x slower; it is rarely worth it. On an RTX 5090,
   Standard Quality takes about 1-2x the video's length. CLI: `--restoration-model-name ltx-basic` (Basic), `ltx` (Standard),
@@ -160,8 +160,8 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
   [Restoring only parts of a video](segments.md#cli---ltx-auto-split).
 - **LTX Encoder** and **LTX Decoder** (**Expert** view): **Full** is the sharpest and slowest,
   **Half** is faster, **Max** is the fastest and a little softer. **Auto** (default) uses the Half
-  encoder and Max decoder for Basic and Standard Quality, Full for the others. Pick Full for both if
-  the fast models look softer than in Jasna 0.11.3. A choice you don't have yet is downloaded when
+  encoder and Max decoder for Basic Quality, Full for the others. Pick Full for both if Basic
+  Quality looks too soft. A choice you don't have yet is downloaded when
   you press Start. CLI: see [environment variables](tuning.md#environment-variables-advanced).
 
 To preview LTX, open the [Segment Editor](segments.md), select a range,
