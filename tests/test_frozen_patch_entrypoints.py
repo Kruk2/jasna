@@ -209,6 +209,27 @@ importlib.import_module({module!r})
     subprocess.run([sys.executable, "-c", code], check=True, timeout=300)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no numeric user IDs")
+def test_nameless_user_fallback_looks_the_account_up_only_when_asked(monkeypatch):
+    import pwd
+    from jasna import _frozen
+
+    lookups = []
+
+    def unknown(uid):
+        lookups.append(uid)
+        raise KeyError(uid)
+
+    monkeypatch.setattr(pwd, "getpwuid", unknown)
+    monkeypatch.setenv("HOME", "/srv/jasna")
+    _frozen.name_a_nameless_user()
+    assert lookups == []
+    account = pwd.getpwuid(os.getuid())
+    assert (account.pw_name, account.pw_dir) == ("jasna", "/srv/jasna")
+    with pytest.raises(KeyError):
+        pwd.getpwuid(os.getuid() + 1)
+
+
 def test_bundled_triton_import_needs_no_external_sdk_command():
     pytest.importorskip("triton")
     code = """
