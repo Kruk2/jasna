@@ -9,6 +9,7 @@ from jasna.ltx.compose import (
     Candidate,
     canvas_to_source,
     composite_frame,
+    crop_edge_ramp,
     crop_to_canvas,
     feather_alpha,
     masked_median,
@@ -53,6 +54,39 @@ def test_feather_alpha_inside_the_polygon_box_equals_the_whole_region(device, po
     whole = feather_alpha(mask, feather, (0, 0, shape[1], shape[0]))
     assert whole.any()
     assert torch.equal(feather_alpha(mask, feather, polygon_box([polygon], shape, (0, 0))), whole)
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA"))])
+@pytest.mark.parametrize("seed", range(4))
+def test_outside_the_union_feather_is_outside_every_track_feather(device, seed):
+    rng = np.random.default_rng(seed)
+    shape, feather = (120, 200), 9
+    polygons = [(rng.integers(-20, 220, size=(5, 2))).tolist() for _ in range(3)]
+    masks = [polygon_mask([p], shape, (0, 0), torch.device(device)) for p in polygons]
+    union = torch.stack(masks).any(dim=0)
+    union_alpha = feather_alpha(union, feather, polygon_box(polygons, shape, (0, 0)))
+    each = torch.stack([feather_alpha(m, feather, polygon_box([p], shape, (0, 0))) <= 0.0 for m, p in zip(masks, polygons)])
+    assert torch.equal(union_alpha <= 0.0, each.all(dim=0))
+
+
+@pytest.mark.parametrize("box", [(30, 20, 150, 100), (0, 0, 200, 120), (0, 40, 90, 120)])
+def test_crop_edge_ramp_window_is_that_part_of_the_whole_ramp(box):
+    shape, window = (120, 200), (25, 15, 160, 110)
+    whole = crop_edge_ramp(box, shape, 12, (0, 0, shape[1], shape[0]), torch.device("cpu"))
+    x1, y1, x2, y2 = window
+    assert torch.equal(crop_edge_ramp(box, shape, 12, window, torch.device("cpu")), whole[y1:y2, x1:x2])
+
+
+def test_composite_blends_the_whole_feathered_mask():
+    source = torch.full((3, 360, 640), 20, dtype=torch.uint8)
+    crop = letterbox((100, 40, 420, 360), 320)
+    polygon = [[200.0, 120.0], [300.0, 120.0], [300.0, 220.0], [200.0, 220.0]]
+    canvas = torch.full((3, 320, 320), 220, dtype=torch.uint8)
+    out = composite_frame(source, [Candidate(canvas, crop, 1.0, 0, [polygon], 1.0)], feather=12, projector=None)
+    alpha = feather_alpha(polygon_mask([polygon], (360, 640), (0, 0), torch.device("cpu")), 12, (0, 0, 640, 360))
+    # The colour match moves the canvas 3/4 of the way to the ring: 220 - 0.75 * 200 = 70.
+    expected = 20 + 50 * alpha
+    assert (out[0].float() - expected).abs().max() <= 0.5 + 1e-4
 
 
 def test_crop_round_trip_at_unit_scale():
