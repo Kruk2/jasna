@@ -306,7 +306,12 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview.pack(fill="both", expand=True, padx=8, pady=8)
         self._preview.bind("<Double-Button-1>", self._reset_preview_view)
         self._preview.show_message(t("segments_loading_preview"), Colors.STATUS_PENDING)
+        self._build_transport(preview_card)
+        self._build_zoom_controls(preview_card)
+        self._build_preview_options(preview_card)
 
+    def _build_transport(self, preview_card: ctk.CTkFrame) -> None:
+        """Frame stepping, play, time and the mask suggestion button under the preview."""
         transport = ctk.CTkFrame(preview_card, fg_color="transparent")
         transport.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 2))
         self._step_back = ctk.CTkButton(
@@ -354,6 +359,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._suggest_btn.pack(side="left", padx=(12, 0))
         Tooltip(self._suggest_btn, t("segments_suggest_mask_hint"))
 
+    def _build_zoom_controls(self, preview_card: ctk.CTkFrame) -> None:
         view_controls = ctk.CTkFrame(preview_card, fg_color="transparent")
         view_controls.grid(row=2, column=0, sticky="ew", padx=8, pady=2)
         self._pan_zoom_hint = ctk.CTkLabel(
@@ -411,6 +417,8 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         self._update_preview_zoom_controls()
 
+    def _build_preview_options(self, preview_card: ctk.CTkFrame) -> None:
+        """Restore preview switch, LTX render button and VR projection choice."""
         preview_options = ctk.CTkFrame(preview_card, fg_color="transparent")
         preview_options.grid(row=3, column=0, sticky="ew", padx=8, pady=(2, 8))
         restore_control = ctk.CTkFrame(preview_options, fg_color="transparent")
@@ -437,6 +445,9 @@ class SegmentEditor(ctk.CTkToplevel):
             command=self._render_ltx_preview,
         )
         self._ltx_render_tooltip = Tooltip(self._ltx_render_btn, t("tip_segments_ltx_render"))
+        self._build_projection_control(preview_options)
+
+    def _build_projection_control(self, preview_options: ctk.CTkFrame) -> None:
         projection_names = {
             "raw": t("segments_vr_projection_raw"),
             "fisheye": t("segments_vr_projection_fisheye"),
