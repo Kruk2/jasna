@@ -362,3 +362,14 @@ def test_single_file_output_must_not_be_the_input(tmp_path, capsys):
 
     assert exit_info.value.code == 2
     assert "--output must not be the --input file" in capsys.readouterr().err
+
+
+def test_ctrl_c_stops_the_cli_with_a_short_message(tmp_path, capsys):
+    pipeline = MagicMock()
+    pipeline.run.side_effect = KeyboardInterrupt
+
+    with pytest.raises(SystemExit) as exit_info:
+        run_cli(cli_args(tmp_path), pipeline=pipeline)
+
+    assert exit_info.value.code == 130
+    assert capsys.readouterr().out.splitlines()[-1] == "Stopped"
