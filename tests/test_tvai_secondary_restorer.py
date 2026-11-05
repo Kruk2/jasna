@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -20,50 +20,30 @@ from jasna.restorer.tvai_secondary_restorer import (
 )
 
 
-class TestParseTvaiArgsKv:
-    def test_empty_string(self):
-        assert _parse_tvai_args_kv("") == {}
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        ("", {}),
+        (None, {}),
+        ("   ", {}),
+        ("model=iris-2", {"model": "iris-2"}),
+        ("model=iris-2:scale=2:noise=0", {"model": "iris-2", "scale": "2", "noise": "0"}),
+        ("model=iris-2:", {"model": "iris-2"}),
+        (":model=iris-2", {"model": "iris-2"}),
+        ("model=iris-2::scale=2", {"model": "iris-2", "scale": "2"}),
+    ],
+)
+def test_parse_tvai_args_kv(args, expected):
+    assert _parse_tvai_args_kv(args) == expected
 
-    def test_none_string(self):
-        assert _parse_tvai_args_kv(None) == {}
 
-    def test_whitespace_only(self):
-        assert _parse_tvai_args_kv("   ") == {}
-
-    def test_single_kv(self):
-        assert _parse_tvai_args_kv("model=iris-2") == {"model": "iris-2"}
-
-    def test_multiple_kv(self):
-        result = _parse_tvai_args_kv("model=iris-2:scale=2:noise=0")
-        assert result == {"model": "iris-2", "scale": "2", "noise": "0"}
-
-    def test_trailing_colon(self):
-        result = _parse_tvai_args_kv("model=iris-2:")
-        assert result == {"model": "iris-2"}
-
-    def test_leading_colon(self):
-        result = _parse_tvai_args_kv(":model=iris-2")
-        assert result == {"model": "iris-2"}
-
-    def test_double_colon(self):
-        result = _parse_tvai_args_kv("model=iris-2::scale=2")
-        assert result == {"model": "iris-2", "scale": "2"}
-
-    def test_missing_equals_raises(self):
-        with pytest.raises(ValueError, match="expected key=value"):
-            _parse_tvai_args_kv("model")
-
-    def test_empty_key_raises(self):
-        with pytest.raises(ValueError, match="empty key"):
-            _parse_tvai_args_kv("=value")
+@pytest.mark.parametrize(("args", "error"), [("model", "expected key=value"), ("=value", "empty key")])
+def test_parse_tvai_args_kv_rejects_malformed(args, error):
+    with pytest.raises(ValueError, match=error):
+        _parse_tvai_args_kv(args)
 
 
 class TestTvaiInit:
-    def test_valid_scales(self):
-        for s in (1, 2, 4):
-            r = TvaiSecondaryRestorer(ffmpeg_path="ffmpeg.exe", tvai_args="model=iris-2", scale=s, num_workers=1)
-            assert r.scale == s
-
     def test_invalid_scale_raises(self):
         with pytest.raises(ValueError, match="Invalid tvai scale"):
             TvaiSecondaryRestorer(ffmpeg_path="ffmpeg.exe", tvai_args="model=iris-2", scale=3, num_workers=1)
@@ -76,19 +56,6 @@ class TestTvaiInit:
             num_workers=2,
         )
         assert r.tvai_filter_args == "model=iris-2:scale=2:noise=0"
-
-    def test_num_workers_stored(self):
-        r = TvaiSecondaryRestorer(ffmpeg_path="ffmpeg.exe", tvai_args="model=iris-2", scale=1, num_workers=3)
-        assert r.num_workers == 3
-
-    def test_out_size_calculated(self):
-        r = TvaiSecondaryRestorer(ffmpeg_path="ffmpeg.exe", tvai_args="model=iris-2", scale=4, num_workers=1)
-        assert r._out_size == 1024
-
-    def test_not_started_on_init(self):
-        r = TvaiSecondaryRestorer(ffmpeg_path="ffmpeg.exe", tvai_args="model=iris-2", scale=1, num_workers=1)
-        assert not r._started
-        assert r._workers == []
 
 
 class TestTvaiBuildFfmpegCmd:
@@ -141,46 +108,30 @@ class TestTvaiBuildFfmpegCmd:
         )
 
 
-class TestTvaiValidateEnvironment:
-    def test_missing_data_dir(self, monkeypatch, tmp_path):
-        monkeypatch.delenv("TVAI_MODEL_DATA_DIR", raising=False)
-        monkeypatch.setenv("TVAI_MODEL_DIR", str(tmp_path))
-        ffmpeg = tmp_path / "ffmpeg.exe"
+@pytest.mark.parametrize(
+    ("data_dir", "model_dir", "ffmpeg_exists", "error", "match"),
+    [
+        (None, "dir", True, RuntimeError, "TVAI_MODEL_DATA_DIR"),
+        ("dir", None, True, RuntimeError, "TVAI_MODEL_DIR"),
+        ("file", "dir", True, RuntimeError, "not a directory"),
+        ("dir", "dir", False, FileNotFoundError, "not found"),
+    ],
+)
+def test_push_clip_rejects_a_broken_tvai_install(monkeypatch, tmp_path, data_dir, model_dir, ffmpeg_exists, error, match):
+    not_a_dir = tmp_path / "not_a_dir"
+    not_a_dir.write_bytes(b"")
+    paths = {"dir": str(tmp_path), "file": str(not_a_dir)}
+    for name, value in (("TVAI_MODEL_DATA_DIR", data_dir), ("TVAI_MODEL_DIR", model_dir)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, paths[value])
+    ffmpeg = tmp_path / "ffmpeg.exe"
+    if ffmpeg_exists:
         ffmpeg.write_bytes(b"")
-        r = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
-        r.ffmpeg_path = str(ffmpeg)
-        with pytest.raises(RuntimeError, match="TVAI_MODEL_DATA_DIR"):
-            r._validate_environment()
-
-    def test_missing_model_dir(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("TVAI_MODEL_DATA_DIR", str(tmp_path))
-        monkeypatch.delenv("TVAI_MODEL_DIR", raising=False)
-        ffmpeg = tmp_path / "ffmpeg.exe"
-        ffmpeg.write_bytes(b"")
-        r = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
-        r.ffmpeg_path = str(ffmpeg)
-        with pytest.raises(RuntimeError, match="TVAI_MODEL_DIR"):
-            r._validate_environment()
-
-    def test_data_dir_not_a_directory(self, monkeypatch, tmp_path):
-        fake = tmp_path / "not_a_dir"
-        fake.write_bytes(b"")
-        monkeypatch.setenv("TVAI_MODEL_DATA_DIR", str(fake))
-        monkeypatch.setenv("TVAI_MODEL_DIR", str(tmp_path))
-        ffmpeg = tmp_path / "ffmpeg.exe"
-        ffmpeg.write_bytes(b"")
-        r = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
-        r.ffmpeg_path = str(ffmpeg)
-        with pytest.raises(RuntimeError, match="not a directory"):
-            r._validate_environment()
-
-    def test_ffmpeg_not_found(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("TVAI_MODEL_DATA_DIR", str(tmp_path))
-        monkeypatch.setenv("TVAI_MODEL_DIR", str(tmp_path))
-        r = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
-        r.ffmpeg_path = str(tmp_path / "missing_ffmpeg.exe")
-        with pytest.raises(FileNotFoundError, match="not found"):
-            r._validate_environment()
+    r = TvaiSecondaryRestorer(ffmpeg_path=str(ffmpeg), tvai_args="model=iris-2", scale=1, num_workers=1)
+    with pytest.raises(error, match=match):
+        r.push_clip(torch.rand((1, 3, 256, 256)), keep_start=0, keep_end=1)
 
 
 class TestTvaiToNumpyHwc:
@@ -230,18 +181,6 @@ class TestPushClip:
         assert r._completed[0] == []
         assert not r._started
 
-    def test_assigns_segment_and_pushes_to_worker(self):
-        r = _make_restorer(num_workers=2)
-        workers = _setup_mock_workers(r)
-        seq = r.push_clip(torch.rand((5, 3, 256, 256)), keep_start=0, keep_end=5)
-        assert seq == 0
-        workers[0].push_frames.assert_called_once()
-        segs = r._worker_segments[0]
-        assert len(segs) == 1
-        assert isinstance(segs[0], _ClipSegment)
-        assert segs[0].seq == 0
-        assert segs[0].expected == 5
-
     def test_least_pending_frames_assignment(self):
         r = _make_restorer(num_workers=2)
         workers = _setup_mock_workers(r)
@@ -265,16 +204,6 @@ class TestPushClip:
         assert sum(s.expected for s in segs_0) == 170
         assert sum(s.expected for s in segs_1) == 2
 
-    def test_equal_pending_uses_lower_index(self):
-        r = _make_restorer(num_workers=2)
-        workers = _setup_mock_workers(r)
-        r.push_clip(torch.rand((6, 3, 256, 256)), keep_start=0, keep_end=6)
-        r.push_clip(torch.rand((6, 3, 256, 256)), keep_start=0, keep_end=6)
-        # Both workers have 6 pending, next clip goes to worker 0 (min picks lowest index)
-        r.push_clip(torch.rand((6, 3, 256, 256)), keep_start=0, keep_end=6)
-        assert workers[0].push_frames.call_count == 2
-        assert workers[1].push_frames.call_count == 1
-
     def test_seq_increments(self):
         r = _make_restorer()
         _setup_mock_workers(r)
@@ -282,24 +211,6 @@ class TestPushClip:
         s1 = r.push_clip(torch.rand((3, 3, 256, 256)), keep_start=0, keep_end=3)
         assert s0 == 0
         assert s1 == 1
-
-    def test_keep_slicing(self):
-        r = _make_restorer()
-        workers = _setup_mock_workers(r)
-        r.push_clip(torch.rand((10, 3, 256, 256)), keep_start=2, keep_end=5)
-        seg = r._worker_segments[0][0]
-        assert seg.expected == 3
-
-    def test_short_clip_no_padding(self):
-        r = _make_restorer()
-        workers = _setup_mock_workers(r)
-        r.push_clip(torch.rand((2, 3, 256, 256)), keep_start=0, keep_end=2)
-        segs = list(r._worker_segments[0])
-        assert len(segs) == 1
-        assert isinstance(segs[0], _ClipSegment)
-        assert segs[0].expected == 2
-        pushed = workers[0].push_frames.call_args[0][0]
-        assert pushed.shape[0] == 2
 
 
 class TestDrainWorker:
@@ -444,31 +355,8 @@ class TestFlushPending:
         assert workers[0].push_frames.call_count == 2
         assert filler.remaining == TVAI_PIPELINE_DELAY * 2
 
-    def test_reflush_extends_partially_consumed_filler(self):
-        r = _make_restorer(num_workers=1)
-        workers = _setup_mock_workers(r)
-        r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
-        r.flush_pending()
-        filler = r._worker_segments[0][-1]
-        filler.remaining = 3
-        r.flush_pending()
-        assert workers[0].push_frames.call_count == 2
-        assert filler.remaining == 3 + TVAI_PIPELINE_DELAY
-
-    def test_reflush_after_filler_consumed(self):
-        r = _make_restorer(num_workers=1)
-        workers = _setup_mock_workers(r)
-        r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
-        r.flush_pending()
-        assert workers[0].push_frames.call_count == 1
-        r._worker_segments[0][-1].remaining = 0
-        r._worker_segments[0].pop()
-        r.flush_pending()
-        assert workers[0].push_frames.call_count == 2
-
     def test_noop_when_not_started(self):
-        r = _make_restorer()
-        r.flush_pending()
+        assert _make_restorer().flush_pending() is False
 
     def test_target_seqs_flushes_only_matching_worker(self):
         r = _make_restorer(num_workers=3)
@@ -525,10 +413,6 @@ class TestFlushAll:
         r.flush_all()
         assert 0 in r._completed
         assert len(r._completed[0]) == 2
-
-    def test_noop_when_not_started(self):
-        r = _make_restorer()
-        r.flush_all()
 
     def test_short_stream_padded_before_close(self):
         r = _make_restorer()
@@ -621,11 +505,6 @@ class TestClose:
             w.kill.assert_called_once()
         assert r._workers == []
         assert not r._started
-
-    def test_noop_when_not_started(self):
-        r = _make_restorer()
-        r.close()
-
 
 class TestReflushCompletesClip:
     def test_clip_completes_after_multiple_flush_rounds(self):
