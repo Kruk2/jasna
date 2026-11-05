@@ -87,6 +87,10 @@ def configure_rocm_devices() -> None:
         return arch in INTEGRATED_HIP_ARCHITECTURES, arch not in TRITON_HIP_ARCHITECTURES
 
     best = min((rank(arch) for arch, _ in supported), default=None)
+    discrete = device_count > len(devices) or any(arch.split(":")[0] not in INTEGRATED_HIP_ARCHITECTURES for arch, _ in devices)
+    if best is not None and best[0] and discrete:
+        # Never move work from an unsupported discrete card to an iGPU; startup reports the unsupported card instead.
+        return
     chosen = [identifier for arch, identifier in supported if rank(arch) == best]
     if chosen and len(chosen) < device_count:
         # Filter before torch import: HIP may load kernels for every visible adapter.
