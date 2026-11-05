@@ -95,8 +95,7 @@ def video_session_config(
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
         max_clip_size=int(settings.max_clip_size),
         temporal_overlap=int(settings.temporal_overlap),
-        # Stricter than ltx_unsupported: the GUI denoises only BasicVSR++ jobs, not LTX auto split parts.
-        denoise_strength=settings.denoise_strength if standard_model else "none",
+        denoise_strength="none" if "denoise_strength" in ltx_unsupported else settings.denoise_strength,
         secondary_restoration=secondary_restoration,
         tvai_ffmpeg_path=settings.tvai_ffmpeg_path,
         tvai_model=settings.tvai_model,
