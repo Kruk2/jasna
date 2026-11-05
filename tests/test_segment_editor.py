@@ -12,10 +12,10 @@ import pytest
 import torch
 from PIL import Image
 
-from jasna.gui import ltx_seed_preview, segment_editor, segment_scan_panel
+from jasna.gui import ltx_seed_preview, segment_editor, segment_scan_panel, segment_seed_panel
 from jasna.gui.locales import t
 from jasna.gui.ltx_models import model_key
-from jasna.gui.ltx_seed_preview import LtxSeedPreviewWorker
+from jasna.gui.ltx_seed_preview import LtxSeedPreviewWorker, SeedFrame, SeedProgress, SeedReady
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.mosaic_scan import MosaicScanResult, ScanCompleted
 from jasna.gui.segment_editor import SegmentEditor
@@ -674,19 +674,23 @@ class _FakeSeedWorker:
         self.closed = True
 
 
+def _seed_chip(editor, text):
+    return next(widget for widget in editor._seeds._chip_widgets if widget.cget("text") == text)
+
+
 def _seed_frames(tmp_path, seed, color):
     frames = []
     for seconds in (1.0, 1.5):
         path = tmp_path / f"{seed}-{seconds}.jpg"
         Image.new("RGB", (160, 90), color).save(path)
-        frames.append(segment_editor.SeedFrame(seconds, path))
+        frames.append(SeedFrame(seconds, path))
     return tuple(frames)
 
 
 def test_restore_preview_renders_an_ltx_range_then_lets_the_user_compare_and_pick_seeds(build_editor, tk_root, monkeypatch, tmp_path) -> None:
     _FakeSeedWorker.instances = []
-    monkeypatch.setattr(segment_editor, "LtxSeedPreviewWorker", _FakeSeedWorker)
-    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 60.0)
+    monkeypatch.setattr(segment_seed_panel, "LtxSeedPreviewWorker", _FakeSeedWorker)
+    monkeypatch.setattr(segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: 60.0)
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
     editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
@@ -700,39 +704,39 @@ def test_restore_preview_renders_an_ltx_range_then_lets_the_user_compare_and_pic
     assert worker.requests[0][:2] == (job.segments[0], 5)
     assert editor._restore_active
     assert shown_message(editor._preview) == t("segments_preview_ltx_rendering", seed=5)
-    assert not editor._ltx_render_btn.winfo_manager()
-    worker.events.put(segment_editor.SeedProgress(5, "denoise", 0.5, 70.0, 1))
+    assert not editor._seeds._render_btn.winfo_manager()
+    worker.events.put(SeedProgress(5, "denoise", 0.5, 70.0, 1))
     editor._poll_workers()
-    assert editor._seed_status.cget("text") == t(
+    assert editor._seeds._status.cget("text") == t(
         "segments_seed_progress", seed=5, stage=t("ltx_stage_denoise"), percent=50.0, eta="1m 10s"
     )
 
-    worker.events.put(segment_editor.SeedReady(5, _seed_frames(tmp_path, 5, "blue"), 1))
+    worker.events.put(SeedReady(5, _seed_frames(tmp_path, 5, "blue"), 1))
     editor._poll_workers()
     tk_root.update()
     assert 1.0 <= editor._current < 2.0
-    assert editor._active_preview_source().getpixel((0, 0))[2] > 200
+    assert editor._preview_display_source().getpixel((0, 0))[2] > 200
 
     editor._new_range_seed()
     new_seed = editor._state.selected_segment.restoration.ltx_seed
     tk_root.update()
     assert shown_message(editor._preview) == t("segments_preview_ltx_not_rendered", seed=new_seed)
-    assert editor._ltx_render_btn.winfo_manager()
-    editor._ltx_render_btn.invoke()
+    assert editor._seeds._render_btn.winfo_manager()
+    editor._seeds._render_btn.invoke()
     assert worker.requests[1][:2] == (editor._state.selected_segment, new_seed)
-    worker.events.put(segment_editor.SeedReady(new_seed, _seed_frames(tmp_path, new_seed, "green"), 2))
+    worker.events.put(SeedReady(new_seed, _seed_frames(tmp_path, new_seed, "green"), 2))
     editor._poll_workers()
-    chips = [w.cget("text") for w in editor._seed_chip_widgets if isinstance(w, ctk.CTkButton)]
+    chips = [w.cget("text") for w in editor._seeds._chip_widgets if isinstance(w, ctk.CTkButton)]
     assert chips == ["5", f"{new_seed} ✓"]
-    assert editor._active_preview_source().getpixel((0, 0))[1] > 100
+    assert editor._preview_display_source().getpixel((0, 0))[1] > 100
 
-    editor._show_tried_seed(5)
-    assert editor._active_preview_source().getpixel((0, 0))[2] > 200
-    editor._use_tried_seed(5)
+    _seed_chip(editor, "5").invoke()
+    assert editor._preview_display_source().getpixel((0, 0))[2] > 200
+    editor._seeds._chip_widgets[-1].invoke()
     assert editor._state.selected_segment.restoration == SegmentRestoration("ltx", 5)
 
     editor._toggle_restoration_preview()
-    assert editor._active_preview_source().getpixel((0, 0))[0] > 200
+    assert editor._preview_display_source().getpixel((0, 0))[0] > 200
 
     editor._claim_gpu_for_scan()
     assert worker.released == 1
@@ -744,8 +748,8 @@ def test_restore_preview_renders_an_ltx_range_then_lets_the_user_compare_and_pic
 def test_restore_preview_asks_before_a_long_ltx_render(build_editor, monkeypatch, tmp_path, answer) -> None:
     _FakeSeedWorker.instances = []
     asked = []
-    monkeypatch.setattr(segment_editor, "LtxSeedPreviewWorker", _FakeSeedWorker)
-    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 360.0)
+    monkeypatch.setattr(segment_seed_panel, "LtxSeedPreviewWorker", _FakeSeedWorker)
+    monkeypatch.setattr(segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: 360.0)
     monkeypatch.setattr(segment_editor.messagebox, "askyesno", lambda title, text, parent: asked.append(text) or answer)
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
@@ -778,8 +782,8 @@ def test_closing_the_app_closes_the_segment_editor_and_its_seed_frames(jasna_app
     preview = MagicMock()
     preview.events = queue.Queue()
     monkeypatch.setattr(segment_editor, "SegmentPreviewWorker", MagicMock(return_value=preview))
-    monkeypatch.setattr(segment_editor, "LtxSeedPreviewWorker", _BlockingSeedWorker)
-    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 0.0)
+    monkeypatch.setattr(segment_seed_panel, "LtxSeedPreviewWorker", _BlockingSeedWorker)
+    monkeypatch.setattr(segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: 0.0)
     asked: list[str] = []
     monkeypatch.setattr(
         segment_editor.messagebox, "askyesno", lambda _title, message, parent: asked.append(message) or stop_render
@@ -818,8 +822,8 @@ def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(build_editor, tk
 
     monkeypatch.setattr(segment_editor.Tooltip, "__init__", record)
     _FakeSeedWorker.instances = []
-    monkeypatch.setattr(segment_editor, "LtxSeedPreviewWorker", _FakeSeedWorker)
-    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 60.0)
+    monkeypatch.setattr(segment_seed_panel, "LtxSeedPreviewWorker", _FakeSeedWorker)
+    monkeypatch.setattr(segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: 60.0)
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     settings = replace(AppSettings(), ltx_model="undistilled")
     editor = build_editor(job=job, settings=settings)
@@ -830,10 +834,10 @@ def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(build_editor, tk
     editor._seek(1.5)
     editor._toggle_restoration_preview()
     worker = _FakeSeedWorker.instances[0]
-    worker.events.put(segment_editor.SeedReady(5, _seed_frames(tmp_path, 5, "blue"), 1))
+    worker.events.put(SeedReady(5, _seed_frames(tmp_path, 5, "blue"), 1))
     editor._poll_workers()
     editor._new_range_seed()
-    editor._show_tried_seed(5)
+    _seed_chip(editor, "5").invoke()
     tk_root.update()
 
     assert editor._model_radios["ltx"].cget("text") == t("model_ltx_undistilled")
@@ -843,13 +847,13 @@ def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(build_editor, tk
         "tip_segments_use_for_all": editor._use_for_all_btn,
         "tip_ltx_seed": editor._seed_entry,
         "tip_ltx_new_seed": editor._new_seed_btn,
-        "tip_segments_ltx_render": editor._ltx_render_btn,
-        "tip_segments_seed_cancel": editor._seed_cancel_btn,
+        "tip_segments_ltx_render": editor._seeds._render_btn,
+        "tip_segments_seed_cancel": editor._seeds._cancel_btn,
     }
     for key, widget in expected.items():
         assert widget in tips[t(key)], key
-    chips = [w for w in editor._seed_chip_widgets if w.cget("text") == "5"]
-    use = [w for w in editor._seed_chip_widgets if w.cget("text") == t("segments_seed_use")]
+    chips = [w for w in editor._seeds._chip_widgets if w.cget("text") == "5"]
+    use = [w for w in editor._seeds._chip_widgets if w.cget("text") == t("segments_seed_use")]
     assert chips and chips[0] in tips[t("tip_segments_seed_chip")]
     assert use and use[0] in tips[t("tip_segments_seed_use")]
     assert editor._ltx_radio_tooltip._text == t("tip_model_ltx_undistilled")
@@ -871,12 +875,12 @@ def test_range_list_keeps_three_rows_beside_a_busy_seed_inspector(build_editor, 
         editor._timeline_create(start, start + 1.0)
     editor._select_range(0)
     editor._model_radios["ltx"].invoke()
-    key = editor._range_key(editor._state.selected_segment)
-    editor._tried_seeds[key] = {1: (), 2: ()}
-    editor._shown_seed = (key, 2)
-    editor._seed_running = (key, 1)
-    editor._seed_status.configure(text="Seed 1: Restoring 30% · about 15s left")
-    editor._refresh_seed_controls()
+    key = segment_seed_panel.range_key(editor._state.selected_segment)
+    editor._seeds._tried[key] = {1: (), 2: ()}
+    editor._seeds._shown = (key, 2)
+    editor._seeds._running = (key, 1)
+    editor._seeds._status.configure(text="Seed 1: Restoring 30% · about 15s left")
+    editor._seeds.refresh()
     for _ in range(5):
         tk_root.update()
 
@@ -884,9 +888,9 @@ def test_range_list_keeps_three_rows_beside_a_busy_seed_inspector(build_editor, 
     viewport = editor._segment_list._parent_canvas
     assert all(_visible_in(row, viewport) for row in rows[:3])
     assert editor._range_controls._parent_canvas.yview() == (0.0, 1.0)
-    assert _visible_in(editor._seed_chips, editor._range_controls._parent_canvas)
+    assert _visible_in(editor._seeds._chips, editor._range_controls._parent_canvas)
     assert editor._range_action.grid_info()["row"] == 0
-    editor._seed_running = None
+    editor._seeds._running = None
 
 
 def test_range_times_stack_and_controls_scroll_at_minimum_size(build_editor, tk_root) -> None:
@@ -947,7 +951,7 @@ def test_footer_shows_the_ltx_share_only_when_a_range_uses_ltx(build_editor, tk_
 def test_restore_preview_uses_basicvsrpp_outside_an_ltx_range(build_editor, monkeypatch, tmp_path) -> None:
     preview_worker = MagicMock()
     monkeypatch.setattr(segment_editor, "RestorationPreviewWorker", MagicMock(return_value=preview_worker))
-    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 60.0)
+    monkeypatch.setattr(segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: 60.0)
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
     editor._seek(5.0)
@@ -958,24 +962,24 @@ def test_restore_preview_uses_basicvsrpp_outside_an_ltx_range(build_editor, monk
     editor._request_restoration_preview()
     assert preview_worker.request.call_count == 1
     assert shown_message(editor._preview) == t("segments_preview_ltx_not_rendered", seed=5)
-    assert editor._ltx_render_btn.winfo_manager()
+    assert editor._seeds._render_btn.winfo_manager()
 
 
 def test_ltx_render_button_enables_once_the_keyframes_arrive(build_editor, monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 60.0)
+    monkeypatch.setattr(segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: 60.0)
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
     editor._seek(1.5)
     editor._restore_active = True
     editor._request_restoration_preview()
-    assert editor._ltx_render_btn.cget("state") == "disabled"
+    assert editor._seeds._render_btn.cget("state") == "disabled"
 
     editor._preview_worker.events.put(
         segment_editor.PreviewKeyframes(KeyframeIndex((0,), Fraction(1, 1000), 0, 60_000), None)
     )
     editor._poll_workers()
 
-    assert editor._ltx_render_btn.cget("state") == "normal"
+    assert editor._seeds._render_btn.cget("state") == "normal"
 
 
 def test_scan_says_it_loads_the_detection_model(build_editor, monkeypatch) -> None:
