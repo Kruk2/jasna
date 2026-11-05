@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, fields, asdict
 from enum import Enum
 from pathlib import Path
 
-from jasna.gui.paths import get_settings_path, update_settings
+from jasna.gui.paths import read_settings, update_settings
 from jasna.segments import SegmentRange
 from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_OVERLAP, LTX_DEFAULT_SEED
 
@@ -258,28 +258,19 @@ class PresetManager:
         
     def _load(self):
         """Load user presets from settings.json."""
-        path = get_settings_path()
-        if not path.exists():
-            return
-            
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            self._last_selected = data.get("last_selected", "Default")
-            self._last_output_folder = data.get("last_output_folder", "")
-            self._last_output_pattern = data.get("last_output_pattern", DEFAULT_OUTPUT_PATTERN)
-            self._system_check_passed_version = data.get("system_check_passed_version", "")
-            view = data.get("settings_view")
-            self._settings_view = view if view in ("advanced", "expert") else "simple"
-            
-            for name, preset_dict in data.get("user_presets", {}).items():
-                try:
-                    self._user_presets[name] = AppSettings(**_migrate_preset_dict(preset_dict))
-                except (TypeError, ValueError) as e:
-                    logger.warning("Skipping invalid preset %r in %s: %s", name, path, e)
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Could not read settings from %s: %s", path, e)
+        data = read_settings()
+        self._last_selected = data.get("last_selected", "Default")
+        self._last_output_folder = data.get("last_output_folder", "")
+        self._last_output_pattern = data.get("last_output_pattern", DEFAULT_OUTPUT_PATTERN)
+        self._system_check_passed_version = data.get("system_check_passed_version", "")
+        view = data.get("settings_view")
+        self._settings_view = view if view in ("advanced", "expert") else "simple"
+
+        for name, preset_dict in data.get("user_presets", {}).items():
+            try:
+                self._user_presets[name] = AppSettings(**_migrate_preset_dict(preset_dict))
+            except (TypeError, ValueError) as e:
+                logger.warning("Skipping invalid preset %r: %s", name, e)
 
     def _save(self, **values) -> None:
         update_settings(**values)

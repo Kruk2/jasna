@@ -20,10 +20,14 @@ def read_settings() -> dict:
         return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
+            data = json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
         logger.warning("Could not read settings from %s, rewriting it: %s", path, e)
         return {}
+    if not isinstance(data, dict):
+        logger.warning("Settings in %s are not an object, rewriting them", path)
+        return {}
+    return data
 
 
 def update_settings(**values) -> None:
@@ -33,7 +37,7 @@ def update_settings(**values) -> None:
     data = read_settings()
     data.update(values)
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        with os_utils.atomic_write(path, "wb") as f:
+            f.write(json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8"))
     except OSError as e:
         logger.warning("Could not save settings to %s: %s", path, e)

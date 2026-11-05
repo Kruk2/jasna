@@ -1,10 +1,9 @@
 """Localization system for Jasna GUI."""
 
-import json
 import locale as _locale
 import logging
 
-from jasna.gui.paths import get_settings_path, update_settings
+from jasna.gui.paths import get_settings_path, read_settings, update_settings
 
 from jasna.gui.locales.en import EN
 from jasna.gui.locales.zh import ZH
@@ -44,12 +43,7 @@ class LocaleManager:
         """Load language preference from settings."""
         path = get_settings_path()
         if path.exists():
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                self._current_lang = data.get("language", "en")
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning("Could not read the language setting from %s: %s", path, e)
+            self._current_lang = read_settings().get("language", "en")
         else:
             # If settings.json is missing, try to autodetect system language
             try:

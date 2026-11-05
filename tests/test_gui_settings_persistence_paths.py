@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 
 from jasna import os_utils
-from jasna.gui.models import AppSettings, PresetManager, get_settings_path
+from jasna.gui.models import AppSettings, PresetManager
+from jasna.gui.paths import get_settings_path
 
 
 def test_get_user_config_dir_windows_uses_appdata(monkeypatch, tmp_path: Path) -> None:
@@ -100,3 +101,22 @@ def test_preset_manager_saves_do_not_overwrite_keys_changed_elsewhere(windows_se
     assert reloaded.get_preset("MyPreset") is not None
     assert reloaded.get_system_check_passed_version() == "9.9.9"
     assert reloaded.get_last_selected() == "MyPreset"
+
+
+@pytest.mark.parametrize("content", ["[1, 2]", "{\"user_presets\": ", "\"text\""])
+def test_unreadable_settings_start_from_defaults_and_are_rewritten(windows_settings, content) -> None:
+    windows_settings.parent.mkdir(parents=True)
+    windows_settings.write_text(content, encoding="utf-8")
+
+    manager = PresetManager()
+    assert manager.get_last_selected() == "Default"
+    assert manager.create_preset("Mine", AppSettings())
+
+    assert list(json.loads(windows_settings.read_text(encoding="utf-8"))) == ["user_presets"]
+    assert [path.name for path in windows_settings.parent.iterdir()] == ["settings.json"]
+
+
+def test_settings_keep_non_ascii_preset_names(windows_settings) -> None:
+    assert PresetManager().create_preset("Ostrość ゆ", AppSettings())
+
+    assert PresetManager().get_preset("Ostrość ゆ") == AppSettings()
