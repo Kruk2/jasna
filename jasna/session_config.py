@@ -25,20 +25,6 @@ SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res"]
 LTX_SECONDARY_RESTORATIONS: tuple[SecondaryRestorationName, ...] = ("none", "rtx-super-res")
 """What LTX restoration supports without auto split; the others need BasicVSR++ parts."""
 
-
-def ltx_unsupported_options(*, auto_split: bool, secondary_restoration: str, denoise_strength: str) -> tuple[str, ...]:
-    """The chosen options, as ``SessionConfig`` field names, that an LTX job cannot use: without
-    auto split it has no BasicVSR++ parts for denoise or a secondary restoration other than
-    ``LTX_SECONDARY_RESTORATIONS``."""
-    if auto_split:
-        return ()
-    return tuple(
-        name for name, unsupported in (
-            ("secondary_restoration", secondary_restoration not in LTX_SECONDARY_RESTORATIONS),
-            ("denoise_strength", denoise_strength != "none"),
-        ) if unsupported
-    )
-
 DenoiseStrengthName = Literal["none", "low", "medium", "high"]
 VrModeName = Literal["auto", "off", "sbs", "sbs-fisheye", "tb"]
 VrProjectionName = Literal["auto", "raw", "fisheye", "gnomonic"]
@@ -49,6 +35,28 @@ DEFAULT_CODEC: CodecName = "hevc"
 LtxVaeName = Literal["auto", "full", "half", "max"]
 """An LTX video encoder or decoder size; "auto" is the model's own default."""
 DecodeBackendName = Literal["auto", "vali", "pyav-hw", "pyav-sw"]
+
+# Option defaults shared by the CLI (``jasna.main.build_parser``) and the GUI (``AppSettings``).
+DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
+DEFAULT_MAX_CLIP_SIZE = 90
+DEFAULT_TEMPORAL_OVERLAP = 8
+DEFAULT_MAX_DETECTION_GAP = 2
+DEFAULT_MIN_DETECTION_DURATION = 2
+TVAI_DEFAULT_FFMPEG_PATH = r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe"
+TVAI_DEFAULT_MODEL = "iris-2"
+TVAI_DEFAULT_SCALE = 4
+TVAI_DEFAULT_ARGS = (
+    "preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1"
+)
+TVAI_DEFAULT_WORKERS = 2
+RTX_DEFAULT_SCALE = 4
+RTX_DEFAULT_QUALITY: RtxQualityName = "high"
+RTX_DEFAULT_DENOISE: RtxLevelName = "medium"
+RTX_DEFAULT_DEBLUR: RtxLevelName = "none"
+SD15_DEFAULT_STEPS = 25
+SD15_DEFAULT_STRENGTH = 0.6
+SD15_DEFAULT_SEED = 0
+SD15_DEFAULT_VARIANTS = 1
 
 
 @dataclass(frozen=True)
@@ -126,3 +134,17 @@ class SessionConfig:
             raise ValueError("Detection score threshold must be in [0, 1]")
         if not 0.0 <= self.sharpen_strength <= 1.0:
             raise ValueError("Sharpening must be in [0, 1]")
+
+
+def ltx_unsupported_options(*, auto_split: bool, secondary_restoration: str, denoise_strength: str) -> tuple[str, ...]:
+    """The chosen options, as ``SessionConfig`` field names, that an LTX job cannot use: without
+    auto split it has no BasicVSR++ parts for denoise or a secondary restoration other than
+    ``LTX_SECONDARY_RESTORATIONS``."""
+    if auto_split:
+        return ()
+    return tuple(
+        name for name, unsupported in (
+            ("secondary_restoration", secondary_restoration not in LTX_SECONDARY_RESTORATIONS),
+            ("denoise_strength", denoise_strength != "none"),
+        ) if unsupported
+    )

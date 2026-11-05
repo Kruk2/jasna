@@ -8,6 +8,7 @@ import torch
 
 from jasna.accelerator import is_amd_device, is_nvidia_device
 from jasna.engine_paths import model_weights_dir
+from jasna.session_config import DEFAULT_DETECTION_MODEL_NAME
 
 
 @dataclass(frozen=True)
@@ -68,8 +69,6 @@ RFDETR_MODEL_NAMES: frozenset[str] = frozenset(
         "rfdetr-vr-v1",
     }
 )
-
-DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
 
 
 def default_detection_batch_size(device: torch.device | str) -> int:

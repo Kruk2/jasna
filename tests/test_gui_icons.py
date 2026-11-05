@@ -96,7 +96,7 @@ def test_native_icon_button_keeps_image_and_disabled_state(tk_root) -> None:
 
 
 def test_slider_value_uses_native_label_without_ctk_canvas(tk_root) -> None:
-    label = settings_widgets.create_slider_value_label(tk_root, "90", Colors.BG_PANEL)
+    label = settings_widgets.create_slider_value_label(tk_root, Colors.BG_PANEL)
 
     assert isinstance(label, tk.Label)
     assert tk_root.tk.splitlist(label.cget("font")) == (

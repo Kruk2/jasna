@@ -1,5 +1,7 @@
 """Secondary restoration settings section."""
 
+from pathlib import PureWindowsPath
+
 import customtkinter as ctk
 from tkinter import filedialog
 
@@ -9,7 +11,7 @@ from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import Row, add_setting_label, create_slider_value_label, get_tooltip, layout_rows
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.session_config import LTX_SECONDARY_RESTORATIONS
+from jasna.session_config import LTX_SECONDARY_RESTORATIONS, TVAI_DEFAULT_FFMPEG_PATH
 
 
 class SecondarySection:
@@ -89,7 +91,6 @@ class SecondarySection:
             text_color=Colors.TEXT_PRIMARY
         )
         self._widgets["tvai_ffmpeg_path"].pack(side="left", fill="x", expand=True, padx=(0, 4))
-        self._widgets["tvai_ffmpeg_path"].insert(0, r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe")
 
         tvai_browse_btn = ctk.CTkButton(
             tvai_path_input_row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
@@ -108,7 +109,6 @@ class SecondarySection:
             text_color=Colors.TEXT_PRIMARY, width=100
         )
         self._widgets["tvai_model"].pack(side="right")
-        self._widgets["tvai_model"].set("iris-2")
 
         # TVAI scale
         tvai_scale_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
@@ -120,7 +120,6 @@ class SecondarySection:
             text_color=Colors.TEXT_PRIMARY, width=80
         )
         self._widgets["tvai_scale"].pack(side="right")
-        self._widgets["tvai_scale"].set("4x")
 
         # TVAI Denoise Operation
         tvai_denoise_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
@@ -154,9 +153,7 @@ class SecondarySection:
         # TVAI workers
         tvai_workers_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         add_setting_label(tvai_workers_row, "workers", "tvai_workers")
-        self._widgets["tvai_workers_val"] = create_slider_value_label(
-            tvai_workers_row, "2", Colors.BG_CARD
-        )
+        self._widgets["tvai_workers_val"] = create_slider_value_label(tvai_workers_row, Colors.BG_CARD)
         self._widgets["tvai_workers_val"].pack(side="right")
         self._widgets["tvai_workers"] = ctk.CTkSlider(
             tvai_workers_row, from_=1, to=8, number_of_steps=7,
@@ -164,7 +161,6 @@ class SecondarySection:
             width=120, command=lambda v: self._widgets["tvai_workers_val"].configure(text=str(int(v)))
         )
         self._widgets["tvai_workers"].pack(side="right", padx=(0, 8))
-        self._widgets["tvai_workers"].set(2)
 
         gap = dict(fill="x", pady=(0, 8))
         self._tvai_rows = [
@@ -196,7 +192,6 @@ class SecondarySection:
             text_color=Colors.TEXT_PRIMARY, width=80
         )
         self._widgets["rtx_scale"].pack(side="right")
-        self._widgets["rtx_scale"].set("4x")
 
         # RTX quality
         rtx_quality_row = ctk.CTkFrame(rtx_inner, fg_color="transparent")
@@ -212,7 +207,6 @@ class SecondarySection:
             text_color=Colors.TEXT_PRIMARY, width=100
         )
         self._widgets["rtx_quality"].pack(side="right")
-        self._widgets["rtx_quality"].set("High")
 
         # RTX denoise
         rtx_denoise_row = ctk.CTkFrame(rtx_inner, fg_color="transparent")
@@ -228,7 +222,6 @@ class SecondarySection:
             text_color=Colors.TEXT_PRIMARY, width=100
         )
         self._widgets["rtx_denoise"].pack(side="right")
-        self._widgets["rtx_denoise"].set("Medium")
 
         # RTX deblur
         rtx_deblur_row = ctk.CTkFrame(rtx_inner, fg_color="transparent")
@@ -244,13 +237,12 @@ class SecondarySection:
             text_color=Colors.TEXT_PRIMARY, width=100
         )
         self._widgets["rtx_deblur"].pack(side="right")
-        self._widgets["rtx_deblur"].set("None")
 
     def _browse_tvai_ffmpeg(self):
         filepath = filedialog.askopenfilename(
             title=t("dialog_select_tvai_ffmpeg"),
             filetypes=[("Executable", "*.exe"), ("All files", "*.*")],
-            initialdir=r"C:\Program Files\Topaz Labs LLC\Topaz Video"
+            initialdir=str(PureWindowsPath(TVAI_DEFAULT_FFMPEG_PATH).parent),
         )
         if filepath:
             self._widgets["tvai_ffmpeg_path"].delete(0, "end")

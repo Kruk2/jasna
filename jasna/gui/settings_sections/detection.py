@@ -13,6 +13,7 @@ from jasna.gui.settings_sections.widgets import (
     layout_rows,
 )
 from jasna.gui.theme import Colors, Sizing
+from jasna.session_config import DEFAULT_DETECTION_MODEL_NAME
 
 TEMPORAL_FILTER_SLIDER_MAX = 10
 
@@ -38,13 +39,10 @@ class DetectionSection:
             command=self._on_detection_model_changed,
         )
         self._widgets["detection_model"].pack(side="right")
-        self._widgets["detection_model"].set(available_models[0])
 
         threshold_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(threshold_row, "detection_threshold", "detection_score_threshold")
-        self._widgets["detection_threshold_val"] = create_slider_value_label(
-            threshold_row, "0.35", Colors.BG_PANEL
-        )
+        self._widgets["detection_threshold_val"] = create_slider_value_label(threshold_row, Colors.BG_PANEL)
         self._widgets["detection_threshold_val"].pack(side="right")
         self._widgets["detection_score_threshold"] = ctk.CTkSlider(
             threshold_row, from_=0.0, to=1.0, number_of_steps=20,
@@ -52,7 +50,6 @@ class DetectionSection:
             width=SLIDER_WIDTH, command=lambda v: self._widgets["detection_threshold_val"].configure(text=f"{v:.2f}")
         )
         self._widgets["detection_score_threshold"].pack(side="right", padx=(0, 8))
-        self._widgets["detection_score_threshold"].set(0.35)
 
         vr_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(vr_row, "vr_mode")
@@ -75,7 +72,6 @@ class DetectionSection:
             width=180,
         )
         self._widgets["vr_mode"].pack(side="right")
-        self._widgets["vr_mode"].set_value("auto")
 
         gap_row = self._filter_slider_row(inner, "max_detection_gap")
         mindur_row = self._filter_slider_row(inner, "min_detection_duration")
@@ -85,7 +81,6 @@ class DetectionSection:
         add_setting_label(scene_frame, "scene_detection", in_card=True)
         self._widgets["scene_detection"] = CompactSwitch(scene_frame, self._on_modified, Colors.BG_CARD)
         self._widgets["scene_detection"].pack(side="right", padx=12, pady=8)
-        self._widgets["scene_detection"].select()
 
         row_gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
         self._rows = [
@@ -100,7 +95,7 @@ class DetectionSection:
     def _filter_slider_row(self, inner, key: str):
         row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(row, key)
-        self._widgets[f"{key}_val"] = create_slider_value_label(row, "2", Colors.BG_PANEL)
+        self._widgets[f"{key}_val"] = create_slider_value_label(row, Colors.BG_PANEL)
         self._widgets[f"{key}_val"].pack(side="right")
         self._widgets[key] = ctk.CTkSlider(
             row, from_=0, to=TEMPORAL_FILTER_SLIDER_MAX,
@@ -109,7 +104,6 @@ class DetectionSection:
             width=SLIDER_WIDTH, command=lambda v: self._on_slider_change(key, int(v))
         )
         self._widgets[key].pack(side="right", padx=(0, 8))
-        self._widgets[key].set(2)
         return row
 
     def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
@@ -132,10 +126,7 @@ class DetectionSection:
         det_threshold = preset.detection_score_threshold
         choices = self._widgets["detection_model"].cget("values")
         if det_model not in choices:
-            from jasna.mosaic.detection_registry import (
-                DEFAULT_DETECTION_MODEL_NAME,
-                recommended_score_threshold,
-            )
+            from jasna.mosaic.detection_registry import recommended_score_threshold
             det_model = DEFAULT_DETECTION_MODEL_NAME if DEFAULT_DETECTION_MODEL_NAME in choices else choices[0]
             det_threshold = recommended_score_threshold(det_model)
         self._widgets["detection_model"].set(det_model)

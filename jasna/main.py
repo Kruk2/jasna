@@ -26,10 +26,28 @@ from jasna.os_utils import (
 )
 from jasna.session_config import (
     DEFAULT_CODEC,
+    DEFAULT_DETECTION_MODEL_NAME,
+    DEFAULT_MAX_CLIP_SIZE,
+    DEFAULT_MAX_DETECTION_GAP,
+    DEFAULT_MIN_DETECTION_DURATION,
+    DEFAULT_TEMPORAL_OVERLAP,
     LTX_DEFAULT_MODEL,
     LTX_DEFAULT_OVERLAP,
     LTX_DEFAULT_SEED,
     LTX_OVERLAP_CHOICES,
+    RTX_DEFAULT_DEBLUR,
+    RTX_DEFAULT_DENOISE,
+    RTX_DEFAULT_QUALITY,
+    RTX_DEFAULT_SCALE,
+    SD15_DEFAULT_SEED,
+    SD15_DEFAULT_STEPS,
+    SD15_DEFAULT_STRENGTH,
+    SD15_DEFAULT_VARIANTS,
+    TVAI_DEFAULT_ARGS,
+    TVAI_DEFAULT_FFMPEG_PATH,
+    TVAI_DEFAULT_MODEL,
+    TVAI_DEFAULT_SCALE,
+    TVAI_DEFAULT_WORKERS,
     DecodeBackendName,
     LtxModelName,
     LtxVaeName,
@@ -280,13 +298,13 @@ def build_parser() -> argparse.ArgumentParser:
     restoration.add_argument(
         "--max-clip-size",
         type=int,
-        default=90,
+        default=DEFAULT_MAX_CLIP_SIZE,
         help=CLI_HELP["max_clip_size"],
     )
     restoration.add_argument(
         "--temporal-overlap",
         type=int,
-        default=8,
+        default=DEFAULT_TEMPORAL_OVERLAP,
         help=CLI_HELP["temporal_overlap"],
     )
     restoration.add_argument(
@@ -317,13 +335,13 @@ def build_parser() -> argparse.ArgumentParser:
     sd15.add_argument(
         "--sd15-steps",
         type=int,
-        default=25,
+        default=SD15_DEFAULT_STEPS,
         help="More steps = more detail, but slower (default: %(default)s)",
     )
     sd15.add_argument(
         "--sd15-strength",
         type=float,
-        default=0.6,
+        default=SD15_DEFAULT_STRENGTH,
         help="How much of the image is redrawn, up to 0.7. Higher = bigger changes (default: %(default)s)",
     )
     sd15.add_argument(
@@ -335,13 +353,13 @@ def build_parser() -> argparse.ArgumentParser:
     sd15.add_argument(
         "--sd15-seed",
         type=int,
-        default=0,
+        default=SD15_DEFAULT_SEED,
         help="Starting number for the random result. Same seed = same result (default: %(default)s)",
     )
     sd15.add_argument(
         "--sd15-variants",
         type=int,
-        default=1,
+        default=SD15_DEFAULT_VARIANTS,
         help="Save N versions (name_v1 … name_vN), each with the next seed, so you can pick the best (default: %(default)s)",
     )
 
@@ -366,28 +384,28 @@ def build_parser() -> argparse.ArgumentParser:
     rtx.add_argument(
         "--rtx-scale",
         type=int,
-        default=4,
+        default=RTX_DEFAULT_SCALE,
         choices=[2, 4],
         help="RTX Super Res upscale factor for BasicVSR++; LTX always upscales 2x (default: %(default)s)",
     )
     rtx.add_argument(
         "--rtx-quality",
         type=str,
-        default="high",
+        default=RTX_DEFAULT_QUALITY,
         choices=["low", "medium", "high", "ultra"],
         help="RTX Super Res upscale quality (default: %(default)s)",
     )
     rtx.add_argument(
         "--rtx-denoise",
         type=str,
-        default="medium",
+        default=RTX_DEFAULT_DENOISE,
         choices=["none", "low", "medium", "high", "ultra"],
         help="RTX Super Res denoise level, none to disable (default: %(default)s)",
     )
     rtx.add_argument(
         "--rtx-deblur",
         type=str,
-        default="none",
+        default=RTX_DEFAULT_DEBLUR,
         choices=["none", "low", "medium", "high", "ultra"],
         help="RTX Super Res deblur level, none to disable (default: %(default)s)",
     )
@@ -396,32 +414,32 @@ def build_parser() -> argparse.ArgumentParser:
     tvai.add_argument(
         "--tvai-ffmpeg-path",
         type=str,
-        default="C:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
+        default=TVAI_DEFAULT_FFMPEG_PATH,
         help=CLI_HELP["tvai_ffmpeg_path"],
     )
     tvai.add_argument(
         "--tvai-model",
         type=str,
-        default="iris-2",
+        default=TVAI_DEFAULT_MODEL,
         help=CLI_HELP["tvai_model"],
     )
     tvai.add_argument(
         "--tvai-scale",
         type=int,
-        default=4,
+        default=TVAI_DEFAULT_SCALE,
         choices=[1, 2, 4],
         help=CLI_HELP["tvai_scale"],
     )
     tvai.add_argument(
         "--tvai-args",
         type=str,
-        default="preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1",
+        default=TVAI_DEFAULT_ARGS,
         help='Extra options for the Topaz model, for advanced users (default: %(default)s)',
     )
     tvai.add_argument(
         "--tvai-workers",
         type=int,
-        default=2,
+        default=TVAI_DEFAULT_WORKERS,
         help=CLI_HELP["tvai_workers"],
     )
     tvai.add_argument(
@@ -435,7 +453,7 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--detection-model",
         type=str,
-        default="rfdetr-v6",
+        default=DEFAULT_DETECTION_MODEL_NAME,
         help=(
             "Detection model name. Installed models are discovered from model_weights/; "
             "rfdetr-v6 (fast) and rfdetr-vr-v1 (VR180) are bundled with Jasna, "
@@ -458,13 +476,13 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--max-detection-gap",
         type=int,
-        default=2,
+        default=DEFAULT_MAX_DETECTION_GAP,
         help=CLI_HELP["max_detection_gap"],
     )
     detection.add_argument(
         "--min-detection-duration",
         type=int,
-        default=2,
+        default=DEFAULT_MIN_DETECTION_DURATION,
         help=CLI_HELP["min_detection_duration"],
     )
     detection.add_argument(

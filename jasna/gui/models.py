@@ -10,7 +10,31 @@ from pathlib import Path
 
 from jasna.user_settings import read_settings, update_settings
 from jasna.segments import SegmentRange
-from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_OVERLAP, LTX_DEFAULT_SEED
+from jasna.session_config import (
+    DEFAULT_CODEC,
+    DEFAULT_DETECTION_MODEL_NAME,
+    DEFAULT_MAX_CLIP_SIZE,
+    DEFAULT_MAX_DETECTION_GAP,
+    DEFAULT_MIN_DETECTION_DURATION,
+    DEFAULT_TEMPORAL_OVERLAP,
+    LTX_AUTO_DEFAULT_PERCENT,
+    LTX_DEFAULT_MODEL,
+    LTX_DEFAULT_OVERLAP,
+    LTX_DEFAULT_SEED,
+    RTX_DEFAULT_DEBLUR,
+    RTX_DEFAULT_DENOISE,
+    RTX_DEFAULT_QUALITY,
+    RTX_DEFAULT_SCALE,
+    SD15_DEFAULT_SEED,
+    SD15_DEFAULT_STEPS,
+    SD15_DEFAULT_STRENGTH,
+    SD15_DEFAULT_VARIANTS,
+    TVAI_DEFAULT_ARGS,
+    TVAI_DEFAULT_FFMPEG_PATH,
+    TVAI_DEFAULT_MODEL,
+    TVAI_DEFAULT_SCALE,
+    TVAI_DEFAULT_WORKERS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,8 +144,8 @@ class AppSettings:
 
     # Basic processing
     batch_size: int = 4
-    max_clip_size: int = 90
-    temporal_overlap: int = 8
+    max_clip_size: int = DEFAULT_MAX_CLIP_SIZE
+    temporal_overlap: int = DEFAULT_TEMPORAL_OVERLAP
     vr_mode: str = "auto"
     vr_projection: str = "auto"
     fp16_mode: bool = True
@@ -132,34 +156,34 @@ class AppSettings:
     
     # Secondary restoration
     secondary_restoration: str = "none"  # none, unet-4x, tvai, rtx-super-res
-    tvai_ffmpeg_path: str = r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe"
-    tvai_model: str = "iris-2"
-    tvai_scale: int = 4
-    tvai_workers: int = 2
-    tvai_args: str = "preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1"
+    tvai_ffmpeg_path: str = TVAI_DEFAULT_FFMPEG_PATH
+    tvai_model: str = TVAI_DEFAULT_MODEL
+    tvai_scale: int = TVAI_DEFAULT_SCALE
+    tvai_workers: int = TVAI_DEFAULT_WORKERS
+    tvai_args: str = TVAI_DEFAULT_ARGS
     tvai_denoise: bool = False
-    rtx_scale: int = 4  # 2, 4
-    rtx_quality: str = "high"  # low, medium, high, ultra
-    rtx_denoise: str = "medium"  # none, low, medium, high, ultra
-    rtx_deblur: str = "none"  # none, low, medium, high, ultra
+    rtx_scale: int = RTX_DEFAULT_SCALE  # 2, 4
+    rtx_quality: str = RTX_DEFAULT_QUALITY  # low, medium, high, ultra
+    rtx_denoise: str = RTX_DEFAULT_DENOISE  # none, low, medium, high, ultra
+    rtx_deblur: str = RTX_DEFAULT_DEBLUR  # none, low, medium, high, ultra
     
     # Detection
-    detection_model: str = "rfdetr-v6"  # RF-DETR, Lada YOLO, or ZeLeFans VR YOLO registry name
+    detection_model: str = DEFAULT_DETECTION_MODEL_NAME  # RF-DETR, Lada YOLO, or ZeLeFans VR YOLO registry name
     detection_score_threshold: float = 0.35
-    max_detection_gap: int = 2
-    min_detection_duration: int = 2
+    max_detection_gap: int = DEFAULT_MAX_DETECTION_GAP
+    min_detection_duration: int = DEFAULT_MIN_DETECTION_DURATION
     scene_detection: bool = True
     compile_basicvsrpp: bool = True
     
     # Image restoration (SD 1.5 inpaint; used only for still-image inputs)
-    image_restore_steps: int = 25
-    image_restore_strength: float = 0.6
+    image_restore_steps: int = SD15_DEFAULT_STEPS
+    image_restore_strength: float = SD15_DEFAULT_STRENGTH
     image_restore_freeu: bool = True
-    image_restore_seed: int = 0
-    image_restore_variants: int = 1
+    image_restore_seed: int = SD15_DEFAULT_SEED
+    image_restore_variants: int = SD15_DEFAULT_VARIANTS
 
     # Encoding
-    codec: str = "hevc"
+    codec: str = DEFAULT_CODEC
     encoder_cq: int | None = None
     encoder_custom_args: str = ""
     sharpen_strength: float = 0.0
@@ -198,8 +222,8 @@ _LEGACY_CODEC_SPELLINGS = {
 def _normalize_preset_codec(value: object) -> str:
     canonical = _LEGACY_CODEC_SPELLINGS.get(str(value).strip().lower())
     if canonical is None:
-        logger.warning("Unknown codec %r in preset; falling back to hevc", value)
-        return "hevc"
+        logger.warning("Unknown codec %r in preset; falling back to %s", value, DEFAULT_CODEC)
+        return DEFAULT_CODEC
     return canonical
 
 

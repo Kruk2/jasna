@@ -215,7 +215,7 @@ def test_native_icon_button_scales_at_hidpi(hidpi, tk_root) -> None:
 
 @pytest.mark.parametrize("hidpi", [1.25, 1.5], indirect=True)
 def test_slider_value_label_font_scales_at_hidpi(hidpi, tk_root) -> None:
-    label = create_slider_value_label(tk_root, "90", Colors.BG_PANEL)
+    label = create_slider_value_label(tk_root, Colors.BG_PANEL)
 
     expected_size = round(Fonts.SIZE_NORMAL * hidpi)
     assert tk_root.tk.splitlist(label.cget("font")) == (Fonts.FAMILY, f"-{expected_size}")

@@ -8,11 +8,8 @@ import torch
 from jasna.benchmark.harness import run_repeatedly
 from jasna.media.probe import get_video_meta_data
 from jasna.media.video_decoder import VideoReader
-from jasna.mosaic.detection_registry import (
-    DEFAULT_DETECTION_MODEL_NAME,
-    detection_model_weights_path,
-    recommended_score_threshold,
-)
+from jasna.mosaic.detection_registry import detection_model_weights_path, recommended_score_threshold
+from jasna.session_config import DEFAULT_DETECTION_MODEL_NAME
 from jasna.session_factory import build_compiled_detection_model
 
 LADA_YOLO_FAST_MODEL = "lada-yolo-v4"

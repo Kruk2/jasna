@@ -18,6 +18,7 @@ from jasna.gui.settings_sections.widgets import (
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.media.encoder_settings import encoder_cq_spec, resolve_cq
+from jasna.session_config import DEFAULT_CODEC
 
 # Display labels contain punctuation ("H.264 (AVC)"), so canonical values come
 # from these maps, never from .lower() on the label.
@@ -57,7 +58,6 @@ class EncodingSection:
             width=140,
         )
         self._widgets["file_conflict"].pack(side="right")
-        self._widgets["file_conflict"].set_value("auto_rename")
 
         # Codec
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
@@ -73,8 +73,7 @@ class EncodingSection:
             text_color=Colors.TEXT_PRIMARY, width=120,
         )
         self._widgets["codec"].pack(side="right")
-        self._widgets["codec"].set_value("hevc")
-        self._active_codec = "hevc"
+        self._active_codec = DEFAULT_CODEC
         self._cq_vendor = vendor_for_device()
         self._cq_values = {
             codec: encoder_cq_spec(codec, self._cq_vendor).default
@@ -87,11 +86,8 @@ class EncodingSection:
 
         add_setting_label(row2, "quality_cq", "encoder_cq")
 
-        initial_cq = self._cq_values[self._active_codec]
         initial_spec = encoder_cq_spec(self._active_codec, self._cq_vendor)
-        self._widgets["encoder_cq_val"] = create_slider_value_label(
-            row2, str(initial_cq), Colors.BG_PANEL
-        )
+        self._widgets["encoder_cq_val"] = create_slider_value_label(row2, Colors.BG_PANEL)
         self._widgets["encoder_cq_val"].pack(side="right")
         self._widgets["encoder_cq"] = ctk.CTkSlider(
             row2,
@@ -103,16 +99,13 @@ class EncodingSection:
             command=self._on_cq_changed,
         )
         self._widgets["encoder_cq"].pack(side="right", padx=(0, 8))
-        self._widgets["encoder_cq"].set(initial_cq)
 
         # Sharpening
         sharpen_row = ctk.CTkFrame(inner, fg_color="transparent")
 
         add_setting_label(sharpen_row, "sharpen_strength")
 
-        self._widgets["sharpen_strength_val"] = create_slider_value_label(
-            sharpen_row, "0.00", Colors.BG_PANEL
-        )
+        self._widgets["sharpen_strength_val"] = create_slider_value_label(sharpen_row, Colors.BG_PANEL)
         self._widgets["sharpen_strength_val"].pack(side="right")
         self._widgets["sharpen_strength"] = ctk.CTkSlider(
             sharpen_row, from_=0.0, to=1.0, number_of_steps=20,
@@ -121,7 +114,6 @@ class EncodingSection:
             command=lambda v: self._widgets["sharpen_strength_val"].configure(text=f"{v:.2f}")
         )
         self._widgets["sharpen_strength"].pack(side="right", padx=(0, 8))
-        self._widgets["sharpen_strength"].set(0.0)
 
         # Optional exact 60/59.94 -> 30/29.97 frame-rate retargeting.
         retarget_row = ctk.CTkFrame(inner, fg_color="transparent")

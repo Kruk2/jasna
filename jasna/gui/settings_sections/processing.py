@@ -43,7 +43,7 @@ class ProcessingSection:
 
         overlap_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(overlap_row, "temporal_overlap")
-        self._widgets["temporal_overlap_val"] = create_slider_value_label(overlap_row, "8", Colors.BG_PANEL)
+        self._widgets["temporal_overlap_val"] = create_slider_value_label(overlap_row, Colors.BG_PANEL)
         self._widgets["temporal_overlap_val"].pack(side="right")
         self._widgets["temporal_overlap"] = ctk.CTkSlider(
             overlap_row, from_=0, to=30, number_of_steps=30,
@@ -51,7 +51,6 @@ class ProcessingSection:
             width=SLIDER_WIDTH, command=self._on_temporal_overlap_slider,
         )
         self._widgets["temporal_overlap"].pack(side="right", padx=(0, 8))
-        self._widgets["temporal_overlap"].set(8)
 
         denoise_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(denoise_row, "denoise_strength")
@@ -70,11 +69,10 @@ class ProcessingSection:
             width=120,
         )
         self._widgets["denoise_strength"].pack(side="right")
-        self._widgets["denoise_strength"].set_value("none")
 
         clip_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(clip_row, "max_clip_size")
-        self._widgets["max_clip_size_val"] = create_slider_value_label(clip_row, "90", Colors.BG_PANEL)
+        self._widgets["max_clip_size_val"] = create_slider_value_label(clip_row, Colors.BG_PANEL)
         self._widgets["max_clip_size_val"].pack(side="right")
         self._widgets["max_clip_size"] = ctk.CTkSlider(
             clip_row,
@@ -86,7 +84,6 @@ class ProcessingSection:
             button_color=Colors.PRIMARY, width=SLIDER_WIDTH,
         )
         self._widgets["max_clip_size"].pack(side="right", padx=(0, 8))
-        self._widgets["max_clip_size"].set(90)
 
         decode_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(decode_row, "decode_backend")
@@ -101,7 +98,6 @@ class ProcessingSection:
             width=140,
         )
         self._widgets["decode_backend"].pack(side="right")
-        self._widgets["decode_backend"].set_value("auto")
 
         self._toggles_row = ctk.CTkFrame(inner, fg_color="transparent")
         fp16_frame = self._switch_card(self._toggles_row, "fp16_mode")
@@ -125,7 +121,6 @@ class ProcessingSection:
         add_setting_label(card, key, in_card=True)
         self._widgets[key] = CompactSwitch(card, self._on_modified, Colors.BG_CARD)
         self._widgets[key].pack(side="right", padx=12, pady=8)
-        self._widgets[key].select()
         return card
 
     def _set_decode_backend(self, backend: str) -> None:
