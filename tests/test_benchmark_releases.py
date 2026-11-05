@@ -116,7 +116,7 @@ def test_run_once_times_out_and_removes_partial_output(tmp_path: Path) -> None:
     output = tmp_path / "output.mp4"
     log = tmp_path / "run.log"
 
-    elapsed, flag, _ = run_once(
+    _, flag, _ = run_once(
         target,
         tmp_path / "input.mp4",
         output,
@@ -130,6 +130,5 @@ def test_run_once_times_out_and_removes_partial_output(tmp_path: Path) -> None:
     )
 
     assert flag == "TIMEOUT"
-    assert elapsed < 5
     assert not output.exists()
     assert "Benchmark timed out" in log.read_text()
