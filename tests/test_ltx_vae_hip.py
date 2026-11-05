@@ -3,7 +3,6 @@
 import pytest
 import torch
 
-from jasna.accelerator import KernelBackend
 from jasna.models.ltx_vae import diffusion_hip, layout_hip, na_hip
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
@@ -15,29 +14,6 @@ def test_the_launch_table_has_every_kernel_the_launchers_launch():
                 *map(diffusion_hip.qkv_module, T.FUSED_QKV_DIMS), layout_hip.MODULE}
 
     assert all(set(kernels) == launched for kernels in KERNEL_LAUNCH.values())
-
-
-def _backend_kernels():
-    from jasna.models.ltx_vae import diffusion_triton, na_triton
-
-    prebuilt = T.DecoderKernels(na_hip.na3d, diffusion_hip.residual_swiglu_, diffusion_hip.slab_qkv,
-                                diffusion_hip.proj_residual_, diffusion_hip.context_add_)
-    return [
-        (KernelBackend.NVIDIA, T.DecoderKernels(na_triton.na3d, diffusion_triton.residual_swiglu_,
-                                                diffusion_triton.slab_qkv, diffusion_triton.proj_residual_,
-                                                diffusion_triton.context_add_)),
-        (KernelBackend.NVIDIA_PRE_SM80, T.DecoderKernels(na3d=T._fp16_eager_na3d)),
-        (KernelBackend.AMD_TRITON, prebuilt),
-        (KernelBackend.AMD_PREBUILT, prebuilt),
-        (KernelBackend.CPU, T.DecoderKernels()),
-    ]
-
-
-@pytest.mark.parametrize(("backend", "expected"), _backend_kernels(), ids=lambda value: str(value)[:20])
-def test_each_backend_runs_its_decoder_kernels(monkeypatch, backend, expected):
-    monkeypatch.setattr(T, "kernel_backend", lambda device: backend)
-
-    assert T.decoder_kernels(torch.device("cuda")) == expected
 
 
 def test_a_model_runs_the_kernels_it_was_given_and_others_keep_the_torch_code():

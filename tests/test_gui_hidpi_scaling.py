@@ -127,7 +127,7 @@ def test_activate_static_dpi_windows_path(monkeypatch) -> None:
     try:
         scaling.activate_static_dpi((900, 580))
 
-        expected = scaling._static_scaling(2.5, (2560, 1440), (900, 580), scaling.SCREEN_MARGIN)
+        expected = pytest.approx(1440 / (580 + 80))  # the screen height caps the 2.5x DPI
         assert ctk.ScalingTracker.deactivate_automatic_dpi_awareness
         assert ctk.ScalingTracker.widget_scaling == expected
         assert ctk.ScalingTracker.window_scaling == expected

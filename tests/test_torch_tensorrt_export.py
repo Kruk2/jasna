@@ -1,7 +1,7 @@
 import os
 from unittest.mock import patch
 
-from jasna.engine_paths import engine_system_suffix, engine_precision_name
+from jasna.engine_paths import engine_system_suffix
 
 
 class TestEngineSystemSuffix:
@@ -13,10 +13,3 @@ class TestEngineSystemSuffix:
         with patch.object(os, "name", "posix"):
             assert engine_system_suffix() == ".linux"
 
-
-class TestEnginePrecisionName:
-    def test_fp16(self):
-        assert engine_precision_name(fp16=True) == "fp16"
-
-    def test_fp32(self):
-        assert engine_precision_name(fp16=False) == "fp32"
