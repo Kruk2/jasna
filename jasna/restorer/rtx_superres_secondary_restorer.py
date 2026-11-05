@@ -39,10 +39,6 @@ def _preload_tensorrt_runtime() -> None:
 _preload_tensorrt_runtime()
 
 RTX_SUPERRES_INPUT_SIZE = 256
-SCALE_CHOICES = [2, 4]
-QUALITY_CHOICES = ["low", "medium", "high", "ultra"]
-DENOISE_CHOICES = ["none", "low", "medium", "high", "ultra"]
-DEBLUR_CHOICES = ["none", "low", "medium", "high", "ultra"]
 
 
 def _resolve_quality(name: str):
