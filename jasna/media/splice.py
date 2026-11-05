@@ -272,6 +272,14 @@ H264_SMART_MAX_B_FRAMES = {
     AcceleratorVendor.AMD: 3,
 }
 
+
+def h264_b_frames_over_cap(codec: str, index: KeyframeIndex, vendor: AcceleratorVendor) -> bool:
+    """Whether the vendor's encoder cannot match the source's B-frames, so a range job
+    re-encodes the whole video instead of cutting its ranges out."""
+    cap = H264_SMART_MAX_B_FRAMES.get(vendor)
+    return canonical_codec(codec) == "h264" and cap is not None and index.max_b_frames > cap
+
+
 _H264_SETTINGS_BY_VENDOR = {
     AcceleratorVendor.NVIDIA: _nvenc_h264_settings,
     AcceleratorVendor.AMD: _amf_h264_settings,

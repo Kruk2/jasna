@@ -25,6 +25,7 @@ from jasna.media.splice import (
     SpliceSpan,
     concatenate_fragments,
     create_copy_fragment,
+    h264_b_frames_over_cap,
     mux_final_output,
     normalize_fragment,
     require_one_model,
@@ -542,11 +543,7 @@ class Pipeline:
         # Re-rendered segments must match the source's B-frames to stitch
         # against the stream-copied ones; past the encoder's cap, re-encode all.
         vendor = vendor_for_device(self.device)
-        if (
-            self.codec == "h264"
-            and vendor in H264_SMART_MAX_B_FRAMES
-            and index.max_b_frames > H264_SMART_MAX_B_FRAMES[vendor]
-        ):
+        if h264_b_frames_over_cap(self.codec, index, vendor):
             log.warning(
                 "%s uses %d consecutive B-frames; %s H.264 smart rendering supports "
                 "at most %d, falling back to a full re-encode",
