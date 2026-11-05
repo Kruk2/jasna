@@ -54,6 +54,13 @@ def _run_windows_tool(command: list[str]) -> str | None:
 @functools.cache
 def log_system_summary() -> None:
     """Log once per process the OS, CPU, RAM and, on Windows, every display adapter with its driver."""
+    try:
+        _log_system_summary()
+    except Exception as error:  # diagnostics only; must never stop processing
+        log.warning("Could not read the system summary: %s", error)
+
+
+def _log_system_summary() -> None:
     log.info(
         "System: Jasna %s, %s, %s (%s threads), %.0f GB RAM",
         __version__, platform.platform(), _cpu_name(), os.cpu_count(), psutil.virtual_memory().total / 2**30,
