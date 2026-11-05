@@ -40,8 +40,9 @@ are recorded in `RELEASE_SOURCES.md` and the two third-party notice files.
 
 Official release packages may include a separately maintained,
 source-unavailable protection component. It performs local supporter-key
-validation and in-memory decryption for supporter-only models. It contains no
-telemetry, persistence, or network communication.
+validation and in-memory decryption for supporter-only models. It sends no
+telemetry. It contacts the activation server only to activate or check a
+supporter license, and saves only the license state that offline use needs.
 
 The protection component is compiled into the official executable. There is
 no supported way to remove it from a prebuilt package. In the free CLI path,
