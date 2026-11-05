@@ -7,7 +7,7 @@ segment-editor restoration preview, plus the still-image session.
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Mapping
+from typing import TYPE_CHECKING, Callable, Hashable, Mapping
 
 from jasna.gui.models import AppSettings
 from jasna.session_config import SessionConfig, ltx_unsupported_options
@@ -181,3 +181,44 @@ def release_session_memory(device: "torch.device") -> None:
         synchronize(device)
         empty_cache(device)
         ipc_collect(device)
+
+
+class SessionCache:
+    """One thread's video session, rebuilt when ``key(settings)`` changes.
+
+    Not thread-safe: each worker owns its cache and calls it from its own thread.
+    ``on_close`` drops what still holds the old session (a pipeline, an LTX runtime)
+    before it is closed and its GPU memory released.
+    """
+
+    def __init__(
+        self,
+        *,
+        key: Callable[[AppSettings], Hashable] = video_session_key,
+        on_close: Callable[[], None] | None = None,
+    ) -> None:
+        self._key_of = key
+        self._on_close = on_close
+        self._key: Hashable = None
+        self.session: RestorationSession | None = None
+
+    def get(self, settings: AppSettings, build: Callable[[], RestorationSession]) -> RestorationSession:
+        key = self._key_of(settings)
+        if self.session is None or key != self._key:
+            self.close()
+            self.session = build()
+            self._key = key
+        return self.session
+
+    def close(self) -> None:
+        session = self.session
+        if session is None:
+            return
+        if self._on_close is not None:
+            self._on_close()
+        self.session = None
+        self._key = None
+        try:
+            session.close()
+        finally:
+            release_session_memory(session.device)

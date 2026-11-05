@@ -9,6 +9,7 @@ import pytest
 
 from jasna.gui.models import AppSettings
 from jasna.gui.video_session import (
+    SessionCache,
     build_video_session,
     video_session_config,
     video_session_key,
@@ -184,3 +185,75 @@ def test_video_session_config_and_key_follow_the_ltx_model() -> None:
     assert video_session_key(undistilled) != video_session_key(replace(undistilled, ltx_model="distilled"))
     standard = replace(AppSettings(), ltx_model="undistilled")
     assert video_session_key(standard) != video_session_key(AppSettings())
+
+
+class _FakeSession:
+    def __init__(self, name: str) -> None:
+        self.device = name
+        self.closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+@pytest.fixture
+def released(monkeypatch) -> list:
+    devices: list = []
+    monkeypatch.setattr("jasna.gui.video_session.release_session_memory", devices.append)
+    return devices
+
+
+def test_session_cache_reuses_the_session_for_the_same_key(released) -> None:
+    built: list[_FakeSession] = []
+
+    def build() -> _FakeSession:
+        built.append(_FakeSession(f"s{len(built)}"))
+        return built[-1]
+
+    cache = SessionCache()
+    first = cache.get(AppSettings(), build)
+
+    assert cache.get(replace(AppSettings(), encoder_cq=30), build) is first
+    assert len(built) == 1 and first.closed == 0 and released == []
+
+
+def test_session_cache_frees_the_old_session_before_building_for_a_new_key(released) -> None:
+    old = _FakeSession("old")
+    new = _FakeSession("new")
+    dropped: list[int] = []
+    cache = SessionCache(on_close=lambda: dropped.append(old.closed))
+    cache.get(AppSettings(), lambda: old)
+
+    def build_new() -> _FakeSession:
+        assert (old.closed, released) == (1, ["old"])
+        return new
+
+    assert cache.get(replace(AppSettings(), max_clip_size=60), build_new) is new
+    assert dropped == [0]  # dependents dropped before the old session closed
+    assert new.closed == 0 and released == ["old"]
+
+
+def test_session_cache_close_releases_once_and_empty_close_is_a_noop(released) -> None:
+    session = _FakeSession("s")
+    dropped: list[None] = []
+    cache = SessionCache(on_close=lambda: dropped.append(None))
+
+    cache.close()
+    cache.get(AppSettings(), lambda: session)
+    cache.close()
+    cache.close()
+
+    assert (session.closed, released, len(dropped)) == (1, ["s"], 1)
+    assert cache.session is None
+
+
+def test_session_cache_releases_memory_when_close_fails(released) -> None:
+    session = _FakeSession("s")
+    session.close = MagicMock(side_effect=RuntimeError("close failed"))
+    cache = SessionCache()
+    cache.get(AppSettings(), lambda: session)
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        cache.close()
+
+    assert released == ["s"] and cache.session is None
