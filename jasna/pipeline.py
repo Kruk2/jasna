@@ -471,7 +471,7 @@ class Pipeline:
             torch.cuda.get_device_name(self.device),
             self.ltx_files.transformer_name,
             frames=frames,
-            fps=metadata.video_fps,
+            fps=metadata.mean_fps,
             megapixels=metadata.video_height * metadata.video_width / 1e6,
             window_hop=self.ltx_window_hop,
         )
@@ -645,7 +645,7 @@ class Pipeline:
                         seek_ts=index.seconds_for_pts(span.start_pts),
                         end_pts=span.end_pts,
                         effect_ranges=span.effect_ranges,
-                        output_frame_count=max(1, round(_span_seconds(span, index) * metadata.video_fps)),
+                        output_frame_count=max(1, _span_frames(span, index, metadata)),
                     )
                     if not self._cancel_event.is_set():
                         fragments.commit(span_index)

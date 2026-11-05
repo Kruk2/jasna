@@ -206,6 +206,23 @@ def test_mixed_job_reports_time_left_from_the_ltx_estimate_until_ltx_reports_its
     assert pipeline.progress_callback.call_args.args[2] == pytest.approx(120.0)
 
 
+def test_ltx_estimate_on_variable_frame_rate_video_uses_the_mean_frame_rate(tmp_path) -> None:
+    pipeline = _smart_pipeline(
+        tmp_path, (SegmentRange(2.5, 3.0), SegmentRange(6.5, 7.0, LTX)), FOUR_SPANS, progress_callback=MagicMock()
+    )
+    vfr = video_metadata(fps=120, average_fps=30.0, num_frames=240, profile="Main")
+
+    with (
+        patch("jasna.ltx.speed.segment_estimate_seconds", return_value=900.0) as estimate,
+        patch("torch.cuda.get_device_name", return_value="Test GPU"),
+        _smart_run() as mocks,
+    ):
+        pipeline._run_smart(vfr)
+
+    assert (estimate.call_args.kwargs["frames"], estimate.call_args.kwargs["fps"]) == (60, 30.0)
+    assert mocks["run_pass"].call_args.kwargs["output_frame_count"] == 60
+
+
 def test_segments_on_the_job_model_follow_an_ltx_job(tmp_path) -> None:
     pipeline = _smart_pipeline(tmp_path, (SegmentRange(2.5, 3.0),), ONE_RENDER, restoration_model_name="ltx")
 
