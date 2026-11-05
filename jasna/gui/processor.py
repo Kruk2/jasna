@@ -13,7 +13,7 @@ from jasna.job_resume import ResumeMismatchError, resume_directories, run_with_r
 from jasna.license_api import LicenseCheckStopped
 from jasna.gui.locales import t
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus, AppSettings
-from jasna.gui.video_session import build_image_session, build_video_session, release_session_memory, video_session_config
+from jasna.gui.video_session import SessionCache, build_image_session, build_video_session, video_session_config
 from jasna.media.probe import UnsupportedVideoError
 from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
@@ -135,7 +135,8 @@ class Processor:
         # Heavy models are loaded once and reused across consecutive jobs of the
         # same type; the other session is unloaded when the type switches.
         self._img_session: tuple | None = None      # (detector, restorer, device)
-        self._video_session: RestorationSession | None = None
+        # Settings are fixed per run; per-job detector overrides swap inside the session.
+        self._video_sessions = SessionCache(key=lambda _settings: None)
         self._current_pipeline = None
         
     def start(
@@ -394,16 +395,16 @@ class Processor:
         else:
             self._run_video_job(job_id, input_path, output_path, segments=segments, settings=settings)
 
-    def _ensure_video_session(self, settings: AppSettings):
+    def _ensure_video_session(self, settings: AppSettings) -> RestorationSession:
         """Compile engines + build the BasicVSR++ (and optional secondary) restorer
         once; reused across consecutive video jobs."""
-        if self._video_session is not None:
-            return
-        self._video_session = build_video_session(
-            settings,
-            log=lambda msg: self._log("INFO", msg),
-        )
-        self._log("INFO", "Restoration models loaded (reused across video jobs)")
+
+        def build() -> RestorationSession:
+            session = build_video_session(settings, log=lambda msg: self._log("INFO", msg))
+            self._log("INFO", "Restoration models loaded (reused across video jobs)")
+            return session
+
+        return self._video_sessions.get(settings, build)
 
     def _run_video_job(self, job_id, input_path, output_path, *, segments, settings):
         run_with_resume_prompt(
@@ -439,8 +440,7 @@ class Processor:
             plan_segment_job(config, input_path, splice_source(config, input_path, output_path), segments)
             if segments else None
         )
-        self._ensure_video_session(settings)
-        s = self._video_session
+        s = self._ensure_video_session(settings)
         self._prepare_job_detector(config, s)
         if self._stop_event.is_set():
             raise ProcessingStopped("Processing stopped")
@@ -505,12 +505,9 @@ class Processor:
         )
 
     def _close_video_session(self):
-        if self._video_session is None:
+        if self._video_sessions.session is None:
             return
-        s = self._video_session
-        self._video_session = None
-        s.close()
-        release_session_memory(s.device)
+        self._video_sessions.close()
         self._log("INFO", "Restoration models unloaded")
 
     def _ensure_image_session(self):
