@@ -1004,6 +1004,13 @@ def right_eye_twins(
         for t, i in matched:
             used[t].add(i)
         twins.append(replace(plan, track_id=track_id, polygons=tuple(polygons), windows=tuple(windows)))
+    # A right-eye detection merging two twins' mosaics is covered by their outlines together.
+    for t, regions in enumerate(right_regions):
+        outlines = [
+            polygon for twin in twins if twin.start <= t < twin.stop and twin.presence[t - twin.start] > 0
+            for polygon in twin.polygons[t - twin.start]
+        ]
+        used[t].update(i for i, r in enumerate(regions) if i not in used[t] and outlines and _outline_covers(outlines, r.polygon))
     unpaired = [[r for i, r in enumerate(regions) if i not in used[t]] for t, regions in enumerate(right_regions)]
     return twins, unpaired
 

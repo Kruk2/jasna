@@ -550,6 +550,21 @@ def test_stereo_twin_paints_the_right_eye_mosaic_its_shift_misses():
     assert all(not (_mask((wider.polygon,)) & ~_mask(frame)).any() for frame in twin.polygons)
 
 
+def test_stereo_right_eye_detection_merging_two_twins_gets_no_track():
+    eye = 1000
+    stereo = StereoLayout("sbs", 2 * eye, eye)
+    regions = [
+        [_eye_square(stereo, 0, 200, 400, 150), _eye_square(stereo, 0, 400, 400, 150)]
+        + ([_rectangle(eye + 160, 400, eye + 510, 550)] if 100 <= t < 160 else [_eye_square(stereo, 1, 160, 400, 150), _eye_square(stereo, 1, 360, 400, 150)])
+        for t in range(250)
+    ]
+    plans = plan_video(
+        regions, set(), frame_w=stereo.frame_w, frame_h=stereo.frame_h, stereo=stereo, large_canvas=False,
+        window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0,
+    )
+    assert len(plans) == 4
+
+
 @pytest.mark.parametrize("kind", ["sbs", "tb"])
 def test_stereo_right_eye_restores_each_left_track_as_a_twin_with_its_noise(kind):
     eye, disparity = 1000, -40
