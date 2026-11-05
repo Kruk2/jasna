@@ -538,6 +538,18 @@ def test_stereo_right_eye_mosaic_in_a_twins_notch_keeps_its_own_track():
     assert len(plans) == 3
 
 
+def test_stereo_twin_paints_the_right_eye_mosaic_its_shift_misses():
+    eye = 1000
+    stereo = StereoLayout("sbs", 2 * eye, eye)
+    wider = _rectangle(eye + 260, 400, eye + 440, 550)  # the right eye sees the mosaic wider than a shift of the left
+    regions = [[_eye_square(stereo, 0, 300, 400, 150), wider] for _ in range(250)]
+    left, twin = plan_video(
+        regions, set(), frame_w=stereo.frame_w, frame_h=stereo.frame_h, stereo=stereo, large_canvas=False,
+        window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0,
+    )
+    assert all(not (_mask((wider.polygon,)) & ~_mask(frame)).any() for frame in twin.polygons)
+
+
 @pytest.mark.parametrize("kind", ["sbs", "tb"])
 def test_stereo_right_eye_restores_each_left_track_as_a_twin_with_its_noise(kind):
     eye, disparity = 1000, -40
