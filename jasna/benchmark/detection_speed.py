@@ -26,6 +26,7 @@ def _run_single(
     fp16: bool,
     video_path: Path,
     score_threshold: float,
+    decode_backend: str = "auto",
 ) -> tuple[float, dict]:
     path = video_path.resolve()
     if not path.exists():
@@ -56,6 +57,7 @@ def _run_single(
             batch_size=batch_size,
             device=device,
             metadata=metadata,
+            decode_backend=decode_backend,
         ) as reader,
         torch.inference_mode(),
     ):
@@ -93,6 +95,7 @@ def _benchmark_detection_speed(
     fp16: bool,
     benchmark_videos: list[Path],
     detection_score_threshold: float | None,
+    decode_backend: str = "auto",
     **_: object,
 ) -> dict[str, tuple[float, float]]:
     results: dict[str, tuple[float, float]] = {}
@@ -113,6 +116,7 @@ def _benchmark_detection_speed(
                 fp16=fp16,
                 video_path=vp,
                 score_threshold=score_threshold,
+                decode_backend=decode_backend,
             ),
             runs=3,
         )
