@@ -29,7 +29,6 @@ $env:TEMP = 'Z:\Temp'
 .\jasna.exe --version
 ```
 
-Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 `--working-directory` 单独设置区间和 LTX 临时文件的文件夹。
 
 ## 通用
@@ -152,7 +151,7 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 | GPU | H.264 默认值 | HEVC 默认值 | AV1 默认值 | 允许范围 |
 | --- | ---: | ---: | ---: | --- |
 | NVIDIA | 25 | 28 | 35 | H.264/HEVC 为 1–51；AV1 为 1–63 |
-| AMD | 24 | 25 | 32 | H.264/HEVC 为 0–51；AV1 为 1–51 |
+| AMD | 24 | 25 | 16 | H.264/HEVC 为 0–51；AV1 为 1–51 |
 
 在 NVIDIA 上，CQ 0 表示“自动”，所以 Jasna 需要 1 或更大的值。GUI 会为每个
 编解码器分别保存 CQ 值。

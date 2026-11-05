@@ -32,7 +32,6 @@ $env:TEMP = 'Z:\Temp'
 .\jasna.exe --version
 ```
 
-Jasna uses `TMP` first, then `TEMP`. `TMPDIR` is not used.
 `--working-directory` sets the folder for range and LTX files separately.
 
 ## General
@@ -156,7 +155,7 @@ it by 5). When you change the codec, the number is not converted.
 | GPU | H.264 default | HEVC default | AV1 default | Accepted range |
 | --- | ---: | ---: | ---: | --- |
 | NVIDIA | 25 | 28 | 35 | 1–51 for H.264/HEVC; 1–63 for AV1 |
-| AMD | 24 | 25 | 32 | H.264/HEVC: 0–51; AV1: 1–51 |
+| AMD | 24 | 25 | 16 | H.264/HEVC: 0–51; AV1: 1–51 |
 
 On NVIDIA, CQ 0 means "automatic", so Jasna needs a value of 1 or more. The
 GUI keeps a separate CQ value for each codec.

@@ -247,7 +247,7 @@ change touches decode, encode or pixel formats; H.264 hides decode differences.
 
 ```bash
 scripts/run_benchmarks.sh benchmarks/scratch [--codecs] [--scan]       # ~8 min
-P=~/.virtualenvs/jasna-linux/bin/python
+P=python   # the venv Python with jasna installed
 $P scripts/benchmark_decode_backends.py --backends vali pyav-hw pyav-sw   # e2e per decoder
 $P scripts/benchmark_scan_backends.py --backends vali                     # GUI mosaic scan
 $P scripts/benchmark_releases.py --release v0.9.0=/path/to/jasna --source HEAD=. --workdir WORKDIR/releases --csv out.csv
