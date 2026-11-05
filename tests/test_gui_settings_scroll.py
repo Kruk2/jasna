@@ -61,7 +61,7 @@ def test_no_scrollbar_after_the_gpu_check_relays_out_a_tab_that_fits(opens_in_ad
 
     jasna_app.geometry("1500x800")
     jasna_app.update()
-    jasna_app._settings_panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=True)
+    jasna_app._settings_panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=True, frame_generation=True)
     jasna_app.update()
 
     assert not jasna_app._settings_panel._scroll._scrollbar.winfo_ismapped()

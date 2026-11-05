@@ -54,17 +54,18 @@ def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, vendor=Accelerator
 def test_warm_up_cuda_inits_context_when_gpu_supported(monkeypatch):
     calls, support = _warm_up_with_gpu_check(monkeypatch, (True, "RTX 4090"))
     assert calls["device"] == "cuda"
-    assert support == (AcceleratorVendor.NVIDIA, False)
+    assert support == (AcceleratorVendor.NVIDIA, False, False)
 
 
 @pytest.mark.parametrize(
     ("vendor", "major", "support"),
     [
-        (AcceleratorVendor.NVIDIA, 12, (AcceleratorVendor.NVIDIA, True)),
-        (AcceleratorVendor.AMD, 12, (AcceleratorVendor.AMD, False)),
+        (AcceleratorVendor.NVIDIA, 12, (AcceleratorVendor.NVIDIA, True, True)),
+        (AcceleratorVendor.NVIDIA, 9, (AcceleratorVendor.NVIDIA, False, True)),
+        (AcceleratorVendor.AMD, 12, (AcceleratorVendor.AMD, False, False)),
     ],
 )
-def test_warm_up_cuda_reports_ltx_gpu_support(monkeypatch, vendor, major, support):
+def test_warm_up_cuda_reports_gpu_support(monkeypatch, vendor, major, support):
     assert _warm_up_with_gpu_check(monkeypatch, (True, "GPU"), vendor=vendor, major=major)[1] == support
 
 
@@ -75,7 +76,7 @@ def test_warm_up_cuda_reports_ltx_gpu_support(monkeypatch, vendor, major, suppor
 def test_warm_up_cuda_launches_no_kernel_on_unsupported_gpu(monkeypatch, gpu_check_result):
     calls, support = _warm_up_with_gpu_check(monkeypatch, gpu_check_result)
     assert calls == {}
-    assert support == (AcceleratorVendor.CPU, False)
+    assert support == (AcceleratorVendor.CPU, False, False)
 
 
 def test_warm_up_launches_no_kernel_with_an_old_driver(monkeypatch):
@@ -83,7 +84,7 @@ def test_warm_up_launches_no_kernel_with_an_old_driver(monkeypatch):
         monkeypatch, (True, "AMD GPU"), vendor=AcceleratorVendor.AMD, driver_ok=False,
     )
     assert calls == {}
-    assert support == (AcceleratorVendor.CPU, False)
+    assert support == (AcceleratorVendor.CPU, False, False)
 
 
 def _logged_warnings(app) -> list[str]:

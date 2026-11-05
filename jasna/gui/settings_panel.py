@@ -313,13 +313,13 @@ class SettingsPanel(ctk.CTkFrame):
             self._show_toast,
             self._open_interactive_image_restore,
         )
-        encoding_section = EncodingSection(self._scroll, self._widgets, self._mark_modified)
+        self._encoding_section = EncodingSection(self._scroll, self._widgets, self._mark_modified)
         post_export_section = PostExportSection(self._scroll, self._widgets, self._mark_modified)
         self._tab_sections = {
             "model": [self._model_section, self._processing_section],
             "detection": [detection_section],
             "upscale": [self._secondary_section],
-            "output": [encoding_section, post_export_section],
+            "output": [self._encoding_section, post_export_section],
             "images": [image_section],
         }
         self._sections = [section for sections in self._tab_sections.values() for section in sections]
@@ -341,10 +341,11 @@ class SettingsPanel(ctk.CTkFrame):
         self._model_section.refresh()
         self._update_modified_indicator()
 
-    def set_gpu_support(self, *, vendor: AcceleratorVendor, blackwell: bool):
+    def set_gpu_support(self, *, vendor: AcceleratorVendor, blackwell: bool, frame_generation: bool):
         self._model_section.set_gpu_support(vendor=vendor, blackwell=blackwell)
         self._processing_section.set_gpu_support(vendor)
         self._secondary_section.set_gpu_support(vendor)
+        self._encoding_section.set_frame_generation_support(frame_generation)
         self._update_modified_indicator()
 
     def set_on_interactive_image_restore(self, callback: callable):

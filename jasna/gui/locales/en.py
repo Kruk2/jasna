@@ -409,6 +409,9 @@ EN = {
         "retarget_high_fps": "Reduce 60 FPS to 30 FPS",
         "tip_sharpen_strength": "Makes edges and fine detail look crisper as the video is written.\n0 turns it off. 0.2-0.5 is a gentle boost; 1.0 is the strongest and can look harsh.\nA sharper picture needs a bigger file, so lower the CQ value if the result looks worse.\nNot shown in the preview.\nWith Segment Editor ranges or LTX only for big mosaics, the parts in between are encoded again instead of copied, so this takes longer.",
         "tip_retarget_high_fps": "Turns 60 or 59.94 FPS video into 30 or 29.97 FPS by keeping every second frame. Other frame rates are unchanged; audio stays in sync.\nNot available with selected ranges.",
+        "frame_generation": "Frame Generation",
+        "frame_generation_off": "Off",
+        "tip_frame_generation": "2x doubles the frame rate for smoother motion: NVIDIA RTX Video Frame Generation adds a new frame between every two. Audio and length stay the same.\nNeeds an NVIDIA RTX 40-series or newer GPU.\nThe whole video is restored: not available with selected ranges, and LTX only for big mosaics is skipped.",
         "fmp4": "Playable While Processing (fMP4)",
         "tip_fmp4": "Play MP4 and MOV output while it is still being made, and keep it playable if a job is interrupted.\nThe video grows in steps of a few seconds, and players may show the wrong length until the job ends.\nNot used with selected ranges.",
         

@@ -124,7 +124,7 @@ def jasna_app(monkeypatch, tmp_path):
     from jasna.gui import app as app_module
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-    monkeypatch.setattr(app_module, "_warm_up_cuda", lambda: (AcceleratorVendor.NVIDIA, True))
+    monkeypatch.setattr(app_module, "_warm_up_cuda", lambda: (AcceleratorVendor.NVIDIA, True, True))
     monkeypatch.setattr(os_utils, "install_on_hard_disk", lambda: False)
     monkeypatch.setattr(os_utils, "windows_module_loaded", lambda _name: False)
     monkeypatch.setattr(engine_paths, "default_restoration_model_path", lambda name: tmp_path / "models" / name)
