@@ -285,6 +285,7 @@ def test_building_the_extension_restores_the_environment_it_builds_in(monkeypatc
     (False, True, logging.WARNING, "eager PyTorch (no bf16 torch.compile"),
 ])
 def test_native_block_off_names_the_path_that_runs_instead(monkeypatch, caplog, compiled, triton, level, path):
+    _cuda_capability(monkeypatch, (8, 9))
     monkeypatch.setenv("JASNA_LTX_NATIVE", "0")
     monkeypatch.setattr(native, "compiles", lambda device, dtype: compiled)
     monkeypatch.setattr(native, "has_triton", lambda: triton)
@@ -312,6 +313,7 @@ def test_packaged_amd_names_its_torch_path_without_importing_triton(monkeypatch,
 
 
 def _native_load_fails(monkeypatch, frozen: bool):
+    _cuda_capability(monkeypatch, (8, 9))
     monkeypatch.setattr(native, "unavailable_reason", lambda device, specs: None)
     monkeypatch.setattr(native, "compiles", lambda device, dtype: False)
     monkeypatch.setattr(native, "has_triton", lambda: False)
@@ -339,6 +341,7 @@ def test_a_release_whose_shipped_native_block_fails_to_load_is_broken(monkeypatc
 
 
 def test_native_block_can_be_turned_off(monkeypatch):
+    _cuda_capability(monkeypatch, (8, 9))
     monkeypatch.setattr(native, "compiles", lambda device, dtype: False)
     monkeypatch.setenv("JASNA_LTX_NATIVE", "0")
     assert native.load(torch.device("cuda"), _block_specs("int8")) is None

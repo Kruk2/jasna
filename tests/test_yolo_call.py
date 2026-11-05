@@ -43,6 +43,7 @@ def _build_yolo_model(*, batch_size=2, imgsz=640):
     return model, mock_runner
 
 
+@tensorrt_gpu_only
 @pytest.mark.usefixtures("nvidia_vendor")
 class TestYoloInit:
     def test_basic_init_trt(self):
