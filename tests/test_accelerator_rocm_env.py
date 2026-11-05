@@ -26,25 +26,17 @@ def test_rocm_pins_the_allocator_and_miopen_find_mode(monkeypatch, platform):
 
 
 @pytest.mark.parametrize("platform", ["linux", "win32"])
-@pytest.mark.parametrize("value", ["0", "1"])
-def test_an_explicit_attention_setting_wins(monkeypatch, platform, value):
+@pytest.mark.parametrize(("name", "value"), [
+    ("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0"),
+    ("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1"),
+    ("PYTORCH_ALLOC_CONF", "expandable_segments:True"),
+    ("MIOPEN_DEBUG_CONV_GEMM", "1"),
+])
+def test_a_user_setting_wins(monkeypatch, platform, name, value):
     monkeypatch.setattr(accelerator.sys, "platform", platform)
-    environ = {"TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL": value}
+    environ = {name: value}
     apply_rocm_env_defaults(environ)
-    assert environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] == value
-
-
-def test_a_user_setting_wins():
-    environ = {"PYTORCH_ALLOC_CONF": "expandable_segments:True"}
-    apply_rocm_env_defaults(environ)
-    assert environ["PYTORCH_ALLOC_CONF"] == "expandable_segments:True"
-    assert environ["PYTORCH_HIP_ALLOC_CONF"] == "expandable_segments:False"
-
-
-def test_a_user_can_turn_miopen_gemm_convs_back_on():
-    environ = {"MIOPEN_DEBUG_CONV_GEMM": "1"}
-    apply_rocm_env_defaults(environ)
-    assert environ["MIOPEN_DEBUG_CONV_GEMM"] == "1"
+    assert environ == {**ROCM_DEFAULTS, name: value}
 
 
 def test_process_env_is_left_alone_off_rocm(monkeypatch):
