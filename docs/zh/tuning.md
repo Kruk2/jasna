@@ -80,8 +80,6 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 
 | 变量 | 取值 | 作用 |
 | --- | --- | --- |
-| `JASNA_LTX_VAE_ENCODER` | `auto`（默认）、`full`、`half`、`max` | 仅限命令行，应用里用 **LTX 编码器**（见 [LTX 选项](models.md#ltx-选项)）。选择 LTX 视频编码器：`half` 和 `max` 更快，画面稍柔和。`auto`：基础画质用 `half`，其他用 `full`。 |
-| `JASNA_LTX_VAE_DECODER` | `auto`（默认）、`full`、`half`、`max` | 仅限命令行，应用里用 **LTX 解码器**。选择 LTX 视频解码器：`half` 和 `max` 更快，画面稍柔和。`auto`：基础画质用 `max`，其他用 `full`。 |
 | `JASNA_DECODE_BACKEND` | `auto`（默认）、`vali`、`pyav-hw`、`pyav-sw` | 仅限命令行，应用里用 **视频解码器**（**模型**标签页，**专家**视图）。选择 Jasna 读取输入视频的方式。视频打不开或画面损坏时，试试 `pyav-sw`（更慢）。`vali` 仅限 NVIDIA。 |
 | `JASNA_TRT_CUDAGRAPHS` | `1`（默认）、`0` | NVIDIA：`0` 关闭已编译 BasicVSR++ 的一项加速。遇到 GPU 错误时可以试试。 |
 | `JASNA_AMD_GRAPHS` | `1`（默认）、`0` | AMD：`0` 关闭 BasicVSR++ 的一项加速。遇到 GPU 错误或显存不足时可以试试。 |

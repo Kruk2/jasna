@@ -118,8 +118,8 @@ def _session_config_from_args(
         ltx_seed=int(args.ltx_seed),
         ltx_fast=bool(args.ltx_fast),
         ltx_model=CLI_RESTORATION_MODELS[args.restoration_model_name][1],
-        ltx_vae_encoder=_env_choice("JASNA_LTX_VAE_ENCODER", get_args(LtxVaeName)),
-        ltx_vae_decoder=_env_choice("JASNA_LTX_VAE_DECODER", get_args(LtxVaeName)),
+        ltx_vae_encoder=str(args.ltx_vae_encoder),
+        ltx_vae_decoder=str(args.ltx_vae_decoder),
         ltx_trial=bool(args.ltx_trial),
         ltx_auto_split_percent=args.ltx_auto_split,
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
@@ -265,6 +265,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=LTX_OVERLAP_CHOICES,
         help=CLI_HELP["ltx_overlap"],
     )
+    for part in ("encoder", "decoder"):
+        restoration.add_argument(
+            f"--ltx-vae-{part}",
+            default="auto",
+            choices=get_args(LtxVaeName),
+            help=CLI_HELP[f"ltx_vae_{part}"],
+        )
     restoration.add_argument(
         "--ltx-seed",
         type=int,
@@ -905,7 +912,8 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
 
 
 LTX_ONLY_ARG_DESTS = (
-    "ltx_fast", "ltx_large_canvas", "ltx_overlap", "ltx_seed", "ltx_trial", "ltx_auto_split"
+    "ltx_fast", "ltx_large_canvas", "ltx_overlap", "ltx_vae_encoder", "ltx_vae_decoder", "ltx_seed", "ltx_trial",
+    "ltx_auto_split",
 )
 BASICVSRPP_ONLY_ARG_DESTS = ("compile_basicvsrpp",)
 

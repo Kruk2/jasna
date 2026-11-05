@@ -57,6 +57,8 @@ $env:TEMP = 'Z:\Temp'
 | `--ltx-fast` / `--no-ltx-fast` | off | LTX: about 1.4x faster, slightly less detail. RTX 50-series only; other GPUs stop with an error. |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | off | LTX: more detail on large mosaics. Most videos have some, so a whole video can take up to about 3x longer. Needs about 12 GB of free VRAM; with less, those mosaics are restored normally. |
 | `--ltx-overlap` | `17` | LTX: frames shared between the chunks LTX restores: `17`, `25`, `33`, `41` or `49`. Fewer is faster when a mosaic stays on screen for more than 4 seconds; `33` is the older mode with more overlap. |
+| `--ltx-vae-encoder` | `auto` | LTX: how LTX reads the video: `full` (sharpest, slowest), `half` (faster) or `max` (fastest, a little softer). `auto`: `half` for `ltx-basic`, `full` for the others. Same as **LTX Encoder** in the app. |
+| `--ltx-vae-decoder` | `auto` | LTX: how LTX turns its result back into video: `full`, `half` or `max`, as above. `auto`: `max` for `ltx-basic`, `full` for the others. Same as **LTX Decoder** in the app. |
 | `--ltx-seed` | `20260923` | LTX: another seed gives a slightly different result; the same seed repeats it. |
 | `--ltx-trial` / `--no-ltx-trial` | off | LTX: test the speed without the model or a license. The video is not restored. |
 | `--ltx-auto-split` | — | LTX: big mosaics (at least this percent of the video height, e.g. `12`) with LTX, smaller ones with BasicVSR++. Works on folders. Cannot be combined with `--segments` or `--fmp4`. See [Segments](segments.md#cli---ltx-auto-split). |

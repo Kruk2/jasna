@@ -138,21 +138,16 @@ def test_cli_ltx_args_are_mapped() -> None:
     assert config.ltx_seed == 7
 
 
-def test_cli_takes_the_vae_and_video_decoder_from_the_environment(monkeypatch) -> None:
-    monkeypatch.setenv("JASNA_LTX_VAE_ENCODER", "full")
-    monkeypatch.setenv("JASNA_LTX_VAE_DECODER", "half")
+def test_cli_takes_the_video_decoder_from_the_environment(monkeypatch) -> None:
     monkeypatch.setenv("JASNA_DECODE_BACKEND", "pyav-sw")
 
-    config = _cli_config()
-
-    assert (config.ltx_vae_encoder, config.ltx_vae_decoder, config.decode_backend) == ("full", "half", "pyav-sw")
+    assert _cli_config().decode_backend == "pyav-sw"
 
 
-@pytest.mark.parametrize("name", ["JASNA_LTX_VAE_ENCODER", "JASNA_LTX_VAE_DECODER", "JASNA_DECODE_BACKEND"])
-def test_cli_rejects_an_unknown_environment_choice(monkeypatch, name) -> None:
-    monkeypatch.setenv(name, "quarter")
+def test_cli_rejects_an_unknown_environment_choice(monkeypatch) -> None:
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "quarter")
 
-    with pytest.raises(ValueError, match=f"{name}='quarter' is not one of auto, "):
+    with pytest.raises(ValueError, match="JASNA_DECODE_BACKEND='quarter' is not one of auto, "):
         _cli_config()
 
 
@@ -254,3 +249,9 @@ def test_ltx_needs_auto_split_for_options_of_the_basicvsrpp_parts(auto_split, se
     assert ltx_unsupported_options(
         auto_split=auto_split, secondary_restoration=secondary, denoise_strength=denoise
     ) == expected
+
+
+def test_cli_ltx_vae_choices_reach_the_config() -> None:
+    assert (_cli_config().ltx_vae_encoder, _cli_config().ltx_vae_decoder) == ("auto", "auto")
+    config = _cli_config(["--restoration-model-name", "ltx", "--ltx-vae-encoder", "max", "--ltx-vae-decoder", "half"])
+    assert (config.ltx_vae_encoder, config.ltx_vae_decoder) == ("max", "half")
