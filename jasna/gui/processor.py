@@ -276,7 +276,11 @@ class Processor:
             # Handle file conflict based on settings
             if output_path.exists() and resumed_output is None:
                 file_conflict = self._settings.file_conflict
-                if file_conflict == "skip":
+                unfinished = job.unfinished_output
+                if unfinished is not None and unfinished.exists() and media_files.is_unique_path_of(unfinished, output_path):
+                    output_path = unfinished
+                    self._log("INFO", f"Replacing {output_path.name}, left unfinished by the last run")
+                elif file_conflict == "skip":
                     job.status = JobStatus.SKIPPED
                     self._progress(ProgressUpdate(
                         job_id=job.id,
@@ -285,7 +289,9 @@ class Processor:
                     ))
                     self._log("WARNING", f"Skipped {job.filename}: output file already exists")
                     return
-                elif file_conflict == "auto_rename":
+                elif file_conflict == "auto_rename" or (
+                    media_files.path_collision_key(output_path) == media_files.path_collision_key(input_path)
+                ):
                     output_path = unique_path(output_path)
                     self._log("INFO", f"Renamed output to {output_path.name} to avoid overwrite")
                 # "overwrite" - just proceed and let the file be replaced
@@ -296,10 +302,12 @@ class Processor:
                 self._close_video_session()
             else:
                 self._close_image_session()
+            job.unfinished_output = output_path
             self._run_pipeline(job.id, input_path, output_path, segments=segments, settings=job_settings)
             if not is_image:
                 self._run_post_export_video_command(input_path, output_path)
 
+            job.unfinished_output = None
             job.output_path = output_path
             job.status = JobStatus.COMPLETED
             self._progress(ProgressUpdate(

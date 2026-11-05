@@ -365,3 +365,39 @@ def test_a_range_job_that_reencodes_the_whole_video_offers_stop_not_pause(tmp_pa
 
     assert job.status is JobStatus.COMPLETED
     assert [update.resumable for update in updates if update.resumable is not None] == [True, False]
+
+
+def test_rerun_replaces_the_output_its_stopped_run_left(tmp_path):
+    from jasna.gui.processor import ProcessingStopped
+
+    outputs: list[Path] = []
+
+    def run_pipeline(job_id, input_path, output_path, **kwargs):
+        outputs.append(output_path)
+        output_path.touch()
+        if len(outputs) == 1:
+            raise ProcessingStopped("Processing stopped")
+
+    processor, job, _updates = _processor_with_job(tmp_path, run_pipeline)
+    job.path.touch()
+    processor._settings = AppSettings(file_conflict="skip")
+
+    processor._run()
+    assert job.status is JobStatus.PENDING
+    processor._run()
+
+    assert outputs == [tmp_path / "clip_restored.mp4"] * 2
+    assert job.status is JobStatus.COMPLETED
+
+
+def test_overwrite_never_writes_over_the_input(tmp_path):
+    outputs: list[Path] = []
+    processor, job, _updates = _processor_with_job(tmp_path, lambda _id, _input, output, **_kw: outputs.append(output))
+    job.path.touch()
+    processor._output_pattern = "{original}.mp4"
+    processor._settings = AppSettings(file_conflict="overwrite")
+
+    processor._run()
+
+    assert outputs == [tmp_path / "clip (1).mp4"]
+    assert job.status is JobStatus.COMPLETED

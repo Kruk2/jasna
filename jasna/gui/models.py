@@ -47,6 +47,7 @@ class JobItem:
     elapsed_seconds: float | None = None
     error_message: str = ""
     has_conflict: bool = False  # True if output file already exists
+    unfinished_output: Path | None = None
     segments: tuple[SegmentRange, ...] = ()
     detection_model: str | None = None
     detection_score_threshold: float | None = None
