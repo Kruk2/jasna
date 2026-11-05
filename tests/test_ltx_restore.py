@@ -315,7 +315,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         cancel=threading.Event(),
         max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None,
     )
-    assert budgets == [3 << 30]
+    assert budgets == [(3 << 30) + (123 << 20)]
     assert _Transformer.seeds == [[5]]
     assert bars[2].total == bars[2].n == 8
     assert len(writer.frames) == 12
@@ -426,10 +426,16 @@ def test_segment_decode_budget_follows_the_gpu_size_not_free_vram(monkeypatch):
 
 def test_free_vram_budget_keeps_one_value_while_free_vram_wanders_within_a_step(monkeypatch):
     mib = 1 << 20
-    free = iter((2048 * mib + 1, 2300 * mib, 2559 * mib, 2560 * mib))
+    free = iter((6144 * mib + 1, 6400 * mib, 6655 * mib, 6656 * mib))
     monkeypatch.setattr(restore, "device_free_bytes", lambda device: next(free))
     budget = restore.free_vram_budget(torch.device("cuda"))
-    assert [budget(512) for _ in range(4)] == [2048 * mib, 2048 * mib, 2048 * mib, 2560 * mib]
+    assert [budget(512) for _ in range(4)] == [6144 * mib, 6144 * mib, 6144 * mib, 6656 * mib]
+
+
+def test_free_vram_budget_keeps_the_exact_figure_where_rounding_could_drop_a_fitting_tile(monkeypatch):
+    mib = 1 << 20
+    monkeypatch.setattr(restore, "device_free_bytes", lambda device: 4000 * mib)
+    assert restore.free_vram_budget(torch.device("cuda"))(512) == 4000 * mib
 
 
 def test_each_window_decode_returns_the_cache_before_reading_its_budget(monkeypatch):
