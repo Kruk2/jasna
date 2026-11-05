@@ -73,12 +73,16 @@ class _OfflineFrameWriter:
         pass
 
     def finish(self) -> None:
-        self.close()
+        if self._entered:
+            self._entered = False
+            self._encoder_ctx.__exit__(None, None, None)
 
     def close(self) -> None:
+        """After ``finish`` a no-op; otherwise the job stopped or failed, and the output ends
+        where it got to instead of looking complete."""
         if self._entered:
-            self._encoder_ctx.__exit__(None, None, None)
             self._entered = False
+            self._encoder_ctx.abort()
 
 
 class _FragmentFrameWriter(_OfflineFrameWriter):
@@ -89,7 +93,7 @@ class _FragmentFrameWriter(_OfflineFrameWriter):
         self._commit = commit
 
     def finish(self) -> None:
-        self.close()
+        super().finish()
         self._commit()
 
 
@@ -233,6 +237,8 @@ class Pipeline:
                 progress=progress,
                 encode_heartbeat=encode_heartbeat,
             )
+            if error is None and not self._cancel_event.is_set():
+                frame_writer.finish()
         finally:
             frame_writer.close()
 

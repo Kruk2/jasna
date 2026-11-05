@@ -279,20 +279,23 @@ def test_blend_encode_writes_the_source_frame_when_secondary_ends_without_its_re
     assert errors == []
 
 
-def test_offline_frame_writer_opens_the_encoder_on_first_write_and_closes_it_once():
+@pytest.mark.parametrize(("finished", "completes", "aborts"), [(True, 1, 0), (False, 0, 1)])
+def test_offline_frame_writer_completes_the_output_only_when_finished(finished, completes, aborts):
     encoder = MagicMock()
     heartbeat = [0.0]
     writer = _OfflineFrameWriter(encoder, heartbeat)
     writer.close()
-    assert encoder.__enter__.call_count == 0 and encoder.__exit__.call_count == 0
+    assert encoder.__enter__.call_count == 0 and encoder.abort.call_count == 0
 
     writer.write(torch.zeros(3, 8, 8), pts=10)
     writer.write(torch.zeros(3, 8, 8), pts=20)
+    if finished:
+        writer.finish()
     writer.close()
     writer.close()
 
     assert [call.args[1] for call in encoder.encode.call_args_list] == [10, 20]
-    assert (encoder.__enter__.call_count, encoder.__exit__.call_count) == (1, 1)
+    assert (encoder.__enter__.call_count, encoder.__exit__.call_count, encoder.abort.call_count) == (1, completes, aborts)
     assert heartbeat[0] > 0
 
 
