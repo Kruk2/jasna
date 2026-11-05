@@ -65,6 +65,10 @@ def _env_choice(name: str, choices: tuple[str, ...]) -> str:
     return value
 
 
+def decode_backend_from_env() -> DecodeBackendName:
+    return _env_choice("JASNA_DECODE_BACKEND", get_args(DecodeBackendName))
+
+
 def _session_config_from_args(
     args: argparse.Namespace,
     *,
@@ -110,7 +114,7 @@ def _session_config_from_args(
         tvai_args=str(args.tvai_args),
         tvai_workers=int(args.tvai_workers),
         tvai_denoise=bool(args.tvai_denoise),
-        decode_backend=_env_choice("JASNA_DECODE_BACKEND", get_args(DecodeBackendName)),
+        decode_backend=decode_backend_from_env(),
         rtx_scale=int(args.rtx_scale),
         rtx_quality=str(args.rtx_quality).lower(),
         rtx_denoise=str(args.rtx_denoise).lower(),

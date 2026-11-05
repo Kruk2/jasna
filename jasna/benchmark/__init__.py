@@ -7,7 +7,7 @@ from argparse import Namespace
 import torch
 
 from jasna.engine_paths import default_restoration_model_path
-from jasna.main import batch_size_from_args
+from jasna.main import batch_size_from_args, decode_backend_from_env
 from jasna.benchmark.basicvsrpp_restoration import benchmark_basicvsrpp_restoration
 from jasna.benchmark.detection_speed import benchmark_lada_yolo_detection_speed, benchmark_rfdetr_detection_speed
 from jasna.os_utils import check_required_executables, check_supported_gpu, gpu_check_error
@@ -34,6 +34,7 @@ def run_benchmarks(
     restoration_model_path: Path | None = None,
     compile_basicvsrpp: bool = True,
     benchmark_filter: str | None = None,
+    decode_backend: str = "auto",
 ) -> None:
     results: dict[str, dict[str, tuple[float, float]]] = {}
     videos_to_run = [p for p in benchmark_videos if p.resolve().exists()]
@@ -57,6 +58,7 @@ def run_benchmarks(
                 detection_score_threshold=detection_score_threshold,
                 restoration_model_path=restoration_model_path,
                 compile_basicvsrpp=compile_basicvsrpp,
+                decode_backend=decode_backend,
             )
             if table_rows is not None:
                 results[benchmark_fn.__name__.replace("benchmark_", "")] = table_rows
@@ -119,4 +121,5 @@ def run_benchmark_cli(args: Namespace) -> None:
         restoration_model_path=Path(args.restoration_model_path or default_restoration_model_path("basicvsrpp")),
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
         benchmark_filter=getattr(args, "benchmark_filter", None),
+        decode_backend=decode_backend_from_env(),
     )

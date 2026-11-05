@@ -143,3 +143,19 @@ def test_detection_benchmark_compiles_missing_engine_before_loading(tmp_path) ->
     assert request.detection
     assert request.detection_model_name == "rfdetr-v6"
     assert request.detection_model_path == str(weights)
+
+
+def test_benchmark_cli_passes_the_decode_backend_from_the_environment(monkeypatch) -> None:
+    from jasna.benchmark import run_benchmark_cli
+    from jasna.main import build_parser
+
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "pyav-sw")
+    args = build_parser().parse_args(["--benchmark", "--batch-size", "4"])
+    with (
+        patch("jasna.benchmark.check_required_executables"),
+        patch("jasna.benchmark.check_supported_gpu", return_value=(True, "gpu")),
+        patch("jasna.benchmark.run_benchmarks") as run_benchmarks,
+    ):
+        run_benchmark_cli(args)
+
+    assert run_benchmarks.call_args.kwargs["decode_backend"] == "pyav-sw"
