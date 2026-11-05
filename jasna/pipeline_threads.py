@@ -34,7 +34,7 @@ from jasna.vram_offloader import VramOffloader
 log = logging.getLogger(__name__)
 
 
-class FrameWriter(Protocol):
+class PassFrameWriter(Protocol):
     def write(self, frame: torch.Tensor, pts: int) -> None: ...
     def after_write(self, frames_written: int, stop_event: threading.Event) -> None: ...
 
@@ -321,7 +321,7 @@ def secondary_restore_loop(ctx: PassContext) -> None:
         ctx.encode_queue.put(_SENTINEL)
 
 
-def blend_encode_loop(ctx: PassContext, frame_writer: FrameWriter, vram_offloader: VramOffloader) -> None:
+def blend_encode_loop(ctx: PassContext, frame_writer: PassFrameWriter, vram_offloader: VramOffloader) -> None:
     timer = LoopTimer("blend-encode")
     blend_buffer = ctx.blend_buffer
     encode_queue = ctx.encode_queue
@@ -589,7 +589,7 @@ def async_secondary_restore_loop(ctx: PassContext) -> None:
 def run_restoration_pass(
     pipeline,
     metadata,
-    frame_writer: FrameWriter,
+    frame_writer: PassFrameWriter,
     cancel_event: threading.Event,
     *,
     seek_ts: float | None,
