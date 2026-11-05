@@ -240,11 +240,11 @@ def test_preview_pass_forwards_scene_detection(monkeypatch) -> None:
     from jasna import pipeline_threads
 
     class ImmediateThread:
-        def __init__(self, *, target, **_kwargs):
-            self._target = target
+        def __init__(self, *, target, args=(), kwargs=None, **_options):
+            self._run = lambda: target(*args, **(kwargs or {}))
 
         def start(self):
-            self._target()
+            self._run()
 
         def is_alive(self):
             return False
@@ -285,7 +285,7 @@ def test_preview_pass_forwards_scene_detection(monkeypatch) -> None:
     worker._run_preview_pass(command, pipeline)
 
     assert pipeline.vr_projection == "raw"
-    assert decode_detect.call_args.kwargs["scene_detection"] is False
+    assert decode_detect.call_args.args[1].scene_detection is False
     worker.close()
 
 

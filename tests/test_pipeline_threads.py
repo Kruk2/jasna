@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
-from factories import make_pipeline, video_metadata
+from factories import make_pipeline, pass_context, video_metadata
 from jasna.blend_buffer import BlendBuffer
 from jasna.frame_queue import FrameQueue
 from jasna.pipeline import _OfflineFrameWriter
@@ -18,6 +18,7 @@ from jasna.pipeline_processing import BatchProcessResult
 from jasna.pipeline_threads import (
     blend_encode_loop,
     decode_detect_loop,
+    effect_runs,
     primary_restore_loop,
     secondary_restore_loop,
 )
@@ -52,50 +53,47 @@ def _register_frames(**kwargs):
     return BatchProcessResult(next_frame_idx=start + len(kwargs["pts_list"]), clips_emitted=0)
 
 
-def _decode(reader, *, process=_register_frames, metadata=None, **overrides):
-    """Run ``decode_detect_loop`` over ``reader``; returns the metadata queue, error holder and detection mock."""
-    metadata_queue = Queue(maxsize=999)
-    arguments = dict(
-        input_video="fake.mkv",
-        decode_backend="auto",
-        batch_size=2,
-        device=torch.device("cpu"),
-        metadata=metadata or video_metadata(num_frames=100),
-        detection_model=MagicMock(),
-        max_clip_size=60,
-        temporal_overlap=8,
-        max_detection_gap=0,
-        min_detection_duration=0,
-        scene_detection=False,
-        blend_buffer=BlendBuffer(device=torch.device("cpu")),
-        crop_buffers={},
-        clip_queue=FrameQueue(max_frames=999),
-        metadata_queue=metadata_queue,
-        error_holder=[],
-        cancel_event=threading.Event(),
-        debug_memory=MagicMock(),
-        stereo=None,
-        vr_projector=None,
-        seek_ts=None,
-        end_pts=None,
-        effect_ranges=None,
-        frame_stride=1,
-        output_frame_count=None,
-        output_fps=None,
-        progress=None,
+def _decode(reader, *, process=_register_frames, end_pts=None, effect_ranges=None, **context):
+    """Run ``decode_detect_loop`` over ``reader``; returns the frame metadata, error holder and detection mock."""
+    ctx = pass_context(metadata=video_metadata(num_frames=100), **context)
+    pipeline = make_pipeline(
+        max_clip_size=60, temporal_overlap=8, max_detection_gap=0, min_detection_duration=0, scene_detection=False
     )
-    arguments.update(overrides)
     with (
         patch("jasna.pipeline_threads.VideoReader", return_value=reader),
         patch("jasna.pipeline_threads.torch.cuda.set_device"),
         patch("jasna.pipeline_threads.process_frame_batch", side_effect=process) as detect,
         patch("jasna.pipeline_threads.finalize_processing"),
     ):
-        decode_detect_loop(**arguments)
+        decode_detect_loop(
+            ctx,
+            pipeline,
+            end_pts=end_pts,
+            effect_ranges=effect_ranges,
+            output_frame_count=None,
+            output_fps=None,
+            progress=None,
+        )
     metas = []
-    while (item := metadata_queue.get_nowait()) is not _SENTINEL:
+    while (item := ctx.metadata_queue.get_nowait()) is not _SENTINEL:
         metas.append(item)
-    return metas, arguments["error_holder"], detect
+    return metas, ctx.error_holder, detect
+
+
+@pytest.mark.parametrize(
+    ("pts_list", "effect_ranges", "runs"),
+    [
+        ([], ((0, 9),), []),
+        ([5, 6, 7], None, [(0, 3, True)]),
+        ([5, 6, 7], ((10, 20),), [(0, 3, False)]),
+        ([60, 61, 62, 63], ((61, 63),), [(0, 1, False), (1, 3, True), (3, 4, False)]),
+        ([0, 1, 2, 3, 4], ((0, 1), (3, 4)), [(0, 1, True), (1, 3, False), (3, 4, True), (4, 5, False)]),
+        ([0, 1, 2, 3], ((0, 2), (2, 4)), [(0, 4, True)]),
+    ],
+    ids=["empty", "no-ranges", "outside", "middle", "two-ranges", "adjacent-ranges"],
+)
+def test_effect_runs_split_a_batch_at_effect_range_edges(pts_list, effect_ranges, runs):
+    assert effect_runs(pts_list, effect_ranges) == runs
 
 
 def test_segment_pass_trims_at_end_and_detects_only_exact_effect_frames():
@@ -131,7 +129,7 @@ def test_decode_stops_reading_once_cancelled():
                 cancel.set()
             yield torch.zeros((2, 3, 8, 8), dtype=torch.uint8), [2 * index, 2 * index + 1]
 
-    _, errors, _ = _decode(_reader(batches), cancel_event=cancel)
+    _, errors, _ = _decode(_reader(batches), stop_event=cancel)
 
     assert not errors
     assert batches_read == [0, 1]
@@ -159,16 +157,7 @@ def test_primary_loop_exits_on_cancel_and_releases_the_secondary_thread():
     errors = []
 
     with patch("jasna.pipeline_threads.torch.cuda.set_device"):
-        primary_restore_loop(
-            device=torch.device("cpu"),
-            restoration_pipeline=MagicMock(),
-            clip_queue=FrameQueue(max_frames=999),
-            secondary_queue=secondary_queue,
-            error_holder=errors,
-            primary_idle_event=threading.Event(),
-            cancel_event=cancel,
-            debug_memory=MagicMock(),
-        )
+        primary_restore_loop(pass_context(secondary_queue=secondary_queue, error_holder=errors, stop_event=cancel))
 
     assert not errors
     assert secondary_queue.get() is _SENTINEL
@@ -182,16 +171,7 @@ def test_primary_loop_logs_its_timing_summary(caplog):
         patch("jasna.pipeline_threads.torch.cuda.set_device"),
         caplog.at_level(logging.INFO, logger="jasna.pipeline_threads"),
     ):
-        primary_restore_loop(
-            device=torch.device("cpu"),
-            restoration_pipeline=MagicMock(),
-            clip_queue=clip_queue,
-            secondary_queue=FrameQueue(max_frames=999),
-            error_holder=[],
-            primary_idle_event=threading.Event(),
-            cancel_event=threading.Event(),
-            debug_memory=MagicMock(),
-        )
+        primary_restore_loop(pass_context(clip_queue=clip_queue))
 
     assert "[timing] primary" in caplog.text
 
@@ -203,15 +183,7 @@ def test_secondary_loop_exits_on_cancel_and_releases_the_encode_thread():
     errors = []
 
     with patch("jasna.pipeline_threads.torch.cuda.set_device"):
-        secondary_restore_loop(
-            device=torch.device("cpu"),
-            restoration_pipeline=MagicMock(),
-            secondary_queue=FrameQueue(max_frames=999),
-            encode_queue=encode_queue,
-            error_holder=errors,
-            cancel_event=cancel,
-            debug_memory=MagicMock(),
-        )
+        secondary_restore_loop(pass_context(encode_queue=encode_queue, error_holder=errors, stop_event=cancel))
 
     assert not errors
     assert encode_queue.get() is _SENTINEL
@@ -236,20 +208,16 @@ def _blend_encode(*, pending_tracks=None, encode_items=(), error_holder=None, ca
         patch("jasna.pipeline_threads.torch.cuda.set_device"),
     ):
         blend_encode_loop(
-            input_video="fake.mkv",
-            decode_backend="auto",
-            batch_size=1,
-            device=torch.device("cpu"),
-            metadata=video_metadata(),
-            blend_buffer=blend_buffer,
-            encode_queue=encode_queue,
-            metadata_queue=metadata_queue,
-            error_holder=error_holder,
-            frame_writer=writer,
-            cancel_event=cancel_event or threading.Event(),
-            vram_offloader=MagicMock(),
-            seek_ts=None,
-            frame_stride=1,
+            pass_context(
+                batch_size=1,
+                blend_buffer=blend_buffer,
+                encode_queue=encode_queue,
+                metadata_queue=metadata_queue,
+                error_holder=error_holder,
+                stop_event=cancel_event or threading.Event(),
+            ),
+            writer,
+            MagicMock(),
         )
     return writer.written, error_holder
 
@@ -347,13 +315,13 @@ def test_streaming_pass_worker_failure_stops_a_writer_waiting_for_player_demand(
         demand_entered.set()
         demand_stopped.append(stop_event.wait(timeout=2))
 
-    def fail_decode(**kwargs):
-        kwargs["metadata_queue"].put(FrameMeta(0, 0, apply_effect=False))
+    def fail_decode(ctx, *args, **kwargs):
+        ctx.metadata_queue.put(FrameMeta(0, 0, apply_effect=False))
         assert demand_entered.wait(timeout=2)
-        kwargs["error_holder"].append(failure)
+        ctx.error_holder.append(failure)
 
-    def wait_for_stop(**kwargs):
-        assert kwargs["cancel_event"].wait(timeout=3)
+    def wait_for_stop(ctx):
+        assert ctx.stop_event.wait(timeout=3)
 
     server.wait_for_demand.side_effect = wait_for_demand
     metadata = video_metadata(num_frames=1)
@@ -499,8 +467,8 @@ def test_ctrl_c_stops_every_worker_before_the_pass_returns(monkeypatch):
     stopped: list[str] = []
 
     def worker(name):
-        def run(**kwargs):
-            kwargs["cancel_event"].wait()
+        def run(ctx, *args, **kwargs):
+            ctx.stop_event.wait()
             stopped.append(name)
 
         return run

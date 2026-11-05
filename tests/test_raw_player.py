@@ -360,11 +360,11 @@ def test_raw_pass_forwards_seek_and_player_writer(monkeypatch) -> None:
     from jasna import pipeline_threads
 
     class ImmediateThread:
-        def __init__(self, *, target, **_kwargs):
-            self._target = target
+        def __init__(self, *, target, args=(), kwargs=None, **_options):
+            self._run = lambda: target(*args, **(kwargs or {}))
 
         def start(self):
-            self._target()
+            self._run()
 
         def is_alive(self):
             return False
@@ -408,9 +408,10 @@ def test_raw_pass_forwards_seek_and_player_writer(monkeypatch) -> None:
         seek_seconds=2.5,
     )
 
-    assert decode.call_args.kwargs["seek_ts"] == pytest.approx(2.5)
-    assert decode.call_args.kwargs["scene_detection"] is False
-    assert blend.call_args.kwargs["frame_writer"] is writer
+    ctx, decode_pipeline = decode.call_args.args
+    assert ctx.seek_ts == pytest.approx(2.5)
+    assert decode_pipeline.scene_detection is False
+    assert blend.call_args.args[1] is writer
 
 
 def test_software_clock_freezes_and_resumes(monkeypatch) -> None:
