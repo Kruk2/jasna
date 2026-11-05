@@ -71,21 +71,30 @@ def _static_scaling(
 
 
 def xft_dpi_factor(raw_xft_dpi: str) -> float:
-    return float(raw_xft_dpi) / 96 if raw_xft_dpi else 1.0
+    try:
+        dpi = float(raw_xft_dpi)
+    except ValueError:
+        dpi = math.nan
+    if math.isfinite(dpi) and dpi > 0:
+        return dpi / 96
+    if raw_xft_dpi:
+        logger.warning("Ignoring invalid Xft.dpi %r", raw_xft_dpi)
+    return 1.0
 
 
 def _linux_xft_dpi_and_screen() -> tuple[float, tuple[int, int]]:
     # Class "Xft" lets Tk's option database match the desktop's top-level Xft.dpi resource.
     probe = tkinter.Tk(className="Xft")
     raw_xft_dpi = probe.option_get("dpi", "Dpi")
+    factor = xft_dpi_factor(raw_xft_dpi)
     if raw_xft_dpi:
         # Tk turns CTk's pixel font sizes into points with this and Xft draws points at
         # Xft.dpi, so matching them keeps text at the CTk factor. The value lives on the
         # X display connection, which Tk keeps open for the CTk windows created later.
-        probe.tk.call("tk", "scaling", float(raw_xft_dpi) / 72)
+        probe.tk.call("tk", "scaling", factor * 96 / 72)
     screen = probe.winfo_screenwidth(), probe.winfo_screenheight()
     probe.destroy()
-    return xft_dpi_factor(raw_xft_dpi), screen
+    return factor, screen
 
 
 def _windows_set_dpi_aware() -> None:

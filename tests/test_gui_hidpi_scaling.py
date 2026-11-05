@@ -102,7 +102,7 @@ def test_main_window_keeps_design_minimum_at_high_dpi_on_1440p(dpi, jasna_app, m
     assert minimum[0] >= 899 and minimum[1] >= 579
 
 
-@pytest.mark.parametrize(("raw_xft_dpi", "factor"), [("192", 2.0), ("144", 1.5), ("", 1.0)])
+@pytest.mark.parametrize(("raw_xft_dpi", "factor"), [("192", 2.0), ("144", 1.5), ("", 1.0), ("96dpi", 1.0), ("0", 1.0), ("nan", 1.0)])
 def test_xft_dpi_factor(raw_xft_dpi, factor) -> None:
     assert scaling.xft_dpi_factor(raw_xft_dpi) == factor
 
