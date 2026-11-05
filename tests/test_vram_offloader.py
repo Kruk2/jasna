@@ -238,9 +238,10 @@ class TestVramOffloaderLifecycle:
             safetynet=0,
         )
         offloader._offload_device_type = "cpu"
+        emptied = threading.Event()
+        mock_empty_cache.side_effect = emptied.set
         offloader.start()
-        import time
-        time.sleep(0.3)
+        assert emptied.wait(timeout=30)
         offloader.stop()
 
         assert offloader.stats.sample_count > 0
