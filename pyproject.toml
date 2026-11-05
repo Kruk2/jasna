@@ -95,6 +95,9 @@ exclude = ["jasna.protection.keytool*", "jasna.protection.tests*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "slow: takes over ten seconds; deselect with -m 'not slow'",
+]
 filterwarnings = [
   "ignore:'maxsplit' is passed as positional argument:DeprecationWarning:mmengine\\.utils\\.misc",
   "ignore:`torch\\.jit\\.script` is deprecated:DeprecationWarning",
