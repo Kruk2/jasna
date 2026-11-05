@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+import torch
 
 from factories import cli_args, run_cli
 
@@ -185,12 +186,12 @@ def test_every_runtime_triton_kernel_module_ships_its_source():
     assert kernel_modules - amd_build_only <= set(LTX_TRACED_MODULES)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX user accounts")
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no numeric user IDs")
 @pytest.mark.parametrize("module", (
     "torch._inductor.codecache",
     pytest.param("torch_tensorrt.dynamo._defaults", marks=pytest.mark.skipif(
-        importlib.util.find_spec("torch_tensorrt") is None, reason="Torch-TensorRT is not installed")),
+        importlib.util.find_spec("torch_tensorrt") is None or not torch.cuda.is_available(),
+        reason="importing Torch-TensorRT needs it installed and a CUDA GPU")),
 ))
 def test_torch_imports_for_a_user_id_without_an_account_name(module):
     code = f"""
@@ -259,27 +260,6 @@ def test_prebuilt_triton_helper_avoids_a_customer_c_compiler(monkeypatch, tmp_pa
         triton.runtime.build._build("missing", "source.c", str(tmp_path), [], [], [], [])
 
 
-def test_frozen_inductor_runs_in_process_and_keeps_runtime_cache_paths(monkeypatch, torch_config):
-    import torch._inductor.config as inductor_config
-    from torch._inductor import codecache
-    from jasna import _frozen
-
-    monkeypatch.setattr(_frozen, "_patched", False)
-    monkeypatch.setattr(_frozen, "is_frozen", lambda: True)
-    monkeypatch.setattr(_frozen, "register_ltx_sources", lambda root: None)
-    monkeypatch.setattr(_frozen, "use_prebuilt_triton_modules", lambda directory: None)
-    torch_config(inductor_config, compile_threads=8)
-    monkeypatch.setattr(codecache, "torch_key", codecache.torch_key_cache(lambda: b"source"))
-    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", "/private/process/inductor")
-    monkeypatch.setenv("TRITON_CACHE_DIR", "/private/process/triton")
-    _frozen.patch_frozen_torch()
-    assert inductor_config.compile_threads == 1
-    assert codecache.torch_key() != b"source"
-    assert _frozen.os.environ["TRITON_BACKENDS_IN_TREE"] == "1"
-    assert _frozen.os.environ["TORCHINDUCTOR_CACHE_DIR"] == "/private/process/inductor"
-    assert _frozen.os.environ["TRITON_CACHE_DIR"] == "/private/process/triton"
-
-
 @pytest.mark.skipif(sys.platform != "win32", reason="Triton looks for the CUDA Toolkit only on Windows")
 def test_frozen_startup_without_cuda_toolkit_shows_no_triton_warning(tmp_path):
     pytest.importorskip("triton")
@@ -322,6 +302,8 @@ def test_frozen_build_compiles_in_process_with_prebuilt_triton_modules(monkeypat
     monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.setattr(os_utils, "get_application_executable", lambda: str(tmp_path / "jasna"))
     monkeypatch.delenv("TRITON_BACKENDS_IN_TREE", raising=False)
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", "/private/process/inductor")
+    monkeypatch.setenv("TRITON_CACHE_DIR", "/private/process/triton")
     torch_config(inductor_config, compile_threads=inductor_config.compile_threads)
     monkeypatch.setattr(triton.knobs.build, "impl", None)
     directory = tmp_path / "triton_prebuilt"
@@ -336,6 +318,8 @@ def test_frozen_build_compiles_in_process_with_prebuilt_triton_modules(monkeypat
     assert inductor_config.compile_threads == 1
     assert codecache.torch_key() != b"source"
     assert os.environ["TRITON_BACKENDS_IN_TREE"] == "1"
+    assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == "/private/process/inductor"
+    assert os.environ["TRITON_CACHE_DIR"] == "/private/process/triton"
     module = triton.runtime.build._build("cuda_utils", "src.c", str(tmp_path), [], [], [], [])
     assert module == str(expected)
     assert registered_roots == [tmp_path]

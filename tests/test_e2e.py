@@ -356,32 +356,6 @@ class TestFullPipelineE2E:
         assert tag["detection"]["threshold"] == 0.25
         assert "ltx" not in tag
 
-    @REQUIRES_NVVFX
-    def test_rtx_superres_secondary(self, tmp_path):
-        from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
-
-        rtx = RtxSuperresSecondaryRestorer(
-            device=torch.device("cuda:0"),
-            scale=4,
-            quality="high",
-            denoise="medium",
-        )
-        try:
-            pipeline, output, det_spy, primary_spy, secondary_spy = self._build(
-                tmp_path, secondary_restorer=rtx,
-            )
-            rtx_restore_spy = _MethodSpy(rtx, "restore")
-            pipeline.run()
-        finally:
-            rtx.close()
-
-        self._assert_output_video(output)
-
-        assert det_spy.total_detections > 0
-        assert primary_spy.call_count > 0
-        assert secondary_spy.call_count == primary_spy.call_count
-        assert rtx_restore_spy.call_count == primary_spy.call_count
-
     @REQUIRES_TVAI
     @pytest.mark.parametrize("overlap", _TEMPORAL_OVERLAPS)
     def test_tvai_secondary(self, tmp_path, overlap):

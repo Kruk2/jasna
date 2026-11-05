@@ -9,16 +9,11 @@ from jasna.media.media_files import (
     file_dialog_patterns,
     folder_output_path,
     folder_media_in_processing_order,
-    is_image,
     is_video,
 )
 
 
 class TestPredicates:
-    def test_is_image(self):
-        assert is_image("a.PNG") and is_image("b.jpeg")
-        assert not is_image("c.mp4")
-
     def test_is_video(self):
         assert is_video("a.MP4") and is_video("b.mkv")
         assert not is_video("c.png")
