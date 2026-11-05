@@ -150,8 +150,9 @@ def test_download_verifies_and_replaces_atomically(tmp_path, monkeypatch):
     assert sorted(p.name for p in target.iterdir()) == ["a.safetensors.enc"]
 
 
-def _response(request, content: bytes, status: int = 200):
-    return urllib.response.addinfourl(io.BytesIO(content), {}, request.full_url, code=status)
+def _response(request, content: bytes, status: int = 200, start: int | None = None):
+    headers = {} if start is None else {"Content-Range": f"bytes {start}-{start + len(content) - 1}/*"}
+    return urllib.response.addinfourl(io.BytesIO(content), headers, request.full_url, code=status)
 
 
 @pytest.mark.parametrize(("status", "served"), [(206, b"tail"), (200, b"head+tail")])
@@ -163,7 +164,7 @@ def test_download_resumes_its_partial_file(tmp_path, monkeypatch, status, served
 
     def open_url(request, **kwargs):
         ranges.append(request.get_header("Range"))
-        return _response(request, served, status)
+        return _response(request, served, status, 5 if status == 206 else None)
 
     monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
     progress = []
@@ -171,6 +172,25 @@ def test_download_resumes_its_partial_file(tmp_path, monkeypatch, status, served
     assert ranges == ["bytes=5-"]
     assert (tmp_path / "model.enc").read_bytes() == content and progress[-1] == len(content)
     assert not (tmp_path / "model.enc.part").exists()
+
+
+@pytest.mark.parametrize(("partial", "range_start"), [(b"HEAD+", 5), (b"head+", 3)])
+def test_bad_resume_restarts_from_the_first_byte(tmp_path, monkeypatch, partial, range_start):
+    content = b"head+tail"
+    file = model_files.DownloadableFile("model.enc", len(content), hashlib.sha256(content).hexdigest())
+    (tmp_path / "model.enc.part").write_bytes(partial)
+    ranges = []
+
+    def open_url(request, **kwargs):
+        ranges.append(request.get_header("Range"))
+        if request.get_header("Range"):
+            return _response(request, content[range_start:], 206, range_start)
+        return _response(request, content)
+
+    monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
+    model_files.download_files(tmp_path, [file], None, mirror_first=False)
+    assert ranges == ["bytes=5-", None]
+    assert (tmp_path / "model.enc").read_bytes() == content and not (tmp_path / "model.enc.part").exists()
 
 
 def test_failed_download_keeps_its_partial_file_and_names_the_direct_link(tmp_path, monkeypatch):
