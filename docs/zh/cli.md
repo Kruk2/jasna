@@ -126,6 +126,7 @@ $env:TEMP = 'Z:\Temp'
 | `--lut` | — | `.cube` 色彩 LUT（1D 或 3D），在写入视频时应用。也可在 GUI 的编码设置部分设置。 |
 | `--sharpen` | `0` | 编码前锐化画面，取值 `0`（关闭）到 `1`（最强）。与 ffmpeg 的 `cas` 滤镜一致，无需二次转码。见[高级处理](advanced_processing.md)。 |
 | `--retarget-high-fps` | 关闭 | 每两帧保留一帧，实现 60 → 30 FPS（以及 59.94 → 29.97）。其他帧率不变；音频保持同步。不能与 `--stream` 或 `--segments` 同时使用。 |
+| `--frame-generation` | `none` | `2x` 用 NVIDIA RTX Video Frame Generation 把帧率翻倍，画面更流畅。需要 RTX 40 系列或更新的显卡。音频和时长不变。不能与 `--stream`、`--segments` 或 `--ltx-auto-split` 同时使用。 |
 | `--fmp4` | 关闭 | `.mp4`/`.mov` 输出在生成过程中即可播放，任务中断后仍可播放。不能与 `--stream`、`--segments` 或 `--ltx-auto-split` 同时使用。见[高级处理](advanced_processing.md)。 |
 | `--segments` | — | 只修复一个视频中的这些区间，单位为秒或 `mm:ss`，例如 `10-25,01:10-01:30.5`。不能与 `--stream`、`--retarget-high-fps`、`--fmp4` 或 `--ltx-auto-split` 同时使用，也不能用于图片或文件夹输入。见[区间](segments.md)。 |
 | `--working-directory` | 输出目录 | 临时文件和保存进度的写入位置。见[区间](segments.md)。 |

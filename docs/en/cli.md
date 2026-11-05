@@ -129,6 +129,7 @@ continue an LTX job or a job with `--segments` from saved work. See [Pause and c
 | `--lut` | — | `.cube` color LUT (1D or 3D) applied as the video is written. Also available in the GUI's Encoding section. |
 | `--sharpen` | `0` | Sharpen the picture before encoding, from `0` (off) to `1` (strongest). Matches ffmpeg's `cas` filter, so no second pass is needed. See [Advanced processing](advanced_processing.md). |
 | `--retarget-high-fps` | off | 60 → 30 FPS (and 59.94 → 29.97) by keeping every second frame. Other rates unchanged; audio stays in sync. Not available with `--stream` or `--segments`. |
+| `--frame-generation` | `none` | `2x` doubles the frame rate for smoother motion with NVIDIA RTX Video Frame Generation. Needs an RTX 40-series or newer GPU. Audio and length stay the same. Not available with `--stream`, `--segments` or `--ltx-auto-split`. |
 | `--fmp4` | off | Play `.mp4`/`.mov` output while it is still being made; it also survives an interrupted job. Not available with `--stream`, `--segments` or `--ltx-auto-split`. See [Advanced processing](advanced_processing.md). |
 | `--segments` | — | Restore only these ranges of one video, in seconds or `mm:ss`, e.g. `10-25,01:10-01:30.5`. Cannot be combined with `--stream`, `--retarget-high-fps`, `--fmp4` or `--ltx-auto-split`, or with image or folder input. See [Segments](segments.md). |
 | `--working-directory` | output dir | Where temporary files and saved progress are written. See [Segments](segments.md). |

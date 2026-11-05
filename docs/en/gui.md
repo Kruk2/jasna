@@ -73,6 +73,16 @@ and switch with one click. Jasna remembers the last preset after a restart.
 The detection model and detection threshold you set in the [Segment Editor](segments.md)
 are saved for that one video. Other videos in the queue keep their own.
 
+## Frame generation
+
+Set **Frame Generation** (in the **Output** tab, Advanced view) to **2x** for
+smoother motion, for example 30 → 60 FPS. NVIDIA RTX Video Frame Generation
+adds a new frame between every two. Audio and length stay the same.
+
+- It needs an NVIDIA RTX 40-series or newer GPU. On other GPUs it is greyed out.
+- The whole video is restored: it doesn't work with ranges from the Segment
+  Editor, and **LTX only for big mosaics** is skipped.
+
 ## Video Player
 
 Click **Video Player** in the header to watch a video while Jasna restores it.
