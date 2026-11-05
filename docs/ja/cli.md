@@ -129,6 +129,7 @@ Ctrl+C、エラー、アプリ終了後は、同じコマンドを実行する�
 | `--lut` | — | 動画の書き出し時に適用される `.cube` カラー LUT（1D または 3D）。GUI のエンコードセクションでも設定できます。 |
 | `--sharpen` | `0` | エンコード前に映像をシャープにします。`0`（無効）〜`1`（最強）。ffmpeg の `cas` フィルターと同じ結果になるため、再エンコードは不要です。詳しくは[高度な処理](advanced_processing.md)。 |
 | `--retarget-high-fps` | オフ | 1 フレームおきに残して 60 → 30 FPS（および 59.94 → 29.97）に変換。他のレートは変わらず、音声もずれません。`--stream` や `--segments` とは併用できません。 |
+| `--frame-generation` | `none` | `2x` で NVIDIA RTX Video Frame Generation によりフレームレートを 2 倍にし、動きを滑らかにします。RTX 40 シリーズ以降の GPU が必要です。音声と長さは変わりません。`--stream`、`--segments`、`--ltx-auto-split` とは併用できません。 |
 | `--fmp4` | オフ | 作成中の `.mp4` / `.mov` 出力をそのまま再生できます。中断してもファイルは再生可能なままです。`--stream`、`--segments`、`--ltx-auto-split` とは併用できません。詳しくは[高度な処理](advanced_processing.md)。 |
 | `--segments` | — | 1 本の動画のこの区間だけを復元します。秒または `mm:ss` で指定。例: `10-25,01:10-01:30.5`。`--stream`、`--retarget-high-fps`、`--fmp4`、`--ltx-auto-split` とは併用できず、画像やフォルダーの入力にも使えません。詳しくは[区間](segments.md)。 |
 | `--working-directory` | 出力ディレクトリ | 一時ファイルと保存済み進行状況の書き込み先。詳しくは[区間](segments.md)。 |
