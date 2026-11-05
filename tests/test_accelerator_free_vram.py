@@ -70,3 +70,16 @@ def test_allocatable_vram_stops_where_allocations_fail_and_frees_the_probe():
         torch.cuda.set_per_process_memory_fraction(1.0, device)
     assert GIB // 2 < allocatable <= GIB
     assert torch.cuda.memory_reserved(device) == reserved
+
+
+@pytest.mark.parametrize(("free", "resident"), [(40 * GIB, 4), (3 * GIB + 3 * GIB + GIB, 2)])
+def test_resident_blocks_probe_only_what_all_resident_needs(monkeypatch, free, resident):
+    from types import SimpleNamespace
+
+    from jasna.ltx import sampler
+
+    limits = []
+    monkeypatch.setattr(sampler, "allocatable_bytes", lambda device, limit: limits.append(limit) or limit)
+    owner = SimpleNamespace(device=torch.device("cuda:0"), _free_vram=lambda device: free)
+    assert sampler.LtxTransformer._resident_blocks(owner, [GIB] * 4) == resident
+    assert limits == [min(free, 4 * GIB + sampler.ACTIVATION_RESERVE_BYTES + 2 * GIB)]
