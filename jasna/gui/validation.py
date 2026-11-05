@@ -33,7 +33,8 @@ def validate_gui_start(settings: AppSettings, jobs: list[JobItem], *, ltx_availa
         if needs_ltx:
             errors.append(t("error_ltx_ranges_unavailable", files=", ".join(needs_ltx)))
 
-    if settings.restoration_model == "ltx":
+    # Without auto split an LTX job drops TVAI (ltx_unsupported_options); auto split keeps it.
+    if settings.restoration_model == "ltx" and not settings.ltx_auto_split:
         return errors
 
     if settings.secondary_restoration != "tvai":

@@ -89,3 +89,14 @@ def test_validate_gui_start_blocks_ltx_ranges_only_when_ltx_cannot_run() -> None
     assert validate_gui_start(ltx, [whole, standard], ltx_available=False) == [
         t("error_ltx_ranges_unavailable", files="whole.mp4, standard.mp4")
     ]
+
+
+def test_validate_gui_start_checks_tvai_for_ltx_only_with_auto_split(monkeypatch) -> None:
+    monkeypatch.delenv("TVAI_MODEL_DATA_DIR", raising=False)
+    monkeypatch.delenv("TVAI_MODEL_DIR", raising=False)
+    ltx = AppSettings(restoration_model="ltx", secondary_restoration="tvai")
+
+    assert validate_gui_start(ltx, [], ltx_available=True) == []
+    assert t("error_tvai_data_dir_not_set") in validate_gui_start(
+        AppSettings(restoration_model="ltx", ltx_auto_split=True, secondary_restoration="tvai"), [], ltx_available=True
+    )
