@@ -4,6 +4,8 @@ import torch
 from jasna.media.probe import get_video_meta_data
 from jasna.media.video_decoder import VideoReader
 
+pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+
 SAMPLE_VIDEOS = [
     "assets/test_clip1_1080p.mp4",
     "assets/test_clip1_2160p.mp4",

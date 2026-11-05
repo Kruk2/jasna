@@ -33,6 +33,8 @@ def _build_session(
     secondary_class = _SECONDARY_RESTORER_CLASSES.get(config.secondary_restoration)
     with (
         patch("jasna.accelerator.is_amd_device", return_value=amd),
+        patch("jasna.accelerator.log_amd_backend"),
+        patch("jasna.ltx.transformer.require_kernels"),
         patch(
             "jasna.engine_compiler.ensure_engines_compiled",
             return_value=compile_result,
@@ -132,6 +134,7 @@ def test_ltx_runs_rtx_super_res_without_auto_split() -> None:
 def test_amd_rejects_secondary_restoration(secondary) -> None:
     # Rejected before the restorer is built, so its NVIDIA-only module never needs to import.
     with (patch("jasna.accelerator.is_amd_device", return_value=True),
+          patch("jasna.accelerator.log_amd_backend"),
           pytest.raises(ValueError, match="not available in the AMD build")):
         build_restoration_session(session_config(secondary_restoration=secondary), log_callback=None)
 

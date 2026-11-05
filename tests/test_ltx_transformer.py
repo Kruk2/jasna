@@ -341,6 +341,7 @@ def test_packaged_amd_runs_the_int8_linears_on_comfy_kitchen_without_importing_t
 
 def test_nvidia_without_triton_kernels_keeps_the_torch_linears(monkeypatch):
     _without_triton(monkeypatch, None)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (8, 9))
     assert T.enable_quant_kernels(torch.device("cuda")) is None
 
 
