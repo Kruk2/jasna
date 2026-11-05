@@ -1,6 +1,7 @@
 """Builders shared by tests that need a SessionConfig, a Pipeline, or test media."""
 from __future__ import annotations
 
+import logging
 import re
 import struct
 import subprocess
@@ -145,8 +146,10 @@ def cli_args(tmp_path: Path, *extra: str, missing: tuple[str, ...] = ()) -> list
 
 @contextmanager
 def cli_environment(pipeline=None):
-    """Passing system checks, no GPU context, no engine builds and a mocked ``Pipeline`` class, which it yields."""
+    """Passing system checks, no GPU context, no engine builds and a mocked ``Pipeline`` class, which it yields.
+    The root log level ``main`` sets is restored, so later tests still capture warnings."""
     pipeline_cls = MagicMock(return_value=MagicMock() if pipeline is None else pipeline)
+    root_level = logging.getLogger().level
     with (
         patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
         patch("jasna.main.check_supported_gpu", return_value=(True, "Fake GPU")),
@@ -158,7 +161,10 @@ def cli_environment(pipeline=None):
         patch("jasna.pipeline.Pipeline", pipeline_cls),
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
     ):
-        yield pipeline_cls
+        try:
+            yield pipeline_cls
+        finally:
+            logging.getLogger().setLevel(root_level)
 
 
 def run_cli(argv: list[str], *, pipeline=None) -> MagicMock:

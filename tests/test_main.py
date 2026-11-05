@@ -150,13 +150,11 @@ def test_a_video_job_needs_input_and_output(capsys, argv, error):
 
 
 def test_log_level_sets_the_logging_level(tmp_path):
-    root = logging.getLogger()
-    previous = root.level
-    try:
-        run_cli(cli_args(tmp_path, "--log-level", "debug"))
-        assert root.level == logging.DEBUG
-    finally:
-        root.setLevel(previous)
+    from jasna.main import main
+
+    with cli_environment(), patch("sys.argv", ["jasna", *cli_args(tmp_path, "--log-level", "debug")]):
+        main()
+        assert logging.getLogger().level == logging.DEBUG
 
 
 def test_disabling_basicvsrpp_compile_skips_its_engine(tmp_path):
