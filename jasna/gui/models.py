@@ -212,21 +212,15 @@ def _migrate_preset_dict(preset_dict: dict) -> dict:
     migrated = {k: v for k, v in preset_dict.items() if k in known_fields}
     custom_args = migrated.get("encoder_custom_args")
     if custom_args:
-        from jasna.media.encoder_settings import parse_encoder_settings
+        from jasna.media.encoder_settings import CQ_CONTROLS, parse_encoder_settings
 
         try:
             parsed_args = parse_encoder_settings(custom_args)
         except (ValueError, json.JSONDecodeError):
             logger.warning("Preset has unreadable custom encoder settings %r; keeping them as they are", custom_args)
         else:
-            cq_key = next(
-                (
-                    key
-                    for key in ("cq", "qvbr_quality_level")
-                    if key in parsed_args
-                ),
-                None,
-            )
+            # A preset may come from either GPU, so every CQ control moves to the slider.
+            cq_key = next((key for key in CQ_CONTROLS if key in parsed_args), None)
             if cq_key is not None:
                 cq = parsed_args[cq_key]
                 if isinstance(cq, int) and not isinstance(cq, bool):

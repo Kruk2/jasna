@@ -34,7 +34,7 @@ from jasna.media.container_utils import (
     is_mov_chapter_stream,
     subtitle_transcode_codec,
 )
-from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_settings
+from jasna.media.encoder_settings import cq_controls, encoder_cq_spec, validate_encoder_settings
 from jasna.media.lut import GpuLutApplier, parse_cube_file
 from jasna.media.probe import VideoMetadata
 from jasna.media.rgb_to_yuv import RgbToYuvConverter
@@ -324,7 +324,7 @@ def _normalize_amf_cq(
             f"AMD {codec.upper()} Main10 does not support QVBR or HQVBR; use the default CQP mode"
         )
 
-    aliases = [key for key in ("cq", "qvbr_quality_level") if key in overrides]
+    aliases = cq_controls(overrides, AcceleratorVendor.AMD)
     if len(aliases) > 1:
         raise ValueError(
             "Conflicting encoder settings: cq and qvbr_quality_level are aliases "
