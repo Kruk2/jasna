@@ -644,9 +644,9 @@ def test_decode_shares_spread_each_window_over_the_frames_it_decodes_during():
     shares = restore._decode_shares([_window(0, 2, 4), _window(1, 2, 4), _window(2, 6, 4, canvas=768)])
 
     assert shares == {
-        0: [(512, 0.5)],
-        1: [(512, 0.5)],
-        2: [(512, 1.0), (768, 0.25)],
+        0: [(512, 0.5), (512, 0.5)],
+        1: [(512, 0.5), (512, 0.5)],
+        2: [(768, 0.25)],
         3: [(768, 0.25)],
         4: [(768, 0.25)],
         5: [(768, 0.25)],
