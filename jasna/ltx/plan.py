@@ -939,6 +939,16 @@ def _twin_crop(crop: CropFrame, shift: int, eye_width: int) -> CropFrame:
     return _shift_crop(crop, min(max(shift, -x1), eye_width - x2), 0)
 
 
+def _outline_covers(polygons: Sequence[Polygon], polygon: Polygon) -> bool:
+    """Whether ``CONTINUATION_COVER`` of ``polygon`` lies inside ``polygons``."""
+    outline, box = _extent(polygons), _extent((polygon,))
+    if _cover(outline, box) < CONTINUATION_COVER:
+        return False
+    # The box test alone marks a region beside a concave outline as covered.
+    raster = _Raster((outline, box))
+    return _covered(raster.mask(polygons), raster.mask((polygon,))) >= CONTINUATION_COVER
+
+
 def right_eye_twins(
     left_plans: Sequence[TrackPlan],
     right_regions: Sequence[Sequence[Region]],
@@ -950,7 +960,8 @@ def right_eye_twins(
     """Each left-eye track the right eye sees on at least ``STEREO_MIN_MATCHED`` of its frames,
     copied to the right eye (eye coordinates) and shifted by its smoothed disparity. A twin's
     windows keep the left windows' ``noise``, so both eyes restore the same detail. Also
-    returns the right-eye regions no twin matched or covers by ``CONTINUATION_COVER``."""
+    returns the right-eye regions no twin matched or covers by ``CONTINUATION_COVER``; a twin also
+    paints the right-eye regions it covers."""
     used: list[set[int]] = [set() for _ in right_regions]
     twins: list[TrackPlan] = []
     index = first_index
@@ -977,26 +988,22 @@ def right_eye_twins(
             crops = tuple(_twin_crop(crop, int(shift[offset + j]), eye_width) for j, crop in enumerate(window.crops))
             windows.append(replace(window, index=index, track_id=track_id, crops=crops))
             index += 1
-        polygons = tuple(
-            tuple(polygon + np.array((shift[k], 0), dtype=polygon.dtype) for polygon in frame)
-            for k, frame in enumerate(plan.polygons)
-        )
+        polygons = []
+        for k, frame in enumerate(plan.polygons):
+            t = plan.start + k
+            outline = tuple(polygon + np.array((shift[k], 0), dtype=polygon.dtype) for polygon in frame)
+            # A rigid shift misses where the eyes see the mosaic's shape differently (depth across a close-up),
+            # so the twin also paints the right-eye regions it covers; those never become a second track.
+            covered = (
+                [i for i, r in enumerate(right_regions[t]) if _outline_covers(outline, r.polygon)]
+                if plan.presence[k] > 0 and 0 <= t < len(right_regions)
+                else []
+            )
+            polygons.append(outline + tuple(right_regions[t][i].polygon for i in covered if i not in used[t]))
+            used[t].update(covered)
         for t, i in matched:
             used[t].add(i)
-        # The mosaic's right-eye regions on frames its match missed must not become a second track there.
-        for k, frame in enumerate(polygons):
-            t = plan.start + k
-            if plan.presence[k] > 0 and 0 <= t < len(right_regions):
-                outline = _extent(frame)
-                for i, r in enumerate(right_regions[t]):
-                    box = _extent((r.polygon,))
-                    if _cover(outline, box) < CONTINUATION_COVER:
-                        continue
-                    # The box test alone marks a region beside a concave outline as covered.
-                    raster = _Raster((outline, box))
-                    if _covered(raster.mask(frame), raster.mask((r.polygon,))) >= CONTINUATION_COVER:
-                        used[t].add(i)
-        twins.append(replace(plan, track_id=track_id, polygons=polygons, windows=tuple(windows)))
+        twins.append(replace(plan, track_id=track_id, polygons=tuple(polygons), windows=tuple(windows)))
     unpaired = [[r for i, r in enumerate(regions) if i not in used[t]] for t, regions in enumerate(right_regions)]
     return twins, unpaired
 
