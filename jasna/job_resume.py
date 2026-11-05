@@ -103,11 +103,9 @@ def _digest(identity: dict) -> str:
     return hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def job_fingerprints(
-    config: SessionConfig, source: Path, output: Path, metadata, splice_plan: SplicePlan | None
-) -> tuple[str, str]:
-    """``(job, latents)``: ``job`` covers everything the output depends on; ``latents`` only
-    what the saved auto split, track plans and latents depend on, so a change to the rest
+def job_inputs(config: SessionConfig, source: Path, output: Path, metadata, splice_plan: SplicePlan | None) -> dict:
+    """Everything a checkpoint depends on, as plain JSON values; ``latents`` holds only what
+    the saved auto split, track plans and latents depend on, so a change to the rest
     (codec, quality, LUT, sharpening, BasicVSR++ settings) keeps them."""
     from jasna.ltx.model_files import bundle_paths
     from jasna.ltx.plan import track_max_gap
@@ -132,7 +130,7 @@ def job_fingerprints(
                 decoder=config.ltx_vae_decoder,
             )
         ]
-    latents = _digest({
+    latents = {
         "format": FORMAT_VERSION,
         "version": __version__,
         "input": [str(source.resolve()), stat.st_size, stat.st_mtime_ns],
@@ -143,8 +141,8 @@ def job_fingerprints(
         "ltx_max_gap": track_max_gap(config.max_detection_gap),
         "segments": [asdict(segment) for segment in ranges],
         "models": latent_models,
-    })
-    job = _digest({
+    }
+    inputs = {
         "latents": latents,
         "output": str(output.resolve()),
         "settings": settings,
@@ -153,8 +151,28 @@ def job_fingerprints(
         ),
         "lut": hashlib.sha256(Path(config.lut_path).read_bytes()).hexdigest() if config.lut_path else None,
         "plan": _digest(asdict(splice_plan)) if splice_plan is not None else None,
-    })
-    return job, latents
+    }
+    return json.loads(json.dumps(inputs, default=str))
+
+
+def fingerprints(inputs: dict) -> tuple[str, str]:
+    """``(job, latents)`` digests of ``job_inputs``."""
+    latents = _digest(inputs["latents"])
+    return _digest({**inputs, "latents": latents}), latents
+
+
+def changed_inputs(saved: dict | None, current: dict) -> list[str]:
+    """``key: saved -> current`` for each input that differs; nested keys are dotted."""
+    if saved is None:
+        return ["unknown (saved by an older Jasna)"]
+    changes = []
+    for key in sorted(saved.keys() | current.keys()):
+        before, after = saved.get(key), current.get(key)
+        if isinstance(before, dict) and isinstance(after, dict):
+            changes += [f"{key}.{change}" for change in changed_inputs(before, after)]
+        elif before != after:
+            changes.append(f"{key}: {before} -> {after}")
+    return changes
 
 
 def segments_from_json(data) -> tuple[SegmentRange, ...]:
@@ -171,7 +189,8 @@ class ResumeJob:
     def __init__(self, config: SessionConfig, source: Path, output: Path, metadata, splice_plan: SplicePlan | None):
         self.root = resume_directory(config, output)
         self.directory = self.root / "render"
-        self.fingerprint, self.latents = job_fingerprints(config, source, output, metadata, splice_plan)
+        self.inputs = job_inputs(config, source, output, metadata, splice_plan)
+        self.fingerprint, self.latents = fingerprints(self.inputs)
         self.output = output.resolve()
         self.source = source.resolve()
 
@@ -190,12 +209,13 @@ class ResumeJob:
             if (self.directory / "segments").exists():
                 shutil.rmtree(self.directory / "segments")
         else:
-            self._replace_unless(_has_render_work(self.directory))
+            self._replace_unless(_has_render_work(self.directory), manifest and manifest.get("inputs"), self.inputs)
             if self.directory.exists():
                 shutil.rmtree(self.directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         write_json(self.directory / "job.json", {
             "fingerprint": self.fingerprint, "latents": self.latents, "input": str(self.source), "output": str(self.output),
+            "inputs": self.inputs,
         })
 
     def saved_split(self) -> tuple[SegmentRange, ...] | None:
@@ -204,19 +224,24 @@ class ResumeJob:
         split = read_json(self.root / "split.json")
         if split is not None and split["fingerprint"] == self.latents:
             return segments_from_json(split["segments"])
-        self._replace_unless(has_saved_work(self.root))
+        self._replace_unless(has_saved_work(self.root), split and split.get("inputs"), self.inputs["latents"])
         return None
 
     def save_split(self, segments: tuple[SegmentRange, ...]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         write_json(self.root / "split.json", {
             "fingerprint": self.latents, "segments": [asdict(segment) for segment in segments],
+            "inputs": self.inputs["latents"],
         })
 
-    def _replace_unless(self, work_saved: bool) -> None:
+    def _replace_unless(self, work_saved: bool, saved_inputs: dict | None, inputs: dict) -> None:
         """Saved data for other settings is replaced, except saved work: only the user may
-        discard that."""
+        discard that. The log names what changed, since users can't tell from the prompt."""
         if work_saved:
+            log.warning(
+                "Saved progress for %s does not match this run; changed: %s",
+                self.output.name, "; ".join(changed_inputs(saved_inputs, inputs)),
+            )
             raise ResumeMismatchError(self.root)
 
     def finish(self) -> None:

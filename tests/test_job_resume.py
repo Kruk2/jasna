@@ -10,7 +10,7 @@ import torch
 
 from factories import session_config
 from jasna import job_resume
-from jasna.job_resume import ResumeJob, ResumeMismatchError, job_fingerprints
+from jasna.job_resume import ResumeJob, ResumeMismatchError, changed_inputs, fingerprints, job_inputs
 from jasna.media.splice import KeyframeIndex, build_splice_plan
 from jasna.os_utils import atomic_write
 from jasna.session_factory import find_resume_output
@@ -89,6 +89,10 @@ def test_latents_ignore_part_files_and_load_only_weights(tmp_path):
         assert torch.equal(store.get(3), torch.tensor([1.0, 2.0], dtype=torch.bfloat16))
     assert load.call_args.kwargs["weights_only"] is True
     assert store.has(3)
+
+
+def job_fingerprints(config, source, output, metadata, splice_plan):
+    return fingerprints(job_inputs(config, source, output, metadata, splice_plan))
 
 
 def test_fingerprint_ignores_progress_working_directory_and_decoder(job, tmp_path):
@@ -232,6 +236,29 @@ def test_latents_follow_the_detection_gap_only_where_ltx_tracks_use_it(job):
         changed = job_fingerprints(replace(config, max_detection_gap=gap), source, output, metadata, None)
         assert changed[0] != job_key
         assert (changed[1] == latents) is keeps_latents
+
+
+@pytest.mark.parametrize("saved, current, expected", [
+    ({"a": 1, "b": {"c": 2, "d": [1, 2]}}, {"a": 1, "b": {"c": 3, "d": [1, 2]}}, ["b.c: 2 -> 3"]),
+    ({"a": 1}, {"a": 1, "b": "new"}, ["b: None -> new"]),
+    ({"a": 1}, {"a": 1}, []),
+    (None, {"a": 1}, ["unknown (saved by an older Jasna)"]),
+])
+def test_changed_inputs_names_each_difference(saved, current, expected):
+    assert changed_inputs(saved, current) == expected
+
+
+def test_mismatch_log_names_the_changed_model_file(job, caplog):
+    config, source, output, metadata = job
+    checkpoint = ResumeJob(config, source, output, metadata, None)
+    checkpoint.prepare()
+    _save_work(checkpoint)
+    stat = config.detection_model_path.stat()
+    os.utime(config.detection_model_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    with pytest.raises(ResumeMismatchError), caplog.at_level("WARNING", logger="jasna.job_resume"):
+        ResumeJob(config, source, output, metadata, None).prepare()
+    assert "changed: latents.models.detection: " in caplog.text
+    assert "latents.settings" not in caplog.text
 
 
 def test_mismatch_preserves_every_file_until_confirmed(job):
