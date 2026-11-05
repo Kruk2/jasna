@@ -20,7 +20,7 @@ def _h264_source():
     """A 10-second H.264 input; yields the splice-plan builder."""
     with (
         patch("jasna.media.probe.get_video_meta_data", return_value=H264_SOURCE),
-        patch("jasna.media.splice.probe_keyframes"),
+        patch("jasna.media.splice.probe_keyframes", return_value=MagicMock(max_b_frames=0)),
         patch("jasna.media.splice.build_splice_plan") as plan,
     ):
         yield plan
@@ -67,7 +67,7 @@ def test_ltx_accepts_segments(tmp_path):
 
 def test_ltx_auto_split_reaches_pipeline_with_the_split_source_codec(tmp_path):
     segments = (SegmentRange(1, 2, SegmentRestoration("ltx", 3)),)
-    split = SegmentJob(session_config(codec="h264"), MagicMock(segments=segments))
+    split = SegmentJob(session_config(codec="h264"), MagicMock(segments=segments, index=MagicMock(max_b_frames=0)))
     with patch("jasna.session_factory.ltx_auto_split", return_value=split) as auto_split, _ltx_installed():
         pipeline_cls = run_cli(cli_args(
             tmp_path, "--restoration-model-name", "ltx", "--ltx-seed", "3", "--ltx-auto-split", "12", "--codec", "av1",
