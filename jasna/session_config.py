@@ -30,6 +30,7 @@ VrProjectionName = Literal["auto", "raw", "fisheye", "gnomonic"]
 RtxQualityName = Literal["low", "medium", "high", "ultra"]
 RtxLevelName = Literal["none", "low", "medium", "high", "ultra"]
 CodecName = Literal["hevc", "h264", "av1"]
+DEFAULT_CODEC: CodecName = "hevc"
 LtxVaeName = Literal["auto", "full", "half", "max"]
 """An LTX video encoder or decoder size; "auto" is the model's own default."""
 DecodeBackendName = Literal["auto", "vali", "pyav-hw", "pyav-sw"]

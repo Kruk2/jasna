@@ -25,6 +25,7 @@ from jasna.os_utils import (
     install_on_hard_disk,
 )
 from jasna.session_config import (
+    DEFAULT_CODEC,
     LTX_DEFAULT_MODEL,
     LTX_DEFAULT_OVERLAP,
     LTX_DEFAULT_SEED,
@@ -545,7 +546,7 @@ def build_parser() -> argparse.ArgumentParser:
     encoding.add_argument(
         "--codec",
         type=lambda value: str(value).lower(),
-        default="hevc",
+        default=None,
         choices=["hevc", "h264", "av1"],
         help=CLI_HELP["codec"],
     )
@@ -981,10 +982,6 @@ def main() -> None:
     if args.activation_status:
         _print_activation_status(parser)
         return
-    codec_was_explicit = any(
-        value == "--codec" or value.startswith("--codec=")
-        for value in sys.argv[1:]
-    )
 
     if args.benchmark:
         from jasna.benchmark import run_benchmark_cli
@@ -1115,7 +1112,7 @@ def main() -> None:
     if restoration_backend != "ltx" and not restoration_model_path.exists():
         parser.error(f"restoration model not found: {restoration_model_path}")
 
-    codec = str(args.codec).lower()
+    codec = DEFAULT_CODEC if args.codec is None else args.codec
     from jasna.accelerator import device_context, vendor_for_device
 
     with _usage_errors(parser):
@@ -1137,7 +1134,7 @@ def main() -> None:
         )
 
     segment_job = (
-        _plan_segments(parser, args, config, input_video, output_video, codec_was_explicit=codec_was_explicit)
+        _plan_segments(parser, args, config, input_video, output_video, codec_was_explicit=args.codec is not None)
         if segments_spec else None
     )
     _ensure_ltx_model(config, segment_job.splice_plan.segments if segment_job is not None else None)

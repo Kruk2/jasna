@@ -1,5 +1,7 @@
 """CLI argument help strings for jasna.main.build_parser, keyed by argparse dest."""
 
+from jasna.session_config import DEFAULT_CODEC
+
 CLI_HELP: dict[str, str] = {
     "license_code": (
         "Activate with your License code. On a computer with a TPM 2.0 security chip, Jasna then works offline; "
@@ -68,7 +70,7 @@ CLI_HELP: dict[str, str] = {
     "max_detection_gap": "Fill detection dropouts up to N frames when the mosaic reappears at the same spot. 0 disables (default: %(default)s). LTX always fills dropouts of up to 3 frames; values above 3 apply to LTX too",
     "min_detection_duration": "Drop detections shorter than N frames as false positives. 0 disables (default: %(default)s)",
     "scene_detection": "Detect hard scene cuts and end all tracked mosaic clips at the cut, so no clip spans two different shots. (default: %(default)s)",
-    "codec": "Offline output video codec (HLS streaming always uses H.264). Default: %(default)s",
+    "codec": f"Offline output video codec (HLS streaming always uses H.264). Default: {DEFAULT_CODEC}",
     "cq": (
         "Video quality (CQ). Lower is better quality and bigger files. NVIDIA defaults: "
         "H.264 25, HEVC 28, AV1 35; AMD defaults: H.264 24, HEVC 25, AV1 16."
