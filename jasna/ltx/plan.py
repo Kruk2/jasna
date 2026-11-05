@@ -950,7 +950,7 @@ def right_eye_twins(
     """Each left-eye track the right eye sees on at least ``STEREO_MIN_MATCHED`` of its frames,
     copied to the right eye (eye coordinates) and shifted by its smoothed disparity. A twin's
     windows keep the left windows' ``noise``, so both eyes restore the same detail. Also
-    returns the right-eye regions no twin matched."""
+    returns the right-eye regions no twin matched or covers by ``CONTINUATION_COVER``."""
     used: list[set[int]] = [set() for _ in right_regions]
     twins: list[TrackPlan] = []
     index = first_index
@@ -966,8 +966,6 @@ def right_eye_twins(
                 disparity[k] = match[1]
         if len(matched) < STEREO_MIN_MATCHED * frames:
             continue
-        for t, i in matched:
-            used[t].add(i)
         known = np.flatnonzero(~np.isnan(disparity))
         shift = np.round(
             gaussian_smooth(np.interp(np.arange(frames), known, disparity[known]), SMOOTH_SIGMA_FRAMES)
@@ -983,6 +981,16 @@ def right_eye_twins(
             tuple(polygon + np.array((shift[k], 0), dtype=polygon.dtype) for polygon in frame)
             for k, frame in enumerate(plan.polygons)
         )
+        for t, i in matched:
+            used[t].add(i)
+        # The mosaic's right-eye regions on frames its match missed must not become a second track there.
+        for k, frame in enumerate(polygons):
+            t = plan.start + k
+            if plan.presence[k] > 0 and 0 <= t < len(right_regions):
+                outline = _extent(frame)
+                used[t].update(
+                    i for i, r in enumerate(right_regions[t]) if _cover(outline, _extent((r.polygon,))) >= CONTINUATION_COVER
+                )
         twins.append(replace(plan, track_id=track_id, polygons=polygons, windows=tuple(windows)))
     unpaired = [[r for i, r in enumerate(regions) if i not in used[t]] for t, regions in enumerate(right_regions)]
     return twins, unpaired
