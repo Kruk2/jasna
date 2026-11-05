@@ -129,7 +129,7 @@ def frame_image(
 
 
 class _CenterFrameCollector:
-    """FrameWriter that keeps the restored frame closest to ``center_pts`` and
+    """PassFrameWriter that keeps the restored frame closest to ``center_pts`` and
     cancels the pass once the center has been written."""
 
     def __init__(
