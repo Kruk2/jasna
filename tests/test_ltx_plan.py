@@ -361,6 +361,17 @@ def test_track_camera_contains_support_and_letterboxes():
         assert crop.canvas == PLAN_CANVAS
 
 
+def test_track_camera_eases_around_a_brief_box_spike():
+    boxes = [(833.0, 235.0, 1059.0, 731.0)] * 95 + [(833.0, 295.0, 1059.0, 761.0)] * 10 + [(833.0, 235.0, 1059.0, 731.0)] * 95
+    boxes[100] = (833.0, 295.0, 1059.0, 784.0)
+    camera = track_camera(boxes, frame_w=1920, frame_h=1080, feather=30)
+    tops = np.array([crop.crop_box[1] for crop in camera])
+    assert np.abs(np.diff(tops, 2)).max() <= 2
+    for crop, box in zip(camera, boxes):
+        x1, y1, x2, y2 = crop.crop_box
+        assert x1 <= box[0] and y1 <= box[1] and x2 >= box[2] and y2 >= box[3]
+
+
 def test_large_crops_use_the_large_canvas():
     plans = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=True, window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
     assert plans[0].windows[0].canvas == LARGE_CANVAS
@@ -433,7 +444,7 @@ def _plan_digest(plans) -> str:
 def test_plan_video_output_matches_the_recorded_plan():
     regions, cuts = _random_video(0, 4000)
     plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, stereo=None, large_canvas=True, window_hop=window_hop(17), max_gap=MAX_GAP, min_duration=0)
-    assert _plan_digest(plans) == "bbaab08c30508a52859c74c20a360fe6c9ddcdcc0d5605d6657e7816d30962e0"
+    assert _plan_digest(plans) == "29215532cc269f4f95eaad4cf5b42dee38008dd256276efd1c0b0bee6b8fb408"
 
 
 def test_gap_fill_keeps_outlines_inside_the_frame_when_boxes_leave_it():
