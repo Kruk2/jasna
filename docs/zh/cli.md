@@ -54,6 +54,8 @@ $env:TEMP = 'Z:\Temp'
 | `--ltx-fast` / `--no-ltx-fast` | 关闭 | LTX：快约 1.4 倍，细节略少。仅限 RTX 50 系列；其他 GPU 会报错停止。 |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多。大多数视频都有大马赛克，整个视频可能慢到约 3 倍。需要约 12 GB 空闲显存；不够时，这些马赛克按普通方式修复。 |
 | `--ltx-overlap` | `17` | LTX：LTX 修复的各段之间共享的帧数（`17`、`25`、`33`、`41` 或 `49`）。马赛克持续超过 4 秒时，越少越快；`33` 是重叠更多的旧模式。 |
+| `--ltx-vae-encoder` | `auto` | LTX：LTX 读取视频的方式：`full`（最清晰、最慢）、`half`（更快）或 `max`（最快，画面稍柔和）。`auto`：`ltx-basic` 用 `half`，其他用 `full`。与应用里的 **LTX 编码器**相同。 |
+| `--ltx-vae-decoder` | `auto` | LTX：LTX 把结果转回视频的方式：`full`、`half` 或 `max`，同上。`auto`：`ltx-basic` 用 `max`，其他用 `full`。与应用里的 **LTX 解码器**相同。 |
 | `--ltx-seed` | `20260923` | LTX：换一个种子，结果会略有不同；同一个种子会重复同样的结果。 |
 | `--ltx-trial` / `--no-ltx-trial` | 关闭 | LTX：不需要模型和许可证即可测试速度。视频不会被修复。 |
 | `--ltx-auto-split` | — | LTX：大马赛克（达到视频高度的这个百分比，例如 `12`）用 LTX，较小的用 BasicVSR++。可用于文件夹。不能与 `--segments` 或 `--fmp4` 一起使用。见[区间](segments.md#cli---ltx-auto-split)。 |

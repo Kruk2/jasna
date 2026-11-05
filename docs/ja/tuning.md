@@ -90,8 +90,6 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 
 | 変数 | 値 | 内容 |
 | --- | --- | --- |
-| `JASNA_LTX_VAE_ENCODER` | `auto`（デフォルト）、`full`、`half`、`max` | コマンドラインのみ。アプリでは **LTX エンコーダー**を使います（[LTX のオプション](models.md#ltx-のオプション)を参照）。LTX の動画エンコーダーを選びます。`half` と `max` は速く、少しやわらかい仕上がりです。`auto`: 基本画質は `half`、それ以外は `full`。 |
-| `JASNA_LTX_VAE_DECODER` | `auto`（デフォルト）、`full`、`half`、`max` | コマンドラインのみ。アプリでは **LTX デコーダー**を使います。LTX の動画デコーダーを選びます。`half` と `max` は速く、少しやわらかい仕上がりです。`auto`: 基本画質は `max`、それ以外は `full`。 |
 | `JASNA_DECODE_BACKEND` | `auto`（デフォルト）、`vali`、`pyav-hw`、`pyav-sw` | コマンドラインのみ。アプリでは **動画デコーダー**（**モデル**タブ、**エキスパート**表示）を使います。入力動画の読み込み方法を選びます。動画が開けない、またはフレームが壊れる場合は `pyav-sw`（低速）を試してください。`vali` は NVIDIA のみです。 |
 | `JASNA_TRT_CUDAGRAPHS` | `1`（デフォルト）、`0` | NVIDIA: `0` でコンパイル済み BasicVSR++ の高速化をオフにします。GPU エラーが出る場合に試してください。 |
 | `JASNA_AMD_GRAPHS` | `1`（デフォルト）、`0` | AMD: `0` で BasicVSR++ の高速化をオフにします。GPU エラーが出る場合や VRAM が足りない場合に試してください。 |

@@ -56,6 +56,14 @@ CLI_HELP: dict[str, str] = {
         "ltx: frames shared between the chunks LTX restores. Fewer is faster when a mosaic stays on screen "
         "for more than 4 seconds; 33 is the older mode with more overlap. (default: %(default)s)"
     ),
+    "ltx_vae_encoder": (
+        "ltx: how LTX reads the video: full (sharpest, slowest), half (faster) or max (fastest, slightly softer). "
+        "auto: half for ltx-basic, full for the others. (default: %(default)s)"
+    ),
+    "ltx_vae_decoder": (
+        "ltx: how LTX turns its result back into video: full (sharpest, slowest), half (faster) or max "
+        "(fastest, slightly softer). auto: max for ltx-basic, full for the others. (default: %(default)s)"
+    ),
     "fp16": "Use half precision. Uses less VRAM and is often faster, with no visible quality loss.",
     "compile_basicvsrpp": "Prepare BasicVSR++ for your GPU: about 3x faster, almost no extra VRAM. The first run takes 15-60 minutes. NVIDIA only. (default: %(default)s)",
     "max_clip_size": "Frames restored together. Bigger is steadier and faster but uses more VRAM; use the biggest that fits. (default: %(default)s)",
