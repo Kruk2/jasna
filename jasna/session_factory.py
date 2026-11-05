@@ -341,12 +341,37 @@ class SegmentJob:
     config: SessionConfig
     splice_plan: "SplicePlan"
 
+    @property
+    def reencodes_whole_video(self) -> bool:
+        """Past the encoder's B-frame cap the ranges cannot be cut out, so the pipeline
+        re-encodes the whole video with BasicVSR++ and keeps no finished parts."""
+        from jasna.accelerator import vendor_for_device
+        from jasna.media.splice import h264_b_frames_over_cap
+
+        return h264_b_frames_over_cap(self.config.codec, self.splice_plan.index, vendor_for_device(self.config.device))
+
+
+def _require_ltx_cuts(config: SessionConfig, spliced: SpliceSource) -> None:
+    """LTX restores ranges only as cut-out parts, which the encoder cannot match past its B-frame cap."""
+    from jasna.accelerator import vendor_for_device
+    from jasna.media.splice import SmartRenderCompatibilityError, h264_b_frames_over_cap
+
+    if h264_b_frames_over_cap(spliced.codec, spliced.index, vendor_for_device(config.device)):
+        raise SmartRenderCompatibilityError(
+            f"This H.264 video uses {spliced.index.max_b_frames} consecutive B-frames, more than the GPU encoder "
+            "can match, so LTX ranges cannot be cut out of it; restore the ranges with BasicVSR++, "
+            "or clear them to restore the whole video with LTX"
+        )
+
 
 def plan_segment_job(
     config: SessionConfig, source: Path, spliced: SpliceSource, segments: "tuple[SegmentRange, ...]"
 ) -> SegmentJob:
     from jasna.media.splice import build_splice_plan
+    from jasna.segments import job_models
 
+    if "ltx" in job_models(config.restoration_model_name, segments):
+        _require_ltx_cuts(config, spliced)
     plan = build_splice_plan(segments, spliced.index, duration=spliced.metadata.duration)
     if config.lut_path is not None or config.sharpen_strength > 0:
         logger.info("%s: a color LUT or sharpening is set, so the parts without ranges are encoded again", source.name)
@@ -417,6 +442,7 @@ def _auto_split_job(
         return None
     try:
         spliced = splice_source(config, input_video, output_video)
+        _require_ltx_cuts(config, spliced)
     except SmartRenderCompatibilityError as exc:
         logger.warning("%s: LTX auto split skipped (%s); restoring the whole video with LTX", input_video.name, exc)
         return None

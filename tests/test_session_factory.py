@@ -204,7 +204,7 @@ def test_build_pipeline_keeps_a_session_that_holds_the_job_model() -> None:
     assert session.ltx_files is None
 
 
-def _auto_split(config, *, samples, validate=None, plan_error=None):
+def _auto_split(config, *, samples, validate=None, plan_error=None, max_b_frames=0):
     from fractions import Fraction
     from tempfile import TemporaryDirectory
 
@@ -215,9 +215,12 @@ def _auto_split(config, *, samples, validate=None, plan_error=None):
     progress = MagicMock()
     with (
         TemporaryDirectory() as temp,
-        patch("jasna.media.probe.get_video_meta_data", return_value=MagicMock(codec_name="hevc", duration=6.0, num_frames=180, time_base=Fraction(1,30))),
+        patch("jasna.media.probe.get_video_meta_data", return_value=MagicMock(codec_name="h264" if max_b_frames else "hevc", duration=6.0, num_frames=180, time_base=Fraction(1,30))),
         patch("jasna.media.splice.validate_smart_render", side_effect=validate),
-        patch("jasna.media.splice.probe_keyframes", return_value=KeyframeIndex((0, 60, 120), Fraction(1, 30), 0, 180)),
+        patch(
+            "jasna.media.splice.probe_keyframes",
+            return_value=KeyframeIndex((0, 60, 120), Fraction(1, 30), 0, 180, max_b_frames=max_b_frames),
+        ),
         patch("jasna.mosaic_scan.scan_mosaic_sizes", return_value=samples) as scan,
     ):
         source, output = Path(temp) / "in.mp4", Path(temp) / "out.mp4"
@@ -284,6 +287,44 @@ def test_ltx_auto_split_falls_back_to_the_whole_video(caplog) -> None:
     split, _ = _auto_split(config, samples=MagicMock(times=(1.0,), scores=(0.0,), sizes=(0.0,), stride=1.0))
     assert split is None
     assert "no mosaics" in caplog.text
+
+
+def test_ltx_auto_split_restores_the_whole_video_with_ltx_past_the_encoder_b_frame_cap(caplog) -> None:
+    config = session_config(restoration_model_name="ltx", ltx_auto_split_percent=12.0)
+    split, scan = _auto_split(config, samples=_samples((0.3, 0.3)), max_b_frames=5)
+    assert split is None
+    scan.assert_not_called()
+    assert "5 consecutive B-frames" in caplog.text
+
+
+def _h264_source(max_b_frames):
+    from fractions import Fraction
+
+    from jasna.media.splice import KeyframeIndex
+    from jasna.session_factory import SpliceSource
+
+    index = KeyframeIndex((0, 60, 120), Fraction(1, 30), 0, 180, max_b_frames=max_b_frames)
+    return SpliceSource(MagicMock(duration=6.0), "h264", index)
+
+
+@pytest.mark.parametrize("model", ["ltx", "basicvsrpp"])
+def test_ltx_ranges_past_the_encoder_b_frame_cap_fail_before_any_work(model) -> None:
+    from jasna.media.splice import SmartRenderCompatibilityError
+    from jasna.session_factory import plan_segment_job
+
+    config = session_config(restoration_model_name=model, codec="h264")
+    ltx_range = SegmentRange(2.5, 3.0, SegmentRestoration("ltx", 1))
+    with pytest.raises(SmartRenderCompatibilityError, match="LTX ranges cannot be cut out"):
+        plan_segment_job(config, Path("in.mp4"), _h264_source(5), (ltx_range,))
+
+
+@pytest.mark.parametrize(("max_b_frames", "whole"), [(4, False), (5, True)])
+def test_basicvsrpp_ranges_past_the_encoder_b_frame_cap_reencode_the_whole_video(max_b_frames, whole) -> None:
+    from jasna.session_factory import plan_segment_job
+
+    config = session_config(codec="h264")
+    job = plan_segment_job(config, Path("in.mp4"), _h264_source(max_b_frames), (SegmentRange(2.5, 3.0),))
+    assert job.reencodes_whole_video is whole
 
 
 @pytest.mark.parametrize(
