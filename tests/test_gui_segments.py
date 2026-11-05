@@ -84,7 +84,7 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
     output_path = tmp_path / "output.mp4"
     segments = (SegmentRange(1, 2),)
     metadata = MagicMock(codec_name="h264", duration=10.0)
-    splice_plan = MagicMock()
+    splice_plan = MagicMock(index=MagicMock(max_b_frames=0))
     pipeline = MagicMock()
     processor = Processor(on_resume_conflict=no_resume_conflict)
     processor._settings = AppSettings()
@@ -95,7 +95,7 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
     with (
         patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
         patch("jasna.media.splice.validate_smart_render"),
-        patch("jasna.media.splice.probe_keyframes", return_value=MagicMock()),
+        patch("jasna.media.splice.probe_keyframes", return_value=MagicMock(max_b_frames=0)),
         patch("jasna.media.splice.build_splice_plan", return_value=splice_plan),
         patch(
             "jasna.mosaic.detection_registry.coerce_detection_model_name",
@@ -150,7 +150,7 @@ def _run_ltx_job(tmp_path, segments, split):
         patch("jasna.gui.processor.ltx_auto_split", return_value=split) as auto_split,
         patch("jasna.media.probe.get_video_meta_data", return_value=MagicMock(codec_name="hevc", duration=10.0)),
         patch("jasna.media.splice.validate_smart_render"),
-        patch("jasna.media.splice.probe_keyframes", return_value=MagicMock()),
+        patch("jasna.media.splice.probe_keyframes", return_value=MagicMock(max_b_frames=0)),
         patch("jasna.media.splice.build_splice_plan", side_effect=lambda ranges, *_a, **_k: MagicMock(segments=ranges)),
         patch("jasna.mosaic.detection_registry.coerce_detection_model_name", side_effect=lambda name: name),
         patch("jasna.mosaic.detection_registry.require_detection_model_weights", return_value=tmp_path / "d.engine"),
@@ -166,7 +166,7 @@ def test_ltx_auto_split_job_runs_the_split_ranges_in_the_source_codec(tmp_path) 
     from jasna.session_factory import SegmentJob
 
     segments = (SegmentRange(1, 2, SegmentRestoration("ltx", 1)),)
-    split = SegmentJob(session_config(codec="h264"), MagicMock(segments=segments))
+    split = SegmentJob(session_config(codec="h264"), MagicMock(segments=segments, index=MagicMock(max_b_frames=0)))
     auto_split, kwargs = _run_ltx_job(tmp_path, (), split)
 
     assert auto_split.call_args.args[0].ltx_auto_split_percent == 20.0
