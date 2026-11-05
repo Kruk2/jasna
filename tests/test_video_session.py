@@ -145,7 +145,7 @@ def test_video_session_config_maps_more_ltx_overlap_to_a_shorter_window_hop() ->
     assert config.ltx_window_hop == 88
 
 
-def test_video_session_config_ignores_standard_only_extras_for_ltx() -> None:
+def test_video_session_config_keeps_standard_extras_only_for_ltx_auto_split() -> None:
     settings = replace(
         AppSettings(),
         restoration_model="ltx",
@@ -161,7 +161,7 @@ def test_video_session_config_ignores_standard_only_extras_for_ltx() -> None:
     assert (standard.secondary_restoration, standard.tvai_denoise, standard.denoise_strength) == ("tvai", True, "high")
     auto_split = _config(replace(settings, ltx_auto_split=True))
     assert (auto_split.secondary_restoration, auto_split.tvai_denoise, auto_split.denoise_strength) == (
-        "tvai", True, "none"
+        "tvai", True, "high"
     )
 
 
