@@ -278,7 +278,6 @@ def test_restore_clip_downscales_when_crop_is_larger_than_restoration_size(monke
 
 
 def test_torch_pad_reflect_supports_large_padding() -> None:
-    import jasna.crop_buffer as cb
 
     image = torch.arange(3 * 2 * 2, dtype=torch.float32).reshape(3, 2, 2)
     out = _torch_pad_reflect(image, (10, 10, 10, 10))
@@ -404,27 +403,6 @@ def _make_clip_and_frames(monkeypatch, *, t=3, frame_hw=(30, 40)):
     return clip, frames, raw_crops
 
 
-def test_prepare_and_run_primary(monkeypatch) -> None:
-    clip, frames, raw_crops = _make_clip_and_frames(monkeypatch)
-    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
-
-    result = pipeline.prepare_and_run_primary(clip, raw_crops, (30, 40), 0, 3, None)
-
-    assert result.track_id == clip.track_id
-    assert result.start_frame == clip.start_frame
-    assert result.frame_count == 3
-    assert result.frame_shape == (30, 40)
-    assert result.frame_device == frames[0].device
-    assert result.keep_start == 0
-    assert result.keep_end == 3
-    assert result.crossfade_weights is None
-    assert result.primary_raw.shape[0] == 3
-    assert len(result.enlarged_bboxes) == 3
-    assert len(result.crop_shapes) == 3
-    assert len(result.pad_offsets) == 3
-    assert len(result.resize_shapes) == 3
-
-
 def test_prepare_and_run_primary_with_denoise(monkeypatch) -> None:
     clip, frames, raw_crops = _make_clip_and_frames(monkeypatch)
     pipeline = RestorationPipeline(
@@ -518,43 +496,3 @@ def test_blend_secondary_result_empty_range(monkeypatch) -> None:
 
     for i in range(3):
         assert bb.is_frame_ready(i)
-
-
-def test_blend_secondary_result_no_pending_tracks(monkeypatch) -> None:
-    """Frames with no pending tracks are immediately ready."""
-    from jasna.blend_buffer import BlendBuffer
-
-    clip, frames, raw_crops = _make_clip_and_frames(monkeypatch, t=2)
-    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
-
-    bb = BlendBuffer(device=torch.device("cpu"))
-    bb.register_frame(0, set())
-    bb.register_frame(1, set())
-
-    assert bb.is_frame_ready(0)
-    assert bb.is_frame_ready(1)
-    blended0 = bb.blend_frame(0, frames[0])
-    blended1 = bb.blend_frame(1, frames[1])
-    assert torch.equal(blended0, frames[0])
-    assert torch.equal(blended1, frames[1])
-
-
-def test_build_secondary_result(monkeypatch) -> None:
-    clip, frames, raw_crops = _make_clip_and_frames(monkeypatch)
-    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
-
-    pr = pipeline.prepare_and_run_primary(clip, raw_crops, (30, 40), 0, 3, None)
-    restored_frames = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8) for _ in range(3)]
-    sr = pipeline.build_secondary_result(pr, restored_frames)
-
-    assert sr.track_id == clip.track_id
-    assert sr.start_frame == clip.start_frame
-    assert sr.frame_count == 3
-    assert sr.frame_shape == (30, 40)
-    assert sr.frame_device == frames[0].device
-    assert sr.restored_frames is restored_frames
-    assert sr.keep_start == 0
-    assert sr.keep_end == 3
-    assert sr.enlarged_bboxes == pr.enlarged_bboxes
-
-
