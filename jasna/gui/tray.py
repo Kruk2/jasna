@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from dataclasses import dataclass
 
@@ -9,6 +10,8 @@ from PIL import Image
 
 from jasna.gui.branding import LOGO_PNG, brand_asset_path
 from jasna.gui.locales import t
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -60,14 +63,18 @@ class TrayIcon:
             return
         with Image.open(brand_asset_path(LOGO_PNG)) as logo:
             image = logo.convert("RGBA").resize((64, 64), Image.Resampling.LANCZOS)
-        self._icon = _create_icon(image, self._title, self._on_open, self._on_quit)
-        self._icon.run_detached()
+        icon = _create_icon(image, self._title, self._on_open, self._on_quit)
+        icon.run_detached()
+        self._icon = icon
 
     def hide(self) -> None:
         if self._icon is None:
             return
-        self._icon.stop()
-        self._icon = None
+        icon, self._icon = self._icon, None
+        try:
+            icon.stop()
+        except Exception:
+            logger.warning("Could not remove the tray icon", exc_info=True)
 
     def set_title(self, title: str) -> None:
         self._title = title

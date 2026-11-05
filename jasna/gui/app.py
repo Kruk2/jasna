@@ -552,7 +552,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         support = tray.tray_support()
         if not support.available or (needs_menu and not support.has_menu):
             return False
-        self._tray.show()
+        try:
+            self._tray.show()
+        except Exception:
+            logger.warning("Could not show the tray icon; keeping the window open", exc_info=True)
+            return False
         self.withdraw()
         return True
 
