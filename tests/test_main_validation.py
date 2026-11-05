@@ -32,6 +32,7 @@ def _ltx_installed():
         patch("jasna.accelerator.is_nvidia_device", return_value=True),
         patch("jasna.ltx.model_files.LtxModelFiles.from_dir", return_value=MagicMock()),
         patch("jasna.ltx.model_files.missing_downloads", return_value=[]),
+        patch("jasna.ltx.transformer.require_kernels"),
     ):
         yield
 
@@ -111,6 +112,7 @@ def test_ltx_trial_needs_no_model_files_or_download(tmp_path, capsys):
         patch("jasna.accelerator.is_nvidia_device", return_value=True),
         patch("jasna.ltx.model_files.LtxModelFiles.from_dir", side_effect=AssertionError("reads model files")),
         patch("jasna.ltx.model_files.missing_downloads", side_effect=AssertionError("offers a download")),
+        patch("jasna.ltx.transformer.require_kernels"),
     ):
         pipeline_cls = run_cli(cli_args(
             tmp_path, "--restoration-model-name", "ltx-undistilled", "--ltx-trial", missing=("--restoration-model-path",),

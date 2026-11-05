@@ -507,6 +507,7 @@ class TestEncodeBuffer:
         else:
             assert aligned.data_ptr() != packed.data_ptr()
 
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
     def test_from_dlpack_uses_shared_cuda_stream_without_host_sync(
         self, tmp_path, monkeypatch
     ):
