@@ -445,7 +445,7 @@ EN = {
         "license_problem_already_converted": "This activation moved to another copy of Jasna. Open Activate Jasna and enter your License code.",
         "license_problem_no_activation": "Activate Jasna with your License code to use supporter models.",
         "license_problem_offline_check": "This computer no longer matches its offline activation, so the queue stopped. Open Activate Jasna and enter your License code again.",
-        "license_problem_already_offline": "This computer already works offline and keeps its device, so it stays offline. Choose \"This is my PC\".",
+        "license_problem_already_offline": "This computer already works offline and keeps its device, so it stays offline. Its activation still works.",
         "license_problem_unofficial_key": "This activation did not come from an official seller. Get a License code from an official seller to use supporter models.",
         "ctx_cut": "Cut",
         "ctx_copy": "Copy",

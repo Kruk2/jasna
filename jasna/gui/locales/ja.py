@@ -445,7 +445,7 @@ JA = {
         "license_problem_already_converted": "この有効化は別の Jasna に移されました。「Jasna を有効化」を開き、ライセンスコードを入力してください。",
         "license_problem_no_activation": "支援者向けモデルを使うには、ライセンスコードで Jasna を有効化してください。",
         "license_problem_offline_check": "このPCがオフライン有効化と一致しなくなったため、キューを停止しました。「Jasna を有効化」を開き、ライセンスコードをもう一度入力してください。",
-        "license_problem_already_offline": "このPCはすでにオフラインで使っていて1台分を使っているため、オフラインのままです。「自分のPC」を選んでください。",
+        "license_problem_already_offline": "このPCはすでにオフラインで使っていて1台分を使っているため、オフラインのままです。今の認証はそのまま使えます。",
         "license_problem_unofficial_key": "This activation did not come from an official seller. Get a License code from an official seller to use supporter models.",
         "ctx_cut": "切り取り",
         "ctx_copy": "コピー",

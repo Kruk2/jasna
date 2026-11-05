@@ -445,7 +445,7 @@ ZH = {
         "license_problem_already_converted": "此激活已转移到另一份 Jasna。请打开“激活 Jasna”并输入许可证码。",
         "license_problem_no_activation": "请先用许可证码激活 Jasna，才能使用支持者模型。",
         "license_problem_offline_check": "这台电脑已与其离线激活不符，队列已停止。请打开“激活 Jasna”并重新输入许可证码。",
-        "license_problem_already_offline": "这台电脑已离线激活并占用 1 台设备，因此会保持离线。请选择“我的电脑”。",
+        "license_problem_already_offline": "这台电脑已离线激活并占用 1 台设备，因此会保持离线。现有激活仍然有效。",
         "license_problem_unofficial_key": "这台电脑上的激活不是 Jasna 官方发放的，无法使用支持者模型。可以从官方闲鱼卖家购买许可证码。",
         "ctx_cut": "剪切",
         "ctx_copy": "复制",

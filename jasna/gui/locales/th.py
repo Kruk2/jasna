@@ -445,7 +445,7 @@ TH = {
         "license_problem_already_converted": "การเปิดใช้งานนี้ย้ายไปยัง Jasna อีกชุดแล้ว เปิดหน้าต่างเปิดใช้งาน Jasna แล้วใส่รหัสสิทธิ์",
         "license_problem_no_activation": "เปิดใช้งาน Jasna ด้วยรหัสสิทธิ์ก่อนใช้โมเดลสำหรับผู้สนับสนุน",
         "license_problem_offline_check": "คอมพิวเตอร์เครื่องนี้ไม่ตรงกับการเปิดใช้งานแบบออฟไลน์อีกต่อไป จึงหยุดคิวแล้ว เปิดหน้าต่างเปิดใช้งาน Jasna แล้วใส่รหัสสิทธิ์อีกครั้ง",
-        "license_problem_already_offline": "คอมพิวเตอร์เครื่องนี้ใช้งานแบบออฟไลน์อยู่แล้วและใช้ 1 อุปกรณ์ไว้ จึงยังคงเป็นออฟไลน์ เลือก เครื่องของฉัน",
+        "license_problem_already_offline": "คอมพิวเตอร์เครื่องนี้ใช้งานแบบออฟไลน์อยู่แล้วและใช้ 1 อุปกรณ์ไว้ จึงยังคงเป็นออฟไลน์ การเปิดใช้งานเดิมยังใช้ได้",
         "license_problem_unofficial_key": "This activation did not come from an official seller. Get a License code from an official seller to use supporter models.",
         "ctx_cut": "ตัด",
         "ctx_copy": "คัดลอก",

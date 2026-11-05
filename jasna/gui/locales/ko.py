@@ -445,7 +445,7 @@ KO = {
         "license_problem_already_converted": "이 활성화는 다른 Jasna로 옮겨졌습니다. Jasna 활성화를 열고 라이선스 코드를 입력하세요.",
         "license_problem_no_activation": "후원자 모델을 사용하려면 라이선스 코드로 Jasna를 활성화하세요.",
         "license_problem_offline_check": "이 컴퓨터가 오프라인 활성화와 더 이상 일치하지 않아 대기열이 멈췄습니다. Jasna 활성화를 열고 라이선스 코드를 다시 입력하세요.",
-        "license_problem_already_offline": "이 컴퓨터는 이미 오프라인으로 사용 중이고 기기 1대를 차지하므로 오프라인으로 유지됩니다. 내 PC를 선택하세요.",
+        "license_problem_already_offline": "이 컴퓨터는 이미 오프라인으로 사용 중이고 기기 1대를 차지하므로 오프라인으로 유지됩니다. 현재 활성화는 그대로 작동합니다.",
         "license_problem_unofficial_key": "This activation did not come from an official seller. Get a License code from an official seller to use supporter models.",
         "ctx_cut": "잘라내기",
         "ctx_copy": "복사",
