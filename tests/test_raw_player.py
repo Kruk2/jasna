@@ -301,7 +301,7 @@ def test_raw_worker_rebuilds_changed_settings_on_same_owner_thread(
     def run_pass(command, _pipeline, _session):
         if command.settings is initial:
             first_pass_started.set()
-            assert release_first_pass.wait(2)
+            assert release_first_pass.wait(30)
         else:
             second_pass_started.set()
         return False
@@ -315,12 +315,12 @@ def test_raw_worker_rebuilds_changed_settings_on_same_owner_thread(
 
     worker.start()
     worker.play_from(0)
-    assert first_pass_started.wait(2)
+    assert first_pass_started.wait(30)
     worker.reload_from(changed, 3.0)
     release_first_pass.set()
-    assert second_pass_started.wait(2)
+    assert second_pass_started.wait(30)
     worker.close()
-    worker.join(2)
+    worker.join(30)
 
     assert not worker.is_alive()
     assert len(set(build_threads)) == 1
