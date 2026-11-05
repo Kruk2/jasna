@@ -6,28 +6,16 @@ import pytest
 from jasna.progressbar import Progressbar, StageProgress
 
 
-class TestFormatDuration:
-    def _fmt(self, s):
-        pb = Progressbar(total_frames=100, video_fps=30, disable=True)
-        return pb._format_duration(s)
-
-    def test_zero(self):
-        assert self._fmt(0) == "0:00"
-
-    def test_negative(self):
-        assert self._fmt(-5) == "0:00"
-
-    def test_none(self):
-        assert self._fmt(None) == "0:00"
-
-    def test_seconds(self):
-        assert self._fmt(45) == "0:45"
-
-    def test_minutes(self):
-        assert self._fmt(125) == "2:05"
-
-    def test_hours(self):
-        assert self._fmt(3723) == "1:02:03"
+@pytest.mark.parametrize(("seconds", "text"), [
+    (0, "0:00"),
+    (-5, "0:00"),
+    (None, "0:00"),
+    (45, "0:45"),
+    (125, "2:05"),
+    (3723, "1:02:03"),
+])
+def test_format_duration(seconds, text):
+    assert Progressbar(total_frames=100, video_fps=30, disable=True)._format_duration(seconds) == text
 
 
 class TestProgressbarLifecycle:
