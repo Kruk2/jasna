@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from jasna.accelerator import AcceleratorVendor
@@ -98,6 +99,39 @@ def validate_encoder_cq(
             f"{spec.minimum}..{spec.maximum} (got {value})"
         )
     return value
+
+
+def resolve_cq(cq: object, *, codec: str, vendor: AcceleratorVendor | str) -> int | float:
+    """``cq`` checked against the codec's range, or the codec's default when it is None."""
+    if cq is None:
+        return encoder_cq_spec(codec, vendor).default
+    return validate_encoder_cq(cq, codec=codec, vendor=vendor)
+
+
+CQ_CONTROLS = ("cq", "qvbr_quality_level")
+"""Encoder settings that set the CQ; only AMD reads ``qvbr_quality_level`` as one."""
+
+
+def cq_controls(settings: Mapping[str, object], vendor: AcceleratorVendor | str) -> list[str]:
+    """The CQ controls in ``settings`` for ``vendor``."""
+    keys = CQ_CONTROLS if AcceleratorVendor(str(vendor)) is AcceleratorVendor.AMD else CQ_CONTROLS[:1]
+    return [key for key in keys if key in settings]
+
+
+def resolve_encoder_settings(
+    settings: Mapping[str, object],
+    *,
+    cq: int | None,
+    codec: str,
+    vendor: AcceleratorVendor | str,
+) -> dict[str, object]:
+    """Validated ``settings`` with one ``cq``: ``cq`` when given, else the CQ control in
+    ``settings``, else the codec's default. Callers reject conflicting CQ controls first."""
+    resolved = dict(settings)
+    if cq is None and (controls := cq_controls(resolved, vendor)):
+        cq = resolved.pop(controls[0])
+    resolved["cq"] = resolve_cq(cq, codec=codec, vendor=vendor)
+    return validate_encoder_settings(resolved, codec=codec, vendor=vendor)
 
 
 # ffmpeg *_nvenc option names shared by every codec

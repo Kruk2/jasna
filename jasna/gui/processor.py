@@ -87,35 +87,17 @@ def _cleanup_torch(torch_mod) -> None:
 def build_job_encoder_settings(settings: AppSettings, codec: str) -> dict:
     # Built per job (not cached in the video session) so a codec change
     # between queued jobs is always validated against the selected codec.
-    from jasna.accelerator import AcceleratorVendor, vendor_for_device
-    from jasna.media.encoder_settings import (
-        encoder_cq_spec,
-        parse_encoder_settings,
-        validate_encoder_cq,
-        validate_encoder_settings,
-    )
+    from jasna.accelerator import vendor_for_device
+    from jasna.media.encoder_settings import cq_controls, parse_encoder_settings, resolve_encoder_settings
 
     vendor = vendor_for_device()
-    cq = (
-        encoder_cq_spec(codec, vendor).default
-        if settings.encoder_cq is None
-        else settings.encoder_cq
-    )
-    validate_encoder_cq(cq, codec=codec, vendor=vendor)
-    encoder_settings = {"cq": cq}
-    if settings.encoder_custom_args:
-        custom_settings = parse_encoder_settings(settings.encoder_custom_args)
-        cq_aliases = {"cq"}
-        if vendor is AcceleratorVendor.AMD:
-            cq_aliases.add("qvbr_quality_level")
-        duplicates = sorted(cq_aliases & custom_settings.keys())
-        if duplicates:
-            raise ValueError(
-                "CQ is controlled by the quality slider; remove "
-                f"{', '.join(duplicates)} from custom encoder settings"
-            )
-        encoder_settings.update(custom_settings)
-    return validate_encoder_settings(encoder_settings, codec=codec, vendor=vendor)
+    custom_settings = parse_encoder_settings(settings.encoder_custom_args)
+    if duplicates := cq_controls(custom_settings, vendor):
+        raise ValueError(
+            "CQ is controlled by the quality slider; remove "
+            f"{', '.join(duplicates)} from custom encoder settings"
+        )
+    return resolve_encoder_settings(custom_settings, cq=settings.encoder_cq, codec=codec, vendor=vendor)
 
 
 def job_config(settings: AppSettings) -> SessionConfig:

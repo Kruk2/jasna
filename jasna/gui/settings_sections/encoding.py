@@ -17,7 +17,7 @@ from jasna.gui.settings_sections.widgets import (
     layout_rows,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_cq
+from jasna.media.encoder_settings import encoder_cq_spec, resolve_cq
 
 # Display labels contain punctuation ("H.264 (AVC)"), so canonical values come
 # from these maps, never from .lower() on the label.
@@ -286,12 +286,7 @@ class EncodingSection:
             for codec in CODEC_CANONICAL_TO_LABEL
         }
         spec = encoder_cq_spec(self._active_codec, self._cq_vendor)
-        cq = spec.default if preset.encoder_cq is None else preset.encoder_cq
-        validate_encoder_cq(
-            cq,
-            codec=self._active_codec,
-            vendor=self._cq_vendor,
-        )
+        cq = resolve_cq(preset.encoder_cq, codec=self._active_codec, vendor=self._cq_vendor)
         if not isinstance(cq, int) or isinstance(cq, bool):
             raise ValueError(f"GUI CQ must be an integer (got {cq!r})")
         self._cq_values[self._active_codec] = cq

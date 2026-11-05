@@ -62,6 +62,30 @@ def test_validate_encoder_cq_rejects_non_numeric_value() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("settings", "cq", "vendor", "expected"),
+    [
+        ({}, None, AcceleratorVendor.NVIDIA, {"cq": 28}),
+        ({"g": 120}, 31, AcceleratorVendor.NVIDIA, {"g": 120, "cq": 31}),
+        ({"cq": 20, "g": 120}, None, AcceleratorVendor.NVIDIA, {"cq": 20, "g": 120}),
+        ({"qvbr_quality_level": 30}, None, AcceleratorVendor.AMD, {"cq": 30}),
+    ],
+    ids=["codec-default", "given", "in-settings", "amd-qvbr-alias"],
+)
+def test_resolve_encoder_settings_takes_the_given_then_the_set_then_the_default_cq(settings, cq, vendor, expected) -> None:
+    from jasna.media.encoder_settings import resolve_encoder_settings
+
+    assert resolve_encoder_settings(settings, cq=cq, codec="hevc", vendor=vendor) == expected
+
+
+def test_qvbr_quality_level_is_a_cq_control_only_on_amd() -> None:
+    from jasna.media.encoder_settings import cq_controls
+
+    settings = {"cq": 20, "qvbr_quality_level": 30}
+    assert cq_controls(settings, AcceleratorVendor.AMD) == ["cq", "qvbr_quality_level"]
+    assert cq_controls(settings, AcceleratorVendor.NVIDIA) == ["cq"]
+
+
 def test_cli_cq_defaults_follow_amd_codec() -> None:
     assert _resolve_cli_encoder_settings(
         "",

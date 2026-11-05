@@ -140,16 +140,10 @@ def _resolve_cli_encoder_settings(
     codec: str,
     vendor,
 ) -> dict[str, object]:
-    from jasna.accelerator import AcceleratorVendor
-    from jasna.media.encoder_settings import parse_encoder_settings, validate_encoder_settings
-    from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_cq
+    from jasna.media.encoder_settings import cq_controls, parse_encoder_settings, resolve_encoder_settings
 
-    resolved_vendor = AcceleratorVendor(str(vendor))
     settings = parse_encoder_settings(raw_settings)
-    cq_aliases = {"cq"}
-    if resolved_vendor is AcceleratorVendor.AMD:
-        cq_aliases.add("qvbr_quality_level")
-    duplicates = sorted(cq_aliases & settings.keys())
+    duplicates = cq_controls(settings, vendor)
     if len(duplicates) > 1:
         raise ValueError(
             "--encoder-settings contains multiple CQ controls: "
@@ -160,36 +154,7 @@ def _resolve_cli_encoder_settings(
             "--cq conflicts with --encoder-settings "
             f"{', '.join(duplicates)}; use only one CQ control"
         )
-
-    if cq is not None:
-        settings["cq"] = validate_encoder_cq(
-            cq,
-            codec=codec,
-            vendor=resolved_vendor,
-        )
-    elif "cq" in settings:
-        validate_encoder_cq(
-            settings["cq"],
-            codec=codec,
-            vendor=resolved_vendor,
-        )
-    elif (
-        resolved_vendor is AcceleratorVendor.AMD
-        and "qvbr_quality_level" in settings
-    ):
-        settings["cq"] = validate_encoder_cq(
-            settings.pop("qvbr_quality_level"),
-            codec=codec,
-            vendor=resolved_vendor,
-        )
-    else:
-        settings["cq"] = encoder_cq_spec(codec, resolved_vendor).default
-
-    return validate_encoder_settings(
-        settings,
-        codec=codec,
-        vendor=resolved_vendor,
-    )
+    return resolve_encoder_settings(settings, cq=cq, codec=codec, vendor=vendor)
 
 
 class _ShortErrorParser(argparse.ArgumentParser):
