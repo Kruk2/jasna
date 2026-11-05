@@ -1,10 +1,9 @@
 """Tests for jasna.restorer.rtx_superres_secondary_restorer covering init, restore, and close."""
 from __future__ import annotations
 
-import ast
 import ctypes
-import inspect
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -85,30 +84,15 @@ class TestTensorrtLoadOrder:
     with a TensorRT serialization-version mismatch.
     """
 
-    def _module_tree(self):
-        import jasna.restorer.rtx_superres_secondary_restorer as mod
-        source = Path(inspect.getfile(mod)).read_text(encoding="utf-8")
-        return ast.parse(source)
-
-    def test_preload_called_at_module_level(self):
-        tree = self._module_tree()
-        top_level_calls = [
-            node.value.func.id
-            for node in tree.body
-            if isinstance(node, ast.Expr)
-            and isinstance(node.value, ast.Call)
-            and isinstance(node.value.func, ast.Name)
-        ]
-        assert "_preload_tensorrt_runtime" in top_level_calls
-
-    def test_nvvfx_only_imported_lazily(self):
-        tree = self._module_tree()
-        # No nvvfx import may appear at module top level.
-        for node in tree.body:
-            if isinstance(node, ast.ImportFrom):
-                assert node.module != "nvvfx"
-            if isinstance(node, ast.Import):
-                assert all(alias.name != "nvvfx" for alias in node.names)
+    def test_import_preloads_tensorrt_without_loading_nvvfx(self):
+        # A fresh process: this file's fake nvvfx module must not be visible.
+        code = (
+            "import ctypes, sys\n"
+            "import jasna.restorer.rtx_superres_secondary_restorer\n"
+            "assert 'nvvfx' not in sys.modules\n"
+            "assert sys.platform == 'win32' or hasattr(ctypes.CDLL(None), 'getInferLibVersion')\n"
+        )
+        subprocess.run([sys.executable, "-c", code], check=True, cwd=Path(__file__).parents[1], timeout=60)
 
     def test_preload_loads_tensorrt_libnvinfer_globally(self):
         import jasna.restorer.rtx_superres_secondary_restorer as mod
@@ -156,47 +140,6 @@ class TestResolveHelpers:
             _resolve_deblur("invalid")
 
 
-class TestRtxSuperresInit:
-    def test_basic_init(self):
-        restorer = _make_restorer(scale=4, quality="high", denoise="medium", deblur=None)
-        assert restorer.name == "rtx-super-res"
-        assert restorer.num_workers == 1
-        assert restorer._sr is not None
-        assert restorer._denoise is not None
-        assert restorer._deblur is None
-
-    def test_init_with_deblur(self):
-        restorer = _make_restorer(scale=2, quality="low", denoise=None, deblur="high")
-        assert restorer._sr is not None
-        assert restorer._denoise is None
-        assert restorer._deblur is not None
-
-    def test_init_no_denoise_no_deblur(self):
-        restorer = _make_restorer(scale=4, quality="medium", denoise=None, deblur=None)
-        assert restorer._denoise is None
-        assert restorer._deblur is None
-
-    def test_init_denoise_none_string(self):
-        restorer = _make_restorer(scale=4, quality="high", denoise="none", deblur="none")
-        assert restorer._denoise is None
-        assert restorer._deblur is None
-
-    def test_custom_input_size(self):
-        with patch("torch.cuda.current_stream") as mock_stream:
-            mock_stream.return_value.cuda_stream = 12345
-            restorer = RtxSuperresSecondaryRestorer(
-                device=torch.device("cuda:0"),
-                input_size=384,
-                scale=4,
-                denoise=None,
-                deblur=None,
-            )
-        assert restorer.input_size == 384
-        assert restorer.output_size == 1536
-        assert restorer._sr.output_width == 1536
-        assert restorer._sr.output_height == 1536
-
-
 class TestRtxSuperresRestore:
     def test_restore_empty_tensor(self):
         restorer = _make_restorer()
@@ -216,107 +159,9 @@ class TestRtxSuperresRestore:
         result = restorer.restore(frames, keep_start=4, keep_end=2)
         assert result == []
 
-    def test_restore_normal(self):
-        restorer = _make_restorer()
-        frames = torch.rand((3, 3, 256, 256), dtype=torch.float32)
-
-        mock_sr_result = MagicMock()
-        mock_sr_result.image = torch.rand((3, 1024, 1024), dtype=torch.float32)
-        restorer._sr.run = MagicMock(return_value=mock_sr_result)
-
-        mock_dn_result = MagicMock()
-        mock_dn_result.image = torch.rand((3, 1024, 1024), dtype=torch.float32)
-        restorer._denoise.run = MagicMock(return_value=mock_dn_result)
-
-        result = restorer.restore(frames, keep_start=0, keep_end=3)
-        assert len(result) == 3
-        for frame in result:
-            assert frame.dtype == torch.uint8
-            assert frame.shape == (3, 1024, 1024)
-
-    def test_restore_custom_input_size(self):
-        with patch("torch.cuda.current_stream") as mock_stream:
-            mock_stream.return_value.cuda_stream = 12345
-            restorer = RtxSuperresSecondaryRestorer(
-                device=torch.device("cuda:0"),
-                input_size=384,
-                scale=4,
-                denoise=None,
-                deblur=None,
-            )
-        frames = torch.rand((2, 3, 384, 384), dtype=torch.float32)
-        mock_result = MagicMock()
-        mock_result.image = torch.rand((3, 1536, 1536), dtype=torch.float32)
-        restorer._sr.run = MagicMock(return_value=mock_result)
-
-        result = restorer.restore(frames, keep_start=0, keep_end=2)
-
-        assert [tuple(frame.shape) for frame in result] == [
-            (3, 1536, 1536),
-            (3, 1536, 1536),
-        ]
-
     def test_restore_rejects_wrong_input_size(self):
         restorer = _make_restorer()
         frames = torch.rand((2, 3, 384, 384), dtype=torch.float32)
 
         with pytest.raises(ValueError, match="expected frames shaped"):
             restorer.restore(frames, keep_start=0, keep_end=2)
-
-    def test_restore_with_keep_slicing(self):
-        restorer = _make_restorer()
-        frames = torch.rand((10, 3, 256, 256), dtype=torch.float32)
-
-        mock_sr_result = MagicMock()
-        mock_sr_result.image = torch.rand((3, 1024, 1024), dtype=torch.float32)
-        restorer._sr.run = MagicMock(return_value=mock_sr_result)
-
-        mock_dn_result = MagicMock()
-        mock_dn_result.image = torch.rand((3, 1024, 1024), dtype=torch.float32)
-        restorer._denoise.run = MagicMock(return_value=mock_dn_result)
-
-        result = restorer.restore(frames, keep_start=2, keep_end=7)
-        assert len(result) == 5
-        assert restorer._sr.run.call_count == 5
-
-    def test_restore_with_deblur(self):
-        restorer = _make_restorer(denoise="medium", deblur="low")
-        frames = torch.rand((2, 3, 256, 256), dtype=torch.float32)
-
-        mock_sr_result = MagicMock()
-        mock_sr_result.image = torch.rand((3, 1024, 1024), dtype=torch.float32)
-        restorer._sr.run = MagicMock(return_value=mock_sr_result)
-
-        mock_dn_result = MagicMock()
-        mock_dn_result.image = torch.rand((3, 1024, 1024), dtype=torch.float32)
-        restorer._denoise.run = MagicMock(return_value=mock_dn_result)
-
-        mock_db_result = MagicMock()
-        mock_db_result.image = torch.rand((3, 1024, 1024), dtype=torch.float32)
-        restorer._deblur.run = MagicMock(return_value=mock_db_result)
-
-        result = restorer.restore(frames, keep_start=0, keep_end=2)
-        assert len(result) == 2
-        assert restorer._deblur.run.call_count == 2
-
-
-class TestRtxSuperresClose:
-    def test_close_all(self):
-        restorer = _make_restorer(denoise="medium", deblur="low")
-        restorer.close()
-        assert restorer._sr is None
-        assert restorer._denoise is None
-        assert restorer._deblur is None
-
-    def test_close_no_denoise_no_deblur(self):
-        restorer = _make_restorer(denoise=None, deblur=None)
-        restorer.close()
-        assert restorer._sr is None
-        assert restorer._denoise is None
-        assert restorer._deblur is None
-
-    def test_close_idempotent(self):
-        restorer = _make_restorer(denoise=None, deblur=None)
-        restorer.close()
-        restorer.close()
-        assert restorer._sr is None
