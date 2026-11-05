@@ -20,11 +20,11 @@ from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.mosaic_scan import MosaicScanResult, ScanCompleted
 from jasna.gui.segment_editor import SegmentEditor
 from jasna.gui.restoration_preview import RestorationClip, RestorationFrame, RestoredClipFrame
-from jasna.gui.segment_editor_state import PREVIEW_ZOOM_MAX, PreviewView
 from jasna.ltx.restore import Cancelled
 from jasna.media.splice import KeyframeIndex
 from jasna.segments import SegmentRange, SegmentRestoration
 from jasna.session_config import LTX_DEFAULT_MODEL
+from factories import shown_message, shown_pixel
 
 
 def test_out_of_bounds_range_uses_specific_message(build_editor) -> None:
@@ -154,18 +154,6 @@ def test_restored_playback_continues_with_the_next_window(restoring_editor) -> N
     assert worker.request.call_args.kwargs["playback"] is True
 
 
-def test_preview_message_replaces_the_shown_image(build_editor) -> None:
-    editor = build_editor()
-    editor._preview_source = Image.new("RGB", (160, 90), "red")
-    editor._refresh_preview_image()
-
-    editor._show_preview_message("Restoring…", "#ffffff")
-    editor.update()
-
-    assert editor._preview._label.cget("image") == ""
-    assert editor._preview.cget("text") == "Restoring…"
-
-
 def test_preview_surface_selects_original_or_restored_from_toggle_state(build_editor) -> None:
     editor = build_editor()
     editor._scan_panel._overlay = False
@@ -173,12 +161,12 @@ def test_preview_surface_selects_original_or_restored_from_toggle_state(build_ed
     editor._restored_source = Image.new("RGB", (160, 90), "blue")
 
     editor._restore_active = False
-    editor._refresh_preview_image()
-    assert editor._preview_image._light_image.getpixel((0, 0)) == (255, 0, 0)
+    editor._preview.redraw()
+    assert shown_pixel(editor._preview, 0, 0) == (255, 0, 0)
 
     editor._restore_active = True
-    editor._refresh_preview_image()
-    assert editor._preview_image._light_image.getpixel((0, 0)) == (0, 0, 255)
+    editor._preview.redraw()
+    assert shown_pixel(editor._preview, 0, 0) == (0, 0, 255)
 
 
 def test_projection_selector_is_disabled_for_non_vr_video(build_editor) -> None:
@@ -246,53 +234,13 @@ def test_pan_zoom_controls_are_visible_and_explain_gestures(build_editor) -> Non
         "segments_preview_reset_view"
     )
 
-    editor._adjust_preview_zoom(0.25)
+    editor._zoom_in_btn.invoke()
     editor.update()
     assert editor._reset_view_btn.winfo_ismapped()
 
     editor._reset_preview_view()
     editor.update()
     assert not editor._reset_view_btn.winfo_ismapped()
-
-
-def test_preview_crop_uses_zoom_and_clamps_pan_to_source() -> None:
-    view = PreviewView(zoom=2.0, center=(0.0, 0.0))
-
-    assert view.crop_box(400, 200) == (0, 0, 200, 100)
-    assert view.center == pytest.approx((0.25, 0.25))
-
-
-def test_preview_view_zoom_limits_and_reset() -> None:
-    view = PreviewView()
-
-    assert view.is_reset
-    assert not view.zoom_to(0.5, None)
-    assert view.zoom_to(1.5, None)
-    assert view.zoomed and not view.is_reset
-    assert view.zoom_to(100.0, None)
-    assert view.zoom == PREVIEW_ZOOM_MAX
-
-    view.center = (0.7, 0.6)
-    view.reset()
-    assert view.is_reset
-    assert view.crop_box(400, 200) is None
-
-
-def test_preview_zoom_keeps_anchor_point_still() -> None:
-    view = PreviewView()
-
-    view.zoom_to(2.0, (1.0, 0.5))
-
-    assert view.center == pytest.approx((0.75, 0.5))
-
-
-def test_dragging_zoomed_preview_pans_the_source() -> None:
-    view = PreviewView(zoom=2.0)
-
-    view.pan(0.1, 0.0)
-
-    assert view.center[0] < 0.5
-    assert view.center[1] == pytest.approx(0.5)
 
 
 @pytest.mark.parametrize("factor", [1.0, 1.25, 1.5, 2.0, 3.0])
@@ -650,21 +598,6 @@ def test_feedback_upload_events_show_toast(build_editor, monkeypatch) -> None:
     assert "boom" in toasts[1][0]
 
 
-@pytest.mark.parametrize("scaling", [1.0, 1.5])
-def test_fit_to_label_compensates_widget_scaling(build_editor, monkeypatch, scaling: float) -> None:
-    editor = build_editor()
-    label = MagicMock()
-    label.winfo_width.return_value = 916
-    label.winfo_height.return_value = 556
-    monkeypatch.setattr(ctk.ScalingTracker, "get_widget_scaling", staticmethod(lambda widget: scaling))
-
-    result = editor._fit_to_label(label, Image.new("RGB", (1920, 1080)))
-
-    rendered = (round(result._size[0] * scaling), round(result._size[1] * scaling))
-    assert rendered[0] <= 900 and rendered[1] <= 540
-    assert result._light_image.size == (900, 506)
-
-
 def test_inspector_sets_the_model_and_seed_of_the_selected_range(build_editor, tk_root) -> None:
     editor = build_editor(settings=AppSettings(ltx_seed=42))
     editor._timeline_create(1.0, 2.0)
@@ -766,7 +699,7 @@ def test_restore_preview_renders_an_ltx_range_then_lets_the_user_compare_and_pic
     assert worker.work_dir == tmp_path
     assert worker.requests[0][:2] == (job.segments[0], 5)
     assert editor._restore_active
-    assert editor._preview.cget("text") == t("segments_preview_ltx_rendering", seed=5)
+    assert shown_message(editor._preview) == t("segments_preview_ltx_rendering", seed=5)
     assert not editor._ltx_render_btn.winfo_manager()
     worker.events.put(segment_editor.SeedProgress(5, "denoise", 0.5, 70.0, 1))
     editor._poll_workers()
@@ -783,7 +716,7 @@ def test_restore_preview_renders_an_ltx_range_then_lets_the_user_compare_and_pic
     editor._new_range_seed()
     new_seed = editor._state.selected_segment.restoration.ltx_seed
     tk_root.update()
-    assert editor._preview.cget("text") == t("segments_preview_ltx_not_rendered", seed=new_seed)
+    assert shown_message(editor._preview) == t("segments_preview_ltx_not_rendered", seed=new_seed)
     assert editor._ltx_render_btn.winfo_manager()
     editor._ltx_render_btn.invoke()
     assert worker.requests[1][:2] == (editor._state.selected_segment, new_seed)
@@ -1024,7 +957,7 @@ def test_restore_preview_uses_basicvsrpp_outside_an_ltx_range(build_editor, monk
     editor._seek(1.5)
     editor._request_restoration_preview()
     assert preview_worker.request.call_count == 1
-    assert editor._preview.cget("text") == t("segments_preview_ltx_not_rendered", seed=5)
+    assert shown_message(editor._preview) == t("segments_preview_ltx_not_rendered", seed=5)
     assert editor._ltx_render_btn.winfo_manager()
 
 

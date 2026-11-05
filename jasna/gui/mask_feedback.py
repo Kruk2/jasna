@@ -19,14 +19,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-import tkinter as tk
-
 import customtkinter as ctk
-from PIL import Image, ImageTk
+from PIL import Image
 
 from jasna.gui.components import grab_modal
 from jasna.gui import scaling
 from jasna.gui.locales import t
+from jasna.gui.preview_canvas import PREVIEW_ZOOM_STEP, PreviewCanvas, Transform, canvas_to_image, image_to_canvas
 from jasna.gui.theme import Colors, Fonts
 
 FEEDBACK_ENDPOINT = "https://jasna-mask-feedback.kruk2.workers.dev/submit"
@@ -40,70 +39,6 @@ MIN_POLYGON_POINTS = 3
 _SEAL_INFO = b"jasna-mask-feedback-v1"
 
 Polygon = tuple[tuple[float, float], ...]
-
-
-def fit_scale_and_offset(
-    image_size: tuple[int, int], canvas_size: tuple[int, int]
-) -> tuple[float, float, float]:
-    image_w, image_h = image_size
-    canvas_w, canvas_h = canvas_size
-    scale = min(canvas_w / image_w, canvas_h / image_h)
-    offset_x = (canvas_w - image_w * scale) / 2
-    offset_y = (canvas_h - image_h * scale) / 2
-    return scale, offset_x, offset_y
-
-
-def view_transform(
-    image_size: tuple[int, int],
-    canvas_size: tuple[int, int],
-    zoom: float,
-    center: tuple[float, float],
-) -> tuple[float, float, float]:
-    """Scale and offsets for a zoomed view centered on ``center`` (image coords).
-
-    At zoom 1.0 this equals ``fit_scale_and_offset``. When the scaled image
-    exceeds the canvas on an axis, the offset follows ``center`` but is clamped
-    so the view never leaves the image."""
-
-    fit_scale, _, _ = fit_scale_and_offset(image_size, canvas_size)
-    scale = fit_scale * float(zoom)
-    offsets = []
-    for axis in (0, 1):
-        span = image_size[axis] * scale
-        if span <= canvas_size[axis]:
-            offsets.append((canvas_size[axis] - span) / 2)
-        else:
-            offset = canvas_size[axis] / 2 - float(center[axis]) * scale
-            offsets.append(min(0.0, max(canvas_size[axis] - span, offset)))
-    return scale, offsets[0], offsets[1]
-
-
-def canvas_to_image(
-    x: float,
-    y: float,
-    *,
-    view: tuple[float, float, float],
-    image_size: tuple[int, int],
-) -> tuple[float, float]:
-    """Map a canvas point to image coords, snapping to the frame edges."""
-
-    scale, offset_x, offset_y = view
-    image_x = (x - offset_x) / scale
-    image_y = (y - offset_y) / scale
-    return (
-        min(float(image_size[0]), max(0.0, image_x)),
-        min(float(image_size[1]), max(0.0, image_y)),
-    )
-
-
-def image_to_canvas(
-    x: float,
-    y: float,
-    *,
-    view: tuple[float, float, float],
-) -> tuple[float, float]:
-    scale, offset_x, offset_y = view
-    return x * scale + offset_x, y * scale + offset_y
 
 
 def polygons_to_mask(
@@ -245,15 +180,10 @@ class MaskSuggestDialog(ctk.CTkToplevel):
         self._on_closed = on_closed
         self._polygons: list[list[tuple[float, float]]] = []
         self._draft: list[tuple[float, float]] = []
-        self._photo = None
-        self._resize_after: str | None = None
         self._done = False
-        self._zoom = 1.0
-        self._center = (frame_image.width / 2, frame_image.height / 2)
         self._shapes_hidden = False
         self._mask_alpha = 0.35
         self._alpha_after: str | None = None
-        self._pan_anchor: tuple[float, float, float, float] | None = None
 
         self.title(t("mask_editor_title"))
         self.configure(fg_color=Colors.BG_MAIN)
@@ -274,20 +204,15 @@ class MaskSuggestDialog(ctk.CTkToplevel):
             justify="left",
         ).pack(fill="x", padx=16, pady=(12, 4))
 
-        self._canvas = tk.Canvas(
+        self._canvas = PreviewCanvas(
             self,
-            background=Colors.BG_PANEL,
-            borderwidth=0,
-            highlightthickness=0,
-            cursor="crosshair",
+            source=lambda: self._frame_image,
+            pan_button=3,
+            decorate=self._fill_shapes,
+            on_drawn=self._draw_shapes,
         )
+        self._canvas.configure(cursor="crosshair")
         self._canvas.pack(fill="both", expand=True, padx=16, pady=4)
-        self._canvas.bind("<Configure>", self._on_resize)
-        self._canvas.bind("<MouseWheel>", self._on_wheel)
-        self._canvas.bind("<Button-4>", lambda event: self._on_wheel(event, delta=120))
-        self._canvas.bind("<Button-5>", lambda event: self._on_wheel(event, delta=-120))
-        self._canvas.bind("<ButtonPress-3>", self._on_pan_start)
-        self._canvas.bind("<B3-Motion>", self._on_pan_move)
 
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.pack(fill="x", padx=16, pady=(4, 12))
@@ -373,9 +298,9 @@ class MaskSuggestDialog(ctk.CTkToplevel):
             text_color=Colors.TEXT_PRIMARY,
         ).pack(side="right")
         for text, command in (
-            (t("segments_fit"), self._reset_zoom),
-            ("+", lambda: self._zoom_step(1.25)),
-            ("−", lambda: self._zoom_step(1 / 1.25)),
+            (t("segments_fit"), self._canvas.reset_view),
+            ("+", lambda: self._canvas.zoom_by(PREVIEW_ZOOM_STEP)),
+            ("−", lambda: self._canvas.zoom_by(-PREVIEW_ZOOM_STEP)),
         ):
             zoom_btn = ctk.CTkButton(
                 footer,
@@ -394,28 +319,15 @@ class MaskSuggestDialog(ctk.CTkToplevel):
         self.bind("<BackSpace>", lambda _e: self._undo_point())
         self.bind("<Control-z>", lambda _e: self._undo_point())
         self.bind("<KeyPress-h>", lambda _e: self._toggle_shapes())
-        self.bind("<KeyPress-plus>", lambda _e: self._zoom_step(1.25))
-        self.bind("<KeyPress-equal>", lambda _e: self._zoom_step(1.25))
-        self.bind("<KeyPress-minus>", lambda _e: self._zoom_step(1 / 1.25))
-        self.bind("<KeyPress-0>", lambda _e: self._reset_zoom())
+        self.bind("<KeyPress-plus>", lambda _e: self._canvas.zoom_by(PREVIEW_ZOOM_STEP))
+        self.bind("<KeyPress-equal>", lambda _e: self._canvas.zoom_by(PREVIEW_ZOOM_STEP))
+        self.bind("<KeyPress-minus>", lambda _e: self._canvas.zoom_by(-PREVIEW_ZOOM_STEP))
+        self.bind("<KeyPress-0>", lambda _e: self._canvas.reset_view())
         self.bind("<Escape>", lambda _e: self._cancel())
 
         self.update_idletasks()
         grab_modal(self)
-        self._redraw()
-
-    def _canvas_size(self) -> tuple[int, int]:
-        return max(2, self._canvas.winfo_width()), max(2, self._canvas.winfo_height())
-
-    def _on_resize(self, _event=None) -> None:
-        if self._resize_after is not None:
-            self.after_cancel(self._resize_after)
-        self._resize_after = self.after(60, self._redraw)
-
-    def _view(self) -> tuple[float, float, float]:
-        return view_transform(
-            self._frame_image.size, self._canvas_size(), self._zoom, self._center
-        )
+        self._canvas.redraw()
 
     def _is_interactive(self, widget) -> bool:
         current = widget
@@ -443,7 +355,7 @@ class MaskSuggestDialog(ctk.CTkToplevel):
         self._close_draft()
 
     def _on_press(self, event) -> None:
-        view = self._view()
+        view = self._canvas.transform()
         point = canvas_to_image(
             event.x, event.y, view=view, image_size=self._frame_image.size
         )
@@ -456,64 +368,13 @@ class MaskSuggestDialog(ctk.CTkToplevel):
                 self._close_draft()
                 return
         self._draft.append(point)
-        self._redraw()
-
-    def _on_wheel(self, event, *, delta: int | None = None) -> str:
-        wheel_delta = delta if delta is not None else int(getattr(event, "delta", 0))
-        if wheel_delta:
-            factor = 1.25 if wheel_delta > 0 else 1 / 1.25
-            self._zoom_step(factor, anchor=(event.x, event.y))
-        return "break"
-
-    def _zoom_step(
-        self, factor: float, anchor: tuple[int, int] | None = None
-    ) -> None:
-        old_view = self._view()
-        new_zoom = min(12.0, max(1.0, self._zoom * float(factor)))
-        if new_zoom == self._zoom:
-            return
-        canvas_w, canvas_h = self._canvas_size()
-        if anchor is None:
-            anchor = (canvas_w / 2, canvas_h / 2)
-        anchored = canvas_to_image(
-            *anchor, view=old_view, image_size=self._frame_image.size
-        )
-        fit_scale, _, _ = fit_scale_and_offset(
-            self._frame_image.size, self._canvas_size()
-        )
-        new_scale = fit_scale * new_zoom
-        self._zoom = new_zoom
-        self._center = (
-            anchored[0] + (canvas_w / 2 - anchor[0]) / new_scale,
-            anchored[1] + (canvas_h / 2 - anchor[1]) / new_scale,
-        )
-        self._redraw()
-
-    def _reset_zoom(self) -> None:
-        self._zoom = 1.0
-        self._center = (self._frame_image.width / 2, self._frame_image.height / 2)
-        self._redraw()
-
-    def _on_pan_start(self, event) -> None:
-        self._pan_anchor = (event.x, event.y, *self._center)
-
-    def _on_pan_move(self, event) -> None:
-        if self._pan_anchor is None:
-            return
-        scale, _, _ = self._view()
-        start_x, start_y, center_x, center_y = self._pan_anchor
-        self._center = (
-            center_x - (event.x - start_x) / scale,
-            center_y - (event.y - start_y) / scale,
-        )
-        self._pan_anchor = (event.x, event.y, *self._center)
-        self._redraw()
+        self._canvas.redraw()
 
     def _on_alpha(self, value: float) -> None:
         self._mask_alpha = float(value)
         if self._alpha_after is not None:
             self.after_cancel(self._alpha_after)
-        self._alpha_after = self.after(40, self._redraw)
+        self._alpha_after = self.after(40, self._canvas.redraw)
 
     def _toggle_shapes(self) -> None:
         self._shapes_hidden = not self._shapes_hidden
@@ -522,72 +383,44 @@ class MaskSuggestDialog(ctk.CTkToplevel):
             if self._shapes_hidden
             else t("mask_editor_hide_shapes")
         )
-        self._redraw()
+        self._canvas.redraw()
 
     def _close_draft(self) -> None:
         if len(self._draft) >= MIN_POLYGON_POINTS:
             self._polygons.append(self._draft)
             self._draft = []
-            self._redraw()
+            self._canvas.redraw()
 
     def _undo_point(self) -> None:
         if self._draft:
             self._draft.pop()
         elif self._polygons:
             self._draft = self._polygons.pop()
-        self._redraw()
+        self._canvas.redraw()
 
     def _erase_all(self) -> None:
         self._polygons = []
         self._draft = []
-        self._redraw()
+        self._canvas.redraw()
 
-    def _redraw(self) -> None:
-        self._resize_after = None
-        canvas = self._canvas
-        canvas.delete("all")
-        canvas_size = self._canvas_size()
-        image_size = self._frame_image.size
-        view = self._view()
-        scale, offset_x, offset_y = view
+    def _fill_shapes(self, display: Image.Image, view: Transform) -> Image.Image:
+        if self._shapes_hidden or not self._polygons or self._mask_alpha <= 0:
+            return display
+        from PIL import ImageDraw
 
-        crop_x0 = max(0, int(-offset_x / scale))
-        crop_y0 = max(0, int(-offset_y / scale))
-        crop_x1 = min(image_size[0], int((canvas_size[0] - offset_x) / scale) + 1)
-        crop_y1 = min(image_size[1], int((canvas_size[1] - offset_y) / scale) + 1)
-        crop = self._frame_image.crop((crop_x0, crop_y0, crop_x1, crop_y1))
-        target = (
-            max(2, round(crop.width * scale)),
-            max(2, round(crop.height * scale)),
+        overlay = Image.new("RGBA", display.size, (0, 0, 0, 0))
+        overlay_draw = ImageDraw.Draw(overlay)
+        primary = Colors.PRIMARY.lstrip("#")
+        fill = (
+            *(int(primary[i : i + 2], 16) for i in (0, 2, 4)),
+            round(self._mask_alpha * 255),
         )
-        display = crop.resize(target, Image.Resampling.LANCZOS)
-        draw_origin = (crop_x0 * scale + offset_x, crop_y0 * scale + offset_y)
-        if not self._shapes_hidden and self._polygons and self._mask_alpha > 0:
-            from PIL import ImageDraw
+        for polygon in self._polygons:
+            overlay_draw.polygon([image_to_canvas(*point, view=view) for point in polygon], fill=fill)
+        return Image.alpha_composite(display.convert("RGBA"), overlay).convert("RGB")
 
-            overlay = Image.new("RGBA", display.size, (0, 0, 0, 0))
-            overlay_draw = ImageDraw.Draw(overlay)
-            primary = Colors.PRIMARY.lstrip("#")
-            fill = (
-                *(int(primary[i : i + 2], 16) for i in (0, 2, 4)),
-                round(self._mask_alpha * 255),
-            )
-            for polygon in self._polygons:
-                overlay_draw.polygon(
-                    [
-                        (
-                            point[0] * scale + offset_x - draw_origin[0],
-                            point[1] * scale + offset_y - draw_origin[1],
-                        )
-                        for point in polygon
-                    ],
-                    fill=fill,
-                )
-            display = Image.alpha_composite(
-                display.convert("RGBA"), overlay
-            ).convert("RGB")
-        self._photo = ImageTk.PhotoImage(display)
-        canvas.create_image(*draw_origin, image=self._photo, anchor="nw")
+    def _draw_shapes(self, view: Transform) -> None:
+        canvas = self._canvas
 
         def to_canvas(point: tuple[float, float]) -> tuple[float, float]:
             return image_to_canvas(*point, view=view)
