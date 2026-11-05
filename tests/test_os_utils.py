@@ -454,11 +454,10 @@ def test_check_ascii_install_path_fails_for_non_ascii(monkeypatch, tmp_path) -> 
 
 
 def test_check_ascii_install_path_uses_executable_when_frozen(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(os_utils.sys, "frozen", True, raising=False)
-    exe_path = tmp_path / "jasna.exe"
-    monkeypatch.setattr(os_utils.sys, "executable", str(exe_path), raising=False)
-    ok, info = os_utils.check_ascii_install_path()
-    assert ok is True
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils, "__file__", str(tmp_path / "プロジェクト" / "os_utils.py"))
+    monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna.exe"))
+    assert os_utils.check_ascii_install_path() == (True, str(tmp_path))
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows module lookup")
