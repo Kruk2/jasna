@@ -72,6 +72,14 @@ def test_playlist_lists_the_whole_gop_segments_the_encoder_cuts(fps, frame_count
     assert (len(durations), durations[0], durations[-1]) == (count, first, last)
 
 
+def test_playlist_leaves_out_the_hidden_lead_in_of_an_mp4_cut_mid_gop():
+    # nb_frames 285 counts 45 lead-in frames before the cut; 8.008 s shows 240.
+    metadata = video_metadata(fps=Fraction(30000, 1001), num_frames=285, duration=8.008)
+    text, count = _generate_vod_playlist(SegmentTimeline.for_video(metadata, 4.0))
+
+    assert (count, re.findall(r"#EXTINF:([\d.]+),", text)) == (2, ["4.004", "4.004"])
+
+
 def test_vod_playlist_lists_every_segment_with_a_short_last_one():
     timeline = SegmentTimeline.for_video(video_metadata(fps=30, num_frames=300), 4.0)
     text, _ = _generate_vod_playlist(timeline)

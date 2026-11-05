@@ -111,7 +111,9 @@ class SegmentTimeline:
         fps = metadata.video_fps_exact
         # A GOP never shorter than -hls_time makes the muxer cut every segment at exactly one GOP.
         frames_per_segment = math.ceil(fps * Fraction(str(segment_duration)))
-        return cls(fps, frames_per_segment, metadata.num_frames)
+        # nb_frames also counts the hidden lead-in of an MP4 cut mid-GOP, which the decoder drops.
+        shown_frames = min(metadata.num_frames, round(Fraction(str(metadata.duration)) * fps))
+        return cls(fps, frames_per_segment, max(1, shown_frames))
 
     @property
     def segment_count(self) -> int:
