@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import threading
 from collections import deque
 from dataclasses import dataclass, field
-from pathlib import Path
 from queue import Queue, Empty
 
 import numpy as np
 
 from jasna.frame_queue import FrameQueue
-from jasna.os_utils import subprocess_no_window_kwargs
+from jasna.os_utils import subprocess_no_window_kwargs, tvai_setup_problems
 import torch
 
 logger = logging.getLogger(__name__)
@@ -274,20 +272,10 @@ class TvaiSecondaryRestorer:
         self._worker_locks: list[threading.Lock] = []
 
     def _validate_environment(self) -> None:
-        data_dir = os.environ.get("TVAI_MODEL_DATA_DIR")
-        if not data_dir:
-            raise RuntimeError("TVAI_MODEL_DATA_DIR environment variable is not set")
-        if not Path(data_dir).is_dir():
-            raise RuntimeError(f"TVAI_MODEL_DATA_DIR is not a directory: {data_dir}")
-
-        model_dir = os.environ.get("TVAI_MODEL_DIR")
-        if not model_dir:
-            raise RuntimeError("TVAI_MODEL_DIR environment variable is not set")
-        if not Path(model_dir).is_dir():
-            raise RuntimeError(f"TVAI_MODEL_DIR is not a directory: {model_dir}")
-
-        if not Path(self.ffmpeg_path).is_file():
-            raise FileNotFoundError(f"TVAI ffmpeg not found: {self.ffmpeg_path}")
+        problems = tvai_setup_problems(self.ffmpeg_path)
+        if problems:
+            error = FileNotFoundError if problems[0].key == "ffmpeg_not_found" else RuntimeError
+            raise error(problems[0].message)
 
     def _ensure_started(self) -> None:
         if self._started:

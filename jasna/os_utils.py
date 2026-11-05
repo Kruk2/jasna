@@ -8,6 +8,7 @@ import subprocess
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from typing import NamedTuple
 
 from jasna._frozen import is_frozen
 
@@ -480,6 +481,27 @@ def check_amd_amf_runtime() -> tuple[bool, str]:
     except (OSError, ImportError) as e:
         return False, str(e)
     return True, library
+
+
+class TvaiSetupProblem(NamedTuple):
+    key: str
+    """data_dir_not_set, data_dir_missing, model_dir_not_set, model_dir_missing or ffmpeg_not_found"""
+    message: str
+    path: str
+
+
+def tvai_setup_problems(ffmpeg_path: str) -> list[TvaiSetupProblem]:
+    """What stops Topaz Video from running: its model folder variables and its ffmpeg."""
+    problems = []
+    for variable, name in (("TVAI_MODEL_DATA_DIR", "data_dir"), ("TVAI_MODEL_DIR", "model_dir")):
+        directory = os.environ.get(variable)
+        if not directory:
+            problems.append(TvaiSetupProblem(f"{name}_not_set", f"{variable} environment variable is not set", ""))
+        elif not Path(directory).is_dir():
+            problems.append(TvaiSetupProblem(f"{name}_missing", f"{variable} is not a directory: {directory}", directory))
+    if not Path(ffmpeg_path).is_file():
+        problems.append(TvaiSetupProblem("ffmpeg_not_found", f"TVAI ffmpeg not found: {ffmpeg_path}", ffmpeg_path))
+    return problems
 
 
 def _install_dir() -> Path:

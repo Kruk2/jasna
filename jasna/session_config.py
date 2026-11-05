@@ -24,6 +24,21 @@ LTX_DEFAULT_OVERLAP = 17
 SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res"]
 LTX_SECONDARY_RESTORATIONS: tuple[SecondaryRestorationName, ...] = ("none", "rtx-super-res")
 """What LTX restoration supports without auto split; the others need BasicVSR++ parts."""
+
+
+def ltx_unsupported_options(*, auto_split: bool, secondary_restoration: str, denoise_strength: str) -> tuple[str, ...]:
+    """The chosen options, as ``SessionConfig`` field names, that an LTX job cannot use: without
+    auto split it has no BasicVSR++ parts for denoise or a secondary restoration other than
+    ``LTX_SECONDARY_RESTORATIONS``."""
+    if auto_split:
+        return ()
+    return tuple(
+        name for name, unsupported in (
+            ("secondary_restoration", secondary_restoration not in LTX_SECONDARY_RESTORATIONS),
+            ("denoise_strength", denoise_strength != "none"),
+        ) if unsupported
+    )
+
 DenoiseStrengthName = Literal["none", "low", "medium", "high"]
 VrModeName = Literal["auto", "off", "sbs", "sbs-fisheye", "tb"]
 VrProjectionName = Literal["auto", "raw", "fisheye", "gnomonic"]

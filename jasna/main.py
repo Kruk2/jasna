@@ -30,12 +30,12 @@ from jasna.session_config import (
     LTX_DEFAULT_OVERLAP,
     LTX_DEFAULT_SEED,
     LTX_OVERLAP_CHOICES,
-    LTX_SECONDARY_RESTORATIONS,
     DecodeBackendName,
     LtxModelName,
     LtxVaeName,
     RestorationModelName,
     SessionConfig,
+    ltx_unsupported_options,
 )
 
 if TYPE_CHECKING:
@@ -1019,12 +1019,15 @@ def main() -> None:
             model_option = f"--restoration-model-name {args.restoration_model_name}"
             if is_streaming:
                 parser.error(f"{model_option} does not support --stream")
-            if args.ltx_auto_split is None and args.secondary_restoration not in LTX_SECONDARY_RESTORATIONS:
+            unsupported = ltx_unsupported_options(
+                auto_split=auto_split, secondary_restoration=args.secondary_restoration, denoise_strength=args.denoise
+            )
+            if "secondary_restoration" in unsupported:
                 parser.error(
                     f"{model_option} supports --secondary-restoration {args.secondary_restoration} "
                     "only with --ltx-auto-split"
                 )
-            if args.ltx_auto_split is None and args.denoise != "none":
+            if "denoise_strength" in unsupported:
                 parser.error(f"{model_option} supports --denoise only with --ltx-auto-split")
         _reject_options_of_other_restoration_backend(parser, args, restoration_backend)
 

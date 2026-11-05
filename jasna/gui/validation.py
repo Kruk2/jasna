@@ -1,9 +1,7 @@
-import os
-from pathlib import Path
-
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.locales import t
 from jasna.media.media_files import is_image
+from jasna.os_utils import tvai_setup_problems
 from jasna.segments import job_models
 
 
@@ -41,21 +39,6 @@ def validate_gui_start(settings: AppSettings, jobs: list[JobItem], *, ltx_availa
     if settings.secondary_restoration != "tvai":
         return errors
 
-    data_dir = os.environ.get("TVAI_MODEL_DATA_DIR")
-    model_dir = os.environ.get("TVAI_MODEL_DIR")
-
-    if not data_dir:
-        errors.append(t("error_tvai_data_dir_not_set"))
-    if not model_dir:
-        errors.append(t("error_tvai_model_dir_not_set"))
-
-    if data_dir and not Path(data_dir).is_dir():
-        errors.append(t("error_tvai_data_dir_missing", path=data_dir))
-    if model_dir and not Path(model_dir).is_dir():
-        errors.append(t("error_tvai_model_dir_missing", path=model_dir))
-
-    ffmpeg_path = str(settings.tvai_ffmpeg_path)
-    if not Path(ffmpeg_path).is_file():
-        errors.append(t("error_tvai_ffmpeg_not_found", path=ffmpeg_path))
-
-    return errors
+    return errors + [
+        t(f"error_tvai_{problem.key}", path=problem.path) for problem in tvai_setup_problems(str(settings.tvai_ffmpeg_path))
+    ]

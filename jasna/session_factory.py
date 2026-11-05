@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from jasna.session_config import LTX_SECONDARY_RESTORATIONS, RestorationModelName, SessionConfig
+from jasna.session_config import RestorationModelName, SessionConfig, ltx_unsupported_options
 
 if TYPE_CHECKING:
     import torch
@@ -168,10 +168,10 @@ def build_restoration_session(
         raise ValueError(
             f"Secondary restoration '{config.secondary_restoration}' is not available in the AMD build yet"
         )
-    if (
-        config.restoration_model_name == "ltx"
-        and config.ltx_auto_split_percent is None
-        and (config.secondary_restoration not in LTX_SECONDARY_RESTORATIONS or config.denoise_strength != "none")
+    if config.restoration_model_name == "ltx" and ltx_unsupported_options(
+        auto_split=config.ltx_auto_split_percent is not None,
+        secondary_restoration=config.secondary_restoration,
+        denoise_strength=config.denoise_strength,
     ):
         raise ValueError(
             "LTX restoration supports Unet 4x, TVAI or denoise only with LTX auto split, "
