@@ -124,7 +124,7 @@ def _split(*, preprocess: nn.Module | None = None, upsample: nn.Module | None = 
     return BasicVSRPlusPlusNetSplit(generator, {}, preprocess, upsample, UPSAMPLE_BATCH, False)
 
 
-@pytest.mark.parametrize("T", [1, 2, 3, 60, 71])
+@pytest.mark.parametrize("T", [1, 2, 3, pytest.param(60, marks=pytest.mark.slow), pytest.param(71, marks=pytest.mark.slow)])
 def test_split_forward_matches_pytorch_forward(T: int) -> None:
     """Verify that BasicVSRPlusPlusNetSplit produces the same output as the
     original BasicVSRPlusPlusNet.  T=1 and T=2 exercise the short-clip
