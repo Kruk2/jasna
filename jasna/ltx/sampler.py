@@ -202,10 +202,12 @@ class LtxTransformer:
             raise
 
     def _resident_blocks(self, sizes: list[int]) -> int:
+        reserve = ACTIVATION_RESERVE_BYTES + 2 * max(sizes)
         free = self._free_vram(self.device)
         if self.device.type == "cuda":
-            free = allocatable_bytes(self.device, free)
-        budget = free - ACTIVATION_RESERVE_BYTES - 2 * max(sizes)
+            # Probe only what all-resident needs, so the GUI preview/decoder/encoder keep their VRAM.
+            free = allocatable_bytes(self.device, min(free, sum(sizes) + reserve))
+        budget = free - reserve
         resident, used = 0, 0
         for size in sizes:
             if used + size > budget:
