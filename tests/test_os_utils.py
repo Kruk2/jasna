@@ -581,3 +581,21 @@ def test_escaped_output_keeps_the_code_page_and_escapes_what_it_cannot_encode() 
     stream.flush()
 
     assert raw.getvalue() == b"Running post-export command for caf\xe9 \\u017c.mp4\n"
+
+
+def test_tvai_setup_problems_name_each_missing_folder_and_ffmpeg(tmp_path, monkeypatch):
+    from jasna.os_utils import tvai_setup_problems
+
+    monkeypatch.delenv("TVAI_MODEL_DATA_DIR", raising=False)
+    monkeypatch.setenv("TVAI_MODEL_DIR", str(tmp_path / "models"))
+    ffmpeg = tmp_path / "ffmpeg.exe"
+
+    assert [(problem.key, problem.path) for problem in tvai_setup_problems(str(ffmpeg))] == [
+        ("data_dir_not_set", ""),
+        ("model_dir_missing", str(tmp_path / "models")),
+        ("ffmpeg_not_found", str(ffmpeg)),
+    ]
+    (tmp_path / "models").mkdir()
+    ffmpeg.touch()
+    monkeypatch.setenv("TVAI_MODEL_DATA_DIR", str(tmp_path))
+    assert tvai_setup_problems(str(ffmpeg)) == []

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Mapping
 
 from jasna.gui.models import AppSettings
-from jasna.session_config import LTX_SECONDARY_RESTORATIONS, SessionConfig
+from jasna.session_config import SessionConfig, ltx_unsupported_options
 from jasna.session_factory import RestorationSession
 
 if TYPE_CHECKING:
@@ -65,12 +65,12 @@ def video_session_config(
 
     det_name = coerce_detection_model_name(str(settings.detection_model))
     standard_model = settings.restoration_model == "basicvsrpp"
-    basicvsrpp_parts = standard_model or settings.ltx_auto_split
-    secondary_restoration = (
-        settings.secondary_restoration
-        if basicvsrpp_parts or settings.secondary_restoration in LTX_SECONDARY_RESTORATIONS
-        else "none"
+    ltx_unsupported = () if standard_model else ltx_unsupported_options(
+        auto_split=settings.ltx_auto_split,
+        secondary_restoration=settings.secondary_restoration,
+        denoise_strength=settings.denoise_strength,
     )
+    secondary_restoration = "none" if "secondary_restoration" in ltx_unsupported else settings.secondary_restoration
     return SessionConfig(
         device="cuda:0",
         fp16=bool(settings.fp16_mode),
@@ -95,6 +95,7 @@ def video_session_config(
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
         max_clip_size=int(settings.max_clip_size),
         temporal_overlap=int(settings.temporal_overlap),
+        # Stricter than ltx_unsupported: the GUI denoises only BasicVSR++ jobs, not LTX auto split parts.
         denoise_strength=settings.denoise_strength if standard_model else "none",
         secondary_restoration=secondary_restoration,
         tvai_ffmpeg_path=settings.tvai_ffmpeg_path,

@@ -603,3 +603,27 @@ class TestPushClipFlushDeadlock:
         flush_thread.start()
 
         assert flush_done.wait(timeout=3), "flush_pending deadlocked on _push_lock held by push_clip"
+
+
+@pytest.mark.parametrize(
+    ("make_dirs", "make_ffmpeg", "error", "message"),
+    [
+        (False, True, RuntimeError, "TVAI_MODEL_DATA_DIR environment variable is not set"),
+        (True, False, FileNotFoundError, "TVAI ffmpeg not found"),
+    ],
+    ids=["unset-folders", "missing-ffmpeg"],
+)
+def test_tvai_stops_at_the_first_setup_problem(tmp_path, monkeypatch, make_dirs, make_ffmpeg, error, message):
+    if make_dirs:
+        monkeypatch.setenv("TVAI_MODEL_DATA_DIR", str(tmp_path))
+        monkeypatch.setenv("TVAI_MODEL_DIR", str(tmp_path))
+    else:
+        monkeypatch.delenv("TVAI_MODEL_DATA_DIR", raising=False)
+        monkeypatch.delenv("TVAI_MODEL_DIR", raising=False)
+    ffmpeg = tmp_path / "ffmpeg.exe"
+    if make_ffmpeg:
+        ffmpeg.touch()
+    restorer = TvaiSecondaryRestorer(ffmpeg_path=str(ffmpeg), tvai_args="model=iris-2", scale=1, num_workers=1)
+
+    with pytest.raises(error, match=message):
+        restorer.push_clip(torch.rand((2, 3, 256, 256)), keep_start=0, keep_end=2)

@@ -223,3 +223,20 @@ def test_gui_image_session_requires_installed_sd15_bundle(monkeypatch) -> None:
 
     with pytest.raises(FileNotFoundError, match=t("interactive_model_missing")):
         build_image_session(AppSettings(), log=None)
+
+
+@pytest.mark.parametrize(
+    ("auto_split", "secondary", "denoise", "expected"),
+    [
+        (False, "rtx-super-res", "none", ()),
+        (False, "tvai", "low", ("secondary_restoration", "denoise_strength")),
+        (False, "none", "high", ("denoise_strength",)),
+        (True, "unet-4x", "high", ()),
+    ],
+)
+def test_ltx_needs_auto_split_for_options_of_the_basicvsrpp_parts(auto_split, secondary, denoise, expected) -> None:
+    from jasna.session_config import ltx_unsupported_options
+
+    assert ltx_unsupported_options(
+        auto_split=auto_split, secondary_restoration=secondary, denoise_strength=denoise
+    ) == expected
