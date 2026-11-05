@@ -339,9 +339,19 @@ class RawPlayerWorker:
         replace_pending(self._commands, command)
 
     def _run(self) -> None:
-        session = None
+        from jasna.gui.video_session import SessionCache, build_video_session
+
         pipeline = None
-        session_key = None
+
+        def drop_pipeline() -> None:
+            nonlocal pipeline
+            pipeline = None
+
+        def load_session(command: _Play):
+            self.events.put(PlayerStatus("loading_models", command.generation))
+            return build_video_session(command.settings, log=logger.info)
+
+        sessions = SessionCache(on_close=drop_pipeline)
         try:
             while not self._closed.is_set():
                 try:
@@ -351,18 +361,13 @@ class RawPlayerWorker:
                 if isinstance(command, _Stop):
                     break
                 try:
-                    from jasna.gui.video_session import video_session_key
-
-                    command_session_key = video_session_key(command.settings)
-                    if session is None or command_session_key != session_key:
-                        if session is not None:
-                            self._release_session(session)
-                            pipeline = None
-                            session = None
-                            session_key = None
-                        self.events.put(PlayerStatus("loading_models", command.generation))
-                        session, pipeline = self._build_pipeline(command.settings)
-                        session_key = command_session_key
+                    session = sessions.get(command.settings, lambda: load_session(command))
+                    if pipeline is None:
+                        try:
+                            pipeline = self._build_pipeline(command.settings, session)
+                        except Exception:
+                            sessions.close()
+                            raise
                     if not self._commands.empty() or self._closed.is_set():
                         continue
                     self.events.put(PlayerStatus("restoring", command.generation))
@@ -375,48 +380,27 @@ class RawPlayerWorker:
                     if not self._closed.is_set() and self._commands.empty():
                         self.events.put(PlayerFailed(str(exc), command.generation))
         finally:
-            if session is not None:
-                self._release_session(session)
+            sessions.close()
             self._on_stopped()
 
-    @staticmethod
-    def _release_session(session) -> None:
-        from jasna.gui.video_session import release_session_memory
-
-        try:
-            session.close()
-        finally:
-            release_session_memory(session.device)
-
-    def _build_pipeline(self, settings: AppSettings):
-        from jasna.gui.video_session import (
-            build_video_session,
-            video_session_config,
-        )
+    def _build_pipeline(self, settings: AppSettings, session):
+        from jasna.gui.video_session import video_session_config
         from jasna.session_factory import build_pipeline
 
-        session = build_video_session(
+        config = video_session_config(
             settings,
-            log=logger.info,
+            codec=settings.codec,
+            encoder_settings={},
         )
-        try:
-            config = video_session_config(
-                settings,
-                codec=settings.codec,
-                encoder_settings={},
-            )
-            pipeline = build_pipeline(
-                config,
-                session,
-                self.path,
-                self.path,
-            )
-            pipeline.validate_metadata(self.metadata)
-            pipeline.configure_vr(self.metadata)
-            return session, pipeline
-        except Exception:
-            self._release_session(session)
-            raise
+        pipeline = build_pipeline(
+            config,
+            session,
+            self.path,
+            self.path,
+        )
+        pipeline.validate_metadata(self.metadata)
+        pipeline.configure_vr(self.metadata)
+        return pipeline
 
     def _run_pass(self, command: _Play, pipeline, session) -> bool:
         cancel_event = threading.Event()
