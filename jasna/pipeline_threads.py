@@ -775,18 +775,20 @@ def run_restoration_pass(
     for thread in threads:
         thread.start()
 
-    while any(thread.is_alive() for thread in threads):
-        if poll is not None and poll():
-            cancel_event.set()
-        if cancel_event.wait(0.05) or error_holder:
-            break
-    stop_event.set()
-
-    for thread in threads:
-        while thread.is_alive():
-            _drain(queues)
-            thread.join(timeout=0.02)
-    vram_offloader.stop()
+    try:
+        while any(thread.is_alive() for thread in threads):
+            if poll is not None and poll():
+                cancel_event.set()
+            if cancel_event.wait(0.05) or error_holder:
+                break
+    finally:
+        # Also on Ctrl+C: the workers stop before the caller closes the encoder and models they use.
+        stop_event.set()
+        for thread in threads:
+            while thread.is_alive():
+                _drain(queues)
+                thread.join(timeout=0.02)
+        vram_offloader.stop()
 
     error = error_holder[0] if error_holder else None
     del queues, clip_queue, secondary_queue, encode_queue, metadata_queue

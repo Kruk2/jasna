@@ -491,3 +491,32 @@ def test_streaming_loop_finishes_the_stream_when_the_video_changes_after_complet
         _streaming_loop(pipeline=MagicMock(), metadata=MagicMock(), hls_server=server, streaming_encoder=MagicMock())
 
     server.mark_finished.assert_called_once()
+
+
+def test_ctrl_c_stops_every_worker_before_the_pass_returns(monkeypatch):
+    import jasna.pipeline_threads as threads_module
+
+    stopped: list[str] = []
+
+    def worker(name):
+        def run(**kwargs):
+            kwargs["cancel_event"].wait()
+            stopped.append(name)
+
+        return run
+
+    for name in ("decode_detect_loop", "primary_restore_loop", "secondary_restore_loop", "blend_encode_loop"):
+        monkeypatch.setattr(threads_module, name, worker(name))
+    monkeypatch.setattr(threads_module, "VramOffloader", MagicMock())
+    pipeline = MagicMock(device=torch.device("cpu"), max_clip_size=4, vr_projector=None)
+    pipeline.restoration_pipeline.secondary_num_workers = 1
+
+    def interrupt():
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        threads_module.run_restoration_pass(
+            pipeline, MagicMock(), MagicMock(), threading.Event(), seek_ts=None, use_async_secondary=False, poll=interrupt
+        )
+
+    assert sorted(stopped) == ["blend_encode_loop", "decode_detect_loop", "primary_restore_loop", "secondary_restore_loop"]
