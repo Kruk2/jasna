@@ -7,7 +7,7 @@ import pytest
 
 from jasna import os_utils
 from jasna.gui.models import AppSettings, PresetManager
-from jasna.gui.paths import get_settings_path
+from jasna.user_settings import get_settings_path
 
 
 def test_get_user_config_dir_windows_uses_appdata(monkeypatch, tmp_path: Path) -> None:

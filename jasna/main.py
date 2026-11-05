@@ -906,10 +906,10 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
         sys.exit(f"Error: {message}")
     from tqdm import tqdm
 
-    from jasna.gui.locales import get_locale
+    from jasna.user_settings import user_language
 
     with tqdm(total=sum(file.size_bytes for file in missing), unit="B", unit_scale=True, desc="LTX download") as bar:
-        download_files(directory, missing, lambda done, total: bar.update(done - bar.n), mirror_first=get_locale().current_language == "zh")
+        download_files(directory, missing, lambda done, total: bar.update(done - bar.n), mirror_first=user_language() == "zh")
 
 
 LTX_ONLY_ARG_DESTS = (

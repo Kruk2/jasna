@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, fields, asdict
 from enum import Enum
 from pathlib import Path
 
-from jasna.gui.paths import read_settings, update_settings
+from jasna.user_settings import read_settings, update_settings
 from jasna.segments import SegmentRange
 from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_OVERLAP, LTX_DEFAULT_SEED
 

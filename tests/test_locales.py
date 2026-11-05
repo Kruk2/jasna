@@ -63,8 +63,30 @@ def test_first_run_language_follows_system_locale(monkeypatch, tmp_path) -> None
     import locale
 
     import jasna.gui.locales as locales
+    from jasna import user_settings
 
-    monkeypatch.setattr(locales, "get_settings_path", lambda: tmp_path / "missing.json")
+    monkeypatch.setattr(user_settings, "get_settings_path", lambda: tmp_path / "missing.json")
     monkeypatch.setattr(locale, "getdefaultlocale", lambda: ("ja_JP", "UTF-8"))
 
     assert locales.LocaleManager().current_language == "ja"
+
+
+@pytest.mark.parametrize(
+    ("saved", "system", "expected"),
+    [(None, ("zh_CN", "UTF-8"), "zh"), (None, ("de_DE", "UTF-8"), "en"), (None, (None, None), "en"),
+     ({"language": "ko"}, ("zh_CN", "UTF-8"), "ko"), ({}, ("zh_CN", "UTF-8"), "en")],
+    ids=["system-zh", "system-unsupported", "system-unknown", "saved", "saved-without-language"],
+)
+def test_user_language_prefers_the_saved_choice_over_the_system_locale(monkeypatch, tmp_path, saved, system, expected) -> None:
+    import json
+    import locale
+
+    from jasna import user_settings
+
+    path = tmp_path / "settings.json"
+    if saved is not None:
+        path.write_text(json.dumps(saved), encoding="utf-8")
+    monkeypatch.setattr(user_settings, "get_settings_path", lambda: path)
+    monkeypatch.setattr(locale, "getdefaultlocale", lambda: system)
+
+    assert user_settings.user_language() == expected

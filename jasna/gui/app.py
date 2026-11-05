@@ -30,7 +30,7 @@ from jasna.gui.control_bar import ControlBar
 from jasna.gui.log_panel import LogPanel
 from jasna.gui.log_filter import runtime_log_level_for_filter
 from jasna.gui.processor import Processor, ProgressUpdate
-from jasna.gui.paths import read_settings
+from jasna.user_settings import read_settings
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui import tray
 from jasna.gui.models import JobStatus, PresetManager

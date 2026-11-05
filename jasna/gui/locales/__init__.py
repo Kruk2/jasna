@@ -1,17 +1,11 @@
 """Localization system for Jasna GUI."""
 
-import locale as _locale
-import logging
-
-from jasna.gui.paths import get_settings_path, read_settings, update_settings
-
 from jasna.gui.locales.en import EN
 from jasna.gui.locales.zh import ZH
 from jasna.gui.locales.ja import JA
 from jasna.gui.locales.ko import KO
 from jasna.gui.locales.th import TH
-
-logger = logging.getLogger(__name__)
+from jasna.user_settings import update_settings, user_language
 
 
 TRANSLATIONS = {
@@ -36,28 +30,7 @@ class LocaleManager:
     """Manages language selection and translation lookup."""
 
     def __init__(self):
-        self._current_lang = "en"
-        self._load()
-
-    def _load(self):
-        """Load language preference from settings."""
-        path = get_settings_path()
-        if path.exists():
-            self._current_lang = read_settings().get("language", "en")
-        else:
-            # If settings.json is missing, try to autodetect system language
-            try:
-                lang, _ = _locale.getdefaultlocale()
-                if lang and lang.startswith("zh"):
-                    self._current_lang = "zh"
-                elif lang and lang.startswith("ja"):
-                    self._current_lang = "ja"
-                elif lang and lang.startswith("ko"):
-                    self._current_lang = "ko"
-                elif lang and lang.startswith("th"):
-                    self._current_lang = "th"
-            except Exception:
-                logger.debug("System locale autodetection failed; using 'en'", exc_info=True)
+        self._current_lang = user_language()
 
     def _save(self):
         update_settings(language=self._current_lang)

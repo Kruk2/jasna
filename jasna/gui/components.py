@@ -8,7 +8,7 @@ import webbrowser
 from jasna.gui import scaling
 from jasna.gui.branding import create_xianyu_qr_image
 from jasna.gui.icons import CompactSwitch
-from jasna.gui.paths import read_settings, update_settings
+from jasna.user_settings import read_settings, update_settings
 from jasna.gui import activation_worker
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.theme import Colors, Fonts, Sizing
