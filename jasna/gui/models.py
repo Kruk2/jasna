@@ -189,6 +189,7 @@ class AppSettings:
     sharpen_strength: float = 0.0
     lut_path: str = ""
     retarget_high_fps: bool = False
+    frame_generation: str = "none"  # none, 2x
     fmp4: bool = False
 
     # Post-export action

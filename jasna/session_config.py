@@ -35,6 +35,7 @@ DEFAULT_CODEC: CodecName = "hevc"
 LtxVaeName = Literal["auto", "full", "half", "max"]
 """An LTX video encoder or decoder size; "auto" is the model's own default."""
 DecodeBackendName = Literal["auto", "vali", "pyav-hw", "pyav-sw"]
+FrameGenerationName = Literal["none", "2x"]
 
 # Option defaults shared by the CLI (``jasna.main.build_parser``) and the GUI (``AppSettings``).
 DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
@@ -100,6 +101,7 @@ class SessionConfig:
     encoder_settings: Mapping[str, object]
     lut_path: str | None
     retarget_high_fps: bool
+    frame_generation: FrameGenerationName
     disable_progress: bool
     working_dir: Path | None
     vr_projection: VrProjectionName

@@ -497,7 +497,7 @@ def test_outputs_with_the_same_name_keep_separate_checkpoints_in_a_working_direc
 
 @pytest.mark.parametrize("change", [
     {"codec": "av1"}, {"encoder_settings": {"cq": 12}}, {"lut_path": "lut"}, {"sharpen_strength": 0.5},
-    {"fmp4": True}, {"max_clip_size": 120}, {"compile_basicvsrpp": False}, {"secondary_restoration": "unet-4x"},
+    {"fmp4": True}, {"frame_generation": "2x"}, {"max_clip_size": 120}, {"compile_basicvsrpp": False}, {"secondary_restoration": "unet-4x"},
 ])
 def test_output_only_settings_keep_the_latent_fingerprint(job, tmp_path, change):
     config, source, output, metadata = job

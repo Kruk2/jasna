@@ -1341,7 +1341,7 @@ def _restore_spans(
 
 def restore_video(
     frames: FrameSource,
-    writer: FrameWriter,
+    open_writer: Callable[[], FrameWriter],
     *,
     detector,
     files: LtxModelFiles,
@@ -1365,7 +1365,7 @@ def restore_video(
 ) -> None:
     """Restore every mosaic of the video ``frames`` yields as one segment. ``large_canvas``
     is ``whole_video_large_canvas``'s decision; the decode tiles follow the free VRAM."""
-    span = LtxSpan(frames, (LtxSegment(*WHOLE_VIDEO_PTS, seed),), lambda: writer)
+    span = LtxSpan(frames, (LtxSegment(*WHOLE_VIDEO_PTS, seed),), open_writer)
     restore_spans(
         [span],
         LtxRender(

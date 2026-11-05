@@ -145,6 +145,7 @@ def _session_config_from_args(
         lut_path=lut_path,
         sharpen_strength=float(args.sharpen),
         retarget_high_fps=bool(args.retarget_high_fps),
+        frame_generation=args.frame_generation,
         fmp4=bool(args.fmp4),
         disable_progress=bool(args.no_progress),
         working_dir=Path(args.working_directory) if args.working_directory else None,
@@ -569,6 +570,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     encoding.add_argument(
+        "--frame-generation",
+        type=str,
+        default="none",
+        choices=["none", "2x"],
+        help=CLI_HELP["frame_generation"],
+    )
+    encoding.add_argument(
         "--fmp4",
         action="store_true",
         help=(
@@ -984,6 +992,8 @@ def _main() -> None:
         parser.error("--retarget-high-fps is only supported for offline exports")
     if is_streaming and args.fmp4:
         parser.error("--fmp4 is only supported for offline exports")
+    if is_streaming and args.frame_generation != "none":
+        parser.error("--frame-generation is only supported for offline exports")
     from jasna.post_export_action import run_post_export_action_safely, validate_post_export_action
     with _usage_errors(parser):
         validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
@@ -1025,6 +1035,8 @@ def _main() -> None:
             parser.error("--ltx-auto-split must be a percentage above 0 and at most 100")
         if args.fmp4:
             parser.error("--fmp4 cannot be combined with --ltx-auto-split")
+        if args.frame_generation != "none":
+            parser.error("--frame-generation cannot be combined with --ltx-auto-split")
     if segments_spec:
         if is_streaming:
             parser.error("--segments cannot be combined with --stream")
@@ -1034,6 +1046,8 @@ def _main() -> None:
             parser.error("--segments requires a single video input, not a folder")
         if args.fmp4:
             parser.error("--fmp4 cannot be combined with --segments")
+        if args.frame_generation != "none":
+            parser.error("--frame-generation cannot be combined with --segments")
     if is_streaming and input_is_dir:
         parser.error("--stream does not support folder input")
     if is_streaming and input_is_image:
@@ -1059,6 +1073,12 @@ def _main() -> None:
 
     _check_system(args)
     _configure_runtime(args)
+    if args.frame_generation != "none" and not input_is_image:
+        from jasna.accelerator import supports_frame_generation
+        from jasna.session_factory import FRAME_GENERATION_NEEDS_RTX_40
+
+        if not supports_frame_generation(args.device):
+            parser.error(FRAME_GENERATION_NEEDS_RTX_40)
 
     folder_images: list[Path] = []
     folder_videos: list[Path] = []

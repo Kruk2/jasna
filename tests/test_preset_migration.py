@@ -82,3 +82,7 @@ def test_the_old_less_overlap_switch_becomes_the_matching_ltx_overlap(less_overl
     old = {} if less_overlap is None else {"ltx_less_overlap": less_overlap}
 
     assert AppSettings(**_migrate_preset_dict(old)).ltx_overlap == overlap
+
+
+def test_presets_saved_before_frame_generation_load_with_it_off():
+    assert AppSettings(**_migrate_preset_dict({"codec": "hevc", "retarget_high_fps": True})).frame_generation == "none"

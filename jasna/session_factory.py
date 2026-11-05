@@ -157,11 +157,13 @@ def build_restoration_session(
 ) -> RestorationSession:
     import torch
 
-    from jasna.accelerator import is_amd_device, log_amd_backend
+    from jasna.accelerator import is_amd_device, log_amd_backend, supports_frame_generation
 
     device = torch.device(config.device)
     if is_amd_device(device):
         log_amd_backend(device)
+    if config.frame_generation != "none" and not supports_frame_generation(device):
+        raise ValueError(FRAME_GENERATION_NEEDS_RTX_40)
     if config.tvai_denoise and config.secondary_restoration != "tvai":
         raise ValueError("TVAI Denoise requires secondary restoration 'tvai'")
     if is_amd_device(device) and config.secondary_restoration not in ("none", "unet-4x"):
@@ -242,6 +244,7 @@ def _build_basicvsrpp_pipeline(
 
 
 LTX_FAST_NEEDS_BLACKWELL = "The fast LTX model needs an RTX 50-series (Blackwell) GPU"
+FRAME_GENERATION_NEEDS_RTX_40 = "Frame generation needs an NVIDIA RTX 40-series or newer GPU"
 
 
 def _ltx_model_files(
@@ -325,8 +328,16 @@ def splice_source(config: SessionConfig, source: Path, output: Path) -> SpliceSo
     """Raises ``SmartRenderCompatibilityError`` when ``source`` cannot be restored in parts
     into ``output``."""
     from jasna.media.probe import get_video_meta_data
-    from jasna.media.splice import canonical_codec, probe_keyframes, validate_smart_render
+    from jasna.media.splice import (
+        SmartRenderCompatibilityError,
+        canonical_codec,
+        probe_keyframes,
+        validate_smart_render,
+    )
 
+    if config.frame_generation != "none":
+        # Copied parts keep the source frame rate, so they cannot sit next to doubled ones.
+        raise SmartRenderCompatibilityError("Smart rendering cannot be combined with frame generation")
     metadata = get_video_meta_data(str(source))
     codec = canonical_codec(metadata.codec_name)
     validate_smart_render(metadata, output_path=output, codec=codec, retarget_high_fps=config.retarget_high_fps)

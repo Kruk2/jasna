@@ -292,6 +292,38 @@ def test_retarget_high_fps_halves_the_rate_for_readers_encoder_and_progress():
     assert progress_cls.call_args.kwargs["video_fps"] == 30.0
 
 
+def test_frame_generation_doubles_the_frames_and_rate_before_the_encoder():
+    generator = MagicMock(side_effect=lambda previous, current: previous)
+    with patch("jasna.frame_generation.RtxFrameGeneration", return_value=generator):
+        _, encoder_cls, encoder = _run(_pipeline(frame_generation="2x"), frames=torch.zeros((2, 3, 8, 8), dtype=torch.uint8))
+
+    assert encoder_cls.call_args.kwargs["frame_generation"] is True
+    assert [call.args[1] for call in encoder.encode.call_args_list] == [0, 1, 2, 3]
+    assert generator.call_count == 1
+    generator.close.assert_called_once()
+
+
+def test_ltx_loads_frame_generation_only_when_compose_opens_the_writer(tmp_path):
+    from jasna.frame_generation import FrameGenerationWriter
+
+    pipeline = _pipeline(frame_generation="2x", restoration_model_name="ltx", ltx_files=MagicMock(transformer_name="t"))
+    pipeline.resume = MagicMock(directory=tmp_path)
+    pipeline.configure_vr(_fake_metadata())
+    with (
+        patch("jasna.ltx.restore.whole_video_large_canvas", return_value=False),
+        patch("jasna.ltx.restore.video_frames"),
+        patch("jasna.ltx.restore.restore_video") as restore_video,
+        patch("jasna.pipeline.VideoEncoder"),
+        patch("jasna.frame_generation.RtxFrameGeneration") as generation_cls,
+    ):
+        pipeline._run_ltx(_fake_metadata())
+        generation_cls.assert_not_called()
+        writer = restore_video.call_args.args[1]()
+
+    assert isinstance(writer, FrameGenerationWriter)
+    generation_cls.assert_called_once_with(torch.device("cpu"), 8, 8)
+
+
 def test_fmp4_is_dropped_for_segment_processing(tmp_path):
     p = _pipeline(
         fmp4=True, segments=(SegmentRange(0.0, 1.0),),
