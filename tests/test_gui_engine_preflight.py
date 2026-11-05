@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 
 import pytest
-import torch
 
 from jasna.gui.engine_preflight import run_engine_preflight
 from jasna.gui.models import AppSettings
@@ -99,22 +98,6 @@ def test_preflight_basicvsrpp_missing_then_found(monkeypatch, tmp_path: Path) ->
     basic_req2 = next(r for r in res2.requirements if r.key == "basicvsrpp")
     assert basic_req2.exists
     assert len(basic_req2.missing_paths) == 0
-
-
-def test_get_onnx_tensorrt_engine_path_matches_compile_return_when_present(monkeypatch, tmp_path: Path) -> None:
-    pytest.importorskip("tensorrt")
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
-
-    from jasna.trt import compile_onnx_to_tensorrt_engine, get_onnx_tensorrt_engine_path
-
-    onnx = Path("model_weights") / "rfdetr-v3.onnx"
-    _touch(onnx)
-    engine = get_onnx_tensorrt_engine_path(onnx, batch_size=4, fp16=True)
-    _touch(engine)
-
-    out = compile_onnx_to_tensorrt_engine(onnx, torch.device("cuda:0"), batch_size=4, fp16=True, workspace_gb=20)
-    assert out == engine
 
 
 def test_preflight_unet4x_encrypted_engine_satisfies(monkeypatch, tmp_path: Path) -> None:

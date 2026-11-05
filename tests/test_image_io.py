@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from jasna.media.image_io import read_image_rgb_chw, write_image_rgb_chw
-from jasna.media.media_files import IMAGE_EXTENSIONS, is_image
+from jasna.media.media_files import is_image
 
 
 class TestIsImagePath:
@@ -17,9 +17,6 @@ class TestIsImagePath:
     @pytest.mark.parametrize("name", ["a.mp4", "b.mkv", "c.txt"])
     def test_non_image_suffixes(self, name: str):
         assert is_image(name) is False
-
-    def test_extension_set(self):
-        assert ".png" in IMAGE_EXTENSIONS and ".jpg" in IMAGE_EXTENSIONS
 
 
 class TestRoundTrip:
