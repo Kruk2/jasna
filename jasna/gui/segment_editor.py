@@ -926,8 +926,8 @@ class SegmentEditor(ctk.CTkToplevel):
             profile_path(),
             torch.cuda.get_device_name(0),
             bundle_names(settings.ltx_model, fast=settings.ltx_fast)[0],
-            frames=max(1, round(segment.duration * metadata.video_fps)),
-            fps=float(metadata.video_fps),
+            frames=max(1, round(segment.duration * metadata.mean_fps)),
+            fps=float(metadata.mean_fps),
             megapixels=metadata.video_width * metadata.video_height / 1e6,
             window_hop=window_hop(settings.ltx_overlap),
         )
