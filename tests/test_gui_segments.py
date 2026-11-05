@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -88,11 +89,11 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
     pipeline = MagicMock()
     processor = Processor(on_resume_conflict=no_resume_conflict)
     processor._settings = AppSettings()
-    processor._video_session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
-    processor._ensure_video_session = MagicMock()
+    session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
     processor._prepare_job_detector = MagicMock()
     
     with (
+        patch("jasna.gui.processor.build_video_session", return_value=session),
         patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
         patch("jasna.media.splice.validate_smart_render"),
         patch("jasna.media.splice.probe_keyframes", return_value=MagicMock(max_b_frames=0)),
@@ -118,17 +119,16 @@ def test_ensure_video_session_delegates_to_factory_and_close_unloads() -> None:
     session = MagicMock()
 
     with patch("jasna.gui.processor.build_video_session", return_value=session) as build:
-        processor._ensure_video_session(processor._settings)
-        processor._ensure_video_session(processor._settings)
+        assert processor._ensure_video_session(processor._settings) is session
+        assert processor._ensure_video_session(replace(processor._settings, detection_model="other")) is session
 
     build.assert_called_once()
-    assert processor._video_session is session
 
-    with patch("jasna.gui.processor.release_session_memory") as release:
+    with patch("jasna.gui.video_session.release_session_memory") as release:
+        processor._close_video_session()
         processor._close_video_session()
     session.close.assert_called_once_with()
     release.assert_called_once_with(session.device)
-    assert processor._video_session is None
 
 
 def _run_ltx_job(tmp_path, segments, split):
@@ -143,10 +143,10 @@ def _run_ltx_job(tmp_path, segments, split):
         encoder_custom_args="tune=uhq",
     )
     processor._settings = settings
-    processor._video_session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
-    processor._ensure_video_session = MagicMock()
+    session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
     processor._prepare_job_detector = MagicMock()
     with (
+        patch("jasna.gui.processor.build_video_session", return_value=session),
         patch("jasna.gui.processor.ltx_auto_split", return_value=split) as auto_split,
         patch("jasna.media.probe.get_video_meta_data", return_value=MagicMock(codec_name="hevc", duration=10.0)),
         patch("jasna.media.splice.validate_smart_render"),

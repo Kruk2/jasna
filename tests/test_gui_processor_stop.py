@@ -201,8 +201,8 @@ def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conf
 
     processor, job, _updates = _processor_with_job(tmp_path, None)
     del processor._run_pipeline
-    processor._ensure_video_session = lambda _settings: setattr(
-        processor, "_video_session", MagicMock(device=torch.device("cpu"))
+    monkeypatch.setattr(
+        "jasna.gui.processor.build_video_session", lambda *_a, **_k: MagicMock(device=torch.device("cpu"))
     )
     processor._prepare_job_detector = MagicMock()
     job.path.touch()
@@ -354,8 +354,8 @@ def test_a_range_job_that_reencodes_the_whole_video_offers_stop_not_pause(tmp_pa
     )
     processor, job, updates = _processor_with_job(tmp_path, None)
     del processor._run_pipeline
-    processor._ensure_video_session = lambda _settings: setattr(
-        processor, "_video_session", MagicMock(device=torch.device("cpu"))
+    monkeypatch.setattr(
+        "jasna.gui.processor.build_video_session", lambda *_a, **_k: MagicMock(device=torch.device("cpu"))
     )
     processor._prepare_job_detector = MagicMock()
     job.path.touch()
