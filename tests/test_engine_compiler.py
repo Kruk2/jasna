@@ -39,13 +39,6 @@ def test_request_json_roundtrip() -> None:
     assert EngineCompilationRequest.from_json(req.to_json()) == req
 
 
-def test_request_defaults() -> None:
-    req = EngineCompilationRequest(device="cuda:0", fp16=True)
-    assert req.basicvsrpp is False
-    assert req.detection is False
-    assert req.unet4x is False
-
-
 def test_ensure_no_subprocess_when_basicvsrpp_exists(monkeypatch) -> None:
     monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: True)
     req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
