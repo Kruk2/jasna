@@ -349,7 +349,15 @@ def _cut(group: RegionGroup, raster: _Raster, outlines: Sequence[np.ndarray]) ->
         for k in range(outside):
             contours, _ = cv2.findContours((nearest == k).view(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             pieces[k].extend(contour[:, 0, :] + np.array((x0, y0), dtype=np.int32) for contour in contours if len(contour) >= 3)
-    return [RegionGroup(_extent(found), tuple(found)) if found else None for found in pieces]
+    return [RegionGroup(_model_box(found, group.box), tuple(found)) if found else None for found in pieces]
+
+
+def _model_box(polygons: Sequence[Polygon], box: Box) -> Box:
+    """A cut part's box: its outline bounds clipped to the detection's model box, since the
+    outlines are dilated (``EXPAND_PIXELS``) and other frames link on model boxes."""
+    left, top, right, bottom = _extent(polygons)
+    clipped = max(left, box[0]), max(top, box[1]), min(right, box[2]), min(bottom, box[3])
+    return clipped if clipped[0] < clipped[2] and clipped[1] < clipped[3] else (left, top, right, bottom)
 
 
 def _may_share(group: RegionGroup, last: RegionGroup) -> bool:
@@ -378,7 +386,7 @@ def _share(
     parts = _cut(group, raster, outlines)
     given = [(track, part) for (track, _), part, alone in zip(owners, parts, apart) if alone and part is not None]
     rest = [polygon for part, alone in zip(parts, apart) if not alone and part is not None for polygon in part.polygons]
-    return given, RegionGroup(_extent(rest), tuple(rest)) if rest else None
+    return given, RegionGroup(_model_box(rest, group.box), tuple(rest)) if rest else None
 
 
 def share_groups(
