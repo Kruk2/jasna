@@ -936,6 +936,14 @@ def _print_activation_status(parser: argparse.ArgumentParser) -> None:
 
 
 def main() -> None:
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print("Stopped")
+        sys.exit(130)
+
+
+def _main() -> None:
     escape_unencodable_output(sys.stdout, sys.stderr)
     parser = build_parser()
     args = parser.parse_args()
