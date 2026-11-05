@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 
 import torch
 
@@ -153,17 +154,19 @@ class TestBlendBufferBlending:
         bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
         bb.register_frame(0, {1, 2})
 
-        bb.add_result(_make_sr(track_id=1, start_frame=0, frame_count=1, fill_value=100))
-        bb.add_result(_make_sr(track_id=2, start_frame=0, frame_count=1, fill_value=200))
+        left = _make_sr(track_id=1, start_frame=0, frame_count=1, fill_value=100)
+        right = _make_sr(track_id=2, start_frame=0, frame_count=1, fill_value=200)
+        bb.add_result(replace(left, enlarged_bboxes=[(0, 0, 4, 8)], crop_shapes=[(8, 4)]))
+        bb.add_result(replace(right, enlarged_bboxes=[(4, 0, 8, 8)], crop_shapes=[(8, 4)]))
 
-        original = torch.zeros(3, 8, 8, dtype=torch.uint8)
-        blended = bb.blend_frame(0, original)
-        assert not torch.all(blended == 0), "at least one track must have been blended"
+        blended = bb.blend_frame(0, torch.zeros(3, 8, 8, dtype=torch.uint8))
+        assert torch.all(blended[:, :, :4] == 100)
+        assert torch.all(blended[:, :, 4:] == 200)
 
 
 class TestBlendBufferDiscardedFrames:
     def test_discarded_frames_outside_keep_range_cleared(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
+        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
         bb.register_frame(0, {1})
         bb.register_frame(1, {1})
         bb.register_frame(2, {1})
@@ -171,9 +174,11 @@ class TestBlendBufferDiscardedFrames:
         sr = _make_sr(track_id=1, start_frame=0, frame_count=3, keep_start=0, keep_end=1, clip_keep_offset=1)
         bb.add_result(sr)
 
-        assert bb.is_frame_ready(0)
-        assert bb.is_frame_ready(2)
-        assert not bb.is_frame_ready(1) or bb.is_frame_ready(1)
+        assert all(bb.is_frame_ready(i) for i in range(3))
+        original = torch.zeros(3, 8, 8, dtype=torch.uint8)
+        assert bb.blend_frame(0, original) is original
+        assert torch.all(bb.blend_frame(1, original) == 200)
+        assert bb.blend_frame(2, original) is original
 
 
 class TestBlendBufferPendingClip:
