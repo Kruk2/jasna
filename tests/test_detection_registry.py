@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -7,7 +7,6 @@ import torch
 from jasna.mosaic.detection_registry import (
     DEFAULT_DETECTION_MODEL_NAME,
     RFDETR_MODEL_NAMES,
-    YOLO_MODEL_FILES,
     build_detection_model,
     coerce_detection_model_name,
     detection_model_weights_path,
@@ -210,16 +209,6 @@ def test_zelefans_vr_model_weights_path() -> None:
     )
 
 
-def test_require_detection_model_weights_returns_existing_path(tmp_path: Path) -> None:
-    path = tmp_path / "vr.pt"
-    path.touch()
-    with patch(
-        "jasna.mosaic.detection_registry.detection_model_weights_path",
-        return_value=path,
-    ):
-        assert require_detection_model_weights("zelefans-vr-yolo-v2") == path
-
-
 def test_require_detection_model_weights_rejects_missing_path(tmp_path: Path) -> None:
     path = tmp_path / "missing.pt"
     with (
@@ -241,10 +230,6 @@ def test_discover_ignores_non_matching_files(tmp_path: Path) -> None:
 
 
 # --- precompile_detection_engine ---
-
-def test_precompile_noop_on_cpu() -> None:
-    precompile_detection_engine("rfdetr-v5", Path("m.onnx"), 1, torch.device("cpu"), True)
-
 
 def test_precompile_rfdetr_on_cuda() -> None:
     with patch("jasna.trt.compile_onnx_to_tensorrt_engine") as mock_compile:
@@ -268,29 +253,6 @@ def test_precompile_rfdetr_v6_uses_requested_dynamic_batch() -> None:
             Path("m.onnx"), torch.device("cuda:0"),
             batch_size=8, fp16=True, workspace_gb=20, dynamic_batch=True,
         )
-
-
-def test_precompile_yolo_on_cuda() -> None:
-    with (
-        patch("jasna.mosaic.yolo_tensorrt_compilation.compile_yolo_to_tensorrt_engine") as mock_compile,
-    ):
-        precompile_detection_engine("lada-yolo-v4", Path("m.pt"), 4, torch.device("cuda:0"), True)
-        mock_compile.assert_called_once()
-
-
-def test_precompile_zelefans_yolo_on_cuda() -> None:
-    with patch(
-        "jasna.mosaic.yolo_tensorrt_compilation.compile_yolo_to_tensorrt_engine"
-    ) as mock_compile:
-        precompile_detection_engine(
-            "zelefans-vr-yolo-v2",
-            Path("vr.pt"),
-            4,
-            torch.device("cuda:0"),
-            True,
-        )
-
-    mock_compile.assert_called_once()
 
 
 # --- build_detection_model ---

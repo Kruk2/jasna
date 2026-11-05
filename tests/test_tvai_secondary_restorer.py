@@ -216,7 +216,7 @@ class TestPushClip:
 class TestDrainWorker:
     def test_clip_segment_collection(self):
         r = _make_restorer()
-        workers = _setup_mock_workers(r)
+        _setup_mock_workers(r)
         out = _make_frame()
         r._worker_segments[0].append(_ClipSegment(seq=0, expected=2))
         r._process_drained_frames(0, [out, out])
@@ -225,7 +225,7 @@ class TestDrainWorker:
 
     def test_filler_segment_skipped(self):
         r = _make_restorer()
-        workers = _setup_mock_workers(r)
+        _setup_mock_workers(r)
         out = _make_frame()
         r._worker_segments[0].append(_FillerSegment(remaining=2))
         r._worker_segments[0].append(_ClipSegment(seq=0, expected=1))
@@ -236,7 +236,7 @@ class TestDrainWorker:
 
     def test_partial_clip_not_completed(self):
         r = _make_restorer()
-        workers = _setup_mock_workers(r)
+        _setup_mock_workers(r)
         out = _make_frame()
         r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
         r._process_drained_frames(0, [out, out])
@@ -245,7 +245,7 @@ class TestDrainWorker:
 
     def test_multiple_clips_drain_in_order(self):
         r = _make_restorer()
-        workers = _setup_mock_workers(r)
+        _setup_mock_workers(r)
         out = _make_frame()
         r._worker_segments[0].append(_ClipSegment(seq=0, expected=2))
         r._worker_segments[0].append(_ClipSegment(seq=1, expected=1))
@@ -549,7 +549,7 @@ class TestReflushCompletesClip:
         """Verify that filler output frames are correctly counted against
         the _FillerSegment and never leak into the clip's collected list."""
         r = _make_restorer(num_workers=1)
-        workers = _setup_mock_workers(r)
+        _setup_mock_workers(r)
         clip_out = _make_frame()
         clip_frames = 5
 
