@@ -6,9 +6,11 @@ import re
 import struct
 import subprocess
 import sys
+import threading
 from contextlib import contextmanager, nullcontext
 from fractions import Fraction
 from pathlib import Path
+from queue import Queue
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -16,9 +18,13 @@ import av
 import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
+from jasna.blend_buffer import BlendBuffer
+from jasna.frame_queue import FrameQueue
 from jasna.media.probe import VideoMetadata
 from jasna.pipeline import Pipeline
+from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import PrimaryRestoreResult
+from jasna.pipeline_threads import PassContext
 from jasna.os_utils import resolve_executable
 from jasna.session_config import SessionConfig
 
@@ -105,6 +111,41 @@ def video_metadata(*, fps: int = 24, num_frames: int = 2, **overrides) -> VideoM
     )
     values.update(overrides)
     return VideoMetadata(**values)
+
+
+def pass_context(**overrides) -> PassContext:
+    """The shared state of one CPU restoration pass over ``video_metadata()``, with unbounded queues."""
+    values = dict(
+        device=torch.device("cpu"),
+        restoration_pipeline=MagicMock(),
+        input_video="fake.mkv",
+        decode_backend="auto",
+        batch_size=2,
+        metadata=video_metadata(),
+        seek_ts=None,
+        frame_stride=1,
+        blend_buffer=BlendBuffer(device=torch.device("cpu")),
+        crop_buffers={},
+        clip_queue=FrameQueue(max_frames=9999),
+        secondary_queue=FrameQueue(max_frames=9999),
+        encode_queue=FrameQueue(max_frames=9999),
+        metadata_queue=Queue(),
+        primary_idle_event=threading.Event(),
+        stop_event=threading.Event(),
+        error_holder=[],
+    )
+    values.update(overrides)
+    values.setdefault(
+        "debug_memory",
+        PipelineDebugMemoryLogger(
+            logger=logging.getLogger("tests.pass_context"),
+            blend_buffer=values["blend_buffer"],
+            clip_queue=values["clip_queue"],
+            secondary_queue=values["secondary_queue"],
+            encode_queue=values["encode_queue"],
+        ),
+    )
+    return PassContext(**values)
 
 
 def primary_result(

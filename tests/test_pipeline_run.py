@@ -8,11 +8,10 @@ import pytest
 import torch
 from av.video.reformatter import Colorspace as AvColorspace
 
-from factories import make_pipeline, primary_result, video_metadata
+from factories import make_pipeline, pass_context, primary_result, video_metadata
 from jasna import pipeline_threads
 from jasna.accelerator import AcceleratorVendor
 from jasna.crop_buffer import RawCrop
-from jasna.frame_queue import FrameQueue
 from jasna.media.encoder_settings import AMF_MIN_SIZE
 from jasna.media.probe import UnsupportedVideoError
 from jasna.pipeline import Pipeline
@@ -335,28 +334,18 @@ def test_run_rejects_a_video_too_small_for_the_amd_encoder_before_processing():
 
 
 def _run_async_secondary(restorer, results, *, primary_idle: bool):
-    secondary_queue = FrameQueue(max_frames=9999)
-    encode_queue = FrameQueue(max_frames=9999)
+    ctx = pass_context(restoration_pipeline=RestorationPipeline(_WhitePrimary(), secondary_restorer=restorer))
     for result in results:
-        secondary_queue.put(result)
+        ctx.secondary_queue.put(result)
     if not primary_idle:
-        secondary_queue.put(_SENTINEL)
-    idle = threading.Event()
+        ctx.secondary_queue.put(_SENTINEL)
     if primary_idle:
-        idle.set()
-        restorer.on_pop = lambda r: secondary_queue.put(_SENTINEL) if len(r.returned) == len(results) else None
-    stats = run_async_secondary(
-        restoration_pipeline=RestorationPipeline(_WhitePrimary(), secondary_restorer=restorer),
-        secondary_queue=secondary_queue,
-        encode_queue=encode_queue,
-        clip_queue=FrameQueue(max_frames=9999),
-        primary_idle_event=idle,
-        cancel_event=threading.Event(),
-        debug_memory=MagicMock(),
-    )
+        ctx.primary_idle_event.set()
+        restorer.on_pop = lambda r: ctx.secondary_queue.put(_SENTINEL) if len(r.returned) == len(results) else None
+    stats = run_async_secondary(ctx)
     forwarded = []
-    while not encode_queue.empty():
-        forwarded.append(encode_queue.get())
+    while not ctx.encode_queue.empty():
+        forwarded.append(ctx.encode_queue.get())
     return stats, forwarded
 
 

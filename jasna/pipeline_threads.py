@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import gc
+import itertools
 import logging
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from queue import Empty, Queue
 from typing import Protocol
 
@@ -14,6 +16,7 @@ from jasna.accelerator import empty_cache, ipc_collect
 from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer
 from jasna.frame_queue import FrameQueue
+from jasna.media.probe import VideoMetadata
 from jasna.media.video_decoder import VideoReader
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryLoopStats, _SENTINEL
@@ -36,215 +39,219 @@ class FrameWriter(Protocol):
     def after_write(self, frames_written: int, stop_event: threading.Event) -> None: ...
 
 
+@dataclass(frozen=True)
+class PassContext:
+    """What the worker threads of one restoration pass share.
+
+    ``stop_event`` is pass-owned: set on cancel or on the first error in ``error_holder``.
+    """
+
+    device: torch.device
+    restoration_pipeline: RestorationPipeline
+    input_video: str
+    decode_backend: DecodeBackendName
+    batch_size: int
+    metadata: VideoMetadata
+    seek_ts: float | None
+    frame_stride: int
+    blend_buffer: BlendBuffer
+    crop_buffers: dict[int, CropBuffer]
+    clip_queue: FrameQueue
+    secondary_queue: FrameQueue
+    encode_queue: FrameQueue
+    metadata_queue: Queue
+    primary_idle_event: threading.Event
+    stop_event: threading.Event
+    error_holder: list[BaseException]
+    debug_memory: PipelineDebugMemoryLogger
+
+    def open_reader(self) -> VideoReader:
+        return VideoReader(
+            self.input_video,
+            batch_size=self.batch_size,
+            device=self.device,
+            metadata=self.metadata,
+            frame_stride=self.frame_stride,
+            decode_backend=self.decode_backend,
+        )
+
+
+def effect_runs(
+    pts_list: list[int], effect_ranges: tuple[tuple[int, int], ...] | None
+) -> list[tuple[int, int, bool]]:
+    """Split a batch into maximal ``(start, end, inside)`` runs of frames that are all inside
+    or all outside the half-open ``effect_ranges`` (``None`` means everything is inside)."""
+    runs = []
+    start = 0
+    inside_flags = (
+        effect_ranges is None or any(low <= int(pts) < high for low, high in effect_ranges) for pts in pts_list
+    )
+    for inside, group in itertools.groupby(inside_flags):
+        end = start + sum(1 for _ in group)
+        runs.append((start, end, inside))
+        start = end
+    return runs
+
+
 def decode_detect_loop(
+    ctx: PassContext,
+    pipeline,
     *,
-    input_video: str,
-    decode_backend: DecodeBackendName,
-    batch_size: int,
-    device: torch.device,
-    metadata,
-    detection_model,
-    max_clip_size: int,
-    temporal_overlap: int,
-    max_detection_gap: int,
-    min_detection_duration: int,
-    scene_detection: bool,
-    blend_buffer: BlendBuffer,
-    crop_buffers: dict[int, CropBuffer],
-    clip_queue: FrameQueue,
-    metadata_queue: Queue,
-    error_holder: list[BaseException],
-    cancel_event: threading.Event,
-    debug_memory: PipelineDebugMemoryLogger,
-    stereo: StereoLayout | None,
-    vr_projector,
-    seek_ts: float | None,
     end_pts: int | None,
     effect_ranges: tuple[tuple[int, int], ...] | None,
-    frame_stride: int,
     output_frame_count: int | None,
     output_fps: float | None,
     progress: Progressbar | None,
 ) -> None:
+    """Decode, detect and track; ``pipeline`` supplies the detector, tracker settings and VR layout."""
     timer = LoopTimer("decode-detect")
     try:
-        torch.cuda.set_device(device)
-        tracker = ClipTracker(
-            max_clip_size=max_clip_size,
-            temporal_overlap=temporal_overlap,
-            max_detection_gap=max_detection_gap,
-        )
-        scene_detector = SceneCutDetector() if scene_detection else None
-        discard_margin = temporal_overlap
-        blend_frames = temporal_overlap // 3
-
-        with (
-            VideoReader(
-                input_video,
-                batch_size=batch_size,
-                device=device,
-                metadata=metadata,
-                frame_stride=frame_stride,
-                decode_backend=decode_backend,
-            ) as reader,
-            torch.inference_mode(),
-        ):
+        torch.cuda.set_device(ctx.device)
+        with ctx.open_reader() as reader, torch.inference_mode():
             if progress is not None:
                 progress.init()
-            target_hw = (int(metadata.video_height), int(metadata.video_width))
-            frame_idx = 0 if seek_ts is None else _estimate_start_frame(metadata, seek_ts)
-            frame_shape = target_hw
-            effect_active = effect_ranges is None
-            stop_after_batch = False
-
-            def _selected(pts: int) -> bool:
-                if effect_ranges is None:
-                    return True
-                return any(start <= pts < end for start, end in effect_ranges)
-
-            def _finalize_tracker() -> None:
-                nonlocal effect_active
-                if not effect_active:
-                    return
-                finalize_processing(
-                    tracker=tracker,
-                    blend_buffer=blend_buffer,
-                    crop_buffers=crop_buffers,
-                    clip_queue=clip_queue,
-                    frame_shape=frame_shape,
-                    discard_margin=discard_margin,
-                    blend_frames=blend_frames,
-                    min_detection_duration=min_detection_duration,
-                )
-                if scene_detector is not None:
-                    scene_detector.reset()
-                effect_active = False
+            metadata = ctx.metadata
             log.info(
                 "Processing %s: %d frames @ %s fps, %dx%d",
-                input_video,
+                ctx.input_video,
                 metadata.num_frames if output_frame_count is None else output_frame_count,
                 metadata.video_fps if output_fps is None else output_fps,
                 metadata.video_width,
                 metadata.video_height,
             )
-
             try:
-                for frames, pts_list in timer.timed_iter(reader.frames(seek_ts=seek_ts), "decode"):
-                    if cancel_event.is_set():
-                        break
-                    if end_pts is not None:
-                        keep_count = next(
-                            (i for i, pts in enumerate(pts_list) if int(pts) >= end_pts),
-                            len(pts_list),
-                        )
-                        if keep_count < len(pts_list):
-                            stop_after_batch = True
-                            frames = frames[:keep_count]
-                            pts_list = pts_list[:keep_count]
-                    effective_bs = len(pts_list)
-                    if effective_bs == 0:
-                        if stop_after_batch:
-                            break
-                        continue
-
-                    frame_shape = (int(frames.shape[-2]), int(frames.shape[-1]))
-                    if error_holder:
-                        raise error_holder[0]
-
-                    batch_start = frame_idx
-
-                    with timer.measure("detect-track"):
-                        offset = 0
-                        while offset < effective_bs:
-                            selected = _selected(int(pts_list[offset]))
-                            group_end = offset + 1
-                            while (
-                                group_end < effective_bs
-                                and _selected(int(pts_list[group_end])) == selected
-                            ):
-                                group_end += 1
-
-                            if selected:
-                                effect_active = True
-                                selected_frames = frames[offset:group_end]
-                                res = process_frame_batch(
-                                    frames=selected_frames,
-                                    pts_list=[int(p) for p in pts_list[offset:group_end]],
-                                    start_frame_idx=frame_idx,
-                                    target_hw=target_hw,
-                                    detections_fn=detection_model,
-                                    tracker=tracker,
-                                    blend_buffer=blend_buffer,
-                                    crop_buffers=crop_buffers,
-                                    clip_queue=clip_queue,
-                                    metadata_queue=metadata_queue,
-                                    discard_margin=discard_margin,
-                                    blend_frames=blend_frames,
-                                    stereo=stereo,
-                                    min_detection_duration=min_detection_duration,
-                                    scene_detector=scene_detector,
-                                    vr_projector=vr_projector,
-                                )
-                                frame_idx = res.next_frame_idx
-                            else:
-                                _finalize_tracker()
-                                for pts in pts_list[offset:group_end]:
-                                    metadata_queue.put(
-                                        FrameMeta(
-                                            frame_idx=frame_idx,
-                                            pts=int(pts),
-                                            apply_effect=False,
-                                        )
-                                    )
-                                    frame_idx += 1
-                            offset = group_end
-                    debug_memory.snapshot("decode", f"frame_start={batch_start} batch={effective_bs}")
-                    if progress is not None:
-                        progress.update(effective_bs)
-                    if stop_after_batch:
-                        break
-
-                if not cancel_event.is_set():
-                    _finalize_tracker()
-                    debug_memory.snapshot("decode", "finalized")
+                _detect_batches(
+                    ctx, pipeline, reader, timer, end_pts=end_pts, effect_ranges=effect_ranges, progress=progress
+                )
             except Exception:
                 if progress is not None:
                     progress.error = True
                 raise
     except BaseException as e:
-        if not cancel_event.is_set():
+        if not ctx.stop_event.is_set():
             log.exception("[decode] thread crashed")
-            error_holder.append(e)
+            ctx.error_holder.append(e)
     finally:
         log.info(timer.summary())
         log.debug("[decode] thread exiting")
-        clip_queue.put(_SENTINEL)
-        metadata_queue.put(_SENTINEL)
+        ctx.clip_queue.put(_SENTINEL)
+        ctx.metadata_queue.put(_SENTINEL)
 
 
-def primary_restore_loop(
+def _detect_batches(
+    ctx: PassContext,
+    pipeline,
+    reader: VideoReader,
+    timer: LoopTimer,
     *,
-    device: torch.device,
-    restoration_pipeline: RestorationPipeline,
-    clip_queue: FrameQueue,
-    secondary_queue: FrameQueue,
-    error_holder: list[BaseException],
-    primary_idle_event: threading.Event,
-    cancel_event: threading.Event,
-    debug_memory: PipelineDebugMemoryLogger,
+    end_pts: int | None,
+    effect_ranges: tuple[tuple[int, int], ...] | None,
+    progress: Progressbar | None,
 ) -> None:
+    tracker = ClipTracker(
+        max_clip_size=pipeline.max_clip_size,
+        temporal_overlap=pipeline.temporal_overlap,
+        max_detection_gap=pipeline.max_detection_gap,
+    )
+    scene_detector = SceneCutDetector() if pipeline.scene_detection else None
+    discard_margin = pipeline.temporal_overlap
+    blend_frames = pipeline.temporal_overlap // 3
+    target_hw = (int(ctx.metadata.video_height), int(ctx.metadata.video_width))
+    frame_idx = 0 if ctx.seek_ts is None else _estimate_start_frame(ctx.metadata, ctx.seek_ts)
+    frame_shape = target_hw
+    effect_active = effect_ranges is None
+    stop_after_batch = False
+
+    def _finalize_tracker() -> None:
+        nonlocal effect_active
+        if not effect_active:
+            return
+        finalize_processing(
+            tracker=tracker,
+            blend_buffer=ctx.blend_buffer,
+            crop_buffers=ctx.crop_buffers,
+            clip_queue=ctx.clip_queue,
+            frame_shape=frame_shape,
+            discard_margin=discard_margin,
+            blend_frames=blend_frames,
+            min_detection_duration=pipeline.min_detection_duration,
+        )
+        if scene_detector is not None:
+            scene_detector.reset()
+        effect_active = False
+
+    for frames, pts_list in timer.timed_iter(reader.frames(seek_ts=ctx.seek_ts), "decode"):
+        if ctx.stop_event.is_set():
+            break
+        if end_pts is not None:
+            keep_count = next((i for i, pts in enumerate(pts_list) if int(pts) >= end_pts), len(pts_list))
+            if keep_count < len(pts_list):
+                stop_after_batch = True
+                frames = frames[:keep_count]
+                pts_list = pts_list[:keep_count]
+        effective_bs = len(pts_list)
+        if effective_bs == 0:
+            if stop_after_batch:
+                break
+            continue
+
+        frame_shape = (int(frames.shape[-2]), int(frames.shape[-1]))
+        if ctx.error_holder:
+            raise ctx.error_holder[0]
+
+        batch_start = frame_idx
+        with timer.measure("detect-track"):
+            for start, end, inside in effect_runs(pts_list, effect_ranges):
+                if not inside:
+                    _finalize_tracker()
+                    for pts in pts_list[start:end]:
+                        ctx.metadata_queue.put(FrameMeta(frame_idx=frame_idx, pts=int(pts), apply_effect=False))
+                        frame_idx += 1
+                    continue
+                effect_active = True
+                frame_idx = process_frame_batch(
+                    frames=frames[start:end],
+                    pts_list=[int(p) for p in pts_list[start:end]],
+                    start_frame_idx=frame_idx,
+                    target_hw=target_hw,
+                    detections_fn=pipeline.job_detection_model,
+                    tracker=tracker,
+                    blend_buffer=ctx.blend_buffer,
+                    crop_buffers=ctx.crop_buffers,
+                    clip_queue=ctx.clip_queue,
+                    metadata_queue=ctx.metadata_queue,
+                    discard_margin=discard_margin,
+                    blend_frames=blend_frames,
+                    stereo=pipeline.stereo,
+                    min_detection_duration=pipeline.min_detection_duration,
+                    scene_detector=scene_detector,
+                    vr_projector=pipeline.vr_projector,
+                ).next_frame_idx
+        ctx.debug_memory.snapshot("decode", f"frame_start={batch_start} batch={effective_bs}")
+        if progress is not None:
+            progress.update(effective_bs)
+        if stop_after_batch:
+            break
+
+    if not ctx.stop_event.is_set():
+        _finalize_tracker()
+        ctx.debug_memory.snapshot("decode", "finalized")
+
+
+def primary_restore_loop(ctx: PassContext) -> None:
     timer = LoopTimer("primary")
+    restoration_pipeline = ctx.restoration_pipeline
     try:
-        torch.cuda.set_device(device)
+        torch.cuda.set_device(ctx.device)
         log.debug("[primary] thread starting")
-        while not cancel_event.is_set():
-            primary_idle_event.set()
+        while not ctx.stop_event.is_set():
+            ctx.primary_idle_event.set()
             try:
                 with timer.measure("queue-wait"):
-                    item = clip_queue.get(timeout=0.1)
+                    item = ctx.clip_queue.get(timeout=0.1)
             except Empty:
                 continue
-            primary_idle_event.clear()
+            ctx.primary_idle_event.clear()
             if item is _SENTINEL:
                 break
             clip_item: ClipRestoreItem = item
@@ -260,39 +267,31 @@ def primary_restore_loop(
                 if restoration_pipeline.secondary_prefers_cpu_input:
                     result.primary_raw = result.primary_raw.cpu()
             with timer.measure("queue-put"):
-                secondary_queue.put(result, frame_count=result.keep_end - result.keep_start)
-            debug_memory.snapshot(
+                ctx.secondary_queue.put(result, frame_count=result.keep_end - result.keep_start)
+            ctx.debug_memory.snapshot(
                 "primary",
                 f"clip={clip_item.clip.track_id} frames={len(clip_item.raw_crops)}",
             )
     except BaseException as e:
-        if not cancel_event.is_set():
+        if not ctx.stop_event.is_set():
             log.exception("[primary] thread crashed")
-            error_holder.append(e)
+            ctx.error_holder.append(e)
     finally:
         log.info(timer.summary())
         log.debug("[primary] thread exiting")
-        secondary_queue.put(_SENTINEL)
+        ctx.secondary_queue.put(_SENTINEL)
 
 
-def secondary_restore_loop(
-    *,
-    device: torch.device,
-    restoration_pipeline: RestorationPipeline,
-    secondary_queue: FrameQueue,
-    encode_queue: FrameQueue,
-    error_holder: list[BaseException],
-    cancel_event: threading.Event,
-    debug_memory: PipelineDebugMemoryLogger,
-) -> None:
+def secondary_restore_loop(ctx: PassContext) -> None:
     timer = LoopTimer("secondary")
+    restoration_pipeline = ctx.restoration_pipeline
     try:
-        torch.cuda.set_device(device)
+        torch.cuda.set_device(ctx.device)
         log.debug("[secondary] thread starting")
-        while not cancel_event.is_set():
+        while not ctx.stop_event.is_set():
             try:
                 with timer.measure("queue-wait"):
-                    item = secondary_queue.get(timeout=0.1)
+                    item = ctx.secondary_queue.get(timeout=0.1)
             except Empty:
                 continue
             if item is _SENTINEL:
@@ -307,55 +306,34 @@ def secondary_restore_loop(
                 del pr.primary_raw
                 sr = restoration_pipeline.build_secondary_result(pr, restored_frames)
             with timer.measure("queue-put"):
-                encode_queue.put(sr, frame_count=sr.keep_end)
-            debug_memory.snapshot(
+                ctx.encode_queue.put(sr, frame_count=sr.keep_end)
+            ctx.debug_memory.snapshot(
                 "secondary",
                 f"clip={pr.track_id} frames={sr.frame_count}",
             )
     except BaseException as e:
-        if not cancel_event.is_set():
+        if not ctx.stop_event.is_set():
             log.exception("[secondary] thread crashed")
-            error_holder.append(e)
+            ctx.error_holder.append(e)
     finally:
         log.info(timer.summary())
         log.debug("[secondary] thread exiting")
-        encode_queue.put(_SENTINEL)
+        ctx.encode_queue.put(_SENTINEL)
 
 
-def blend_encode_loop(
-    *,
-    input_video: str,
-    decode_backend: DecodeBackendName,
-    batch_size: int,
-    device: torch.device,
-    metadata,
-    blend_buffer: BlendBuffer,
-    encode_queue: FrameQueue,
-    metadata_queue: Queue,
-    error_holder: list[BaseException],
-    frame_writer: FrameWriter,
-    cancel_event: threading.Event,
-    vram_offloader: VramOffloader,
-    seek_ts: float | None,
-    frame_stride: int,
-) -> None:
+def blend_encode_loop(ctx: PassContext, frame_writer: FrameWriter, vram_offloader: VramOffloader) -> None:
     timer = LoopTimer("blend-encode")
+    blend_buffer = ctx.blend_buffer
+    encode_queue = ctx.encode_queue
     try:
-        torch.cuda.set_device(device)
+        torch.cuda.set_device(ctx.device)
 
         def _flat_frames(rdr: VideoReader):
-            for batch, pts in rdr.frames(seek_ts=seek_ts):
+            for batch, pts in rdr.frames(seek_ts=ctx.seek_ts):
                 for i in range(len(pts)):
                     yield batch[i]
 
-        with VideoReader(
-            input_video,
-            batch_size=batch_size,
-            device=device,
-            metadata=metadata,
-            frame_stride=frame_stride,
-            decode_backend=decode_backend,
-        ) as reader2:
+        with ctx.open_reader() as reader2:
             frame_gen = _flat_frames(reader2)
             secondary_done = False
             frames_encoded = 0
@@ -372,11 +350,11 @@ def blend_encode_loop(
                     except Empty:
                         break
 
-            while not cancel_event.is_set():
+            while not ctx.stop_event.is_set():
                 _drain_encode_queue()
                 try:
                     with timer.measure("queue-wait"):
-                        meta_item = metadata_queue.get(timeout=0.05)
+                        meta_item = ctx.metadata_queue.get(timeout=0.05)
                 except Empty:
                     continue
                 if meta_item is _SENTINEL:
@@ -387,10 +365,10 @@ def blend_encode_loop(
 
                 with timer.measure("result-wait"):
                     while meta.apply_effect and not blend_buffer.is_frame_ready(meta.frame_idx):
-                        if cancel_event.is_set():
+                        if ctx.stop_event.is_set():
                             break
-                        if error_holder:
-                            raise error_holder[0]
+                        if ctx.error_holder:
+                            raise ctx.error_holder[0]
                         if secondary_done:
                             log.error("[blend-encode] frame %d not ready but secondary is done", meta.frame_idx)
                             break
@@ -414,14 +392,14 @@ def blend_encode_loop(
                 with timer.measure("write"):
                     frame_writer.write(blended, meta.pts)
                     frames_encoded += 1
-                    frame_writer.after_write(frames_encoded, cancel_event)
+                    frame_writer.after_write(frames_encoded, ctx.stop_event)
 
             vram_offloader.pause_stall_check()
 
     except BaseException as e:
-        if not cancel_event.is_set():
+        if not ctx.stop_event.is_set():
             log.exception("[blend-encode] thread crashed")
-            error_holder.append(e)
+            ctx.error_holder.append(e)
     finally:
         log.info(timer.summary())
 
@@ -457,21 +435,13 @@ def starvation_action(
     return "retry" if since_flush > _FLUSH_RETRY_TIMEOUT else None
 
 
-def run_async_secondary(
-    *,
-    restoration_pipeline: RestorationPipeline,
-    secondary_queue: FrameQueue,
-    encode_queue: FrameQueue,
-    clip_queue: FrameQueue,
-    primary_idle_event: threading.Event,
-    cancel_event: threading.Event,
-    debug_memory: PipelineDebugMemoryLogger,
-) -> SecondaryLoopStats:
+def run_async_secondary(ctx: PassContext) -> SecondaryLoopStats:
     """Feed an AsyncSecondaryRestorer (TVAI) from one thread and forward results from this one.
 
     The restorer buffers frames internally, so when no clip is arriving the
     loop flushes the clip that blocks the earliest unblended frame.
     """
+    restoration_pipeline = ctx.restoration_pipeline
     restorer: AsyncSecondaryRestorer = restoration_pipeline.secondary_restorer  # type: ignore[assignment]
     pending_prs: dict[int, PrimaryRestoreResult] = {}
     push_done = threading.Event()
@@ -485,9 +455,9 @@ def run_async_secondary(
     def _pusher():
         nonlocal last_push_time, flushed_since_last_push, pusher_stall_seconds, clips_pushed
         try:
-            while not cancel_event.is_set():
+            while not ctx.stop_event.is_set():
                 try:
-                    item = secondary_queue.get(timeout=0.1)
+                    item = ctx.secondary_queue.get(timeout=0.1)
                 except Empty:
                     continue
                 if item is _SENTINEL:
@@ -525,14 +495,14 @@ def run_async_secondary(
                 batch = batch.to(pr.frame_device, non_blocking=True)
             tensors = list(batch.unbind(0)) if batch.numel() > 0 else []
             sr = restoration_pipeline.build_secondary_result(pr, tensors)
-            encode_queue.put(sr, frame_count=sr.keep_end)
-            debug_memory.snapshot("secondary", f"clip={pr.track_id} frames={sr.frame_count}")
+            ctx.encode_queue.put(sr, frame_count=sr.keep_end)
+            ctx.debug_memory.snapshot("secondary", f"clip={pr.track_id} frames={sr.frame_count}")
             forwarded += 1
             clips_popped += 1
         return forwarded
 
     def _no_clips_incoming() -> bool:
-        return primary_idle_event.is_set() and clip_queue.qsize() == 0
+        return ctx.primary_idle_event.is_set() and ctx.clip_queue.qsize() == 0
 
     pusher_thread = threading.Thread(target=_pusher, name="SecondaryPusher", daemon=True)
     pusher_thread.start()
@@ -582,7 +552,7 @@ def run_async_secondary(
     pusher_thread.join()
     if pusher_error:
         raise pusher_error[0]
-    if not cancel_event.is_set():
+    if not ctx.stop_event.is_set():
         restorer.flush_all()
         for _ in range(100):
             if not pending_prs:
@@ -599,40 +569,21 @@ def run_async_secondary(
     )
 
 
-def async_secondary_restore_loop(
-    *,
-    device: torch.device,
-    restoration_pipeline: RestorationPipeline,
-    secondary_queue: FrameQueue,
-    encode_queue: FrameQueue,
-    clip_queue: FrameQueue,
-    primary_idle_event: threading.Event,
-    error_holder: list[BaseException],
-    cancel_event: threading.Event,
-    debug_memory: PipelineDebugMemoryLogger,
-) -> None:
+def async_secondary_restore_loop(ctx: PassContext) -> None:
     try:
-        torch.cuda.set_device(device)
-        stats = run_async_secondary(
-            restoration_pipeline=restoration_pipeline,
-            secondary_queue=secondary_queue,
-            encode_queue=encode_queue,
-            clip_queue=clip_queue,
-            primary_idle_event=primary_idle_event,
-            cancel_event=cancel_event,
-            debug_memory=debug_memory,
-        )
+        torch.cuda.set_device(ctx.device)
+        stats = run_async_secondary(ctx)
         log.info(
             "Secondary — clips: %d pushed / %d popped, pusher stall: %.1fs, starvation flushes: %d (%.1fs)",
             stats.clips_pushed, stats.clips_popped, stats.pusher_stall_seconds,
             stats.starvation_flushes, stats.starvation_seconds,
         )
     except BaseException as e:
-        if not cancel_event.is_set():
+        if not ctx.stop_event.is_set():
             log.exception("[secondary-async] thread crashed")
-            error_holder.append(e)
+            ctx.error_holder.append(e)
     finally:
-        encode_queue.put(_SENTINEL)
+        ctx.encode_queue.put(_SENTINEL)
 
 
 def run_restoration_pass(
@@ -670,105 +621,59 @@ def run_restoration_pass(
     metadata_queue: Queue[FrameMeta | object] = Queue(maxsize=max_clip_size * 5)
     queues = (clip_queue, secondary_queue, encode_queue, metadata_queue)
 
-    error_holder: list[BaseException] = []
-    stop_event = threading.Event()
     blend_buffer = BlendBuffer(device=device, vr_projector=pipeline.vr_projector)
     crop_buffers: dict[int, CropBuffer] = {}
-    primary_idle_event = threading.Event()
     vram_offloader = VramOffloader(device=device, blend_buffer=blend_buffer, crop_buffers=crop_buffers)
     if encode_heartbeat is not None:
         vram_offloader.set_encode_heartbeat(encode_heartbeat)
     vram_offloader.set_pipeline_queues(clip_queue, secondary_queue, encode_queue, metadata_queue)
-    debug_memory = PipelineDebugMemoryLogger(
-        logger=log,
+    ctx = PassContext(
+        device=device,
+        restoration_pipeline=restoration_pipeline,
+        input_video=str(pipeline.input_video),
+        decode_backend=pipeline.decode_backend,
+        batch_size=pipeline.batch_size,
+        metadata=metadata,
+        seek_ts=seek_ts,
+        frame_stride=frame_stride,
         blend_buffer=blend_buffer,
+        crop_buffers=crop_buffers,
         clip_queue=clip_queue,
         secondary_queue=secondary_queue,
         encode_queue=encode_queue,
+        metadata_queue=metadata_queue,
+        primary_idle_event=threading.Event(),
+        stop_event=threading.Event(),
+        error_holder=[],
+        debug_memory=PipelineDebugMemoryLogger(
+            logger=log,
+            blend_buffer=blend_buffer,
+            clip_queue=clip_queue,
+            secondary_queue=secondary_queue,
+            encode_queue=encode_queue,
+        ),
     )
 
-    secondary_kwargs = dict(
-        device=device,
-        restoration_pipeline=restoration_pipeline,
-        secondary_queue=secondary_queue,
-        encode_queue=encode_queue,
-        error_holder=error_holder,
-        cancel_event=stop_event,
-        debug_memory=debug_memory,
-    )
     if use_async_secondary:
         log.debug("Using async secondary restore path")
-        secondary_target = lambda: async_secondary_restore_loop(  # noqa: E731
-            clip_queue=clip_queue, primary_idle_event=primary_idle_event, **secondary_kwargs
-        )
+        secondary_loop = async_secondary_restore_loop
     else:
-        secondary_target = lambda: secondary_restore_loop(**secondary_kwargs)  # noqa: E731
-
+        secondary_loop = secondary_restore_loop
+    decode_options = dict(
+        end_pts=end_pts,
+        effect_ranges=effect_ranges,
+        output_frame_count=output_frame_count,
+        output_fps=output_fps,
+        progress=progress,
+    )
     threads = [
         threading.Thread(
-            target=lambda: decode_detect_loop(
-                input_video=str(pipeline.input_video),
-                decode_backend=pipeline.decode_backend,
-                batch_size=pipeline.batch_size,
-                device=device,
-                metadata=metadata,
-                detection_model=pipeline.job_detection_model,
-                max_clip_size=max_clip_size,
-                temporal_overlap=pipeline.temporal_overlap,
-                max_detection_gap=pipeline.max_detection_gap,
-                min_detection_duration=pipeline.min_detection_duration,
-                scene_detection=pipeline.scene_detection,
-                blend_buffer=blend_buffer,
-                crop_buffers=crop_buffers,
-                clip_queue=clip_queue,
-                metadata_queue=metadata_queue,
-                error_holder=error_holder,
-                cancel_event=stop_event,
-                debug_memory=debug_memory,
-                stereo=pipeline.stereo,
-                vr_projector=pipeline.vr_projector,
-                seek_ts=seek_ts,
-                end_pts=end_pts,
-                effect_ranges=effect_ranges,
-                frame_stride=frame_stride,
-                output_frame_count=output_frame_count,
-                output_fps=output_fps,
-                progress=progress,
-            ),
-            name="DecodeDetect", daemon=True,
+            target=decode_detect_loop, args=(ctx, pipeline), kwargs=decode_options, name="DecodeDetect", daemon=True
         ),
+        threading.Thread(target=primary_restore_loop, args=(ctx,), name="PrimaryRestore", daemon=True),
+        threading.Thread(target=secondary_loop, args=(ctx,), name="SecondaryRestore", daemon=True),
         threading.Thread(
-            target=lambda: primary_restore_loop(
-                device=device,
-                restoration_pipeline=restoration_pipeline,
-                clip_queue=clip_queue,
-                secondary_queue=secondary_queue,
-                error_holder=error_holder,
-                primary_idle_event=primary_idle_event,
-                cancel_event=stop_event,
-                debug_memory=debug_memory,
-            ),
-            name="PrimaryRestore", daemon=True,
-        ),
-        threading.Thread(target=secondary_target, name="SecondaryRestore", daemon=True),
-        threading.Thread(
-            target=lambda: blend_encode_loop(
-                input_video=str(pipeline.input_video),
-                decode_backend=pipeline.decode_backend,
-                batch_size=pipeline.batch_size,
-                device=device,
-                metadata=metadata,
-                blend_buffer=blend_buffer,
-                encode_queue=encode_queue,
-                metadata_queue=metadata_queue,
-                error_holder=error_holder,
-                frame_writer=frame_writer,
-                cancel_event=stop_event,
-                vram_offloader=vram_offloader,
-                seek_ts=seek_ts,
-                frame_stride=frame_stride,
-            ),
-            name="BlendEncode", daemon=True,
+            target=blend_encode_loop, args=(ctx, frame_writer, vram_offloader), name="BlendEncode", daemon=True
         ),
     ]
     vram_offloader.start()
@@ -779,19 +684,19 @@ def run_restoration_pass(
         while any(thread.is_alive() for thread in threads):
             if poll is not None and poll():
                 cancel_event.set()
-            if cancel_event.wait(0.05) or error_holder:
+            if cancel_event.wait(0.05) or ctx.error_holder:
                 break
     finally:
         # Also on Ctrl+C: the workers stop before the caller closes the encoder and models they use.
-        stop_event.set()
+        ctx.stop_event.set()
         for thread in threads:
             while thread.is_alive():
                 _drain(queues)
                 thread.join(timeout=0.02)
         vram_offloader.stop()
 
-    error = error_holder[0] if error_holder else None
-    del queues, clip_queue, secondary_queue, encode_queue, metadata_queue
+    error = ctx.error_holder[0] if ctx.error_holder else None
+    del ctx, queues, clip_queue, secondary_queue, encode_queue, metadata_queue
     del blend_buffer, crop_buffers, threads
     gc.collect()
     empty_cache(device)
