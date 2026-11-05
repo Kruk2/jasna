@@ -108,6 +108,18 @@ def gaussian_smooth(values: np.ndarray, sigma: float) -> np.ndarray:
     return np.convolve(padded, kernel, mode="valid")
 
 
+def _rate_limited_floor(values: np.ndarray, max_step: float | np.ndarray) -> np.ndarray:
+    """The lowest curve at or above ``values`` that changes at most ``max_step`` per frame:
+    it rises early to meet a peak and falls back after it."""
+    floor = np.asarray(values, dtype=np.float64).copy()
+    steps = np.broadcast_to(np.asarray(max_step, dtype=np.float64), floor.shape)
+    for index in range(1, len(floor)):
+        floor[index] = max(floor[index], floor[index - 1] - steps[index])
+    for index in range(len(floor) - 2, -1, -1):
+        floor[index] = max(floor[index], floor[index + 1] - steps[index])
+    return floor
+
+
 def zoom_crop_sides(raw_sides: np.ndarray, max_log_step: float = ZOOM_LOG_STEP) -> np.ndarray:
     """Smooth per-frame sides, never below any frame's raw side, zooming at most
     ``exp(max_log_step)`` per frame (log-space running max, rate limit, Gaussian)."""
@@ -115,10 +127,7 @@ def zoom_crop_sides(raw_sides: np.ndarray, max_log_step: float = ZOOM_LOG_STEP) 
     radius = max(1, int(math.ceil(3.0 * SMOOTH_SIGMA_FRAMES)))
     padded = np.pad(values, (radius, radius), mode="edge")
     envelope = np.lib.stride_tricks.sliding_window_view(padded, 2 * radius + 1).max(axis=1)
-    for index in range(1, len(envelope)):
-        envelope[index] = max(envelope[index], envelope[index - 1] - max_log_step)
-    for index in range(len(envelope) - 2, -1, -1):
-        envelope[index] = max(envelope[index], envelope[index + 1] - max_log_step)
+    envelope = _rate_limited_floor(envelope, max_log_step)
     return np.ceil(np.exp(gaussian_smooth(envelope, SMOOTH_SIGMA_FRAMES)) - 1e-6).astype(np.int64)
 
 
@@ -147,15 +156,33 @@ def follow_camera(
         raise ValueError("mosaic support does not fit inside the crop")
     target_x = gaussian_smooth((raw[:, 0] + raw[:, 2]) / 2.0, SMOOTH_SIGMA_FRAMES)
     target_y = gaussian_smooth((raw[:, 1] + raw[:, 3]) / 2.0, SMOOTH_SIGMA_FRAMES)
-    frames = []
-    for index, (x1, y1, x2, y2) in enumerate(support):
-        width, height = int(widths[index]), int(heights[index])
-        min_left, max_left = _feasible_interval(x1, x2, width, frame_w, margin)
-        min_top, max_top = _feasible_interval(y1, y2, height, frame_h, margin)
-        left = min(max(int(round(target_x[index] - width / 2)), min_left), max_left)
-        top = min(max(int(round(target_y[index] - height / 2)), min_top), max_top)
-        frames.append(letterbox((left, top, left + width, top + height), PLAN_CANVAS))
-    return frames
+    lefts = _eased_offsets(
+        target_x - widths / 2,
+        [_feasible_interval(x1, x2, int(w), frame_w, margin) for (x1, _, x2, _), w in zip(support, widths)],
+        widths / PLAN_CANVAS,
+    )
+    tops = _eased_offsets(
+        target_y - heights / 2,
+        [_feasible_interval(y1, y2, int(h), frame_h, margin) for (_, y1, _, y2), h in zip(support, heights)],
+        heights / PLAN_CANVAS,
+    )
+    return [
+        letterbox((left, top, left + int(width), top + int(height)), PLAN_CANVAS)
+        for left, top, width, height in zip(lefts, tops, widths, heights)
+    ]
+
+
+def _eased_offsets(targets: np.ndarray, bounds: Sequence[tuple[int, int]], max_step: np.ndarray) -> list[int]:
+    """Crop offsets near ``targets`` within each frame's ``(min, max)`` bounds. The push
+    a bound gives the crop eases in and out by ``max_step`` per frame, because LTX keeps
+    its motion smooth and a one-frame jerk of the crop shifts that frame's restoration;
+    only pushes that grow faster than that still move the crop at once."""
+    minimum, maximum = np.asarray(bounds, dtype=np.float64).T
+    targets = np.round(targets)
+    push_up = _rate_limited_floor(np.maximum(minimum - targets, 0.0), max_step)
+    push_down = _rate_limited_floor(np.maximum(targets - maximum, 0.0), max_step)
+    eased = np.round(targets + push_up - push_down)
+    return np.clip(eased, minimum, maximum).astype(int).tolist()
 
 
 def _edge_gap(crop: tuple[int, int, int, int], box: Box, frame_w: int, frame_h: int) -> float:
