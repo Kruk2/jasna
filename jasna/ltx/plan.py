@@ -127,9 +127,6 @@ class Window:
     def canvas(self) -> int:
         return self.crops[0].canvas
 
-    def model_crops(self) -> list[CropFrame]:
-        return list(self.crops) + [self.crops[-1]] * (WINDOW_FRAMES - self.real_frames)
-
 
 @dataclass(frozen=True)
 class TrackPlan:
