@@ -335,3 +335,33 @@ def test_a_failed_license_check_fails_that_job_and_stops_the_queue(tmp_path, cap
     assert [(record.levelname, record.getMessage()) for record in caplog.records if record.name == "jasna.gui.processor"] == [
         ("WARNING", "Failed to process clip.mp4: lost the connection")
     ]
+
+
+def test_a_range_job_that_reencodes_the_whole_video_offers_stop_not_pause(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    import torch
+
+    import jasna.gui.processor as processor_module
+    from jasna.segments import SegmentRange
+
+    monkeypatch.setattr(processor_module, "splice_source", MagicMock())
+    monkeypatch.setattr(
+        processor_module, "plan_segment_job", MagicMock(return_value=MagicMock(reencodes_whole_video=True))
+    )
+    monkeypatch.setattr(
+        processor_module, "build_job_pipeline", MagicMock(return_value=MagicMock(cancel_requested=False))
+    )
+    processor, job, updates = _processor_with_job(tmp_path, None)
+    del processor._run_pipeline
+    processor._ensure_video_session = lambda _settings: setattr(
+        processor, "_video_session", MagicMock(device=torch.device("cpu"))
+    )
+    processor._prepare_job_detector = MagicMock()
+    job.path.touch()
+    job.segments = (SegmentRange(2.5, 3.0),)
+
+    processor._run()
+
+    assert job.status is JobStatus.COMPLETED
+    assert [update.resumable for update in updates if update.resumable is not None] == [True, False]

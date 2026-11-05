@@ -478,6 +478,8 @@ class Processor:
 
         if segment_job is None:
             segment_job = ltx_auto_split(config, s, input_path, output_path, progress_callback=progress_callback)
+        if segment_job is not None and segment_job.reencodes_whole_video:
+            self._progress(ProgressUpdate(job_id=job_id, status=JobStatus.PROCESSING, resumable=False))
 
         pipeline = None
         try:
