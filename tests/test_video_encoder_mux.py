@@ -386,6 +386,27 @@ def test_half_rate_output_preserves_duration_and_audio_sync(
     assert stream_start_skew(dst) == pytest.approx(stream_start_skew(src), abs=0.05)
 
 
+def test_aborted_output_ends_with_its_last_encoded_frame(tmp_path):
+    src = _make_source(tmp_path, "src.mp4", duration=4)
+    metadata = get_video_meta_data(str(src))
+    dst = tmp_path / "out.mp4"
+
+    encoder = VideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={})
+    with VideoReader(str(src), batch_size=12, device=DEVICE, metadata=metadata) as reader:
+        encoder.__enter__()
+        frames, pts_list = next(reader.frames())
+        for frame, pts in zip(frames, pts_list):
+            encoder.encode(frame, pts)
+        encoder.abort()
+
+    with av.open(str(dst)) as container:
+        video, audio = container.streams.video[0], container.streams.audio[0]
+        assert len(list(container.decode(video))) == len(pts_list)
+        container.seek(0)
+        audio_seconds = sum(float(packet.duration * packet.time_base) for packet in container.demux(audio) if packet.duration)
+    assert audio_seconds < 2.0
+
+
 def test_anamorphic_sar_preserved(tmp_path):
     src = _make_source(tmp_path, "src.mp4", extra=["-vf", "setsar=8/9"])
     metadata = get_video_meta_data(str(src))

@@ -334,6 +334,9 @@ def test_ltx_smart_resume_keeps_completed_fragments_and_retries_partial_span(tmp
         def __exit__(self, *exc):
             pass
 
+        def abort(self):
+            pass
+
     def ltx_run(_render, _metadata, _index, pending, *_args):
         restored.extend(span for span, _, _ in pending)
         writer = pending[0][2]()

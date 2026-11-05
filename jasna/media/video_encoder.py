@@ -753,22 +753,31 @@ class VideoEncoder:
         return None
 
     def __exit__(self, exc_type, exc_value, traceback):
+        self._close(flush_video=exc_type is None, copy_rest_of_source=exc_type is None)
+
+    def abort(self) -> None:
+        """Close an unfinished output after the frames given so far, without the rest of the
+        source's audio and subtitles, so its length shows how far the job got."""
+        self._close(flush_video=True, copy_rest_of_source=False)
+
+    def _close(self, *, flush_video: bool, copy_rest_of_source: bool) -> None:
         try:
-            if exc_type is None:
+            if flush_video:
                 while self.frame_buffer:
                     self._process_buffer(flush_all=True)
             self._encode_queue.join()
             self._encode_queue.put(self._stop_sentinel)
             self._encode_thread.join()
 
-            if exc_type is None and self._worker_error is None and self.out_stream.codec_context.is_open:
+            if flush_video and self._worker_error is None and self.out_stream.codec_context.is_open:
                 for packet in self.out_stream.encode(None):
                     self._mux_video(packet)
-                self._drain_source_streams()
+                if copy_rest_of_source:
+                    self._drain_source_streams()
         finally:
             self.dst.close()
             self._src.close()
-        if exc_type is None and self._worker_error is not None:
+        if copy_rest_of_source and self._worker_error is not None:
             raise self._worker_error
 
     def _encode_worker(self):
