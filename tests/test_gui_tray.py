@@ -111,3 +111,32 @@ def test_close_quits_unless_close_to_tray_can_work(jasna_app, fake_tray, monkeyp
 
     assert fake_tray == []
     assert not jasna_app.children
+
+
+def test_a_tray_that_fails_to_show_keeps_the_window_and_close_still_quits(jasna_app, monkeypatch, show_window):
+    class BrokenTrayIcon(FakeTrayIcon):
+        def run_detached(self):
+            raise ValueError("bad bus address")
+
+    monkeypatch.setattr(tray, "_create_icon", BrokenTrayIcon)
+    monkeypatch.setattr(tray, "tray_support", lambda: TraySupport(available=True, has_menu=True))
+    update_settings(close_to_tray=True)
+    show_window(jasna_app)
+
+    assert not jasna_app._hide_to_tray()
+    assert jasna_app.state() == "normal"
+    assert not jasna_app._tray.shown
+
+    close_window(jasna_app)
+
+    assert not jasna_app.children
+
+
+def test_a_failing_stop_still_hides_the_icon(fake_tray):
+    icon = tray.TrayIcon(on_open=lambda: None, on_quit=lambda: None)
+    icon.show()
+    fake_tray[0].stop = lambda: (_ for _ in ()).throw(BrokenPipeError())
+
+    icon.hide()
+
+    assert not icon.shown
