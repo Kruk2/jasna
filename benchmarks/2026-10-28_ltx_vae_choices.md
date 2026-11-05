@@ -54,8 +54,8 @@ or "very similar" every time; on pred with Good, each step full -> half -> max i
 val and real clips: half + max close to the 0.12.1 VAE, which is ~1 % sharper on fine hair.
 
 The VAE is a large share of a Basic or Standard job and a small one of a Good, High or Top job, so Basic and
-Standard default to half + max and Good, High and Top to full + full. `JASNA_LTX_VAE_ENCODER` /
-`JASNA_LTX_VAE_DECODER` (`full`, `half`, `max`) override either.
+Standard default to half + max and Good, High and Top to full + full. `--ltx-vae-encoder` /
+`--ltx-vae-decoder` (`full`, `half`, `max`) override either (the `JASNA_LTX_VAE_*` variables until 0.12.2).
 
 Not measured: other GPUs (the distilled parts run the same kernels at the same shapes, fewer of them), AMD, and
 release builds. The job outputs are near-lossless HEVC (constant QP 0): Jasna has no lossless output.
