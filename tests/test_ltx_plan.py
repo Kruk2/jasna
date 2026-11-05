@@ -501,6 +501,23 @@ def test_stereo_mosaics_too_far_apart_for_one_subject_are_planned_per_eye(kind):
         assert low <= points[:, axis].min() and points[:, axis].max() <= high
 
 
+def test_stereo_right_eye_detections_the_twin_missed_get_no_second_track():
+    eye, disparity = 1000, -40
+    stereo = StereoLayout("sbs", 2 * eye, eye)
+    regions = [
+        [
+            _eye_square(stereo, 0, 300, 400, 150),
+            _eye_square(stereo, 1, 300 + disparity + 45, 445, 60) if 100 <= t < 160 else _eye_square(stereo, 1, 300 + disparity, 400, 150),
+        ]
+        for t in range(250)
+    ]
+    plans = plan_video(
+        regions, set(), frame_w=stereo.frame_w, frame_h=stereo.frame_h, stereo=stereo, large_canvas=False,
+        window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0,
+    )
+    assert [p.track_id for p in plans] == [0, 1]
+
+
 @pytest.mark.parametrize("kind", ["sbs", "tb"])
 def test_stereo_right_eye_restores_each_left_track_as_a_twin_with_its_noise(kind):
     eye, disparity = 1000, -40
