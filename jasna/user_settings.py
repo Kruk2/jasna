@@ -1,6 +1,7 @@
-"""Filesystem locations for GUI state."""
+"""The user's settings.json: GUI state, and the language the CLI also follows."""
 
 import json
+import locale
 import logging
 from pathlib import Path
 
@@ -41,3 +42,15 @@ def update_settings(**values) -> None:
             f.write(json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8"))
     except OSError as e:
         logger.warning("Could not save settings to %s: %s", path, e)
+
+
+def user_language() -> str:
+    """The language chosen in the GUI; before settings.json exists, the system's when Jasna has it, else "en"."""
+    if get_settings_path().exists():
+        return read_settings().get("language", "en")
+    try:
+        system, _ = locale.getdefaultlocale()
+    except Exception:
+        logger.debug("System locale autodetection failed; using 'en'", exc_info=True)
+        return "en"
+    return next((lang for lang in ("zh", "ja", "ko", "th") if system and system.startswith(lang)), "en")

@@ -2,7 +2,7 @@ import pytest
 
 from jasna.gui import tray
 from jasna.gui.components import TrayOptionsDialog
-from jasna.gui.paths import read_settings, update_settings
+from jasna.user_settings import read_settings, update_settings
 from jasna.gui.tray import TraySupport
 
 
