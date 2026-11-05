@@ -13,7 +13,9 @@ from av.video.reformatter import Colorspace as AvColorspace
 
 from jasna.gui import raw_player
 from jasna.gui.raw_player import (
+    PlayerFailed,
     PlayerFrame,
+    PlayerStatus,
     RawFrameWriter,
     RawPlayerWorker,
     SoftwareClock,
@@ -263,6 +265,7 @@ def test_raw_worker_rebuilds_changed_settings_on_same_owner_thread(
     monkeypatch,
 ) -> None:
     from jasna.gui import video_session
+    from jasna import session_factory
 
     initial = AppSettings(secondary_restoration="none")
     changed = AppSettings(secondary_restoration="rtx-super-res")
@@ -281,16 +284,19 @@ def test_raw_worker_rebuilds_changed_settings_on_same_owner_thread(
     release_first_pass = threading.Event()
     second_pass_started = threading.Event()
 
-    def build_pipeline(settings):
+    def build_session(*_args, **_kwargs):
         build_threads.append(threading.get_ident())
         session = SimpleNamespace(
             device=torch.device("cpu"),
             close=MagicMock(),
         )
-        pipeline = SimpleNamespace(close=MagicMock())
         sessions.append(session)
+        return session
+
+    def build_pipeline(*_args, **_kwargs):
+        pipeline = SimpleNamespace(validate_metadata=lambda _m: None, configure_vr=lambda _m: None)
         pipelines.append(pipeline)
-        return session, pipeline
+        return pipeline
 
     def run_pass(command, _pipeline, _session):
         if command.settings is initial:
@@ -301,7 +307,9 @@ def test_raw_worker_rebuilds_changed_settings_on_same_owner_thread(
         return False
 
     release_memory = MagicMock()
-    monkeypatch.setattr(worker, "_build_pipeline", build_pipeline)
+    monkeypatch.setattr(video_session, "build_video_session", build_session)
+    monkeypatch.setattr(video_session, "video_session_config", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(session_factory, "build_pipeline", build_pipeline)
     monkeypatch.setattr(worker, "_run_pass", run_pass)
     monkeypatch.setattr(video_session, "release_session_memory", release_memory)
 
@@ -349,9 +357,14 @@ def test_raw_worker_releases_session_when_pipeline_construction_fails(
         on_stopped=lambda: None,
     )
 
-    with pytest.raises(RuntimeError, match="pipeline failed"):
-        worker._build_pipeline(AppSettings())
+    worker.start()
+    generation = worker.play_from(0)
+    assert worker.events.get(timeout=2) == PlayerStatus("loading_models", generation)
+    assert worker.events.get(timeout=2) == PlayerFailed("pipeline failed", generation)
+    worker.close()
+    worker.join(2)
 
+    assert not worker.is_alive()
     session.close.assert_called_once_with()
     release.assert_called_once_with(session.device)
 

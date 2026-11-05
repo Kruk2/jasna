@@ -17,7 +17,7 @@ from PIL import Image
 
 from jasna.gui.queues import replace_pending
 from jasna.gui.models import AppSettings
-from jasna.gui.video_session import build_video_session, release_session_memory, video_session_key
+from jasna.gui.video_session import SessionCache, build_video_session
 from jasna.session_factory import RestorationSession
 from jasna.media.probe import VideoMetadata
 from jasna.vr180 import left_eye
@@ -307,10 +307,21 @@ class RestorationPreviewWorker:
         replace_pending(self._commands, command)
 
     def _run(self) -> None:
-        session: RestorationSession | None = None
-        session_key: tuple | None = None
         pipeline = None
         pipeline_settings: AppSettings | None = None
+
+        def drop_pipeline() -> None:
+            nonlocal pipeline
+            pipeline = None
+
+        def load_session(command: _Request) -> RestorationSession:
+            self.events.put(RestorationStatus("loading_models", command.generation))
+            return build_video_session(
+                command.settings,
+                log=lambda msg: self.events.put(RestorationStatus(msg, command.generation)),
+            )
+
+        sessions = SessionCache(on_close=drop_pipeline)
         try:
             while not self._closed.is_set():
                 try:
@@ -322,20 +333,7 @@ class RestorationPreviewWorker:
                 if isinstance(command, _Cancel):
                     continue
                 try:
-                    key = video_session_key(command.settings)
-                    if session is None or key != session_key:
-                        pipeline = None
-                        if session is not None:
-                            session.close()
-                            release_session_memory(session.device)
-                            session = None
-                            session_key = None
-                        self.events.put(RestorationStatus("loading_models", command.generation))
-                        session = build_video_session(
-                            command.settings,
-                            log=lambda msg: self.events.put(RestorationStatus(msg, command.generation)),
-                        )
-                        session_key = key
+                    session = sessions.get(command.settings, lambda: load_session(command))
                     if pipeline is None or command.settings != pipeline_settings:
                         pipeline = self._build_pipeline(command.settings, session)
                         pipeline_settings = command.settings
@@ -349,9 +347,7 @@ class RestorationPreviewWorker:
                     if not self._closed.is_set():
                         self.events.put(RestorationFailed(str(exc), command.generation))
         finally:
-            if session is not None:
-                session.close()
-                release_session_memory(session.device)
+            sessions.close()
             if self._on_stopped is not None:
                 self._on_stopped()
 
