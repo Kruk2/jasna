@@ -242,7 +242,7 @@ def test_picking_a_missing_variant_never_asks_or_reverts(tk_root, tmp_path, monk
 
 
 def _queue_job(app, settings: AppSettings, **job_options) -> None:
-    app._settings_panel.set_gpu_support(vendor=NVIDIA, blackwell=True)
+    app._settings_panel.set_gpu_support(vendor=NVIDIA, blackwell=True, frame_generation=True)
     for section in app._settings_panel._sections:
         section.apply(settings)
     app._queue_panel.add_job(Path("a.mp4"))

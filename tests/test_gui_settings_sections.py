@@ -86,6 +86,7 @@ _NON_DEFAULT_SETTINGS = AppSettings(
     sharpen_strength=0.35,
     lut_path="/luts/a.cube",
     retarget_high_fps=True,
+    frame_generation="2x",
     fmp4=True,
     post_export_action="command",
     post_export_command="echo done",
@@ -120,6 +121,20 @@ def test_settings_round_trip_through_panel(panel_factory, settings) -> None:
     _apply(panel, settings)
 
     assert panel.get_settings() == settings
+
+
+def test_frame_generation_is_off_and_locked_on_a_gpu_without_it(panel_factory) -> None:
+    panel = panel_factory()
+    _apply(panel, replace(AppSettings(), frame_generation="2x"))
+
+    panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=False, frame_generation=False)
+
+    assert panel.get_settings().frame_generation == "none"
+    assert panel._widgets["frame_generation"].cget("state") == "disabled"
+    _apply(panel, replace(AppSettings(), frame_generation="2x"))
+    assert panel.get_settings().frame_generation == "none"
+    panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=False, frame_generation=True)
+    assert panel._widgets["frame_generation"].cget("state") == "normal"
 
 
 def test_sections_collect_every_setting_except_runtime_ones(panel_factory) -> None:
@@ -371,14 +386,14 @@ def test_amd_secondary_choices_and_busy_state(panel_factory, monkeypatch, tmp_pa
     model.touch()
     monkeypatch.setattr(engine_paths, "UNET4X_ONNX_PATH", model)
     panel = panel_factory(True)
-    panel.set_gpu_support(vendor=AcceleratorVendor.AMD, blackwell=False)
+    panel.set_gpu_support(vendor=AcceleratorVendor.AMD, blackwell=False, frame_generation=False)
     radios = panel._secondary_section._engine_radios
     radios["unet-4x"].invoke()
     assert panel.get_settings().secondary_restoration == "unet-4x"
     assert radios["tvai"].cget("state") == radios["rtx-super-res"].cget("state") == "disabled"
 
     panel._secondary_section.set_enabled(False)
-    panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=False)
+    panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=False, frame_generation=True)
     assert radios["unet-4x"].cget("state") == "disabled"
     panel._secondary_section.set_enabled(True)
     assert radios["tvai"].cget("state") == "normal"
@@ -388,7 +403,7 @@ def test_amd_offers_only_the_decoders_it_can_use_and_drops_vali(panel_factory) -
     panel = panel_factory()
     _apply(panel, replace(AppSettings(), decode_backend="vali"))
 
-    panel.set_gpu_support(vendor=AcceleratorVendor.AMD, blackwell=False)
+    panel.set_gpu_support(vendor=AcceleratorVendor.AMD, blackwell=False, frame_generation=False)
 
     assert panel.get_settings().decode_backend == "auto"
     _apply(panel, replace(AppSettings(), decode_backend="vali"))

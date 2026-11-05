@@ -140,6 +140,19 @@ class EncodingSection:
         )
         self._widgets["retarget_high_fps"].pack(side="right")
 
+        frame_generation_row = ctk.CTkFrame(inner, fg_color="transparent")
+        add_setting_label(frame_generation_row, "frame_generation")
+        self._widgets["frame_generation"] = ValueOptionMenu(
+            frame_generation_row,
+            options={"none": t("frame_generation_off"), "2x": "2x"},
+            command=lambda _value: self._on_modified(),
+            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
+            text_color=Colors.TEXT_PRIMARY, width=120,
+        )
+        self._widgets["frame_generation"].pack(side="right")
+        self._frame_generation_supported = True
+
         # Fragmented MP4: output stays playable while it is written.
         fmp4_row = ctk.CTkFrame(inner, fg_color="transparent")
         fmp4_label = ctk.CTkLabel(
@@ -211,6 +224,7 @@ class EncodingSection:
         self._rows = [
             Row(sharpen_row, row_gap, "advanced"),
             Row(retarget_row, row_gap, "advanced"),
+            Row(frame_generation_row, row_gap, "advanced"),
             Row(fmp4_row, row_gap, "advanced"),
             Row(lut_row, label_gap, "advanced"),
             Row(lut_input_row, input_gap, "advanced"),
@@ -223,6 +237,14 @@ class EncodingSection:
     def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
         layout_rows(self._rows, level, standard=standard, ltx=ltx)
         return True
+
+    def set_frame_generation_support(self, supported: bool) -> None:
+        """Frame generation needs an RTX 40-series or newer GPU; its tooltip says so."""
+        self._frame_generation_supported = supported
+        menu = self._widgets["frame_generation"]
+        if not supported:
+            menu.set_value("none")
+        menu.configure(state="normal" if supported else "disabled")
 
     def _browse_working_directory(self):
         directory = filedialog.askdirectory(title=t("dialog_select_working_directory"))
@@ -300,6 +322,9 @@ class EncodingSection:
             self._widgets["retarget_high_fps"].select()
         else:
             self._widgets["retarget_high_fps"].deselect()
+        self._widgets["frame_generation"].set_value(
+            preset.frame_generation if self._frame_generation_supported else "none"
+        )
         if preset.fmp4:
             self._widgets["fmp4"].select()
         else:
@@ -315,6 +340,7 @@ class EncodingSection:
             "encoder_cq": int(self._widgets["encoder_cq"].get()),
             "sharpen_strength": round(float(self._widgets["sharpen_strength"].get()), 2),
             "retarget_high_fps": self._widgets["retarget_high_fps"].get() == 1,
+            "frame_generation": self._widgets["frame_generation"].get_value(),
             "fmp4": self._widgets["fmp4"].get() == 1,
             "lut_path": self._widgets["lut_path"].get().strip(),
             "encoder_custom_args": self._widgets["encoder_custom_args"].get(),

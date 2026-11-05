@@ -54,26 +54,27 @@ _SHUTDOWN_COUNTDOWN_SECONDS = 60
 _WINDHAWK_MODULE = "windhawk.dll"
 
 
-def _warm_up_cuda() -> tuple[AcceleratorVendor, bool]:
+def _warm_up_cuda() -> tuple[AcceleratorVendor, bool, bool]:
     """Import torch and create the CUDA context. Run off the UI thread after the window
     paints, so the window shows first and the first job skips cold torch/CUDA init.
     An unsupported GPU gets no kernel launch; the system check reports it instead.
-    Returns (GPU vendor, Blackwell GPU) for the LTX model options; CPU without a supported GPU."""
+    Returns (GPU vendor, Blackwell GPU, frame generation support) for the GPU-specific options;
+    CPU without a supported GPU."""
     from jasna.os_utils import check_supported_gpu
-    from jasna.accelerator import supports_nvfp4, vendor_for_device
+    from jasna.accelerator import supports_frame_generation, supports_nvfp4, vendor_for_device
 
     if vendor_for_device() is AcceleratorVendor.AMD:
         driver_ok, _ = os_utils.check_gpu_driver_version()
         if driver_ok is False:
-            return AcceleratorVendor.CPU, False
+            return AcceleratorVendor.CPU, False, False
     gpu_ok, _ = check_supported_gpu()
     if not gpu_ok:
-        return AcceleratorVendor.CPU, False
+        return AcceleratorVendor.CPU, False, False
     import torch
 
     torch.zeros(1, device="cuda")
     vendor = vendor_for_device()
-    return vendor, supports_nvfp4("cuda:0")
+    return vendor, supports_nvfp4("cuda:0"), supports_frame_generation("cuda:0")
 
 
 class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
@@ -471,12 +472,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _start_cuda_warmup(self):
         def _run():
             try:
-                vendor, blackwell = _warm_up_cuda()
+                vendor, blackwell, frame_generation = _warm_up_cuda()
             except Exception:
                 logger.warning("CUDA warm-up failed", exc_info=True)
-                vendor, blackwell = AcceleratorVendor.CPU, False
+                vendor, blackwell, frame_generation = AcceleratorVendor.CPU, False, False
             self._main_thread.post(
-                lambda: self._settings_panel.set_gpu_support(vendor=vendor, blackwell=blackwell)
+                lambda: self._settings_panel.set_gpu_support(
+                    vendor=vendor, blackwell=blackwell, frame_generation=frame_generation
+                )
             )
 
         threading.Thread(target=_run, daemon=True, name="cuda-warmup").start()
