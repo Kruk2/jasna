@@ -12,6 +12,7 @@ import pytest
 from PIL import Image
 
 from jasna.gui import mask_feedback
+from jasna.gui.preview_canvas import PREVIEW_ZOOM_STEP, image_to_canvas
 
 
 def test_triangle_mask_fills_interior():
@@ -37,52 +38,6 @@ def test_multiple_polygons_union():
 def test_too_few_points_rejected():
     with pytest.raises(ValueError):
         mask_feedback.polygons_to_mask([((0, 0), (10, 10))], (100, 100))
-
-
-@pytest.mark.parametrize(
-    "image_size,canvas_size",
-    [((1920, 1080), (800, 600)), ((1080, 1920), (800, 600)), ((640, 480), (1000, 400))],
-)
-def test_coordinate_round_trip(image_size, canvas_size):
-    view = mask_feedback.view_transform(
-        image_size, canvas_size, 1.0, (image_size[0] / 2, image_size[1] / 2)
-    )
-    point = (image_size[0] * 0.25, image_size[1] * 0.75)
-    cx, cy = mask_feedback.image_to_canvas(*point, view=view)
-    back = mask_feedback.canvas_to_image(
-        cx, cy, view=view, image_size=image_size
-    )
-    assert back == pytest.approx(point)
-
-
-def test_letterbox_margin_click_snaps_to_edge():
-    image_size = (1920, 1080)
-    view = mask_feedback.view_transform(image_size, (800, 600), 1.0, (960, 540))
-    snapped = mask_feedback.canvas_to_image(400, 10, view=view, image_size=image_size)
-    assert snapped[1] == 0.0
-    assert 0 <= snapped[0] <= 1920
-    below = mask_feedback.canvas_to_image(-50, 700, view=view, image_size=image_size)
-    assert below == (0.0, 1080.0)
-
-
-def test_view_transform_zoom_one_equals_fit():
-    image_size, canvas_size = (1920, 1080), (800, 600)
-    fit = mask_feedback.fit_scale_and_offset(image_size, canvas_size)
-    view = mask_feedback.view_transform(image_size, canvas_size, 1.0, (10, 10))
-    assert view == pytest.approx(fit)
-
-
-def test_view_transform_clamps_at_image_edges():
-    image_size, canvas_size = (1000, 1000), (500, 500)
-    scale, off_x, off_y = mask_feedback.view_transform(
-        image_size, canvas_size, 4.0, (0, 0)
-    )
-    assert (off_x, off_y) == (0.0, 0.0)
-    scale, off_x, off_y = mask_feedback.view_transform(
-        image_size, canvas_size, 4.0, (1000, 1000)
-    )
-    assert off_x == pytest.approx(500 - 1000 * scale)
-    assert off_y == pytest.approx(500 - 1000 * scale)
 
 
 def test_meta_contains_only_allowed_keys():
@@ -180,7 +135,7 @@ def root():
 
 
 def _click_image(dialog, image_x, image_y):
-    x, y = mask_feedback.image_to_canvas(image_x, image_y, view=dialog._view())
+    x, y = image_to_canvas(image_x, image_y, view=dialog._canvas.transform())
     dialog._on_press(SimpleNamespace(x=round(x), y=round(y)))
 
 
@@ -261,25 +216,21 @@ def test_dialog_click_outside_frame_snaps_to_edge(root):
     dialog._cancel()
 
 
-def test_dialog_zoom_and_reset(root):
+def test_dialog_zoom_keeps_clicks_on_the_frame_and_resets(root):
     root.update()
     dialog = mask_feedback.MaskSuggestDialog(
         root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
     )
     root.update()
-    fit_scale, _, _ = mask_feedback.fit_scale_and_offset(
-        dialog._frame_image.size, dialog._canvas_size()
-    )
-    dialog._zoom_step(2.0)
-    assert dialog._zoom == pytest.approx(2.0)
-    assert dialog._view()[0] == pytest.approx(fit_scale * 2.0)
-    dialog._zoom_step(1 / 4)
-    assert dialog._zoom == 1.0
 
-    dialog._on_wheel(SimpleNamespace(x=10, y=10, delta=120))
-    assert dialog._zoom > 1.0
-    dialog._reset_zoom()
-    assert dialog._zoom == 1.0
+    dialog.event_generate("<KeyPress-plus>")
+    dialog.event_generate("<KeyPress-plus>")
+    _click_image(dialog, 300, 200)
+    assert dialog._canvas.view.zoom == pytest.approx(1 + 2 * PREVIEW_ZOOM_STEP)
+    assert dialog._draft[0] == pytest.approx((300, 200), abs=2)
+
+    dialog.event_generate("<KeyPress-0>")
+    assert dialog._canvas.view.is_reset
     dialog._cancel()
 
 
@@ -319,9 +270,9 @@ def test_dialog_alpha_slider_updates_and_redraws(root):
 
     dialog._on_alpha(0.8)
     assert dialog._mask_alpha == 0.8
-    dialog._redraw()
+    dialog._canvas.redraw()
     dialog._on_alpha(0.0)
-    dialog._redraw()
+    dialog._canvas.redraw()
     assert dialog._polygons
     dialog._cancel()
 
@@ -334,8 +285,7 @@ def test_click_above_canvas_snaps_point_to_top_edge(root):
     root.update()
     canvas_x = dialog._canvas.winfo_rootx()
     canvas_y = dialog._canvas.winfo_rooty()
-    view = dialog._view()
-    inside_x, _ = mask_feedback.image_to_canvas(320, 0, view=view)
+    inside_x, _ = image_to_canvas(320, 0, view=dialog._canvas.transform())
 
     dialog._on_global_press(
         SimpleNamespace(

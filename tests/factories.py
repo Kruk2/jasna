@@ -514,3 +514,17 @@ class ReadObserver:
         for group in groups:
             self.destinations.extend(group.values())
             yield group
+
+
+def shown_pixel(canvas, x: int, y: int) -> tuple[int, ...]:
+    """RGB at ``x``, ``y`` of the one image a canvas shows, in that image's own pixels."""
+    (item,) = canvas.find_all()
+    assert canvas.type(item) == "image"
+    return tuple(int(value) for value in canvas.tk.call(canvas.itemcget(item, "image"), "get", x, y))
+
+
+def shown_message(canvas) -> str:
+    """Text of the one message a canvas shows instead of an image."""
+    (item,) = canvas.find_all()
+    assert canvas.type(item) == "text"
+    return canvas.itemcget(item, "text")

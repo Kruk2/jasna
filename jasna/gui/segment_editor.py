@@ -35,13 +35,8 @@ from jasna.gui.mask_feedback import (
     MaskFeedbackWorker,
     MaskSuggestDialog,
 )
-from jasna.gui.segment_editor_state import (
-    PREVIEW_ZOOM_MAX,
-    PREVIEW_ZOOM_STEP,
-    PreviewView,
-    SegmentEditorState,
-    smart_render_error_key,
-)
+from jasna.gui.preview_canvas import PREVIEW_ZOOM_MAX, PREVIEW_ZOOM_STEP, PreviewCanvas
+from jasna.gui.segment_editor_state import SegmentEditorState, smart_render_error_key
 from jasna.gui.segment_scan_panel import ScanPanel
 from jasna.gui.segment_preview import (
     PreviewEnded,
@@ -120,13 +115,9 @@ class SegmentEditor(ctk.CTkToplevel):
         self._closed = threading.Event()
         self._saved = False
         self._next_frame_after: str | None = None
-        self._resize_after: str | None = None
         self._preview_source: Image.Image | None = None
-        self._preview_image = None
         self._preview_generation = 0
         self._preview_stereo = "off"
-        self._preview_view = PreviewView()
-        self._preview_pan_anchor: tuple[int, int] | None = None
         self.vr_resolution = None
         self._vr_projection = job.vr_projection or "auto"
         self._restore_active = False
@@ -304,22 +295,17 @@ class SegmentEditor(ctk.CTkToplevel):
         preview_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         preview_card.grid_rowconfigure(0, weight=1)
         preview_card.grid_columnconfigure(0, weight=1)
-        self._preview = ctk.CTkLabel(
-            preview_card,
-            text=t("segments_loading_preview"),
-            fg_color=Colors.BG_PANEL,
-            text_color=Colors.STATUS_PENDING,
-            corner_radius=Sizing.BORDER_RADIUS,
+        preview_frame = ctk.CTkFrame(preview_card, fg_color=Colors.BG_PANEL, corner_radius=Sizing.BORDER_RADIUS)
+        preview_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
+        self._preview = PreviewCanvas(
+            preview_frame,
+            source=self._preview_display_source,
+            pan_button=1,
+            on_view_changed=self._update_preview_zoom_controls,
         )
-        self._preview.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
-        self._preview.bind("<Configure>", self._preview_resized)
-        self._preview.bind("<MouseWheel>", self._preview_mousewheel)
-        self._preview.bind("<Button-4>", self._preview_mousewheel)
-        self._preview.bind("<Button-5>", self._preview_mousewheel)
-        self._preview.bind("<ButtonPress-1>", self._preview_pan_start)
-        self._preview.bind("<B1-Motion>", self._preview_pan_drag)
-        self._preview.bind("<ButtonRelease-1>", self._preview_pan_end)
+        self._preview.pack(fill="both", expand=True, padx=8, pady=8)
         self._preview.bind("<Double-Button-1>", self._reset_preview_view)
+        self._preview.show_message(t("segments_loading_preview"), Colors.STATUS_PENDING)
 
         transport = ctk.CTkFrame(preview_card, fg_color="transparent")
         transport.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 2))
@@ -387,7 +373,7 @@ class SegmentEditor(ctk.CTkToplevel):
             height=26,
             fg_color=Colors.BG_PANEL,
             hover_color=Colors.BORDER_LIGHT,
-            command=lambda: self._adjust_preview_zoom(-PREVIEW_ZOOM_STEP),
+            command=lambda: self._preview.zoom_by(-PREVIEW_ZOOM_STEP),
         )
         self._zoom_out_btn.pack(side="left")
         Tooltip(self._zoom_out_btn, t("segments_preview_zoom_out"))
@@ -406,7 +392,7 @@ class SegmentEditor(ctk.CTkToplevel):
             height=26,
             fg_color=Colors.BG_PANEL,
             hover_color=Colors.BORDER_LIGHT,
-            command=lambda: self._adjust_preview_zoom(PREVIEW_ZOOM_STEP),
+            command=lambda: self._preview.zoom_by(PREVIEW_ZOOM_STEP),
         )
         self._zoom_in_btn.pack(side="left")
         Tooltip(self._zoom_in_btn, t("segments_preview_zoom_in"))
@@ -1117,7 +1103,7 @@ class SegmentEditor(ctk.CTkToplevel):
             release_gpu=lambda: self._set_preview_gpu_busy(False),
             on_lock_changed=self._on_scan_lock_changed,
             on_ranges_added=self._on_scan_ranges_added,
-            on_preview_changed=self._refresh_preview_image,
+            on_preview_changed=self._preview.redraw,
             on_detection_changed=self._on_scan_detection_changed,
         )
         self._scan_panel.pack(fill="x", padx=16, pady=(8, 0))
@@ -1303,18 +1289,13 @@ class SegmentEditor(ctk.CTkToplevel):
         if self._restore_active and self._playing and self._restored_clip:
             self._show_restored_clip_frame(self._current)
         elif not self._restore_active:
-            self._refresh_preview_image()
+            self._preview.redraw()
         self._time_label.configure(text=self._time_text())
         self._timeline.reveal(self._current)
         self._refresh_timeline()
         if self._playing:
             delay = max(10, round(1000 / min(60.0, self._state.fps)))
             self._next_frame_after = self.after(delay, self._request_next_frame)
-
-    def _preview_resized(self, _event=None) -> None:
-        if self._resize_after is not None:
-            self.after_cancel(self._resize_after)
-        self._resize_after = self.after(60, self._refresh_preview_image)
 
     def _active_preview_source(self) -> Image.Image | None:
         seed_image = self._seed_view_image()
@@ -1324,33 +1305,14 @@ class SegmentEditor(ctk.CTkToplevel):
             return self._restored_source
         return None if self._restore_active else self._preview_source
 
-    def _preview_image_geometry(
-        self,
-        source: Image.Image,
-    ) -> tuple[float, float, float, float]:
-        widget_width = max(2, self._preview.winfo_width())
-        widget_height = max(2, self._preview.winfo_height())
-        available_width = max(2, widget_width - 16)
-        available_height = max(2, widget_height - 16)
-        scale = min(
-            available_width / source.width,
-            available_height / source.height,
-        )
-        display_width = max(1.0, source.width * scale)
-        display_height = max(1.0, source.height * scale)
-        return (
-            (widget_width - display_width) / 2,
-            (widget_height - display_height) / 2,
-            display_width,
-            display_height,
-        )
-
-    def _preview_crop(self, source: Image.Image) -> Image.Image:
-        box = self._preview_view.crop_box(source.width, source.height)
-        return source if box is None else source.crop(box)
+    def _preview_display_source(self) -> Image.Image | None:
+        source = self._active_preview_source()
+        if source is None or self._closed.is_set():
+            return None
+        return self._scan_panel.apply_overlay(source) if source is self._preview_source else source
 
     def _update_preview_zoom_controls(self) -> None:
-        view = self._preview_view
+        view = self._preview.view
         self._zoom_label.configure(text=f"{round(view.zoom * 100)}%")
         self._zoom_out_btn.configure(state="normal" if view.zoomed else "disabled")
         self._zoom_in_btn.configure(state="disabled" if view.zoom >= PREVIEW_ZOOM_MAX else "normal")
@@ -1361,114 +1323,9 @@ class SegmentEditor(ctk.CTkToplevel):
             self._reset_view_btn.pack_forget()
         self._preview.configure(cursor="fleur" if view.zoomed else "")
 
-    def _set_preview_zoom(
-        self,
-        zoom: float,
-        *,
-        anchor: tuple[float, float] | None = None,
-    ) -> None:
-        anchor_fraction = None
-        source = self._active_preview_source() if anchor is not None else None
-        if source is not None:
-            left, top, width, height = self._preview_image_geometry(source)
-            anchor_fraction = (
-                min(1.0, max(0.0, (anchor[0] - left) / width)),
-                min(1.0, max(0.0, (anchor[1] - top) / height)),
-            )
-        changed = self._preview_view.zoom_to(zoom, anchor_fraction)
-        self._update_preview_zoom_controls()
-        if changed:
-            self._refresh_preview_image()
-
-    def _adjust_preview_zoom(self, amount: float) -> None:
-        self._set_preview_zoom(self._preview_view.zoom + float(amount))
-
     def _reset_preview_view(self, event=None):
-        self._preview_view.reset()
-        self._preview_pan_anchor = None
-        self._update_preview_zoom_controls()
-        self._refresh_preview_image()
+        self._preview.reset_view()
         return "break" if event is not None else None
-
-    def _preview_mousewheel(self, event):
-        button = int(getattr(event, "num", 0))
-        delta = int(getattr(event, "delta", 0))
-        direction = 1 if button == 4 or delta > 0 else -1 if button == 5 or delta < 0 else 0
-        if not direction:
-            return None
-        self._set_preview_zoom(
-            self._preview_view.zoom + direction * PREVIEW_ZOOM_STEP,
-            anchor=(float(event.x), float(event.y)),
-        )
-        return "break"
-
-    def _preview_pan_start(self, event):
-        if not self._preview_view.zoomed:
-            self._preview_pan_anchor = None
-            return None
-        self._preview_pan_anchor = (int(event.x), int(event.y))
-        return "break"
-
-    def _preview_pan_drag(self, event):
-        anchor = self._preview_pan_anchor
-        source = self._active_preview_source()
-        if anchor is None or source is None or not self._preview_view.zoomed:
-            return None
-        _, _, display_width, display_height = self._preview_image_geometry(source)
-        self._preview_view.pan(
-            (int(event.x) - anchor[0]) / display_width,
-            (int(event.y) - anchor[1]) / display_height,
-        )
-        self._preview_pan_anchor = (int(event.x), int(event.y))
-        self._refresh_preview_image()
-        return "break"
-
-    def _preview_pan_end(self, _event=None):
-        was_panning = self._preview_pan_anchor is not None
-        self._preview_pan_anchor = None
-        return "break" if was_panning else None
-
-    def _fit_to_label(self, label: ctk.CTkLabel, source: Image.Image) -> ctk.CTkImage:
-        # winfo_* measures physical pixels while CTkImage's size is multiplied
-        # by the widget scaling factor at render time; divide it back out so
-        # HiDPI displays do not overflow and clip the preview (issue #229).
-        widget_scaling = scaling.widget_scaling(label)
-        width = max(2, label.winfo_width() - 16)
-        height = max(2, label.winfo_height() - 16)
-        source_width, source_height = source.size
-        scale = min(width / source_width, height / source_height)
-        pixel_size = (
-            max(2, round(source_width * scale)),
-            max(2, round(source_height * scale)),
-        )
-        image = source.resize(pixel_size, Image.Resampling.LANCZOS)
-        return ctk.CTkImage(
-            image,
-            size=(
-                max(1, round(pixel_size[0] / widget_scaling)),
-                max(1, round(pixel_size[1] / widget_scaling)),
-            ),
-        )
-
-    def _refresh_preview_image(self) -> None:
-        self._resize_after = None
-        source = self._active_preview_source()
-        if source is None or self._closed.is_set():
-            return
-        if source is self._preview_source:
-            source = self._scan_panel.apply_overlay(source)
-        source = self._preview_crop(source)
-        self._preview_image = self._fit_to_label(self._preview, source)
-        self._preview.configure(image=self._preview_image, text="")
-
-    def _show_preview_message(self, text: str, color: str) -> None:
-        # CTkLabel.configure(image=None) updates its Python-side image reference
-        # but does not clear the underlying tkinter.Label image. Clear that
-        # first so releasing our CTkImage cannot leave Tk pointing at a deleted
-        # ``pyimage`` and abort the callback before background work starts.
-        self._preview._label.configure(image="")
-        self._preview.configure(image=None, text=text, text_color=color)
-        self._preview_image = None
 
     def _show_preview_error(self, message: str) -> None:
         self._set_playing(False)
@@ -1476,7 +1333,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._loading_bar.stop()
             self._loading_label.configure(text=message, text_color=Colors.STATUS_ERROR)
             return
-        self._show_preview_message(message, Colors.STATUS_ERROR)
+        self._preview.show_message(message, Colors.STATUS_ERROR)
 
     def _time_text(self) -> str:
         if self._state is None:
@@ -1513,7 +1370,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._restored_clip = ()
         self._restored_source = None
         self._restore_play_pending = False
-        self._show_preview_message(
+        self._preview.show_message(
             t("segments_restore_restoring"),
             Colors.STATUS_PENDING,
         )
@@ -1596,7 +1453,7 @@ class SegmentEditor(ctk.CTkToplevel):
                 self._set_preview_gpu_busy(False)
                 self._restore_active = False
                 self._restore_toggle.deselect()
-                self._refresh_preview_image()
+                self._preview.redraw()
                 raise
 
     def _deactivate_restoration_preview(self) -> None:
@@ -1610,10 +1467,9 @@ class SegmentEditor(ctk.CTkToplevel):
             self.after_cancel(self._restore_after)
             self._restore_after = None
         self._restored_source = None
-        self._preview_image = None
         self._restore_toggle.deselect()
         self._refresh_ltx_render_button()
-        self._refresh_preview_image()
+        self._preview.redraw()
 
     def _schedule_restoration_preview(self) -> None:
         self._restore_generation = -1
@@ -1637,7 +1493,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._show_ltx_preview_state()
             return
         if self._seed_running is not None:
-            self._show_preview_message(t("segments_preview_ltx_busy"), Colors.STATUS_PENDING)
+            self._preview.show_message(t("segments_preview_ltx_busy"), Colors.STATUS_PENDING)
             return
         self._ensure_restoration_worker()
         self._restore_generation = self._restoration_worker.request(
@@ -1646,7 +1502,7 @@ class SegmentEditor(ctk.CTkToplevel):
             projection=self._vr_projection,
         )
         if self._restored_source is None:
-            self._show_preview_message(
+            self._preview.show_message(
                 t("segments_restore_restoring"),
                 Colors.STATUS_PENDING,
             )
@@ -1655,15 +1511,15 @@ class SegmentEditor(ctk.CTkToplevel):
         """Preview over LTX: its rendered frames, else what it waits for."""
         segment = self._ltx_range_at_playhead()
         if segment is None:
-            self._show_preview_message(t("segments_restore_ltx_unavailable"), Colors.STATUS_WARNING)
+            self._preview.show_message(t("segments_restore_ltx_unavailable"), Colors.STATUS_WARNING)
         elif self._seed_view_image() is not None:
-            self._refresh_preview_image()
+            self._preview.redraw()
         elif self._is_rendering(segment):
-            self._show_preview_message(
+            self._preview.show_message(
                 t("segments_preview_ltx_rendering", seed=self._seed_running[1]), Colors.STATUS_PENDING
             )
         else:
-            self._show_preview_message(
+            self._preview.show_message(
                 t("segments_preview_ltx_not_rendered", seed=self._preview_seed(segment)), Colors.STATUS_WARNING
             )
 
@@ -1681,7 +1537,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._restored_clip = ()
         self._restored_source = None
         self._play.configure(text="…")
-        self._show_preview_message(
+        self._preview.show_message(
             t("segments_restore_restoring"),
             Colors.STATUS_PENDING,
         )
@@ -1709,14 +1565,14 @@ class SegmentEditor(ctk.CTkToplevel):
             return
         if isinstance(event, RestorationStatus):
             if self._restored_source is None:
-                self._show_preview_message(
+                self._preview.show_message(
                     worker_status_text(event.message),
                     Colors.STATUS_PENDING,
                 )
         elif isinstance(event, RestorationFrame):
             self._restored_clip = ()
             self._restored_source = event.image
-            self._refresh_preview_image()
+            self._preview.redraw()
         elif isinstance(event, RestorationClip):
             self._restored_clip = event.frames
             if not event.frames:
@@ -1724,7 +1580,7 @@ class SegmentEditor(ctk.CTkToplevel):
                 self._play.configure(text="▶")
                 return
             self._restored_source = event.frames[0].image
-            self._refresh_preview_image()
+            self._preview.redraw()
             if self._restore_play_pending:
                 self._restore_play_pending = False
                 self._start_restored_playback(event.frames[0].seconds)
@@ -1733,7 +1589,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._play.configure(text="▶")
             self._restored_clip = ()
             self._restored_source = None
-            self._show_preview_message(
+            self._preview.show_message(
                 t("segments_restore_failed", message=event.message),
                 Colors.STATUS_ERROR,
             )
@@ -1756,7 +1612,7 @@ class SegmentEditor(ctk.CTkToplevel):
     def _show_restored_clip_frame(self, seconds: float) -> None:
         frame = min(self._restored_clip, key=lambda item: abs(item.seconds - seconds))
         self._restored_source = frame.image
-        self._refresh_preview_image()
+        self._preview.redraw()
 
     def _refresh_restore_toggle(self) -> None:
         busy = bool(self._is_gpu_busy())
