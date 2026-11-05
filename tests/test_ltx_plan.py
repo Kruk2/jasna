@@ -518,6 +518,26 @@ def test_stereo_right_eye_detections_the_twin_missed_get_no_second_track():
     assert [p.track_id for p in plans] == [0, 1]
 
 
+def test_stereo_right_eye_mosaic_in_a_twins_notch_keeps_its_own_track():
+    eye, disparity = 1000, -40
+    stereo = StereoLayout("sbs", 2 * eye, eye)
+    ell = np.array([[0, 0], [300, 0], [300, 60], [60, 60], [60, 300], [0, 300]], dtype=np.int32)
+
+    def shape(x: float, y: float) -> Region:
+        polygon = ell + np.array((x, y), dtype=np.int32)
+        return Region(box=(x, y, x + 300.0, y + 300.0), polygon=polygon)
+
+    regions = [
+        [shape(200, 300), shape(eye + 200 + disparity, 300), _square(eye + 200 + disparity + 150, 450, 100)]
+        for _ in range(250)
+    ]
+    plans = plan_video(
+        regions, set(), frame_w=stereo.frame_w, frame_h=stereo.frame_h, stereo=stereo, large_canvas=False,
+        window_hop=WINDOW_HOP, max_gap=MAX_GAP, min_duration=0,
+    )
+    assert len(plans) == 3
+
+
 @pytest.mark.parametrize("kind", ["sbs", "tb"])
 def test_stereo_right_eye_restores_each_left_track_as_a_twin_with_its_noise(kind):
     eye, disparity = 1000, -40
