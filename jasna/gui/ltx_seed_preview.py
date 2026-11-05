@@ -23,7 +23,7 @@ import torch
 from jasna.accelerator import device_free_bytes
 from jasna.gui.models import AppSettings
 from jasna.gui.queues import replace_pending
-from jasna.gui.video_session import build_video_session, release_session_memory, video_session_key
+from jasna.gui.video_session import SessionCache, build_video_session, video_session_key
 from jasna.media.probe import VideoMetadata
 from jasna.media.splice import KeyframeIndex, segment_render_span
 from jasna.segments import SegmentRange, SegmentRestoration
@@ -115,8 +115,7 @@ class SeedRenderer:
         self.metadata = metadata
         self.index = index
         self._temp = Path(tempfile.mkdtemp(prefix=".jasna-seeds-", dir=work_dir))
-        self._session = None
-        self._session_key: tuple | None = None
+        self._sessions = SessionCache(on_close=self._drop_runtime)
         self._prepared: dict[tuple, object] = {}
         self._transformer = None
         self._transformer_path: Path | None = None
@@ -149,9 +148,9 @@ class SeedRenderer:
 
         settings = replace(settings, restoration_model="ltx")
         seeded = replace(segment, restoration=SegmentRestoration("ltx", int(seed)))
-        self._ensure_session(settings)
+        session = self._sessions.get(settings, lambda: build_video_session(settings, log=lambda _msg: None))
         config = video_session_config(settings, codec=settings.codec, encoder_settings={})
-        pipeline = build_pipeline(config, self._session, self.path, self.path, segments=(seeded,))
+        pipeline = build_pipeline(config, session, self.path, self.path, segments=(seeded,))
         pipeline.configure_vr(self.metadata)
         render = pipeline.ltx_segment_render(self.metadata)
         if self._runtime is None or self._runtime.files != render.files:
@@ -201,14 +200,6 @@ class SeedRenderer:
             torch.cuda.empty_cache()
         return writer
 
-    def _ensure_session(self, settings: AppSettings) -> None:
-        key = video_session_key(settings)
-        if self._session is not None and key == self._session_key:
-            return
-        self._drop_session()
-        self._session = build_video_session(settings, log=lambda _msg: None)
-        self._session_key = key
-
     def _drop_transformer(self) -> None:
         if self._transformer is not None:
             self._transformer = None
@@ -223,21 +214,12 @@ class SeedRenderer:
             self._runtime.close()
             self._runtime = None
 
-    def _drop_session(self) -> None:
-        self._drop_runtime()
-        if self._session is not None:
-            device = self._session.device
-            self._session.close()
-            self._session = None
-            self._session_key = None
-            release_session_memory(device)
-
     def release(self) -> None:
         """Free the GPU; the prepared references stay on disk for the next seed."""
-        self._drop_session()
+        self._sessions.close()
 
     def close(self) -> None:
-        self._drop_session()
+        self._sessions.close()
         self._prepared.clear()
         shutil.rmtree(self._temp)
 
