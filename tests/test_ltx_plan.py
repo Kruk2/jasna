@@ -180,6 +180,19 @@ def test_a_detection_briefly_spanning_two_mosaics_keeps_both_cameras():
         assert np.array_equal(left | right, _mask([_BOTH.polygon]))
 
 
+def test_tiny_mosaics_keep_their_tracks_through_a_spanning_detection():
+    """Real outlines are dilated around the model box; a cut part's box must not keep that margin."""
+
+    def dilated(x1, y1, x2, y2, margin=20):
+        outline = [[x1 - margin, y1 - margin], [x2 + margin, y1 - margin], [x2 + margin, y2 + margin], [x1 - margin, y2 + margin]]
+        return Region((x1, y1, x2, y2), np.array(outline, dtype=np.int32))
+
+    left, right, both = dilated(300, 300, 310, 310), dilated(360, 300, 370, 310), dilated(300, 300, 370, 310)
+    frames = [[left, right] for _ in range(150)] + [[both] for _ in range(20)] + [[left, right] for _ in range(130)]
+    tracks = build_tracks([group_regions(regions) for regions in frames], set(), MAX_GAP)
+    assert [(t.first, t.last) for t in tracks] == [(0, 299), (0, 299)]
+
+
 def test_a_mosaic_breaking_up_beside_another_keeps_both_tracks():
     """For a few frames a piece of the big mosaic comes glued to its neighbour, then one detection covers both."""
     mosaic, neighbour = _rectangle(560, 580, 1780, 1080), _rectangle(1490, 250, 1920, 700)
