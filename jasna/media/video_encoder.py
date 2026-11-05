@@ -262,7 +262,10 @@ def source_bitrate_cap_options(
     *,
     output_codec: str,
     vendor: AcceleratorVendor,
+    frame_generation: bool = False,
 ) -> dict[str, str]:
+    """With ``frame_generation`` the output has twice the frames, so the ceiling doubles to
+    keep each frame's share of it."""
     if metadata.video_bitrate <= 0:
         logger.warning(
             "No source bitrate for %s; encoding without a source-tied bitrate ceiling",
@@ -275,7 +278,7 @@ def source_bitrate_cap_options(
         factor = SOURCE_BITRATE_CAP_FACTORS.get(
             metadata.codec_name.lower(), DEFAULT_SOURCE_BITRATE_CAP_FACTOR
         )
-    maxrate = int(metadata.video_bitrate * factor)
+    maxrate = int(metadata.video_bitrate * factor * (2 if frame_generation else 1))
     return {
         "maxrate": str(maxrate),
         "bufsize": str(maxrate * SOURCE_BITRATE_CAP_BUFFER_RATIO),
@@ -384,6 +387,7 @@ def resolve_encoder_options(
     encoder_settings: dict[str, object],
     *,
     smart_fragment: bool,
+    frame_generation: bool = False,
 ) -> tuple[EncoderSpec, dict[str, str]]:
     """Pick the encoder spec and the final FFmpeg options for one output."""
     specs = AMF_ENCODER_SPECS if vendor is AcceleratorVendor.AMD else ENCODER_SPECS
@@ -421,7 +425,9 @@ def resolve_encoder_options(
         and overrides.get("rc", encoder_options["rc"]) in {"cqp", "0"}
     )
     if "maxrate" not in overrides and not uses_amf_cqp:
-        encoder_options.update(source_bitrate_cap_options(metadata, output_codec=codec, vendor=vendor))
+        encoder_options.update(
+            source_bitrate_cap_options(metadata, output_codec=codec, vendor=vendor, frame_generation=frame_generation)
+        )
     encoder_options.update(overrides)
     if smart_fragment:
         encoder_options.update(
@@ -446,8 +452,11 @@ class VideoEncoder:
         smart_fragment: bool = False,
         fmp4: bool = False,
         settings: Mapping[str, object] | None = None,
+        frame_generation: bool = False,
     ):
-        """``settings`` (from ``settings_tag.job_settings``) become the output's comment tag."""
+        """``settings`` (from ``settings_tag.job_settings``) become the output's comment tag.
+        ``frame_generation`` doubles ``output_fps`` and takes PTS in half the source time base
+        (``jasna.frame_generation.FrameGenerationWriter``)."""
         self.device = torch.device(device)
         self.vendor = vendor_for_device(self.device)
         if self.vendor not in {AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD}:
@@ -455,7 +464,8 @@ class VideoEncoder:
                 f"GPU video encoding is not supported on {self.vendor.value}"
             )
         spec, self.encoder_options = resolve_encoder_options(
-            self.vendor, codec, metadata, encoder_settings, smart_fragment=smart_fragment
+            self.vendor, codec, metadata, encoder_settings, smart_fragment=smart_fragment,
+            frame_generation=frame_generation,
         )
         color_variant = _COLOR_VARIANTS.get((metadata.color_space, metadata.color_range))
         if color_variant is None:
@@ -472,7 +482,8 @@ class VideoEncoder:
         self.settings = settings
         self.output_fps = Fraction(
             metadata.video_fps_exact if output_fps is None else output_fps
-        )
+        ) * (2 if frame_generation else 1)
+        self.time_base = metadata.time_base / 2 if frame_generation else metadata.time_base
 
         self._lut_applier: GpuLutApplier | None = None
         if lut_path:
@@ -528,9 +539,9 @@ class VideoEncoder:
             out_v.codec_tag = "hvc1"
         out_v.width = self.metadata.video_width
         out_v.height = self.metadata.video_height
-        out_v.time_base = self.metadata.time_base
+        out_v.time_base = self.time_base
         ctx = out_v.codec_context
-        ctx.time_base = self.metadata.time_base
+        ctx.time_base = self.time_base
         ctx.framerate = self.output_fps
         ctx.pix_fmt = pix_fmt
         if self.smart_fragment:
@@ -1047,7 +1058,7 @@ class VideoEncoder:
                 format=self.spec.frame_format,
             )
         hw_frame.pts = pts
-        hw_frame.time_base = self.metadata.time_base
+        hw_frame.time_base = self.time_base
         try:
             packets = self.out_stream.encode(hw_frame)
         except av.FFmpegError as exc:

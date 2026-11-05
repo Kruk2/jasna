@@ -298,7 +298,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
     writer = _Writer()
     restore.restore_video(
         _source(video),
-        writer,
+        lambda: writer,
         detector=_Detector(),
         files=FILES,
         frame_h=64,
@@ -809,7 +809,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
     (tmp_path / "speed.json").unlink()
     restore.restore_video(
         _source(_video(12, range(2, 10))),
-        _Writer(),
+        _Writer,
         detector=_Detector(),
         files=FILES,
         frame_h=64,

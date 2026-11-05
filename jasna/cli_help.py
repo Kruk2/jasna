@@ -21,6 +21,13 @@ CLI_HELP: dict[str, str] = {
         "BasicVSR++ parts of --ltx-auto-split. A missing "
         "LTX model is offered for download. (default: %(default)s)"
     ),
+    "frame_generation": (
+        "2x: double the frame rate with NVIDIA RTX Video Frame Generation for smoother motion. "
+        "Needs an RTX 40-series or newer GPU. Audio and length stay the same. "
+        "Restores the whole video, so it can't be combined with --segments, --ltx-auto-split or --stream. "
+        "With --retarget-high-fps, 60 FPS is halved first and then doubled back. "
+        "(default: %(default)s)"
+    ),
     "restoration_model_path": (
         "Restoration model file (basicvsrpp) or folder (ltx). Default: the model in model_weights/."
     ),

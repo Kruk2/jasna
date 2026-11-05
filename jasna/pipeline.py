@@ -218,7 +218,7 @@ class Pipeline:
             output_frame_count = frame_rate.output_frame_count(metadata.num_frames)
 
         encode_heartbeat: list[float] = [time.monotonic()]
-        frame_writer = _OfflineFrameWriter(encoder_ctx, encode_heartbeat)
+        frame_writer = self._frame_writer(_OfflineFrameWriter(encoder_ctx, encode_heartbeat), metadata)
         try:
             error = run_restoration_pass(
                 self,
@@ -246,6 +246,16 @@ class Pipeline:
         if error is not None:
             error.__traceback__ = None
             raise error
+
+    def _frame_writer(self, writer: _OfflineFrameWriter, metadata):
+        """``writer``, behind 2x frame generation when the job asks for it; the effect takes
+        its GPU memory from here until the writer closes."""
+        if self.config.frame_generation == "none":
+            return writer
+        from jasna.frame_generation import FrameGenerationWriter, RtxFrameGeneration
+
+        generate = RtxFrameGeneration(self.device, int(metadata.video_width), int(metadata.video_height))
+        return FrameGenerationWriter(writer, generate)
 
     def _log_memory_at_end(self) -> None:
         free, total = torch.cuda.mem_get_info(self.device)
@@ -322,6 +332,7 @@ class Pipeline:
             output_fps=frame_rate.output_fps,
             fmp4=self.fmp4,
             settings=settings,
+            frame_generation=self.config.frame_generation != "none",
         )
 
     def _run_full(
@@ -368,7 +379,7 @@ class Pipeline:
         resume_dir = self.resume.directory / "ltx"
         large_canvas = whole_video_large_canvas(self.ltx_large_canvas, self.device, resume_dir)
         settings = self._job_settings(frozenset({"ltx"}), ltx_large_canvas=large_canvas)
-        writer = _OfflineFrameWriter(self._video_encoder(metadata, frame_rate, settings), [time.monotonic()])
+        encoder = self._video_encoder(metadata, frame_rate, settings)
         try:
             restore_video(
                 video_frames(
@@ -381,7 +392,9 @@ class Pipeline:
                     seek_ts=None,
                     end_pts=None,
                 ),
-                writer,
+                # Opened when compose starts, so frame generation loads after the denoiser is
+                # gone and before the free VRAM sets the first decode's budget.
+                lambda: self._frame_writer(_OfflineFrameWriter(encoder, [time.monotonic()]), metadata),
                 detector=self.job_detection_model,
                 files=self.ltx_files,
                 frame_h=int(metadata.video_height),
@@ -406,8 +419,6 @@ class Pipeline:
             )
         except Cancelled:
             log.info("LTX restoration cancelled")
-        finally:
-            writer.close()
         self._log_memory_at_end()
 
     def ltx_segment_render(self, metadata) -> "LtxRender":

@@ -79,6 +79,7 @@ def session_config(**overrides) -> SessionConfig:
         encoder_settings={"cq": 25},
         lut_path=None,
         retarget_high_fps=False,
+        frame_generation="none",
         disable_progress=False,
         working_dir=None,
         vr_projection="auto",

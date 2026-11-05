@@ -173,6 +173,11 @@ def supports_nvfp4(device: torch.device | str) -> bool:
     return is_nvidia_device(device) and torch.cuda.get_device_capability(device)[0] >= 10
 
 
+def supports_frame_generation(device: torch.device | str) -> bool:
+    """NVIDIA's Video Frame Generation runs on RTX 40-series (Ada) and newer only."""
+    return is_nvidia_device(device) and torch.cuda.get_device_capability(device) >= (8, 9)
+
+
 def amd_gpu_architecture(device: torch.device | str) -> str:
     """The AMD GPU's architecture without target features, e.g. ``gfx1201``."""
     return torch.cuda.get_device_properties(device).gcnArchName.split(":")[0]

@@ -123,3 +123,13 @@ def test_hundreds_of_ranges_keep_the_comment_short():
     )
 
     assert len(settings_comment(settings, encoder="h264_nvenc", options={"cq": "25"})) < 2000
+
+
+def test_output_records_frame_generation():
+    config = session_config(frame_generation="2x")
+
+    settings = job_settings(
+        config, models=frozenset({"basicvsrpp"}), segments=None, vr=FLAT, ltx_weights=None, ltx_large_canvas=None
+    )
+
+    assert settings["output"]["frame_generation"] == "2x"

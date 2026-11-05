@@ -121,6 +121,7 @@ def job_settings(
         "lut": Path(config.lut_path).name if config.lut_path else None,
         "sharpen": config.sharpen_strength,
         "retarget_high_fps": config.retarget_high_fps,
+        "frame_generation": config.frame_generation,
     }
     return settings
 

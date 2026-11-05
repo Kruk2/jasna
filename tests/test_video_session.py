@@ -33,6 +33,7 @@ pytestmark = pytest.mark.usefixtures("nvidia_vendor")
         ({"ltx_vae_encoder": "full"}, False),
         ({"ltx_vae_decoder": "half"}, False),
         ({"decode_backend": "pyav-sw"}, True),
+        ({"frame_generation": "2x"}, True),
     ],
 )
 def test_video_session_key_tracks_only_session_fields(changes, same_session) -> None:
@@ -40,7 +41,7 @@ def test_video_session_key_tracks_only_session_fields(changes, same_session) -> 
 
 
 def test_video_session_config_forwards_vr_projection() -> None:
-    settings = replace(AppSettings(), vr_projection="gnomonic")
+    settings = replace(AppSettings(), vr_projection="gnomonic", frame_generation="2x")
 
     with (
         patch("jasna.engine_paths.model_weights_dir"),
@@ -59,7 +60,7 @@ def test_video_session_config_forwards_vr_projection() -> None:
             encoder_settings={},
         )
 
-    assert config.vr_projection == "gnomonic"
+    assert (config.vr_projection, config.frame_generation) == ("gnomonic", "2x")
 
 
 def test_video_session_key_includes_active_secondary_knobs() -> None:

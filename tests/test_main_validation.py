@@ -160,6 +160,11 @@ LTX_NEEDED = "needs --restoration-model-name ltx-basic, ltx, ltx-4step, ltx-8ste
         (["--stream", "--retarget-high-fps"], (), "--retarget-high-fps is only supported for offline exports"),
         (["--stream", "--fmp4"], (), "--fmp4 is only supported for offline exports"),
         (["--segments", "10-20", "--fmp4"], (), "--fmp4 cannot be combined with --segments"),
+        (["--stream", "--frame-generation", "2x"], (), "--frame-generation is only supported for offline exports"),
+        (["--segments", "10-20", "--frame-generation", "2x"], (), "--frame-generation cannot be combined with --segments"),
+        (["--restoration-model-name", "ltx", "--ltx-auto-split", "12", "--frame-generation", "2x"], (),
+         "--frame-generation cannot be combined with --ltx-auto-split"),
+        (["--frame-generation", "4x"], (), "argument --frame-generation: invalid choice"),
         (["--codec", "vp9"], (), "argument --codec: invalid choice: 'vp9'"),
         (["--codec", "av1", "--encoder-settings", "profile=main"], (), "for codec av1.*profile"),
         (["--batch-size", "0"], (), "Batch size must be > 0"),
@@ -299,3 +304,23 @@ def test_cli_continues_on_amd_with_the_amf_runtime(capsys):
     ):
         main._check_system(argparse.Namespace(device="cuda:0"))
     assert "AMF" not in capsys.readouterr().out
+
+
+def test_frame_generation_reaches_the_pipeline_with_retargeting(tmp_path):
+    with patch("jasna.accelerator.supports_frame_generation", return_value=True):
+        config = run_cli(
+            cli_args(tmp_path, "--frame-generation", "2x", "--retarget-high-fps")
+        ).call_args.kwargs["config"]
+
+    assert (config.frame_generation, config.retarget_high_fps) == ("2x", True)
+
+
+def test_frame_generation_on_an_older_gpu_is_a_usage_error(tmp_path, capsys):
+    with (
+        patch("jasna.accelerator.supports_frame_generation", return_value=False),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        run_cli(cli_args(tmp_path, "--frame-generation", "2x"))
+
+    assert exit_info.value.code == 2
+    assert "Frame generation needs an NVIDIA RTX 40-series or newer GPU" in capsys.readouterr().err
