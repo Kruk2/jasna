@@ -934,7 +934,7 @@ def _reject_options_of_other_restoration_backend(
 
 
 def _print_activation_status(parser: argparse.ArgumentParser) -> None:
-    from jasna.gui.activation_worker import license_status_key, read_license_info
+    from jasna.gui.activation_worker import device_use_text, license_status_key, read_license_info
     from jasna.gui.locales import t
 
     licensed, mode = read_license_info()
@@ -944,10 +944,10 @@ def _print_activation_status(parser: argparse.ArgumentParser) -> None:
     from jasna.protection import ProtectionError, lease
 
     try:
-        used, limit, offline, online = lease.device_count()
+        use = lease.device_count()
     except (ProtectionError, OSError) as exc:
         parser.exit(1, f"Could not check devices in use: {exc}\n")
-    print(t("license_devices_count", used=used, limit=limit, offline=offline, online=online))
+    print(device_use_text(use))
 
 
 def main() -> None:

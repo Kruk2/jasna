@@ -278,7 +278,7 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | ------ | ----- |
 | `--license-code CODE` | 在 GPU 初始化之前，使用你的许可证码激活。未指定处理选项时，激活后退出。有 TPM 2.0 安全芯片的电脑之后可离线使用；否则（在 Linux 容器或虚拟机里也总是如此）Jasna 使用支持者模型时会在线核验许可证。 |
 | `--online` | 与 `--license-code` 一起使用：不离线使用，改为在线核验许可证。在租用或共用的电脑上使用，这样不会一直占用 3 个名额中的 1 个。 |
-| `--activation-status` | 显示 Jasna 是否已激活以及正在使用的设备数量，然后退出。未激活时以 1 退出。 |
+| `--activation-status` | 显示 Jasna 是否已激活以及正在使用的设备及其 ID，然后退出。未激活时以 1 退出。 |
 
 ```bash
 jasna --license-code "YOUR_LICENSE_CODE"

@@ -206,7 +206,7 @@ def test_dialog_ignores_worker_result_after_close(tk_root, controlled_activation
         dialog._main_thread._run_pending()
         done = pending.devices.pop()
     dialog.destroy()
-    done({"info": (False, None), "activation": lease.Activated([], "missing"), "devices": (1, 3, 0, 1)}[stage], None)
+    done({"info": (False, None), "activation": lease.Activated([], "missing"), "devices": lease.DeviceUse(1, 3, 0, 1, (), "JD1-0a1b2c3d")}[stage], None)
     tk_root.update()
     activated.assert_not_called()
     assert "closed activation dialog" in caplog.text
@@ -295,13 +295,35 @@ def test_lease_dialog_names_the_saved_activation_when_reopened(tk_root, lease_ap
     monkeypatch.setattr(license_store, "is_licensed", lambda: True)
     monkeypatch.setattr(offline, "saved_grant", lambda: grant)
     monkeypatch.setattr(lease, "load_token", lambda: token)
-    monkeypatch.setattr(lease, "device_count", lambda: (2, 3, 1, 1))
+    monkeypatch.setattr(lease, "device_count", lambda: lease.DeviceUse(2, 3, 1, 1, (), "JT1-1a2b3c4d"))
     assert activation_worker.read_license_info() == (True, mode)
     dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     settle_activation(dialog)
     assert dialog._status.cget("text") == t(message)
     assert dialog._devices.cget("text") == t("license_devices_count", used=2, limit=3, offline=1, online=1)
     assert dialog._devices.winfo_manager() == "pack"
+
+
+def test_device_list_marks_this_pc_and_says_how_to_free_a_slot():
+    from datetime import datetime
+
+    from jasna.gui import activation_worker
+    from jasna.gui import locales
+    from jasna.protection import lease
+
+    since = int(datetime(2026, 11, 5, 12).timestamp() * 1000)
+    use = lease.DeviceUse(3, 3, 2, 1, (
+        lease.DeviceSlot("JT1-5e6f7a8b", "offline", since),
+        lease.DeviceSlot("JT1-1a2b3c4d", "offline", since),
+        lease.DeviceSlot("JD1-0a1b2c3d", "online", since),
+    ), "JT1-1a2b3c4d")
+    count, older, this_pc, online, hint = activation_worker.device_use_text(use).split("\n")
+    assert "3" in count
+    assert older.startswith("JT1-5e6f7a8b") and "2026-11-05" in older
+    assert this_pc.startswith("JT1-1a2b3c4d") and this_pc.endswith(locales.t("license_device_this_pc"))
+    assert not older.endswith(locales.t("license_device_this_pc")) and not online.endswith(locales.t("license_device_this_pc"))
+    assert online.startswith("JD1-0a1b2c3d") and "2026" not in online
+    assert hint == locales.t("license_devices_free_hint")
 
 
 def test_device_count_failure_keeps_the_activation_status(tk_root, lease_api, settle_activation, monkeypatch):
@@ -363,7 +385,7 @@ def test_cli_activation_status_shows_devices_in_use_and_exits_before_gpu_setup(m
     monkeypatch.setattr(license_store, "is_licensed", lambda: True)
     monkeypatch.setattr(offline, "saved_grant", lambda: grant)
     monkeypatch.setattr(lease, "load_token", lambda: token)
-    monkeypatch.setattr(lease, "device_count", lambda: (2, 3, 1, 1))
+    monkeypatch.setattr(lease, "device_count", lambda: lease.DeviceUse(2, 3, 1, 1, (), "JT1-1a2b3c4d"))
     monkeypatch.setattr(sys, "argv", ["jasna", "--activation-status"])
     monkeypatch.setattr(main, "_check_system", lambda args: pytest.fail("GPU check ran"))
     monkeypatch.setattr(main, "_configure_runtime", lambda args: pytest.fail("Runtime setup ran"))
