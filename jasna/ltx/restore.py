@@ -83,6 +83,7 @@ SEGMENT_DECODE_BUDGETS = (
 and NVENC share it (#697), 5.5 GiB leaves a 6 GB card room for the rest of the job (768 px
 windows need 15 GiB, see ``segment_large_canvas``)."""
 DECODE_BUDGET_STEP_BYTES = 512 << 20
+DECODE_BUDGET_EXACT_BELOW = 4 << 30
 DECODE_AHEAD = 2
 """Windows a compose pass keeps decoding or decoded ahead of the frames; each waits in host
 memory (~95 MB at 512 px)."""
@@ -692,8 +693,15 @@ def denoise_track(
 def free_vram_budget(device: torch.device) -> DecodeBudget:
     """Free VRAM rounded down to ``DECODE_BUDGET_STEP_BYTES``: decode tiling follows the budget and
     each tile shape is a compiled graph, so an exact figure that wanders (8 GB cards) runs past
-    the compile limit (#690)."""
-    return lambda _canvas: device_free_bytes(device) // DECODE_BUDGET_STEP_BYTES * DECODE_BUDGET_STEP_BYTES
+    the compile limit (#690). Under ``DECODE_BUDGET_EXACT_BELOW`` the exact figure stays, so the
+    step never drops a decode that the smallest tiles (~3.3 GiB at 512) would fit."""
+
+    def budget(_canvas: int) -> int:
+        free = device_free_bytes(device)
+        rounded = free // DECODE_BUDGET_STEP_BYTES * DECODE_BUDGET_STEP_BYTES
+        return rounded if rounded >= DECODE_BUDGET_EXACT_BELOW else free
+
+    return budget
 
 
 def segment_decode_budget(total_bytes: int) -> DecodeBudget:
