@@ -64,15 +64,19 @@ class _FailingSecondary:
 class _BufferingAsyncRestorer:
     """Async secondary restorer that, like TVAI, returns a clip only once it is flushed.
 
-    It answers a flush only for the clips it names. ``on_pop`` runs after each forwarded batch.
+    It answers a flush only for the clips it names. ``on_pop`` runs after each forwarded batch;
+    ``pop_error`` is raised once a flushed clip is ready.
     """
 
     name = "buffering"
     prefers_cpu_input = True
     num_workers = 2
 
-    def __init__(self, *, push_error: Exception | None = None, on_pop=lambda restorer: None):
+    def __init__(
+        self, *, push_error: Exception | None = None, pop_error: Exception | None = None, on_pop=lambda restorer: None
+    ):
         self.push_error = push_error
+        self.pop_error = pop_error
         self.on_pop = on_pop
         self.frames: dict[int, int] = {}
         self.ready: list[int] = []
@@ -87,6 +91,8 @@ class _BufferingAsyncRestorer:
         return seq
 
     def pop_completed(self):
+        if self.pop_error and self.ready:
+            raise self.pop_error
         completed = [(seq, [np.full((256, 256, 3), 255, np.uint8)] * self.frames[seq]) for seq in self.ready]
         self.returned += self.ready
         self.ready = []
@@ -202,8 +208,9 @@ def test_run_encodes_nothing_for_an_empty_video():
         ({"primary": _WhitePrimary(RuntimeError("primary boom"))}, None, "primary boom"),
         ({"secondary": _FailingSecondary()}, None, "secondary boom"),
         ({"secondary": _BufferingAsyncRestorer(push_error=RuntimeError("push boom"))}, None, "push boom"),
+        ({"secondary": _BufferingAsyncRestorer(pop_error=RuntimeError("pop boom"))}, None, "pop boom"),
     ],
-    ids=["decode", "primary", "secondary", "async-secondary"],
+    ids=["decode", "primary", "secondary", "async-secondary-push", "async-secondary-pop"],
 )
 def test_run_raises_a_worker_thread_error(pipeline_kwargs, decode_error, message):
     with pytest.raises(RuntimeError, match=message):
@@ -371,6 +378,34 @@ def test_async_secondary_flushes_the_earliest_blocking_clip_when_starved(monkeyp
 
     assert restorer.flushes == [{0}, {1}]
     assert [sr.track_id for sr in forwarded] == [0, 1]
+
+
+def test_async_secondary_stops_after_a_cancel_mid_pass_without_flushing(monkeypatch):
+    monkeypatch.setattr(pipeline_threads, "_ASYNC_POLL_TIMEOUT", 0.001)
+    stop = threading.Event()
+
+    class _CancelOnFirstPush(_BufferingAsyncRestorer):
+        def push_clip(self, frames_256, *, keep_start, keep_end):
+            seq = super().push_clip(frames_256, keep_start=keep_start, keep_end=keep_end)
+            stop.set()
+            return seq
+
+    restorer = _CancelOnFirstPush()
+    ctx = pass_context(
+        restoration_pipeline=RestorationPipeline(_WhitePrimary(), secondary_restorer=restorer), stop_event=stop
+    )
+    ctx.secondary_queue.put(primary_result(track_id=1))
+    ctx.secondary_queue.put(primary_result(track_id=2))
+
+    with patch("jasna.pipeline_threads.torch.cuda.set_device"):
+        pipeline_threads.async_secondary_restore_loop(ctx)
+
+    assert ctx.error_holder == []
+    assert list(restorer.frames) == [0]
+    assert restorer.ready == [] and restorer.returned == []
+    assert ctx.secondary_queue.qsize() == 1
+    assert ctx.encode_queue.get_nowait() is _SENTINEL
+    assert ctx.encode_queue.empty()
 
 
 @pytest.mark.parametrize(
