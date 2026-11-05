@@ -149,10 +149,13 @@ Good to know:
 - One License code works on **3 devices at the same time**. Activating the
   same PC again does not use a new slot.
 - Reopen **Activate Jasna** to see **Devices in use**: offline PCs plus
-  devices running supporter models online right now. Jasna checks this online.
+  devices running supporter models online right now, each with a short ID
+  (like `JT1-1a2b3c4d`), and **(this PC)** next to the one you're on. Jasna
+  checks this online.
 - Offline PCs keep their slot. Reinstalling the system or changing the GPU,
   disk or RAM keeps it; a new motherboard or a security chip reset in the BIOS
-  counts as a new PC. To free a slot, ask where you got your License code.
+  counts as a new PC. To free a slot, open Jasna on each PC you keep and send
+  their IDs to where you got your License code.
 - Online devices count only while Jasna runs, and each open Jasna counts.
   "In use on 3 devices"? Close Jasna on another device and start again. If
   Jasna crashed or was force-closed, wait up to 15 minutes.

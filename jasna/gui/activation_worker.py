@@ -65,7 +65,7 @@ def start_unofficial_notice_check(on_done) -> threading.Thread:
 
 
 def start_device_count(on_done) -> threading.Thread:
-    """Calls ``on_done((used, limit, offline PCs, online devices), error)``; asks the license service."""
+    """Calls ``on_done(DeviceUse, error)``; asks the license service."""
 
     def count():
         require_protection()
@@ -74,6 +74,24 @@ def start_device_count(on_done) -> threading.Thread:
         return lease.device_count()
 
     return _start(count, on_done)
+
+
+def device_use_text(use) -> str:
+    """The devices in use and, when the service lists them, one line per slot with this PC marked."""
+    from datetime import datetime
+
+    from jasna.gui.locales import t
+
+    lines = [t("license_devices_count", used=use.used, limit=use.limit, offline=use.offline, online=use.online)]
+    for slot in use.slots:
+        if slot.kind == "offline":
+            line = t("license_device_offline", device=slot.device, date=datetime.fromtimestamp(slot.since / 1000).strftime("%Y-%m-%d"))
+        else:
+            line = t("license_device_online", device=slot.device)
+        lines.append(f"{line} {t('license_device_this_pc')}" if slot.device == use.this_device else line)
+    if use.slots:
+        lines.append(t("license_devices_free_hint"))
+    return "\n".join(lines)
 
 
 def start_lease_activation(code: str, try_offline: bool, on_done) -> threading.Thread:

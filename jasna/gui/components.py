@@ -386,8 +386,7 @@ class LicenseDialog(ctk.CTkToplevel):
         if error is not None:
             self._devices.configure(text=t("license_devices_unavailable"))
         else:
-            used, limit, offline, online = count
-            self._devices.configure(text=t("license_devices_count", used=used, limit=limit, offline=offline, online=online))
+            self._devices.configure(text=activation_worker.device_use_text(count))
         self._resize()
 
     def _activate(self):
