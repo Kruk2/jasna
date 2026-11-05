@@ -23,14 +23,18 @@ _PROPERTIES_INTERFACE = "org.freedesktop.DBus.Properties"
 _WATCHER = DBusAddress("/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher", "org.kde.StatusNotifierWatcher")
 _ACTIVATIONS = {"Activate", "SecondaryActivate", "ContextMenu"}
 _POLL_SECONDS = 0.25
+_REPLY_TIMEOUT_SECONDS = 2.0
 
 
 def host_running() -> bool:
     """Whether a tray that shows StatusNotifierItems is running in this session."""
     try:
         with open_dbus_connection("SESSION") as connection:
-            reply = connection.send_and_get_reply(Properties(_WATCHER).get("IsStatusNotifierHostRegistered"))
-    except (KeyError, OSError):  # no session bus
+            reply = connection.send_and_get_reply(
+                Properties(_WATCHER).get("IsStatusNotifierHostRegistered"), timeout=_REPLY_TIMEOUT_SECONDS
+            )
+    except Exception as error:  # no session bus, auth refused, a hung bus...
+        logger.debug("No system tray: %s", error)
         return False
     if reply.header.message_type == MessageType.error:  # no watcher
         return False
@@ -69,15 +73,29 @@ class StatusNotifierItem:
     def run_detached(self) -> None:
         connection = open_dbus_connection("SESSION")
         name = f"org.kde.StatusNotifierItem-{os.getpid()}-1"
-        connection.send_and_get_reply(message_bus.RequestName(name))
+        try:
+            connection.send_and_get_reply(message_bus.RequestName(name), timeout=_REPLY_TIMEOUT_SECONDS)
+        except BaseException:
+            connection.close()
+            raise
         self._thread = threading.Thread(target=self._serve, args=(connection, name), name="tray-icon", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
-        self._thread.join()
+        if self._thread is not None:
+            self._thread.join()
 
     def _serve(self, connection, name: str) -> None:
+        try:
+            self._serve_until_stopped(connection, name)
+        except Exception:
+            if self._stop.is_set():
+                return
+            logger.warning("The Jasna tray icon stopped working", exc_info=True)
+            self._on_activate()
+
+    def _serve_until_stopped(self, connection, name: str) -> None:
         with connection:
             # Not send_and_get_reply: it drops the host's property calls that arrive before the reply.
             connection.send(new_method_call(_WATCHER, "RegisterStatusNotifierItem", "s", (name,)))

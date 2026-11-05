@@ -53,3 +53,35 @@ def test_unknown_calls_get_an_error():
     reply = call(item, "org.kde.StatusNotifierItem", "ProvideXdgActivationToken", "s", ("token",))
 
     assert reply.header.message_type == jeepney.MessageType.error
+
+
+def test_a_broken_session_bus_means_no_tray(monkeypatch):
+    def refuse(bus):
+        raise ValueError("unsupported bus address")
+
+    monkeypatch.setattr(status_notifier, "open_dbus_connection", refuse)
+
+    assert status_notifier.host_running() is False
+
+
+def test_stop_before_the_icon_ran_is_harmless():
+    StatusNotifierItem(Image.new("RGBA", (1, 1)), "Jasna", on_activate=lambda: None).stop()
+
+
+def test_a_dead_connection_brings_the_window_back():
+    class DeadConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def send(self, message):
+            raise BrokenPipeError()
+
+    clicks = []
+    item = StatusNotifierItem(Image.new("RGBA", (1, 1)), "Jasna", on_activate=lambda: clicks.append(True))
+
+    item._serve(DeadConnection(), "org.kde.StatusNotifierItem-1-1")
+
+    assert clicks == [True]
