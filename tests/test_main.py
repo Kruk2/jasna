@@ -352,3 +352,15 @@ def test_batch_size_defaults_per_vendor_unless_given(monkeypatch, argv, amd, exp
     args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4", *argv])
 
     assert batch_size_from_args(args) == expected
+
+
+def test_single_file_output_must_not_be_the_input(tmp_path, capsys):
+    args = cli_args(tmp_path)
+    (tmp_path / "sub").mkdir()
+    args[args.index("--output") + 1] = str(tmp_path / "sub" / ".." / "in.mp4")
+
+    with pytest.raises(SystemExit) as exit_info:
+        run_cli(args)
+
+    assert exit_info.value.code == 2
+    assert "--output must not be the --input file" in capsys.readouterr().err

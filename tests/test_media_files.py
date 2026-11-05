@@ -82,3 +82,14 @@ def test_folder_output_path_names_videos_by_pattern_and_keeps_image_extensions(s
 
 def test_file_dialog_patterns_are_sorted_globs():
     assert file_dialog_patterns(frozenset({".png", ".jpg"})) == "*.jpg *.png"
+
+
+@pytest.mark.parametrize(
+    ("candidate", "expected"),
+    [("out.mp4", True), ("out (3).mp4", True), ("out (x).mp4", False), ("out (1).mkv", False), ("other.mp4", False)],
+)
+def test_is_unique_path_of(tmp_path: Path, candidate, expected):
+    from jasna.media.media_files import is_unique_path_of
+
+    assert is_unique_path_of(tmp_path / candidate, tmp_path / "out.mp4") is expected
+    assert not is_unique_path_of(tmp_path / "sub" / candidate, tmp_path / "out.mp4")

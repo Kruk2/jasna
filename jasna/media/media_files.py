@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import sys
 from pathlib import Path
 
 IMAGE_EXTENSIONS: frozenset[str] = frozenset(
@@ -68,6 +70,19 @@ def folder_output_path(output_dir: str | Path, input_path: str | Path, output_pa
             output_name = output_name[: -len(pattern_suffix)]
         output_name += input_path.suffix
     return Path(output_dir) / output_name
+
+
+def path_collision_key(path: Path) -> str:
+    """A key equal for two paths that name the same file."""
+    key = str(path.resolve(strict=False))
+    return key.casefold() if sys.platform == "win32" else key
+
+
+def is_unique_path_of(candidate: Path, path: Path) -> bool:
+    """Whether ``candidate`` is ``path`` or a name ``unique_path(path)`` can return."""
+    return candidate.parent == path.parent and candidate.suffix == path.suffix and (
+        re.fullmatch(rf"{re.escape(path.stem)}(?: \(\d+\))?", candidate.stem) is not None
+    )
 
 
 def unique_path(path: Path) -> Path:

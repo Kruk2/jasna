@@ -132,12 +132,6 @@ def _session_config_from_args(
     )
 
 
-def _path_collision_key(path: Path) -> str:
-    absolute = path.resolve(strict=False)
-    key = str(absolute)
-    return key.casefold() if sys.platform == "win32" else key
-
-
 def _resolve_cli_encoder_settings(
     raw_settings: str,
     *,
@@ -719,7 +713,7 @@ def _plan_folder(
     output_dir: Path | None,
 ) -> tuple[list[Path], list[Path], Path]:
     """Validate a folder batch and return its images, videos and output folder."""
-    from jasna.media.media_files import classify_folder, folder_output_path, is_media
+    from jasna.media.media_files import classify_folder, folder_output_path, is_media, path_collision_key
 
     images, videos = classify_folder(input_dir)
     if not images and not videos:
@@ -732,10 +726,10 @@ def _plan_folder(
         parser.error(f"--output must be a folder when --input is a folder; got a media filename: {output_dir}")
     inputs = [*images, *videos]
     planned_outputs: dict[str, tuple[Path, Path]] = {}
-    input_keys = {_path_collision_key(path) for path in inputs}
+    input_keys = {path_collision_key(path) for path in inputs}
     for path in inputs:
         out_path = folder_output_path(output_dir, path, args.output_pattern)
-        out_key = _path_collision_key(out_path)
+        out_key = path_collision_key(out_path)
         if out_key in planned_outputs:
             other_input, other_output = planned_outputs[out_key]
             parser.error(
@@ -1026,9 +1020,14 @@ def main() -> None:
     if lut_arg and not Path(lut_arg).exists():
         parser.error(f"--lut file not found: {lut_arg}")
 
-    from jasna.media.media_files import folder_output_path, is_image
+    from jasna.media.media_files import folder_output_path, is_image, path_collision_key
     input_is_image = input_video is not None and is_image(input_video)
     input_is_dir = input_video is not None and input_video.is_dir()
+    if (
+        input_video is not None and output_video is not None and not input_is_dir
+        and path_collision_key(output_video) == path_collision_key(input_video)
+    ):
+        parser.error("--output must not be the --input file")
     segments_spec = str(args.segments).strip()
     auto_split = args.ltx_auto_split is not None
     if auto_split:
