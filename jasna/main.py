@@ -937,7 +937,10 @@ def _print_activation_status(parser: argparse.ArgumentParser) -> None:
     from jasna.gui.activation_worker import device_use_text, license_status_key, read_license_info
     from jasna.gui.locales import t
 
-    licensed, mode = read_license_info()
+    try:
+        licensed, mode = read_license_info()
+    except Exception as exc:  # ProtectionError or OSError; not imported here, jasna.protection may be missing
+        parser.exit(1, f"Could not read the activation: {exc}\n")
     if not licensed:
         parser.exit(1, t("license_problem_no_activation") + "\n")
     print(t(license_status_key(mode)))
@@ -956,6 +959,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.online and args.license_code is None:
         parser.error("--online needs --license-code")
+    if args.activation_status and (args.input is not None or args.stream or args.benchmark):
+        parser.error("--activation-status cannot be combined with --input, --stream or --benchmark")
     if args.license_code is not None:
         from jasna.license_api import ProtectionUnavailableError, require_protection
 
@@ -973,7 +978,7 @@ def main() -> None:
         except (ProtectionError, OSError) as exc:
             parser.exit(1, f"Activation error: {exc}\n")
         print(lease.activated_message(result.online_reason))
-        if args.input is None and not args.stream and not args.benchmark:
+        if args.input is None and not args.stream and not args.benchmark and not args.activation_status:
             return
     if args.activation_status:
         _print_activation_status(parser)

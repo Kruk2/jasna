@@ -428,3 +428,47 @@ def test_cli_activation_status_reports_an_unreachable_service(monkeypatch, lease
     output = capsys.readouterr()
     assert output.out == t("license_lease_active") + "\n"
     assert output.err == f"Could not check devices in use: {error}\n"
+
+
+def test_cli_activation_status_follows_a_new_activation(monkeypatch, lease_api, capsys):
+    from jasna import main
+    from jasna.gui.locales import t
+    from jasna.protection import lease, license_store, offline
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    lease_api.return_value = lease.Activated(["ltx-2.5-v2"], None)
+    monkeypatch.setattr(license_store, "is_licensed", lambda: True)
+    monkeypatch.setattr(offline, "saved_grant", lambda: None)
+    monkeypatch.setattr(lease, "load_token", lambda: None)
+    monkeypatch.setattr(lease, "device_count", lambda: lease.DeviceUse(1, 3, 0, 1, (), "JT1-1a2b3c4d"))
+    monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", "JL1-code", "--activation-status"])
+    main.main()
+    assert capsys.readouterr().out.endswith(
+        t("license_active") + "\n" + t("license_devices_count", used=1, limit=3, offline=0, online=1) + "\n"
+    )
+
+
+@pytest.mark.parametrize("extra", [["--input", "a.mp4"], ["--stream"], ["--benchmark"]])
+def test_cli_activation_status_rejects_processing_options(monkeypatch, capsys, extra):
+    from jasna.main import main
+
+    monkeypatch.setattr(sys, "argv", ["jasna", "--activation-status", *extra])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+    assert "--activation-status cannot be combined" in capsys.readouterr().err
+
+
+def test_cli_activation_status_reports_an_unreadable_license_store(monkeypatch, lease_api, capsys):
+    from jasna.main import main
+    from jasna.protection import license_store
+
+    def unreadable():
+        raise PermissionError("license store")
+
+    monkeypatch.setattr(license_store, "is_licensed", unreadable)
+    monkeypatch.setattr(sys, "argv", ["jasna", "--activation-status"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == "Could not read the activation: license store\n"
