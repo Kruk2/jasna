@@ -988,9 +988,14 @@ def right_eye_twins(
             t = plan.start + k
             if plan.presence[k] > 0 and 0 <= t < len(right_regions):
                 outline = _extent(frame)
-                used[t].update(
-                    i for i, r in enumerate(right_regions[t]) if _cover(outline, _extent((r.polygon,))) >= CONTINUATION_COVER
-                )
+                for i, r in enumerate(right_regions[t]):
+                    box = _extent((r.polygon,))
+                    if _cover(outline, box) < CONTINUATION_COVER:
+                        continue
+                    # The box test alone marks a region beside a concave outline as covered.
+                    raster = _Raster((outline, box))
+                    if _covered(raster.mask(frame), raster.mask((r.polygon,))) >= CONTINUATION_COVER:
+                        used[t].add(i)
         twins.append(replace(plan, track_id=track_id, polygons=polygons, windows=tuple(windows)))
     unpaired = [[r for i, r in enumerate(regions) if i not in used[t]] for t, regions in enumerate(right_regions)]
     return twins, unpaired
