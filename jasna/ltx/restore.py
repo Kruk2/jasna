@@ -728,15 +728,15 @@ def _decode_window(
 
 def _decode_shares(windows: list[Window]) -> dict[int, list[tuple[int, float]]]:
     """Per segment frame, the ``(canvas, share)`` of each window decode it counts: a window
-    decodes from the previous window's start (the first from frame 0) to its own start, so
-    its decode counts evenly over those frames, or all at its start when there are none."""
+    decodes from the start of the window ``DECODE_AHEAD`` before it (the first ones from
+    frame 0) to its own start, so its decode counts evenly over those frames, or all at its
+    start when there are none."""
     shares: dict[int, list[tuple[int, float]]] = {}
-    submitted = 0
-    for window in windows:
-        frames = range(submitted, window.start) or range(window.start, window.start + 1)
+    submitted = [0] * DECODE_AHEAD + [window.start for window in windows]
+    for window, start in zip(windows, submitted):
+        frames = range(start, window.start) or range(window.start, window.start + 1)
         for frame_idx in frames:
             shares.setdefault(frame_idx, []).append((window.canvas, 1 / len(frames)))
-        submitted = window.start
     return shares
 
 
