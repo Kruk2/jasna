@@ -5,7 +5,6 @@ import pytest
 import torch
 
 from jasna.mosaic.detection_registry import (
-    DEFAULT_DETECTION_MODEL_NAME,
     RFDETR_MODEL_NAMES,
     build_detection_model,
     coerce_detection_model_name,
@@ -19,6 +18,7 @@ from jasna.mosaic.detection_registry import (
     rfdetr_model_config,
     require_detection_model_weights,
 )
+from jasna.session_config import DEFAULT_DETECTION_MODEL_NAME
 
 pytestmark = pytest.mark.usefixtures("nvidia_vendor")
 

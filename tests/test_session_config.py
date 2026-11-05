@@ -173,7 +173,21 @@ def test_gui_defaults_match_cli_defaults() -> None:
     cli = _cli_config()
     gui = _gui_config(AppSettings())
 
+    # The GUI shows its own progress, never the terminal bar.
     assert replace(cli, disable_progress=True) == gui
+
+
+def test_gui_image_defaults_match_cli_defaults() -> None:
+    args = build_parser().parse_args(["--input", "a.png", "--output", "b.png"])
+    gui = AppSettings()
+
+    assert (args.sd15_steps, args.sd15_strength, args.sd15_freeu, args.sd15_seed, args.sd15_variants) == (
+        gui.image_restore_steps,
+        gui.image_restore_strength,
+        gui.image_restore_freeu,
+        gui.image_restore_seed,
+        gui.image_restore_variants,
+    )
 
 
 def test_gui_config_maps_settings_fields() -> None:

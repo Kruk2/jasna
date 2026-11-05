@@ -33,10 +33,10 @@ def add_setting_label(row, label_key: str, tooltip_key: str | None = None, *, in
 SLIDER_WIDTH = 200
 
 
-def create_slider_value_label(master, text: str, background: str) -> tk.Label:
+def create_slider_value_label(master, background: str) -> tk.Label:
+    """The value shown right of a slider; whoever sets the slider also sets this text."""
     return tk.Label(
         master,
-        text=text,
         foreground=Colors.TEXT_PRIMARY,
         background=background,
         font=(Fonts.FAMILY, scaling.raw_tk_font_size(master, Fonts.SIZE_NORMAL)),

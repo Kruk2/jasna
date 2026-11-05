@@ -49,9 +49,7 @@ class ImageRestorationSection:
         # Steps slider (5-60, step 5)
         row_steps = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(row_steps, "image_restore_steps")
-        self._widgets["image_restore_steps_val"] = create_slider_value_label(
-            row_steps, "25", Colors.BG_PANEL
-        )
+        self._widgets["image_restore_steps_val"] = create_slider_value_label(row_steps, Colors.BG_PANEL)
         self._widgets["image_restore_steps_val"].pack(side="right")
         self._widgets["image_restore_steps"] = ctk.CTkSlider(
             row_steps, from_=5, to=60, number_of_steps=11,
@@ -59,14 +57,11 @@ class ImageRestorationSection:
             width=SLIDER_WIDTH, command=lambda v: self._on_slider_change("image_restore_steps", int(v)),
         )
         self._widgets["image_restore_steps"].pack(side="right", padx=(0, 8))
-        self._widgets["image_restore_steps"].set(25)
 
         # Strength slider (0.1-0.7, step 0.05)
         row_str = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(row_str, "image_restore_strength")
-        self._widgets["image_restore_strength_val"] = create_slider_value_label(
-            row_str, "0.60", Colors.BG_PANEL
-        )
+        self._widgets["image_restore_strength_val"] = create_slider_value_label(row_str, Colors.BG_PANEL)
         self._widgets["image_restore_strength_val"].pack(side="right")
         self._widgets["image_restore_strength"] = ctk.CTkSlider(
             row_str, from_=0.1, to=0.7, number_of_steps=12,
@@ -74,14 +69,11 @@ class ImageRestorationSection:
             width=SLIDER_WIDTH, command=lambda v: self._widgets["image_restore_strength_val"].configure(text=f"{v:.2f}"),
         )
         self._widgets["image_restore_strength"].pack(side="right", padx=(0, 8))
-        self._widgets["image_restore_strength"].set(0.6)
 
         # Variants slider (1-8, step 1)
         row_var = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(row_var, "image_restore_variants")
-        self._widgets["image_restore_variants_val"] = create_slider_value_label(
-            row_var, "1", Colors.BG_PANEL
-        )
+        self._widgets["image_restore_variants_val"] = create_slider_value_label(row_var, Colors.BG_PANEL)
         self._widgets["image_restore_variants_val"].pack(side="right")
         self._widgets["image_restore_variants"] = ctk.CTkSlider(
             row_var, from_=1, to=8, number_of_steps=7,
@@ -89,7 +81,6 @@ class ImageRestorationSection:
             width=SLIDER_WIDTH, command=lambda v: self._on_slider_change("image_restore_variants", int(v)),
         )
         self._widgets["image_restore_variants"].pack(side="right", padx=(0, 8))
-        self._widgets["image_restore_variants"].set(1)
 
         # Seed entry + FreeU toggle
         row_last = ctk.CTkFrame(inner, fg_color="transparent")
@@ -100,7 +91,6 @@ class ImageRestorationSection:
             seed_frame, width=70, fg_color=Colors.BG_PANEL, text_color=Colors.TEXT_PRIMARY, border_color=Colors.BORDER_LIGHT,
         )
         self._widgets["image_restore_seed"].pack(side="right", padx=12, pady=8)
-        self._widgets["image_restore_seed"].insert(0, "0")
 
         freeu_frame = ctk.CTkFrame(row_last, fg_color=Colors.BG_CARD, corner_radius=6)
         add_setting_label(freeu_frame, "image_restore_freeu", in_card=True)
@@ -110,7 +100,6 @@ class ImageRestorationSection:
             Colors.BG_CARD,
         )
         self._widgets["image_restore_freeu"].pack(side="right", padx=12, pady=8)
-        self._widgets["image_restore_freeu"].select()
 
         gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
         self._rows = [
