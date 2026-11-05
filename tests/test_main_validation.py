@@ -143,6 +143,7 @@ LTX_NEEDED = "needs --restoration-model-name ltx-basic, ltx, ltx-4step, ltx-8ste
     [
         (["--segments", "1-2", "--codec", "av1"], (), "with --segments output codec must match input; pass --codec h264"),
         (["--segments", "1-2", "--codec", "hevc"], (), "with --segments output codec must match input; pass --codec h264"),
+        (["--segments", "1-2", "--codec=hevc"], (), "with --segments output codec must match input; pass --codec h264"),
         (["--ltx-auto-split", "12"], (), f"--ltx-auto-split {LTX_NEEDED}"),
         (["--restoration-model-name", "ltx", "--ltx-auto-split", "12", "--segments", "1-2"], (),
          "--segments cannot be combined with --ltx-auto-split"),
