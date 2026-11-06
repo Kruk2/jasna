@@ -116,8 +116,9 @@ def test_run_summary_gives_each_pass_its_wall_time_and_warm_medians_per_canvas()
         ),
     }
     work = speed.Work(frames=100, megapixels=2.0, windows={768: 2, 512: 4}, crop_megapixels=50.0)
-    assert speed.run_summary("key", timings, work, 3 << 30, (40, 48)) == [
-        "[timing] LTX: 100.0s, 100 frames, windows 4 at 512, 2 at 768, 40 window-steps, peak VRAM 3072.0 MiB",
+    assert speed.run_summary("key", timings, work, (1 << 30, 3 << 30), (40, 48)) == [
+        "[timing] LTX: 100.0s, 100 frames, windows 4 at 512, 2 at 768, 40 window-steps, "
+        "peak VRAM 1024.0 MiB, LTX worker 3072.0 MiB",
         "[timing] LTX profile: key",
         "[timing] LTX scan: 4.0s, 45.0 frames/s",
         "[timing] LTX encode: 20.0s, 9.0 frames/s, 2.00 s/window at 512, 4.00 s/window at 768",
@@ -131,7 +132,7 @@ def test_run_summary_without_mosaics_has_only_scan_and_compose():
         "scan": speed.PassTiming(seconds=3.0, units=50, warm_seconds=1.0, warm_frames=40),
         "compose": speed.PassTiming(seconds=2.0, units=50),
     }
-    assert speed.run_summary("key", timings, speed.Work(frames=50, megapixels=2.0, windows={}, crop_megapixels=0.0), 0, None) == [
+    assert speed.run_summary("key", timings, speed.Work(frames=50, megapixels=2.0, windows={}, crop_megapixels=0.0), (0, None), None) == [
         "[timing] LTX: 5.0s, 50 frames, windows 0, 0 window-steps, peak VRAM 0.0 MiB",
         "[timing] LTX profile: key",
         "[timing] LTX scan: 3.0s, 40.0 frames/s",

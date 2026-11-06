@@ -155,6 +155,23 @@ def test_runtime_reuses_transport_updates_cancel_and_translates_cancellation(mon
     assert clients[0].closed and runtime._client is None
 
 
+def test_runtime_reports_its_own_and_the_workers_peak_apart(monkeypatch):
+    class Client:
+        def __init__(self, config, cancel):
+            pass
+
+        def request(self, op, params, tensors, advance=None):
+            return ({"peak_vram_bytes": 9 << 30} if op == "stats" else {}), []
+
+    monkeypatch.setattr(license_api, "require_protection", lambda: None)
+    monkeypatch.setitem(sys.modules, "jasna.protection.ltx_worker", SimpleNamespace(WorkerClient=Client, WorkerCancelled=RuntimeError))
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda device: 2 << 30)
+    runtime = inference.ModelRuntime(_files(".enc"), torch.device("cuda:0"), threading.Event())
+    assert runtime.peak_vram_bytes() == (2 << 30, None)
+    runtime.request("load_encoder", {}, [])
+    assert runtime.peak_vram_bytes() == (2 << 30, 9 << 30)
+
+
 def test_worker_peak_vram_counts_the_native_block_store(monkeypatch, allocator):
     backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
