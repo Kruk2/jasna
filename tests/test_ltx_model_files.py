@@ -14,6 +14,7 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
+from factories import write_sparse_file
 from jasna.ltx import model_files
 from jasna.ltx.model_files import LtxModelFiles, bundle_names, open_tensors
 
@@ -382,8 +383,7 @@ def test_cli_explains_models_copied_from_older_release_need_updating(
     monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or "n")
     names = bundle_names("distilled2", fast=False)
     for index, name in enumerate(names):
-        with (tmp_path / (name + ".enc")).open("wb") as stream:
-            stream.truncate(13_368_048_749 if index == 0 else model_files.LTX_DOWNLOADS[name].size_bytes)
+        write_sparse_file(tmp_path / (name + ".enc"), 13_368_048_749 if index == 0 else model_files.LTX_DOWNLOADS[name].size_bytes)
     config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path, ltx_model="distilled2")
 
     with pytest.raises(SystemExit) as error:
