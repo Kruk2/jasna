@@ -546,7 +546,8 @@ def build_splice_plan(
     return SplicePlan(index=index, spans=tuple(spans), segments=normalized)
 
 
-def _run_ffmpeg(args: list[str], *, purpose: str) -> None:
+def _run_ffmpeg(args: list[str], *, purpose: str) -> str:
+    """Run ffmpeg at log level error and return what it printed."""
     command = [resolve_executable("ffmpeg"), "-hide_banner", "-y", "-loglevel", "error", *args]
     completed = subprocess.run(
         command,
@@ -558,6 +559,7 @@ def _run_ffmpeg(args: list[str], *, purpose: str) -> None:
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or "unknown ffmpeg error").strip()
         raise RuntimeError(f"Failed to {purpose}: {detail}")
+    return completed.stderr
 
 
 def _seconds(value: float) -> str:
@@ -629,6 +631,9 @@ def _repacked(packet: av.Packet, payload: bytes) -> av.Packet:
     return repacked
 
 
+_MPEGTS_NULL_PACKET = b"\x47\x1f\xff\x10" + b"\xff" * 184
+
+
 def normalize_fragment(source: Path, destination: Path, *, codec: str) -> None:
     bitstream_filter = {
         "h264": "h264_mp4toannexb,dump_extra=freq=keyframe",
@@ -651,6 +656,11 @@ def normalize_fragment(source: Path, destination: Path, *, codec: str) -> None:
         ],
         purpose=f"normalize smart-render fragment {source.name}",
     )
+    if muxer == "mpegts":
+        # ffmpeg can't recognize a TS shorter than ~11 packets, so concat would skip a span of a few
+        # tiny frames (#733). Null packets (PID 0x1FFF) carry nothing and every demuxer drops them.
+        with destination.open("ab") as fragment:
+            fragment.write(_MPEGTS_NULL_PACKET * 16)
 
 
 def _quote_concat_path(path: Path) -> str:
@@ -671,7 +681,7 @@ def concatenate_fragments(
     manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
     muxer = "mpegts" if codec in {"h264", "hevc"} else "matroska"
     muxer_args = ["-muxdelay", "0"] if muxer == "mpegts" else []
-    _run_ffmpeg(
+    errors = _run_ffmpeg(
         [
             "-f", "concat",
             "-safe", "0",
@@ -685,6 +695,9 @@ def concatenate_fragments(
         ],
         purpose="concatenate smart-render video fragments",
     )
+    if "Impossible to open" in errors:
+        # The concat demuxer skips a fragment it can't open and still exits 0.
+        raise RuntimeError(f"Failed to concatenate smart-render video fragments: {errors.strip()}")
 
 
 def mux_final_output(
