@@ -1,4 +1,4 @@
-> **支援者向けモデルの正規ライセンスコードを入手できるのは、[Buy Me a Coffee](https://buymeacoffee.com/kruk2) と [Unifans](https://app.unifans.io/c/kruk2) だけです。**
+> **支援者向けモデルの正規ライセンスコードを入手できるのは、[Ko-fi](https://ko-fi.com/kruk2) と [Unifans](https://app.unifans.io/c/kruk2) だけです。**
 
 [English](README.md) | [**日本語**](README.ja.md) | [中文](README.zh.md)
 
@@ -119,8 +119,8 @@ Jasna は無料です。支援は新しいモデルの訓練に使われます�
 
 | 支援額 | モデル |
 | --- | --- |
-| **合計 15 USD** 以上 | **UNet 4x**: 復元した部分をよりシャープにします。<br>**SD 1.5**: 静止画用の実験的なモデル。 |
-| **25 USD** | **UNet 4x** と **SD 1.5**、さらに<br>**LTX**: BasicVSR++ よりずっと遅いですが、より細かく復元します。この LTX モデルの今後のアップデートも含みます。 |
+| **合計 15 USD**（Ko-fi は **14 EUR**）以上 | **UNet 4x**: 復元した部分をよりシャープにします。<br>**SD 1.5**: 静止画用の実験的なモデル。 |
+| **25 USD**（Ko-fi は **23 EUR**） | **UNet 4x** と **SD 1.5**、さらに<br>**LTX**: BasicVSR++ よりずっと遅いですが、より細かく復元します。この LTX モデルの今後のアップデートも含みます。 |
 
 **2026 年 10 月 14 日までに 15 USD 以上**支援した方は、LTX を無料で使えます。
 
@@ -142,7 +142,7 @@ Jasna は無料です。支援は新しいモデルの訓練に使われます�
 
 ライセンスコードは次の場所で**のみ**入手できます:
 
-- [Buy Me a Coffee](https://buymeacoffee.com/kruk2)（暗号資産も使えます）
+- [Ko-fi](https://ko-fi.com/kruk2)
 - [Unifans](https://app.unifans.io/c/kruk2)
 
 それ以外で Jasna、コード、改変ファイルを販売している人は詐欺です。そのキーは

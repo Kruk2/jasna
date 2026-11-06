@@ -1,6 +1,6 @@
-> **The only places to get a genuine License code for the supporter models are [Buy Me a Coffee](https://buymeacoffee.com/kruk2), [Unifans](https://app.unifans.io/c/kruk2), and for China the seller in the [Chinese README](README.zh.md#在闲鱼购买).**
+> **The only places to get a genuine License code for the supporter models are [Ko-fi](https://ko-fi.com/kruk2), [Unifans](https://app.unifans.io/c/kruk2), and for China the seller in the [Chinese README](README.zh.md#在闲鱼购买).**
 >
-> **支持者模型的正版许可证码只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2)、[Unifans](https://app.unifans.io/c/kruk2) 或 [闲鱼](README.zh.md#在闲鱼购买) 获取。**
+> **支持者模型的正版许可证码只能通过 [Ko-fi](https://ko-fi.com/kruk2)、[Unifans](https://app.unifans.io/c/kruk2) 或 [闲鱼](README.zh.md#在闲鱼购买) 获取。**
 
 [**English**](README.md) | [日本語](README.ja.md) | [中文](README.zh.md)
 
@@ -124,8 +124,8 @@ Supporters get a License code for the supporter models:
 
 | Support | Models |
 | --- | --- |
-| **$15 USD** or more in total | **UNet 4x**: makes restored areas sharper.<br>**SD 1.5**: experimental model for still images. |
-| **$25 USD** | **UNet 4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. Includes future updates of this LTX model. |
+| **$15 USD** (Ko-fi: **14 EUR**) or more in total | **UNet 4x**: makes restored areas sharper.<br>**SD 1.5**: experimental model for still images. |
+| **$25 USD** (Ko-fi: **23 EUR**) | **UNet 4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. Includes future updates of this LTX model. |
 
 Supporters who gave **$15 USD or more on or before 14 October 2026** get LTX for free.
 
@@ -147,7 +147,7 @@ More examples:
 
 License codes come **only** from here:
 
-- [Buy Me a Coffee](https://buymeacoffee.com/kruk2) (crypto works too)
+- [Ko-fi](https://ko-fi.com/kruk2)
 - [Unifans](https://app.unifans.io/c/kruk2)
 - For China: see the [Chinese README](README.zh.md#在闲鱼购买)
 

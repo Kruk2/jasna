@@ -1,4 +1,4 @@
-> **支持者模型的正版许可证码只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2)、[Unifans](https://app.unifans.io/c/kruk2) 或 [闲鱼](#在闲鱼购买) 获取。**
+> **支持者模型的正版许可证码只能通过 [Ko-fi](https://ko-fi.com/kruk2)、[Unifans](https://app.unifans.io/c/kruk2) 或 [闲鱼](#在闲鱼购买) 获取。**
 
 [English](README.md) | [日本語](README.ja.md) | [**中文**](README.zh.md)
 
@@ -110,8 +110,8 @@ Jasna 是免费的。你的支持用于训练新模型，主要是租用 GPU。�
 
 | 支持 | 模型 |
 | --- | --- |
-| 累计 **15 美元**或以上 | **UNet 4x**：让修复区域更清晰。<br>**SD 1.5**：用于静态图片的实验性模型。 |
-| **25 美元** | **UNet 4x** 和 **SD 1.5**，再加上<br>**LTX**：比 BasicVSR++ 慢很多，但细节更多。包含这个 LTX 模型以后的更新。 |
+| 累计 **15 美元**（Ko-fi：**14 欧元**）或以上 | **UNet 4x**：让修复区域更清晰。<br>**SD 1.5**：用于静态图片的实验性模型。 |
+| **25 美元**（Ko-fi：**23 欧元**） | **UNet 4x** 和 **SD 1.5**，再加上<br>**LTX**：比 BasicVSR++ 慢很多，但细节更多。包含这个 LTX 模型以后的更新。 |
 
 **截至 2026 年 10 月 14 日（含当天）**累计支持 **15 美元或以上**的支持者可免费获得 LTX。
 
@@ -133,7 +133,7 @@ Jasna 是免费的。你的支持用于训练新模型，主要是租用 GPU。�
 
 许可证码**只**能从这里获得：
 
-- [Buy Me a Coffee](https://buymeacoffee.com/kruk2)（也可以用加密货币）
+- [Ko-fi](https://ko-fi.com/kruk2)
 - [Unifans](https://app.unifans.io/c/kruk2)
 - 中国用户：[闲鱼 (Xianyu)](#在闲鱼购买)，见下文
 
