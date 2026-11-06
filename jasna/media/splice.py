@@ -579,10 +579,10 @@ def create_copy_fragment(
     if canonical_codec(codec) == "av1":
         start = index.seconds_for_pts(span.start_pts)
         duration = float((span.end_pts - span.start_pts) * index.time_base)
-        args: list[str] = []
-        if start > 0:
-            args += ["-ss", _seconds(start)]
-        args += [
+        # Without -seek_timestamp, -ss and -t count from the earliest stream; the video may start after the audio.
+        args = [
+            "-seek_timestamp", "1",
+            "-ss", _seconds(float(span.start_pts * index.time_base)),
             "-i", str(source),
             "-t", _seconds(duration),
             "-map", "0:v:0",
