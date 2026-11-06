@@ -151,3 +151,21 @@ def test_the_source_comment_stays_inside_the_settings_tag(source_tags, expected)
     comment = with_source_comment('{"jasna":"test"}', source_tags)
     assert json.loads(comment).get("source_comment") == expected
     assert next(iter(json.loads(comment))) == "jasna"
+
+
+@pytest.mark.parametrize(("hip", "cuda", "tensorrt"), [(None, "13.0", True), ("7.15.26333", None, False)])
+def test_basicvsrpp_records_tensorrt_only_where_it_runs(monkeypatch, hip, cuda, tensorrt):
+    import torch
+
+    monkeypatch.setattr(torch.version, "hip", hip)
+    monkeypatch.setattr(torch.version, "cuda", cuda)
+    settings = job_settings(
+        session_config(compile_basicvsrpp=True),
+        models=frozenset({"basicvsrpp"}),
+        segments=None,
+        vr=FLAT,
+        ltx_weights=None,
+        ltx_large_canvas=None,
+    )
+
+    assert settings["basicvsrpp"]["tensorrt"] is tensorrt
