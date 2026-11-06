@@ -35,6 +35,20 @@ PINNED_CHUNK_BYTES = 64 << 20
 _ADALN_PREFIXES = ("adaln_single.", "prompt_adaln_single.")
 
 
+def resident_block_count(sizes: list[int], usable_vram: Callable[[int], int]) -> int:
+    """How many leading blocks stay in VRAM; ``usable_vram(limit)`` checks at most ``limit`` bytes."""
+    reserve = ACTIVATION_RESERVE_BYTES + 2 * max(sizes)
+    # Probe only what all-resident needs, so the GUI preview/decoder/encoder keep their VRAM.
+    budget = usable_vram(sum(sizes) + reserve) - reserve
+    resident, used = 0, 0
+    for size in sizes:
+        if used + size > budget:
+            break
+        used += size
+        resident += 1
+    return resident
+
+
 def patchify(latent: torch.Tensor) -> torch.Tensor:
     """``[1, C, F, H, W]`` -> ``[1, F*H*W, C]``."""
     return latent.flatten(2).transpose(1, 2)
@@ -202,19 +216,10 @@ class LtxTransformer:
             raise
 
     def _resident_blocks(self, sizes: list[int]) -> int:
-        reserve = ACTIVATION_RESERVE_BYTES + 2 * max(sizes)
         free = self._free_vram(self.device)
-        if self.device.type == "cuda":
-            # Probe only what all-resident needs, so the GUI preview/decoder/encoder keep their VRAM.
-            free = allocatable_bytes(self.device, min(free, sum(sizes) + reserve))
-        budget = free - reserve
-        resident, used = 0, 0
-        for size in sizes:
-            if used + size > budget:
-                break
-            used += size
-            resident += 1
-        return resident
+        if self.device.type != "cuda":
+            return resident_block_count(sizes, lambda limit: free)
+        return resident_block_count(sizes, lambda limit: allocatable_bytes(self.device, min(free, limit)))
 
     def native_vram_bytes(self) -> int:
         return self.blocks.native_vram_bytes() if self.blocks is not None else 0
