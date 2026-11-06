@@ -18,6 +18,7 @@ from jasna.license_api import protection_available
 logger = logging.getLogger(__name__)
 
 
+KOFI_URL = "https://ko-fi.com/kruk2"
 BMC_URL = "https://buymeacoffee.com/Kruk2"
 UNIFANS_URL = "https://app.unifans.io/c/kruk2"
 
@@ -172,6 +173,14 @@ def attach_entry_context_menu(entry: ctk.CTkEntry) -> tkinter.Menu:
 
     widget.bind("<Button-3>", _popup)
     return menu
+
+
+class KofiButton(_SupportButton):
+    def __init__(self, master, width: int, height: int):
+        super().__init__(
+            master, text=t("kofi_support"), command=lambda: webbrowser.open(KOFI_URL),
+            fg_color=Colors.KOFI_RED, text_color=Colors.KOFI_TEXT, width=width, height=height,
+        )
 
 
 class BuyMeCoffeeButton(_SupportButton):

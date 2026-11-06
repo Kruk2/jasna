@@ -454,7 +454,7 @@ TH = {
         "ctx_copy": "คัดลอก",
         "ctx_paste": "วาง",
         "ctx_select_all": "เลือกทั้งหมด",
-        "license_official_sellers": "รับรหัสสิทธิ์ได้เฉพาะที่ Buy Me a Coffee และ Unifans (kruk2) เท่านั้น รหัสจากที่อื่นเป็นของปลอม",
+        "license_official_sellers": "รับรหัสสิทธิ์ได้เฉพาะที่ Ko-fi, Unifans (kruk2) และ Buy Me a Coffee เท่านั้น รหัสจากที่อื่นเป็นของปลอม",
         "official_sellers_notice": "Jasna ใช้ได้ฟรีบน GitHub รับรหัสสิทธิ์ได้ผ่านปุ่มด้านล่างเท่านั้น ใครก็ตามที่ขาย Jasna รหัส หรือไฟล์ดัดแปลงคือมิจฉาชีพ และไฟล์ของพวกเขาอาจรันโค้ดที่ซ่อนอยู่บนเครื่องของคุณ",
         "license_chip_inactive": "เปิดใช้งาน Jasna",
         "license_chip_active": "เปิดใช้แล้ว",
@@ -546,8 +546,9 @@ TH = {
         "toast_preset_deleted": "ลบพรีเซ็ต '{name}' แล้ว",
         "toast_settings_reset": "รีเซ็ตการตั้งค่าแล้ว",
         "toast_no_files": "ไม่มีไฟล์ในคิว",
-        # Support buttons (Buy Me a Coffee + Unifans)
-        "bmc_support": "สนับสนุน",
+        # Support buttons (Ko-fi + Unifans + Buy Me a Coffee)
+        "kofi_support": "สนับสนุน",
+        "bmc_support": "Coffee",
         "unifans_support": "Unifans",
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "ซื้อบน Xianyu",
