@@ -70,10 +70,6 @@ class Colors:
     KOFI_RED = "#FF5E5B"
     KOFI_TEXT = "#FFFFFF"
 
-    # Buy Me a Coffee branding
-    BMC_YELLOW = "#FFDD00"        # Official Brand Color
-    BMC_TEXT = "#0f172a"          # Slate-900 (dark text on yellow)
-
     # Unifans branding
     UNIFANS_PURPLE = "#8B5CF6"    # Violet-500
     UNIFANS_TEXT = "#FFFFFF"      # White text on violet

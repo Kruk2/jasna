@@ -454,7 +454,7 @@ ZH = {
         "ctx_copy": "复制",
         "ctx_paste": "粘贴",
         "ctx_select_all": "全选",
-        "license_official_sellers": "许可证码只能从 Ko-fi、Unifans (kruk2)、Buy Me a Coffee 和闲鱼获得。闲鱼只认下方按钮里的二维码，其他闲鱼店铺即使同名也是假的。",
+        "license_official_sellers": "许可证码只能从 Ko-fi、Unifans (kruk2) 和闲鱼获得。闲鱼只认下方按钮里的二维码，其他闲鱼店铺即使同名也是假的。",
         "official_sellers_notice": "Jasna 在 GitHub 上免费提供。许可证码只能通过下方按钮获得。其他任何出售 Jasna、许可证码或修改版文件的人都是骗子，他们的文件可能会在你的电脑上运行隐藏代码。",
         "license_chip_inactive": "激活 Jasna",
         "license_chip_active": "已激活",
@@ -546,9 +546,8 @@ ZH = {
         "toast_preset_deleted": "预设 '{name}' 已删除",
         "toast_settings_reset": "设置已重置",
         "toast_no_files": "队列中没有文件",
-        # Support buttons (Ko-fi + Unifans + Buy Me a Coffee)
-        "kofi_support": "支持",
-        "bmc_support": "Coffee",
+        # Support buttons, named by site (Ko-fi + Unifans)
+        "kofi_support": "Ko-fi",
         "unifans_support": "Unifans",
         "xianyu_support": "闲鱼扫码购买",
         "xianyu_dialog_title": "在闲鱼购买",
