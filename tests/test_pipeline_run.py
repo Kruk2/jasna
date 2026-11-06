@@ -8,7 +8,7 @@ import pytest
 import torch
 from av.video.reformatter import Colorspace as AvColorspace
 
-from factories import make_pipeline, pass_context, primary_result, video_metadata
+from factories import FakeFrameGeneration, make_pipeline, pass_context, primary_result, video_metadata
 from jasna import pipeline_threads
 from jasna.accelerator import AcceleratorVendor
 from jasna.crop_buffer import RawCrop
@@ -293,14 +293,13 @@ def test_retarget_high_fps_halves_the_rate_for_readers_encoder_and_progress():
 
 
 def test_frame_generation_doubles_the_frames_and_rate_before_the_encoder():
-    generator = MagicMock(side_effect=lambda previous, current: previous)
+    generator = FakeFrameGeneration(lambda previous, current: previous)
     with patch("jasna.frame_generation.RtxFrameGeneration", return_value=generator):
         _, encoder_cls, encoder = _run(_pipeline(frame_generation="2x"), frames=torch.zeros((2, 3, 8, 8), dtype=torch.uint8))
 
     assert encoder_cls.call_args.kwargs["frame_generation"] is True
     assert [call.args[1] for call in encoder.encode.call_args_list] == [0, 1, 2, 3]
-    assert generator.call_count == 1
-    generator.close.assert_called_once()
+    assert generator.calls == 1 and generator.closed
 
 
 def test_ltx_loads_frame_generation_only_when_compose_opens_the_writer(tmp_path):

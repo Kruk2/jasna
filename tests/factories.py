@@ -529,3 +529,17 @@ def shown_message(canvas) -> str:
     (item,) = canvas.find_all()
     assert canvas.type(item) == "text"
     return canvas.itemcget(item, "text")
+
+
+class FakeFrameGeneration:
+    """Stands in for RtxFrameGeneration: makes each in-between frame with ``blend`` and records the calls."""
+
+    def __init__(self, blend):
+        self.blend, self.calls, self.closed = blend, 0, False
+
+    def __call__(self, previous, current):
+        self.calls += 1
+        return self.blend(previous, current)
+
+    def close(self):
+        self.closed = True

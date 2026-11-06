@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
-from factories import session_config, video_metadata
+from factories import FakeFrameGeneration, session_config, video_metadata
 from jasna.frame_generation import FrameGenerationWriter
 from jasna.media.splice import SmartRenderCompatibilityError
 from jasna.media.video_encoder import resolve_encoder_options, AcceleratorVendor
@@ -38,8 +38,8 @@ def _generate_mean(previous, current):
     return ((previous.int() + current.int()) // 2).to(torch.uint8)
 
 
-def _write(pts: list[int]) -> tuple[_Writer, MagicMock]:
-    writer, generate = _Writer(), MagicMock(side_effect=_generate_mean)
+def _write(pts: list[int]) -> tuple[_Writer, FakeFrameGeneration]:
+    writer, generate = _Writer(), FakeFrameGeneration(_generate_mean)
     frame_generation = FrameGenerationWriter(writer, generate)
     for value, frame_pts in zip(range(0, 100, 10), pts):
         frame_generation.write(_frame(value), frame_pts)
@@ -52,9 +52,8 @@ def test_a_frame_is_generated_at_each_midpoint_and_the_last_frame_fills_its_inte
     writer, generate = _write([0, 3, 6])
 
     assert writer.written == [(0, 0), (5, 3), (10, 6), (15, 9), (20, 12), (20, 15)]
-    assert generate.call_count == 2
-    assert writer.finished and writer.closed
-    generate.close.assert_called_once()
+    assert generate.calls == 2
+    assert writer.finished and writer.closed and generate.closed
 
 
 def test_variable_frame_intervals_keep_their_midpoints():
@@ -67,19 +66,18 @@ def test_one_frame_is_written_once():
     writer, generate = _write([5])
 
     assert writer.written == [(0, 10)]
-    generate.assert_not_called()
+    assert generate.calls == 0
 
 
 def test_a_stopped_job_closes_without_the_held_frame():
-    writer, generate = _Writer(), MagicMock(side_effect=_generate_mean)
+    writer, generate = _Writer(), FakeFrameGeneration(_generate_mean)
     frame_generation = FrameGenerationWriter(writer, generate)
     frame_generation.write(_frame(0), 0)
     frame_generation.write(_frame(10), 1)
     frame_generation.close()
 
     assert writer.written == [(0, 0), (5, 1)]
-    assert not writer.finished and writer.closed
-    generate.close.assert_called_once()
+    assert not writer.finished and writer.closed and generate.closed
 
 
 def test_the_bitrate_cap_doubles_with_frame_generation():
