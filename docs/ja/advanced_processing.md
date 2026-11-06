@@ -115,7 +115,7 @@ Jasna は使った設定を出力ファイルの **Comment** タグに書き込�
 ffprobe -v error -show_entries format_tags=comment out.mkv
 ```
 
-元の動画にあったコメントは置き換えられます。
+元の動画にあったコメントは、その行の `source_comment` に残ります。
 
 ## キューの完了後
 

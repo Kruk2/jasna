@@ -533,7 +533,7 @@ def test_container_metadata_and_audio_language_copied(tmp_path):
 
 
 @pytest.mark.parametrize("suffix", [".mp4", ".mkv", ".mov"])
-def test_settings_replace_the_source_comment(tmp_path, suffix):
+def test_settings_replace_the_source_comment_and_keep_its_text(tmp_path, suffix):
     src = _make_source(tmp_path, f"src{suffix}", extra=["-metadata", "comment=source comment"])
     dst = tmp_path / f"out{suffix}"
     metadata = get_video_meta_data(str(src))
@@ -554,6 +554,7 @@ def test_settings_replace_the_source_comment(tmp_path, suffix):
         {
             "jasna": "test",
             "output": {"codec": "hevc", "encoder": encoder.encoder_name, "encoder_options": encoder.encoder_options},
+            "source_comment": "source comment",
         }
     ]
 

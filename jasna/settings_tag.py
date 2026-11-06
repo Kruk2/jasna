@@ -58,6 +58,10 @@ def _segments_summary(segments: tuple[SegmentRange, ...]) -> dict[str, object]:
     return summary
 
 
+# Windows caps a command line at 32 767 characters; the settings themselves stay under 2 000.
+SOURCE_COMMENT_MAX_CHARS = 16_000
+
+
 def job_settings(
     config: SessionConfig,
     *,
@@ -129,3 +133,13 @@ def job_settings(
 def settings_comment(settings: Mapping[str, object], *, encoder: str, options: Mapping[str, str]) -> str:
     output = {**settings["output"], "encoder": encoder, "encoder_options": dict(options)}
     return json.dumps({**settings, "output": output}, separators=(",", ":"))
+
+
+def with_source_comment(comment: str, source_tags: Mapping[str, str]) -> str:
+    """``comment`` replaces the source's own comment tag; keep that text as ``source_comment``, cut
+    to ``SOURCE_COMMENT_MAX_CHARS`` so the smart-render mux command line stays within Windows' limit."""
+    source_comment = next((value for key, value in source_tags.items() if key.lower() == "comment" and value), None)
+    if source_comment is None:
+        return comment
+    tag = {**json.loads(comment), "source_comment": source_comment[:SOURCE_COMMENT_MAX_CHARS]}
+    return json.dumps(tag, separators=(",", ":"))

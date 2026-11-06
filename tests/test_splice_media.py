@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import struct
 import subprocess
 from pathlib import Path
@@ -464,7 +465,9 @@ def test_final_mux_preserves_compatible_source_structure(
 
     with av.open(str(output)) as container:
         assert container.metadata["title"] == "Source title"
-        assert [value for key, value in container.metadata.items() if key.lower() == "comment"] == [COMMENT]
+        assert [
+            json.loads(value) for key, value in container.metadata.items() if key.lower() == "comment"
+        ] == [{**json.loads(COMMENT), "source_comment": "Source comment"}]
         assert [chapter["metadata"]["title"] for chapter in container.chapters()] == [
             "Opening",
             "Main",

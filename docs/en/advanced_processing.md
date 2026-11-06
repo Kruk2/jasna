@@ -117,7 +117,7 @@ or with:
 ffprobe -v error -show_entries format_tags=comment out.mkv
 ```
 
-A comment the source video had is replaced.
+A comment the source video had is kept in that line as `source_comment`.
 
 ## After the queue is done
 

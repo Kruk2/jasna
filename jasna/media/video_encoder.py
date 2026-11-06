@@ -38,7 +38,7 @@ from jasna.media.encoder_settings import cq_controls, encoder_cq_spec, validate_
 from jasna.media.lut import GpuLutApplier, parse_cube_file
 from jasna.media.probe import VideoMetadata
 from jasna.media.rgb_to_yuv import RgbToYuvConverter
-from jasna.settings_tag import settings_comment
+from jasna.settings_tag import settings_comment, with_source_comment
 
 logger = logging.getLogger(__name__)
 
@@ -619,9 +619,9 @@ class VideoEncoder:
         if self.settings is not None:
             for key in [key for key in self.dst.metadata if key.lower() == "comment"]:
                 del self.dst.metadata[key]
-            self.dst.metadata["comment"] = settings_comment(
-                self.settings, encoder=self.encoder_name, options=self.encoder_options
-            )
+            comment = settings_comment(self.settings, encoder=self.encoder_name, options=self.encoder_options)
+            self.dst.metadata["comment"] = with_source_comment(comment, self._src.metadata)
+            logger.info("%s settings: %s", self.output_path.name, self.dst.metadata["comment"])
         out_v.metadata.update(in_v.metadata)
         out_v.disposition = in_v.disposition
         if not self.smart_fragment:
