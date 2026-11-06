@@ -1,12 +1,15 @@
 import logging
+import os
 import re
+import signal
+import sys
 from contextlib import contextmanager, nullcontext
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from factories import cli_args, cli_environment, run_cli
-from jasna.main import batch_size_from_args, build_parser
+from jasna.main import batch_size_from_args, build_parser, stop_on_sigterm
 from jasna.media.probe import UnsupportedVideoError
 from jasna.post_export_action import PostExportVideoCommandError
 from jasna.restorer.denoise import DenoiseStrength
@@ -373,3 +376,14 @@ def test_ctrl_c_stops_the_cli_with_a_short_message(tmp_path, capsys):
 
     assert exit_info.value.code == 130
     assert capsys.readouterr().out.splitlines()[-1] == "Stopped"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="os.kill(SIGTERM) terminates the process on Windows")
+def test_sigterm_stops_like_ctrl_c():
+    previous = signal.getsignal(signal.SIGTERM)
+    try:
+        stop_on_sigterm()
+        with pytest.raises(KeyboardInterrupt):
+            os.kill(os.getpid(), signal.SIGTERM)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
