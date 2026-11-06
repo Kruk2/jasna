@@ -219,12 +219,12 @@ def test_lease_dialog_activates_with_the_license_code_only(tk_root, lease_api, s
     from jasna.gui.locales import t
     from jasna.protection import lease
 
-    monkeypatch.setattr(sys, "platform", "linux")
     lease_api.return_value = lease.Activated(["ltx-2.5-v2"], online_reason)
 
     callback_threads = []
     dialog = LicenseDialog(tk_root, on_activated=lambda: callback_threads.append(threading.get_ident()))
     settle_activation(dialog)
+    monkeypatch.setattr(sys, "platform", "linux")
     assert dialog._activate_button.cget("state") == "normal"
     dialog._code.insert(0, "  JL1-code  ")
     dialog._activate_button.invoke()
