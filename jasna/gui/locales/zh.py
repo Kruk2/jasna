@@ -109,7 +109,7 @@ ZH = {
         "segments_restore_failed": "修复预览失败：{message}",
         "segments_vr_projection": "VR 投影",
         "segments_vr_projection_resolved": "VR 投影（自动：{projection}）",
-        "segments_vr_projection_hint": "用于修复预览和最终输出。自动会为这个视频选择最合适的投影；选择其他投影可覆盖自动设置。仅适用于左右并排（SBS）的 VR180 视频。",
+        "segments_vr_projection_hint": "用于修复预览和最终输出。自动会为这个视频选择最合适的投影；选择其他投影可覆盖自动设置。仅适用于 VR180 视频。",
         "segments_vr_projection_auto": "自动",
         "segments_vr_projection_raw": "原始",
         "segments_vr_projection_fisheye": "鱼眼",

@@ -58,7 +58,7 @@ $env:TEMP = 'Z:\Temp'
 | `--ltx-vae-decoder` | `auto` | LTX：LTX 把结果转回视频的方式：`full`、`half` 或 `max`，同上。`auto`：`ltx-basic` 用 `max`，其他用 `full`。与应用里的 **LTX 解码器**相同。 |
 | `--ltx-seed` | `20260923` | LTX：换一个种子，结果会略有不同；同一个种子会重复同样的结果。 |
 | `--ltx-trial` / `--no-ltx-trial` | 关闭 | LTX：不需要模型和许可证即可测试速度。视频不会被修复。 |
-| `--ltx-auto-split` | — | LTX：大马赛克（达到视频高度的这个百分比，例如 `12`）用 LTX，较小的用 BasicVSR++。可用于文件夹。不能与 `--segments` 或 `--fmp4` 一起使用。见[区间](segments.md#cli---ltx-auto-split)。 |
+| `--ltx-auto-split` | — | LTX：大马赛克（达到视频高度的这个百分比，例如 `12`）用 LTX，较小的用 BasicVSR++。可用于文件夹。不能与 `--segments`、`--fmp4` 或 `--frame-generation` 一起使用。见[区间](segments.md#cli---ltx-auto-split)。 |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | 开启 | 为你的 GPU 准备 BasicVSR++：快约 3 倍，几乎不多占显存。首次运行需要 15–60 分钟。仅限 NVIDIA。见[调优](tuning.md)。 |
 | `--max-clip-size` | `90` | 一起修复的帧数。越大越稳定、越快，但占用更多显存。在显存允许的范围内用最大的值。 |
 | `--temporal-overlap` | `8` | 相邻片段共享的帧数，用于隐藏拼接处的闪烁。`8`–`20` 效果好；必须小于 `--max-clip-size` 的一半。 |
@@ -125,12 +125,12 @@ $env:TEMP = 'Z:\Temp'
 | `--codec` | `hevc` | 离线输出可选 `hevc`、`h264` 或 `av1`。HLS 流媒体始终使用 H.264。 |
 | `--cq` | 根据 GPU/编解码器 | 视频质量。越低质量越好、文件越大。NVIDIA 默认值：H.264 25、HEVC 28、AV1 35；AMD 默认值：H.264 24、HEVC 25、AV1 16。 |
 | `--encoder-settings` | — | JSON 对象或逗号分隔的高级 `key=value` 设置，例如 `{"rc-lookahead":32}` 或 `rc-lookahead=32,bf=4`。见下文。 |
-| `--lut` | — | `.cube` 色彩 LUT（1D 或 3D），在写入视频时应用。也可在 GUI 的编码设置部分设置。 |
+| `--lut` | — | `.cube` 色彩 LUT（1D 或 3D），在写入视频时应用。也可在应用的**输出**标签页中设置**色彩 LUT (.cube)**。 |
 | `--sharpen` | `0` | 编码前锐化画面，取值 `0`（关闭）到 `1`（最强）。与 ffmpeg 的 `cas` 滤镜一致，无需二次转码。见[高级处理](advanced_processing.md)。 |
 | `--retarget-high-fps` | 关闭 | 每两帧保留一帧，实现 60 → 30 FPS（以及 59.94 → 29.97）。其他帧率不变；音频保持同步。不能与 `--stream` 或 `--segments` 同时使用。 |
 | `--frame-generation` | `none` | `2x` 用 NVIDIA RTX Video Frame Generation 把帧率翻倍，画面更流畅。需要 RTX 40 系列或更新的显卡。音频和时长不变。不能与 `--stream`、`--segments` 或 `--ltx-auto-split` 同时使用。 |
 | `--fmp4` | 关闭 | `.mp4`/`.mov` 输出在生成过程中即可播放，任务中断后仍可播放。不能与 `--stream`、`--segments` 或 `--ltx-auto-split` 同时使用。见[高级处理](advanced_processing.md)。 |
-| `--segments` | — | 只修复一个视频中的这些区间，单位为秒或 `mm:ss`，例如 `10-25,01:10-01:30.5`。不能与 `--stream`、`--retarget-high-fps`、`--fmp4` 或 `--ltx-auto-split` 同时使用，也不能用于图片或文件夹输入。见[区间](segments.md)。 |
+| `--segments` | — | 只修复一个视频中的这些区间，单位为秒或 `mm:ss`，例如 `10-25,01:10-01:30.5`。不能与 `--stream`、`--retarget-high-fps`、`--fmp4`、`--ltx-auto-split` 或 `--frame-generation` 同时使用，也不能用于图片或文件夹输入。见[区间](segments.md)。 |
 | `--working-directory` | 输出目录 | 临时文件和保存进度的写入位置。见[区间](segments.md)。 |
 
 ### 选择编解码器

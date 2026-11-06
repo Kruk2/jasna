@@ -28,7 +28,7 @@ Open it with the scissors button on a video in the queue.
 - Zoom with **− / +** or the mouse wheel, and drag the picture to move it.
   **Reset view** goes back.
 - With ranges selected, the output keeps the codec of the source video. The
-  **Codec** setting in **Encoding** is not used, because the parts between
+  **Codec** setting in the **Output** tab is not used, because the parts between
   ranges are copied. If another codec is chosen there, its CQ and custom
   encoder settings are not used either. If a video can't be processed in
   parts, the editor tells you at once.
@@ -91,7 +91,7 @@ Limits:
 - On AMD, some H.264 files are encoded again in full. Only the ranges are
   restored.
 - With `--restoration-model-name ltx`, every range uses LTX.
-- Cannot be used with `--retarget-high-fps` or `--fmp4`.
+- Cannot be used with `--retarget-high-fps`, `--fmp4`, `--ltx-auto-split` or `--frame-generation`.
 
 If the input can't be used, Jasna stops with an error before it starts.
 
@@ -108,7 +108,7 @@ jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto
 The number is the mosaic size, as % of the video height. The output keeps
 the codec of the source video. If that is not `--codec`, `--cq` and
 `--encoder-settings` are not used for it. If a video can't be processed in parts, it is
-restored whole with LTX. Cannot be used with `--segments` or `--fmp4`.
+restored whole with LTX. Cannot be used with `--segments`, `--fmp4` or `--frame-generation`.
 
 ## Working Directory
 

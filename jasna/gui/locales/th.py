@@ -109,7 +109,7 @@ TH = {
         "segments_restore_failed": "ตัวอย่างการฟื้นฟูล้มเหลว: {message}",
         "segments_vr_projection": "การฉายภาพ VR",
         "segments_vr_projection_resolved": "การฉายภาพ VR (อัตโนมัติ: {projection})",
-        "segments_vr_projection_hint": "ใช้กับตัวอย่างการฟื้นฟูและผลลัพธ์สุดท้าย โหมดอัตโนมัติจะเลือกโปรเจกชันที่ดีที่สุดสำหรับวิดีโอนี้ เลือกแบบอื่นเพื่อแทนที่ได้ ใช้ได้เฉพาะวิดีโอ VR180 แบบซ้าย-ขวา (SBS)",
+        "segments_vr_projection_hint": "ใช้กับตัวอย่างการฟื้นฟูและผลลัพธ์สุดท้าย โหมดอัตโนมัติจะเลือกโปรเจกชันที่ดีที่สุดสำหรับวิดีโอนี้ เลือกแบบอื่นเพื่อแทนที่ได้ ใช้ได้เฉพาะวิดีโอ VR180",
         "segments_vr_projection_auto": "อัตโนมัติ",
         "segments_vr_projection_raw": "ต้นฉบับ",
         "segments_vr_projection_fisheye": "ฟิชอาย",

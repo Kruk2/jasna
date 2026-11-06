@@ -109,7 +109,7 @@ EN = {
         "segments_restore_failed": "Restoration preview failed: {message}",
         "segments_vr_projection": "VR projection",
         "segments_vr_projection_resolved": "VR projection (Auto: {projection})",
-        "segments_vr_projection_hint": "Used for the restoration preview and final output. Auto picks the best projection for this video; choose another one to override it. Available only for VR180 side-by-side videos.",
+        "segments_vr_projection_hint": "Used for the restoration preview and final output. Auto picks the best projection for this video; choose another one to override it. Available only for VR180 videos.",
         "segments_vr_projection_auto": "Auto",
         "segments_vr_projection_raw": "Raw",
         "segments_vr_projection_fisheye": "Fisheye",

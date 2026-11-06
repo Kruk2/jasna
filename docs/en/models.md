@@ -46,7 +46,7 @@ at these samples: [1](https://discord.com/channels/1196376491815092265/119905943
 (explore the [new channel](https://discord.com/channels/1196376491815092265/1556960822578909244) and the
 [old channel (archived)](https://discord.com/channels/1196376491815092265/1199059436199759943) on SLS Discord for more samples),
 and run **Trial mode** to see if your PC can run it and how long it takes. Pick it in the
-**Restoration Model** section, or:
+**Model** tab, or:
 
 ```bash
 jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
@@ -162,7 +162,7 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
   **Half** is faster, **Max** is the fastest and a little softer. **Auto** (default) uses the Half
   encoder and Max decoder for Basic Quality, Full for the others. Pick Full for both if Basic
   Quality looks too soft. A choice you don't have yet is downloaded when
-  you press Start. CLI: see [environment variables](tuning.md#environment-variables-advanced).
+  you press Start. CLI: `--ltx-vae-encoder` and `--ltx-vae-decoder`.
 
 To preview LTX, open the [Segment Editor](segments.md), select a range,
 choose LTX and turn on **Restore preview**. The Video Player always uses

@@ -105,7 +105,7 @@ No output file is created.
 
 ## Images, one by one
 
-For still images, **Process images interactively** (in the **Image Restoration (still images)** section)
+For still images, **Process images interactively** (in the **Images** tab)
 opens a side-by-side view. Go through your images, try other seeds, compare
 original, mask and result, and save only the results you like. This is much
 faster than running the whole job again for each try.

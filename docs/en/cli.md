@@ -61,7 +61,7 @@ $env:TEMP = 'Z:\Temp'
 | `--ltx-vae-decoder` | `auto` | LTX: how LTX turns its result back into video: `full`, `half` or `max`, as above. `auto`: `max` for `ltx-basic`, `full` for the others. Same as **LTX Decoder** in the app. |
 | `--ltx-seed` | `20260923` | LTX: another seed gives a slightly different result; the same seed repeats it. |
 | `--ltx-trial` / `--no-ltx-trial` | off | LTX: test the speed without the model or a license. The video is not restored. |
-| `--ltx-auto-split` | — | LTX: big mosaics (at least this percent of the video height, e.g. `12`) with LTX, smaller ones with BasicVSR++. Works on folders. Cannot be combined with `--segments` or `--fmp4`. See [Segments](segments.md#cli---ltx-auto-split). |
+| `--ltx-auto-split` | — | LTX: big mosaics (at least this percent of the video height, e.g. `12`) with LTX, smaller ones with BasicVSR++. Works on folders. Cannot be combined with `--segments`, `--fmp4` or `--frame-generation`. See [Segments](segments.md#cli---ltx-auto-split). |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | on | Prepares BasicVSR++ for your GPU: about 3x faster, almost no extra VRAM. The first run takes 15–60 minutes. NVIDIA only. See [Tuning](tuning.md). |
 | `--max-clip-size` | `90` | Frames restored together. Bigger is steadier and faster but uses more VRAM. Use the biggest that fits. |
 | `--temporal-overlap` | `8` | Frames shared by neighboring clips, to hide flicker where they meet. `8`–`20` works well; must be less than half of `--max-clip-size`. |
@@ -128,12 +128,12 @@ continue an LTX job or a job with `--segments` from saved work. See [Pause and c
 | `--codec` | `hevc` | `hevc`, `h264`, or `av1` for offline output. HLS streaming always uses H.264. |
 | `--cq` | GPU/codec-specific | Video quality. Lower is better quality and a larger file. NVIDIA defaults: H.264 25, HEVC 28, AV1 35. AMD defaults: H.264 24, HEVC 25, AV1 16. |
 | `--encoder-settings` | — | Advanced settings as a JSON object or comma-separated `key=value` pairs, e.g. `{"rc-lookahead":32}` or `rc-lookahead=32,bf=4`. See below. |
-| `--lut` | — | `.cube` color LUT (1D or 3D) applied as the video is written. Also available in the GUI's Encoding section. |
+| `--lut` | — | `.cube` color LUT (1D or 3D) applied as the video is written. Also in the app: **Color LUT** in the **Output** tab. |
 | `--sharpen` | `0` | Sharpen the picture before encoding, from `0` (off) to `1` (strongest). Matches ffmpeg's `cas` filter, so no second pass is needed. See [Advanced processing](advanced_processing.md). |
 | `--retarget-high-fps` | off | 60 → 30 FPS (and 59.94 → 29.97) by keeping every second frame. Other rates unchanged; audio stays in sync. Not available with `--stream` or `--segments`. |
 | `--frame-generation` | `none` | `2x` doubles the frame rate for smoother motion with NVIDIA RTX Video Frame Generation. Needs an RTX 40-series or newer GPU. Audio and length stay the same. Not available with `--stream`, `--segments` or `--ltx-auto-split`. |
 | `--fmp4` | off | Play `.mp4`/`.mov` output while it is still being made; it also survives an interrupted job. Not available with `--stream`, `--segments` or `--ltx-auto-split`. See [Advanced processing](advanced_processing.md). |
-| `--segments` | — | Restore only these ranges of one video, in seconds or `mm:ss`, e.g. `10-25,01:10-01:30.5`. Cannot be combined with `--stream`, `--retarget-high-fps`, `--fmp4` or `--ltx-auto-split`, or with image or folder input. See [Segments](segments.md). |
+| `--segments` | — | Restore only these ranges of one video, in seconds or `mm:ss`, e.g. `10-25,01:10-01:30.5`. Cannot be combined with `--stream`, `--retarget-high-fps`, `--fmp4`, `--ltx-auto-split` or `--frame-generation`, or with image or folder input. See [Segments](segments.md). |
 | `--working-directory` | output dir | Where temporary files and saved progress are written. See [Segments](segments.md). |
 
 ### Choosing a codec

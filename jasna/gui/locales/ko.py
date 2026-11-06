@@ -109,7 +109,7 @@ KO = {
         "segments_restore_failed": "복원 미리보기 실패: {message}",
         "segments_vr_projection": "VR 투영",
         "segments_vr_projection_resolved": "VR 투영 (자동: {projection})",
-        "segments_vr_projection_hint": "복원 미리보기와 최종 출력에 사용됩니다. 자동은 이 비디오에 가장 맞는 투영을 고릅니다. 다른 투영을 고르면 그것을 사용합니다. VR180 사이드 바이 사이드 비디오에서만 사용할 수 있습니다.",
+        "segments_vr_projection_hint": "복원 미리보기와 최종 출력에 사용됩니다. 자동은 이 비디오에 가장 맞는 투영을 고릅니다. 다른 투영을 고르면 그것을 사용합니다. VR180 비디오에서만 사용할 수 있습니다.",
         "segments_vr_projection_auto": "자동",
         "segments_vr_projection_raw": "원본",
         "segments_vr_projection_fisheye": "어안",

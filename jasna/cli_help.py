@@ -17,7 +17,7 @@ CLI_HELP: dict[str, str] = {
         "NVIDIA RTX or AMD Radeon RX 7000/9000; recommended), ltx-4step (Good Quality: a bit more detail, about 1.5x slower than ltx), "
         "ltx-8step (High Quality: more detail, about 2.5x slower than ltx) or ltx-undistilled (Top Quality: "
         "slightly better, about 5x slower than ltx). LTX doesn't "
-        "support VR side-by-side video or streaming; secondary restoration and denoise work only on the "
+        "support streaming; secondary restoration and denoise work only on the "
         "BasicVSR++ parts of --ltx-auto-split. A missing "
         "LTX model is offered for download. (default: %(default)s)"
     ),

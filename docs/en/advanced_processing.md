@@ -70,14 +70,14 @@ available with streaming or [selected ranges](segments.md).
 ## Color LUT
 
 Apply a `.cube` color LUT (1D or 3D) to the output, for color grading. Set
-**Color LUT** in the **Encoding** section, or use `--lut path/to/look.cube`.
+**Color LUT** in the **Output** tab, or use `--lut path/to/look.cube`.
 It is applied as the video is written, so it is almost free. With
 [selected ranges](segments.md), the parts between them are encoded again
 instead of copied, so the LUT covers the whole video.
 
 ## Sharpening
 
-Restored video can look a bit soft. **Sharpening** in the **Encoding** section
+Restored video can look a bit soft. **Sharpening** in the **Output** tab
 (`--sharpen`) makes edges and small details sharper while the video is saved.
 No second tool is needed.
 

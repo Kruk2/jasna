@@ -1,4 +1,4 @@
-> **支援者向けモデルの正規ライセンスコードを入手できるのは、[Ko-fi](https://ko-fi.com/kruk2) と [Unifans](https://app.unifans.io/c/kruk2) だけです。**
+> **支援者向けモデルの正規ライセンスコードを入手できるのは、[Ko-fi](https://ko-fi.com/kruk2)、[Unifans](https://app.unifans.io/c/kruk2)、中国では[中国語版 README](README.zh.md#在闲鱼购买) の販売者だけです。**
 
 [English](README.md) | [**日本語**](README.ja.md) | [中文](README.zh.md)
 
@@ -147,6 +147,7 @@ Jasna は無料です。支援は新しいモデルの訓練に使われます�
 
 - [Ko-fi](https://ko-fi.com/kruk2)
 - [Unifans](https://app.unifans.io/c/kruk2)
+- 中国の方: [中国語版 README](README.zh.md#在闲鱼购买) をご覧ください
 
 それ以外で Jasna、コード、改変ファイルを販売している人は詐欺です。そのキーは
 使えず、そのファイルは PC 上で隠れたコードを実行する可能性があります。Jasna は
