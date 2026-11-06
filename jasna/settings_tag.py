@@ -86,10 +86,12 @@ def job_settings(
         },
     }
     if "basicvsrpp" in models:
+        from jasna.accelerator import is_amd_device
+
         basicvsrpp: dict[str, object] = {
             "model": config.model_path("basicvsrpp").name,
             "fp16": config.fp16,
-            "tensorrt": config.compile_basicvsrpp,
+            "tensorrt": config.compile_basicvsrpp and not is_amd_device(config.device),
             "max_clip_size": config.max_clip_size,
             "temporal_overlap": config.temporal_overlap,
             "denoise": config.denoise_strength,
