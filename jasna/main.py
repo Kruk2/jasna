@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import signal
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -946,7 +947,17 @@ def _print_activation_status(parser: argparse.ArgumentParser) -> None:
     print(device_use_text(use))
 
 
+def _stop_like_ctrl_c(signum, frame) -> None:
+    raise KeyboardInterrupt
+
+
+def stop_on_sigterm() -> None:
+    """SIGTERM stops Jasna like Ctrl+C, so exit handlers (license lease release, LTX worker close) still run."""
+    signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
+
+
 def main() -> None:
+    stop_on_sigterm()
     try:
         _main()
     except KeyboardInterrupt:
