@@ -205,6 +205,18 @@ def escape_unencodable_output(*streams) -> None:
             stream.reconfigure(errors="backslashreplace")
 
 
+def confirm_in_terminal(prompt: str) -> bool | None:
+    """``True`` for a y/yes answer, ``None`` when there is no terminal to ask in (scheduled or
+    scripted runs). Windows reports a NUL stdin as a terminal; reading it ends at once."""
+    if not sys.stdin.isatty():
+        return None
+    try:
+        answer = input(prompt)
+    except EOFError:
+        return None
+    return answer.strip().lower() in ("y", "yes")
+
+
 def exit_without_joining_threads() -> None:
     """End the process without waiting for non-daemon threads that CUDA/TensorRT may leave running, after the atexit
     handlers a normal exit runs (freeing the online license slot, stopping LTX workers, removing code caches)."""

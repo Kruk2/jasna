@@ -360,7 +360,7 @@ def test_auto_split_that_could_not_split_finds_its_whole_video_checkpoint(job):
         assert find_resume_output(config, source, output, ()) == output
 
 
-@pytest.mark.parametrize("answer", ["yes", "no", None])
+@pytest.mark.parametrize("answer", ["yes", "no", None, EOFError])
 def test_cli_asks_before_replacing_progress(job, answer):
     from jasna.job_resume import run_with_resume_prompt
     from jasna.main import _ask_to_replace_progress
@@ -370,7 +370,8 @@ def test_cli_asks_before_replacing_progress(job, answer):
     checkpoint.prepare()
     error = ResumeMismatchError(checkpoint.root)
     run = MagicMock(side_effect=[error, "done"])
-    with patch("sys.stdin.isatty", return_value=answer is not None), patch("builtins.input", return_value=answer) as prompt:
+    reply = {"side_effect": answer} if answer is EOFError else {"return_value": answer}
+    with patch("sys.stdin.isatty", return_value=answer is not None), patch("builtins.input", **reply) as prompt:
         if answer == "yes":
             assert run_with_resume_prompt(run, _ask_to_replace_progress) == "done"
             assert run.call_count == 2

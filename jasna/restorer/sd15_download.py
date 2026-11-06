@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
 from jasna.engine_paths import SD15_CKPT_ENC_PATH, SD15_CKPT_PATH, SD15_HF_REPO
+from jasna.os_utils import confirm_in_terminal
 
 logger = logging.getLogger(__name__)
 
@@ -130,16 +132,12 @@ def ensure_sd15_bundle(model_dir: Path, repo_id: str = SD15_HF_REPO) -> None:
     if bundle_present(model_dir):
         return
 
-    prompt = (
-        f"SD15 model not found at {model_dir}.\n"
-        f"Download it (~6.9 GB) from https://huggingface.co/{repo_id} ? [y/N]: "
-    )
-    answer = input(prompt).strip().lower()
-    if answer not in ("y", "yes"):
-        raise FileNotFoundError(
-            f"SD15 model bundle missing at {model_dir} and download declined. "
-            f"Get it from https://huggingface.co/{repo_id}."
-        )
+    missing = f"SD15 model not found at {model_dir}."
+    answer = confirm_in_terminal(f"{missing}\nDownload it (~6.9 GB) from https://huggingface.co/{repo_id} ? [y/N]: ")
+    if answer is None:
+        sys.exit(f"Error: {missing} Run jasna in a terminal to download it (~6.9 GB).")
+    if not answer:
+        sys.exit(f"Error: {missing} Get it from https://huggingface.co/{repo_id}.")
 
     model_dir.mkdir(parents=True, exist_ok=True)
     download_sd15_bundle(model_dir, repo_id)
