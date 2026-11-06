@@ -118,6 +118,45 @@ def test_copy_span_keeps_frames_past_the_recorded_video_duration(tmp_path: Path)
         assert np.array_equal(frame, source_frames[24 + frame_index])
 
 
+@pytest.mark.parametrize(
+    ("codec", "encoder", "options"),
+    [
+        ("h264", "libx264", ["-g", "12", "-keyint_min", "12", "-sc_threshold", "0"]),
+        ("av1", "libsvtav1", ["-preset", "10", "-g", "12", "-svtav1-params", "scd=0"]),
+    ],
+)
+def test_copy_span_of_video_starting_after_audio_holds_only_its_frames(
+    tmp_path: Path, codec: str, encoder: str, options: list[str]
+) -> None:
+    # MKV keeps the audio priming delay by starting the video after the audio.
+    source = tmp_path / f"late-video-{codec}.mkv"
+    _ffmpeg(
+        "-itsoffset", "0.25",
+        "-f", "lavfi", "-i", "testsrc2=size=160x96:rate=12:duration=3",
+        "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000:duration=3",
+        "-c:v", encoder,
+        "-pix_fmt", "yuv420p",
+        *options,
+        "-c:a", "libopus",
+        str(source),
+    )
+    with av.open(str(source)) as container:
+        assert container.streams.video[0].start_time * container.streams.video[0].time_base == pytest.approx(0.25)
+        source_frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
+    metadata = get_video_meta_data(str(source))
+    index = probe_keyframes(source, metadata)
+    assert len(index.pts) == 3
+
+    for first_frame, (start, end) in ((0, (index.start_pts, index.pts[1])), (12, (index.pts[1], index.pts[2]))):
+        copied = tmp_path / f"from-{first_frame}.nut"
+        create_copy_fragment(source, SpliceSpan("copy", start, end), index, copied, codec=codec)
+        with av.open(str(copied)) as container:
+            copied_frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
+        assert len(copied_frames) == 12
+        for frame_index, frame in enumerate(copied_frames):
+            assert np.array_equal(frame, source_frames[first_frame + frame_index])
+
+
 def test_h264_probe_resolves_source_compatible_smart_settings(tmp_path: Path) -> None:
     source = tmp_path / "source-h264-main.mp4"
     _ffmpeg(
