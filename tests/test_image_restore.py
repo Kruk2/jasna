@@ -57,9 +57,11 @@ class TestVariantOutputPaths:
 
 
 class TestClampStrength:
-    def test_caps_at_07(self):
-        assert clamp_strength(0.9) == pytest.approx(0.7)
+    def test_caps_at_07_and_says_so(self, caplog):
         assert clamp_strength(0.6) == pytest.approx(0.6)
+        assert caplog.records == []
+        assert clamp_strength(0.9) == pytest.approx(0.7)
+        assert "0.9 is above the maximum; using 0.7" in caplog.text
 
     def test_rejects_non_positive(self):
         with pytest.raises(ValueError):
