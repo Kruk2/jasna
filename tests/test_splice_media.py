@@ -580,3 +580,40 @@ def test_restored_fragment_with_long_multibyte_title_splices_and_keeps_title(tmp
 
     with av.open(str(output)) as container:
         assert container.metadata["title"] == title
+
+
+def _packet_count(path: Path) -> int:
+    with av.open(str(path)) as container:
+        return sum(1 for packet in container.demux(container.streams.video[0]) if packet.size)
+
+
+def test_concatenation_keeps_a_fragment_of_a_few_tiny_frames(tmp_path: Path) -> None:
+    """#733: a two-frame black tail made a TS too small for ffmpeg to recognize, and concat skipped it."""
+    sources = {
+        "picture": "testsrc2=size=160x96:rate=12:duration=1",
+        "black-tail": "color=c=black:size=160x96:rate=12:duration=0.1",
+    }
+    fragments = []
+    expected = 0
+    for name, graph in sources.items():
+        raw = tmp_path / f"{name}.mp4"
+        _ffmpeg("-f", "lavfi", "-i", graph, "-c:v", "libx264", "-pix_fmt", "yuv420p", str(raw))
+        expected += _packet_count(raw)
+        normalized = tmp_path / f"{name}.ts"
+        normalize_fragment(raw, normalized, codec="h264")
+        fragments.append((normalized, float(get_video_meta_data(str(raw)).duration)))
+    assembled = tmp_path / "assembled.ts"
+
+    concatenate_fragments(fragments, manifest=tmp_path / "parts.ffconcat", destination=assembled, codec="h264")
+
+    assert _packet_count(assembled) == expected
+
+
+def test_concatenation_fails_when_a_fragment_cannot_be_read(tmp_path: Path) -> None:
+    unreadable = tmp_path / "broken.ts"
+    unreadable.write_bytes(b"not a video")
+
+    with pytest.raises(RuntimeError, match="Impossible to open"):
+        concatenate_fragments(
+            [(unreadable, 1.0)], manifest=tmp_path / "parts.ffconcat", destination=tmp_path / "out.ts", codec="h264"
+        )
