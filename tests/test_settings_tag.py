@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from factories import session_config
 from jasna.segments import SegmentRange, SegmentRestoration
-from jasna.settings_tag import job_settings, settings_comment
+from jasna.settings_tag import job_settings, settings_comment, with_source_comment
 from jasna.vr180 import VrModeResolution
 
 FLAT = VrModeResolution("auto", "off", "", 16 / 9, "raw")
@@ -133,3 +135,19 @@ def test_output_records_frame_generation():
     )
 
     assert settings["output"]["frame_generation"] == "2x"
+
+
+@pytest.mark.parametrize(
+    ("source_tags", "expected"),
+    [
+        ({}, None),
+        ({"COMMENT": ""}, None),
+        ({"title": "t", "Comment": "my notes"}, "my notes"),
+        ({"comment": "x" * 40_000}, "x" * 16_000),
+    ],
+    ids=["none", "empty", "kept", "cut"],
+)
+def test_the_source_comment_stays_inside_the_settings_tag(source_tags, expected):
+    comment = with_source_comment('{"jasna":"test"}', source_tags)
+    assert json.loads(comment).get("source_comment") == expected
+    assert next(iter(json.loads(comment))) == "jasna"

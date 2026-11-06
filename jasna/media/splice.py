@@ -23,6 +23,7 @@ from jasna.media.container_utils import (
 )
 from jasna.os_utils import find_executable, resolve_executable, subprocess_no_window_kwargs
 from jasna.segments import SegmentRange, normalize_segments
+from jasna.settings_tag import with_source_comment
 
 log = logging.getLogger(__name__)
 
@@ -709,7 +710,7 @@ def mux_final_output(
     comment: str,
 ) -> None:
     """Mux the assembled ``video`` with every stream, tag and chapter of ``source``; ``comment``
-    replaces the source's comment tag."""
+    replaces the source's comment tag, which it keeps inside (``settings_tag.with_source_comment``)."""
     temporary = destination.with_name(f".{destination.stem}.smart-render{destination.suffix}")
     output_format = {
         ".mkv": "matroska",
@@ -725,6 +726,8 @@ def mux_final_output(
         "-map", "0:v:0",
     ]
     with av.open(str(source), metadata_errors="replace") as container:
+        comment = with_source_comment(comment, container.metadata)
+        log.info("%s settings: %s", destination.name, comment)
         primary_video_index = container.streams.video[0].index
         copied_streams = []
         transcoded_subtitles = {}

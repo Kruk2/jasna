@@ -96,7 +96,7 @@ Jasna 会把所用的设置写入输出文件的 **Comment** 标签：模型、L
 ffprobe -v error -show_entries format_tags=comment out.mkv
 ```
 
-源视频原有的注释会被替换。
+源视频原有的注释会保留在这一行的 `source_comment` 中。
 
 ## 队列完成后
 
