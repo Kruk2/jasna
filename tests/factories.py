@@ -543,3 +543,25 @@ class FakeFrameGeneration:
 
     def close(self):
         self.closed = True
+
+
+def write_sparse_file(path: Path, size: int) -> None:
+    """A file of ``size`` zero bytes that takes no disk space. Windows truncate() writes the zeros,
+    so the size comes from one byte written at the end of a sparse file."""
+    with path.open("wb") as stream:
+        if sys.platform == "win32":
+            _mark_sparse(stream)
+        stream.seek(size - 1)
+        stream.write(bytes(1))
+
+
+def _mark_sparse(stream) -> None:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    fsctl_set_sparse = 0x000900C4
+    returned = wintypes.DWORD()
+    if not ctypes.windll.kernel32.DeviceIoControl(wintypes.HANDLE(msvcrt.get_osfhandle(stream.fileno())), fsctl_set_sparse,
+                                                  None, 0, None, 0, ctypes.byref(returned), None):
+        raise ctypes.WinError()

@@ -6,7 +6,7 @@ from tkinter import messagebox
 
 import pytest
 
-from factories import ltx_models
+from factories import ltx_models, write_sparse_file
 from jasna import os_utils
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui import ltx_models as ltx_models_module
@@ -156,8 +156,7 @@ def test_ensure_warns_before_replacing_models_from_older_release(
     monkeypatch.setattr(ltx_models_module, "t", lambda key, **values: EN[key].format(**values))
     names = bundle_names("distilled2", fast=fast)
     for index, name in enumerate(names):
-        with (tmp_path / (name + ".enc")).open("wb") as stream:
-            stream.truncate(old_size if index == 0 else model_files.LTX_DOWNLOADS[name].size_bytes)
+        write_sparse_file(tmp_path / (name + ".enc"), old_size if index == 0 else model_files.LTX_DOWNLOADS[name].size_bytes)
     asked = _answer(monkeypatch, yes=False)
     downloads = _fake_download(monkeypatch, error=None)
     models = LtxModels(tmp_path, _NowCalls(), lambda: None)
@@ -282,8 +281,7 @@ def test_start_downloads_only_the_fast_model_then_starts(
         directory.mkdir(parents=True, exist_ok=True)
         for file in files:
             downloaded.append(file.name)
-            with (directory / file.name).open("wb") as stream:
-                stream.truncate(file.size_bytes)
+            write_sparse_file(directory / file.name, file.size_bytes)
 
     monkeypatch.setattr(model_files, "download_files", download_files)
     monkeypatch.setattr(ltx_models_module, "start_download", lambda download, _on_percent, on_done: (download(None), on_done(None)))
