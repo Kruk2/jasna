@@ -66,6 +66,10 @@ class Colors:
     LOG_ERROR = "#fb7185"   # Rose-400
     LOG_DEBUG = "#94a3b8"   # Slate-400
     
+    # Ko-fi branding
+    KOFI_RED = "#FF5E5B"
+    KOFI_TEXT = "#FFFFFF"
+
     # Buy Me a Coffee branding
     BMC_YELLOW = "#FFDD00"        # Official Brand Color
     BMC_TEXT = "#0f172a"          # Slate-900 (dark text on yellow)

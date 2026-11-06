@@ -1,4 +1,4 @@
-"""The support entry points (Buy Me a Coffee, Unifans, and Xianyu for Chinese) point at the right pages."""
+"""The support entry points (Ko-fi, Unifans, Buy Me a Coffee, and Xianyu for Chinese) point at the right pages."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from jasna.gui.components import (
     BuyMeCoffeeButton,
+    KofiButton,
     UnifansButton,
     XianyuButton,
     XianyuQrDialog,
@@ -47,7 +48,8 @@ def test_official_seller_text_names_xianyu_only_in_chinese_and_english():
 
 def test_support_buttons_do_not_depend_on_emoji_fonts(tk_root):
     labels = {
-        BuyMeCoffeeButton(tk_root, width=100, height=28).cget("text"),
+        KofiButton(tk_root, width=100, height=28).cget("text"),
+        BuyMeCoffeeButton(tk_root, width=130, height=28).cget("text"),
         UnifansButton(tk_root, width=110, height=28).cget("text"),
         XianyuButton(tk_root, width=80, height=28).cget("text"),
     }
