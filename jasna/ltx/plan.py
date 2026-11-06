@@ -31,7 +31,6 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
-import cv2
 import numpy as np
 
 from jasna.ltx.camera import (
@@ -93,6 +92,7 @@ class RegionGroup:
     @functools.cached_property
     def largest_area(self) -> float:
         """Area of the largest polygon, at most the area of the outline."""
+        import cv2  # the LTX worker imports this module and must not load OpenCV
         return max(abs(cv2.contourArea(np.asarray(polygon, dtype=np.float32))) for polygon in self.polygons)
 
 
@@ -267,6 +267,7 @@ class _Raster:
 
     def mask(self, polygons: Sequence[Polygon]) -> np.ndarray:
         """uint8 cells inside any of ``polygons`` (one fill each, so overlaps stay filled)."""
+        import cv2
         mask = np.zeros(self.shape, dtype=np.uint8)
         origin = np.array((self.x0, self.y0), dtype=np.float64)
         for polygon in polygons:
@@ -314,6 +315,7 @@ def _cut(group: RegionGroup, raster: _Raster, outlines: Sequence[np.ndarray]) ->
     """The group's outlines cut so each pixel goes to the nearest of ``outlines`` (signed
     distance on the coarse grid); a cut piece under ``SCRAP_SHARE`` of its outline stays with
     that outline's largest part. One part per outline, None when it gets no pixel."""
+    import cv2
     nearest_cell = np.argmin(
         [cv2.distanceTransform(1 - outline, cv2.DIST_L2, 3) - cv2.distanceTransform(outline, cv2.DIST_L2, 3) for outline in outlines],
         axis=0,
