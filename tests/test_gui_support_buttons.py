@@ -1,11 +1,10 @@
-"""The support entry points (Ko-fi, Unifans, Buy Me a Coffee, and Xianyu for Chinese) point at the right pages."""
+"""The support entry points (Ko-fi, Unifans, and Xianyu for Chinese) point at the right pages."""
 
 from __future__ import annotations
 
 
 
 from jasna.gui.components import (
-    BuyMeCoffeeButton,
     KofiButton,
     UnifansButton,
     XianyuButton,
@@ -49,7 +48,6 @@ def test_official_seller_text_names_xianyu_only_in_chinese_and_english():
 def test_support_buttons_do_not_depend_on_emoji_fonts(tk_root):
     labels = {
         KofiButton(tk_root, width=100, height=28).cget("text"),
-        BuyMeCoffeeButton(tk_root, width=130, height=28).cget("text"),
         UnifansButton(tk_root, width=110, height=28).cget("text"),
         XianyuButton(tk_root, width=80, height=28).cget("text"),
     }
@@ -68,7 +66,7 @@ def test_support_button_runs_its_command_on_a_mouse_click(tk_root, show_window):
 
 
 def test_support_button_hover_scales_from_its_own_size(tk_root):
-    button = BuyMeCoffeeButton(tk_root, width=140, height=48)
+    button = KofiButton(tk_root, width=140, height=48)
     button._grow_on_hover()
     assert (button.cget("width"), button.cget("height")) == (147, 50)
     button._restore_size()

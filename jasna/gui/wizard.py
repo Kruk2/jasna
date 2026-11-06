@@ -13,7 +13,7 @@ from jasna import os_utils
 from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import get_locale, t
-from jasna.gui.components import BuyMeCoffeeButton, KofiButton, UnifansButton, XianyuButton, grab_modal, shows_xianyu_seller
+from jasna.gui.components import KofiButton, UnifansButton, XianyuButton, grab_modal, shows_xianyu_seller
 from jasna.gui.system_checks import WARNING_ONLY_CHECKS, evaluate_check_results, run_system_checks
 
 logger = logging.getLogger(__name__)
@@ -196,10 +196,9 @@ class FirstRunWizard(ctk.CTkToplevel):
         )
         self._continue_btn.pack(side="left", padx=(0, 12))
         
-        # Support the project — Ko-fi, Unifans, Buy Me a Coffee or (Chinese UI) Xianyu
+        # Support the project — Ko-fi, Unifans or (Chinese UI) Xianyu
         KofiButton(btn_container, width=140, height=48).pack(side="left")
-        UnifansButton(btn_container, width=120, height=48).pack(side="left", padx=(12, 0))
-        BuyMeCoffeeButton(btn_container, width=120, height=48).pack(side="left", padx=(12, 0))
+        UnifansButton(btn_container, width=150, height=48).pack(side="left", padx=(12, 0))
         if shows_xianyu_seller(get_locale().current_language):
             XianyuButton(btn_container, width=150, height=48).pack(side="left", padx=(12, 0))
         

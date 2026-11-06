@@ -143,8 +143,7 @@ NVIDIA RTX Video Frame Generation 会在每两帧之间生成一帧。音频和�
 - 有 Jasna 0.10 的邮箱和密钥？旧密钥已不能使用，请向购买的地方申请新的许可证码。
 
 许可证码只能从 [Ko-fi](https://ko-fi.com/kruk2)、
-[Unifans](https://app.unifans.io/c/kruk2)、
-[Buy Me a Coffee](https://buymeacoffee.com/kruk2)，以及面向中国的
+[Unifans](https://app.unifans.io/c/kruk2)，以及面向中国的
 [闲鱼 (Xianyu)](../../README.zh.md#在闲鱼购买) 获得。支持档位：见
 [支持本项目](../../README.zh.md#支持本项目)。
 界面顶部的 **闲鱼** 按钮会显示卖家的闲鱼二维码，用闲鱼 App 扫描即可打开卖家主页购买。

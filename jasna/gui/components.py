@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 
 KOFI_URL = "https://ko-fi.com/kruk2"
-BMC_URL = "https://buymeacoffee.com/Kruk2"
 UNIFANS_URL = "https://app.unifans.io/c/kruk2"
 
 
@@ -180,14 +179,6 @@ class KofiButton(_SupportButton):
         super().__init__(
             master, text=t("kofi_support"), command=lambda: webbrowser.open(KOFI_URL),
             fg_color=Colors.KOFI_RED, text_color=Colors.KOFI_TEXT, width=width, height=height,
-        )
-
-
-class BuyMeCoffeeButton(_SupportButton):
-    def __init__(self, master, width: int, height: int):
-        super().__init__(
-            master, text=t("bmc_support"), command=lambda: webbrowser.open(BMC_URL),
-            fg_color=Colors.BMC_YELLOW, text_color=Colors.BMC_TEXT, width=width, height=height,
         )
 
 

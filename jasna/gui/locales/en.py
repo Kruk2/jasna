@@ -454,7 +454,7 @@ EN = {
         "ctx_copy": "Copy",
         "ctx_paste": "Paste",
         "ctx_select_all": "Select all",
-        "license_official_sellers": "License codes come only from Ko-fi, Unifans (kruk2) and Buy Me a Coffee, and in China from 闲鱼 (Xianyu). Codes from anywhere else are fake.",
+        "license_official_sellers": "License codes come only from Ko-fi and Unifans (kruk2), and in China from 闲鱼 (Xianyu). Codes from anywhere else are fake.",
         "official_sellers_notice": "Jasna is free on GitHub. License codes come only through the buttons below. Anyone else selling Jasna, codes or modified files is a scam, and their files can run hidden code on your PC.",
         "license_chip_inactive": "Activate Jasna",
         "license_chip_active": "Active",
@@ -546,9 +546,8 @@ EN = {
         "toast_preset_deleted": "Preset '{name}' deleted",
         "toast_settings_reset": "Settings reset",
         "toast_no_files": "No files in queue",
-        # Support buttons (Ko-fi + Unifans + Buy Me a Coffee)
-        "kofi_support": "Support",
-        "bmc_support": "Coffee",
+        # Support buttons, named by site (Ko-fi + Unifans)
+        "kofi_support": "Ko-fi",
         "unifans_support": "Unifans",
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "Buy on Xianyu",

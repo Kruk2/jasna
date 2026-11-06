@@ -185,7 +185,6 @@ Good to know:
 
 License codes come only from
 [Ko-fi](https://ko-fi.com/kruk2),
-[Unifans](https://app.unifans.io/c/kruk2),
-[Buy Me a Coffee](https://buymeacoffee.com/kruk2) and, for China, the Xianyu seller in the
+[Unifans](https://app.unifans.io/c/kruk2) and, for China, the Xianyu seller in the
 [Chinese README](../../README.zh.md#在闲鱼购买). Support tiers: see
 [Supporting the project](../../README.md#supporting-the-project).

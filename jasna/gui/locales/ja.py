@@ -454,7 +454,7 @@ JA = {
         "ctx_copy": "コピー",
         "ctx_paste": "貼り付け",
         "ctx_select_all": "すべて選択",
-        "license_official_sellers": "ライセンスコードは Ko-fi、Unifans (kruk2)、Buy Me a Coffee でのみ入手できます。それ以外のコードは偽物です。",
+        "license_official_sellers": "ライセンスコードは Ko-fi と Unifans (kruk2) でのみ入手できます。それ以外のコードは偽物です。",
         "official_sellers_notice": "Jasna は GitHub で無料です。ライセンスコードは下のボタンからのみ入手できます。それ以外で Jasna、コード、改変ファイルを販売している人は詐欺です。そのファイルはPC上で隠れたコードを実行する可能性があります。",
         "license_chip_inactive": "Jasna を有効化",
         "license_chip_active": "有効",
@@ -546,9 +546,8 @@ JA = {
         "toast_preset_deleted": "プリセット '{name}' を削除しました",
         "toast_settings_reset": "設定をリセットしました",
         "toast_no_files": "キューにファイルがありません",
-        # Support buttons (Ko-fi + Unifans + Buy Me a Coffee)
-        "kofi_support": "応援する",
-        "bmc_support": "Coffee",
+        # Support buttons, named by site (Ko-fi + Unifans)
+        "kofi_support": "Ko-fi",
         "unifans_support": "Unifans",
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "闲鱼で購入",

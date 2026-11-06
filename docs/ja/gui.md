@@ -183,7 +183,6 @@ AMD では、AMD ドライバーと、動画の読み書きに必要な AMD の 
   購入先から新しいライセンスコードをもらってください。
 
 ライセンスコードは
-[Ko-fi](https://ko-fi.com/kruk2)、
-[Unifans](https://app.unifans.io/c/kruk2)、
-[Buy Me a Coffee](https://buymeacoffee.com/kruk2) でのみ入手できます。支援の内容は
+[Ko-fi](https://ko-fi.com/kruk2) と
+[Unifans](https://app.unifans.io/c/kruk2) でのみ入手できます。支援の内容は
 [プロジェクトを支援する](../../README.ja.md#プロジェクトを支援する)をご覧ください。
