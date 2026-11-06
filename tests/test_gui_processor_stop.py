@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from jasna.gui.models import AppSettings, JobItem, JobStatus
+from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, AppSettings, JobItem, JobStatus
 from jasna.gui.processor import Processor, ProgressUpdate
 from factories import no_resume_conflict
 
@@ -29,6 +29,12 @@ def _processor_with_job(tmp_path, run_pipeline):
     processor._output_folder = str(tmp_path)
     processor._output_pattern = "{original}_restored.mp4"
     return processor, job, updates
+
+
+def _run_queue(processor, job, tmp_path, settings, output_pattern=DEFAULT_OUTPUT_PATTERN):
+    processor.start([job], settings, str(tmp_path), output_pattern)
+    processor.join()
+    assert not processor.is_running()
 
 
 def test_stopped_job_leaves_processing_state(tmp_path):
@@ -352,16 +358,16 @@ def test_a_range_job_that_reencodes_the_whole_video_offers_stop_not_pause(tmp_pa
     monkeypatch.setattr(
         processor_module, "build_job_pipeline", MagicMock(return_value=MagicMock(cancel_requested=False))
     )
-    processor, job, updates = _processor_with_job(tmp_path, None)
-    del processor._run_pipeline
     monkeypatch.setattr(
         "jasna.gui.processor.build_video_session", lambda *_a, **_k: MagicMock(device=torch.device("cpu"))
     )
-    processor._prepare_job_detector = MagicMock()
+    monkeypatch.setattr("jasna.engine_compiler.ensure_engines_compiled", lambda *_a, **_k: None)
+    updates: list[ProgressUpdate] = []
+    processor = Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append)
+    job = JobItem(path=tmp_path / "clip.mp4", segments=(SegmentRange(2.5, 3.0),))
     job.path.touch()
-    job.segments = (SegmentRange(2.5, 3.0),)
 
-    processor._run()
+    _run_queue(processor, job, tmp_path, AppSettings())
 
     assert job.status is JobStatus.COMPLETED
     assert [update.resumable for update in updates if update.resumable is not None] == [True, False]
@@ -380,11 +386,10 @@ def test_rerun_replaces_the_output_its_stopped_run_left(tmp_path):
 
     processor, job, _updates = _processor_with_job(tmp_path, run_pipeline)
     job.path.touch()
-    processor._settings = AppSettings(file_conflict="skip")
 
-    processor._run()
+    _run_queue(processor, job, tmp_path, AppSettings(file_conflict="skip"))
     assert job.status is JobStatus.PENDING
-    processor._run()
+    _run_queue(processor, job, tmp_path, AppSettings(file_conflict="skip"))
 
     assert outputs == [tmp_path / "clip_restored.mp4"] * 2
     assert job.status is JobStatus.COMPLETED
@@ -394,10 +399,8 @@ def test_overwrite_never_writes_over_the_input(tmp_path):
     outputs: list[Path] = []
     processor, job, _updates = _processor_with_job(tmp_path, lambda _id, _input, output, **_kw: outputs.append(output))
     job.path.touch()
-    processor._output_pattern = "{original}.mp4"
-    processor._settings = AppSettings(file_conflict="overwrite")
 
-    processor._run()
+    _run_queue(processor, job, tmp_path, AppSettings(file_conflict="overwrite"), output_pattern="{original}.mp4")
 
     assert outputs == [tmp_path / "clip (1).mp4"]
     assert job.status is JobStatus.COMPLETED
