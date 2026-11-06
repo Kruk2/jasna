@@ -61,7 +61,7 @@ $env:TEMP = 'Z:\Temp'
 | `--ltx-vae-decoder` | `auto` | LTX：LTX の結果を動画に戻す方法。`full`、`half`、`max`（上と同じ）。`auto`: `ltx-basic` は `max`、それ以外は `full`。アプリの **LTX デコーダー**と同じです。 |
 | `--ltx-seed` | `20260923` | LTX：シードを変えると結果が少し変わります。同じシードなら同じ結果になります。 |
 | `--ltx-trial` / `--no-ltx-trial` | オフ | LTX：モデルやライセンスなしで速度を試します。動画は復元されません。 |
-| `--ltx-auto-split` | — | LTX：大きなモザイク（動画の高さのこの割合以上、例 `12`）を LTX、小さなものを BasicVSR++ で復元します。フォルダーにも使えます。`--segments` や `--fmp4` とは併用できません。[区間](segments.md#cli---ltx-auto-split)を参照。 |
+| `--ltx-auto-split` | — | LTX：大きなモザイク（動画の高さのこの割合以上、例 `12`）を LTX、小さなものを BasicVSR++ で復元します。フォルダーにも使えます。`--segments`、`--fmp4`、`--frame-generation` とは併用できません。[区間](segments.md#cli---ltx-auto-split)を参照。 |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | オン | BasicVSR++ をお使いの GPU 向けに準備します。約 3 倍速く、VRAM はほとんど増えません。初回は 15～60 分かかります。NVIDIA のみ。詳しくは[調整ガイド](tuning.md)。 |
 | `--max-clip-size` | `90` | 一度に復元するフレーム数。大きいほど安定して速くなりますが、VRAM を多く使います。収まる最大の値を使ってください。 |
 | `--temporal-overlap` | `8` | 隣り合うクリップが共有するフレーム数で、つなぎ目のちらつきを隠します。`8`～`20` が目安で、`--max-clip-size` の半分未満にしてください。 |
@@ -128,12 +128,12 @@ Ctrl+C、エラー、アプリ終了後は、同じコマンドを実行する�
 | `--codec` | `hevc` | オフライン出力用の `hevc`、`h264`、`av1`。HLS ストリーミングは常に H.264 を使います。 |
 | `--cq` | GPU/コーデック別 | 動画の品質。低いほど高品質でファイルは大きくなります。NVIDIA のデフォルト: H.264 25、HEVC 28、AV1 35。AMD: H.264 24、HEVC 25、AV1 16。 |
 | `--encoder-settings` | — | 高度な設定を JSON オブジェクトまたはカンマ区切りの `key=value` で指定。例: `{"rc-lookahead":32}` または `rc-lookahead=32,bf=4`。下記参照。 |
-| `--lut` | — | 動画の書き出し時に適用される `.cube` カラー LUT（1D または 3D）。GUI のエンコードセクションでも設定できます。 |
+| `--lut` | — | 動画の書き出し時に適用される `.cube` カラー LUT（1D または 3D）。アプリでは**出力**タブの**カラー LUT (.cube)** でも設定できます。 |
 | `--sharpen` | `0` | エンコード前に映像をシャープにします。`0`（無効）〜`1`（最強）。ffmpeg の `cas` フィルターと同じ結果になるため、再エンコードは不要です。詳しくは[高度な処理](advanced_processing.md)。 |
 | `--retarget-high-fps` | オフ | 1 フレームおきに残して 60 → 30 FPS（および 59.94 → 29.97）に変換。他のレートは変わらず、音声もずれません。`--stream` や `--segments` とは併用できません。 |
 | `--frame-generation` | `none` | `2x` で NVIDIA RTX Video Frame Generation によりフレームレートを 2 倍にし、動きを滑らかにします。RTX 40 シリーズ以降の GPU が必要です。音声と長さは変わりません。`--stream`、`--segments`、`--ltx-auto-split` とは併用できません。 |
 | `--fmp4` | オフ | 作成中の `.mp4` / `.mov` 出力をそのまま再生できます。中断してもファイルは再生可能なままです。`--stream`、`--segments`、`--ltx-auto-split` とは併用できません。詳しくは[高度な処理](advanced_processing.md)。 |
-| `--segments` | — | 1 本の動画のこの区間だけを復元します。秒または `mm:ss` で指定。例: `10-25,01:10-01:30.5`。`--stream`、`--retarget-high-fps`、`--fmp4`、`--ltx-auto-split` とは併用できず、画像やフォルダーの入力にも使えません。詳しくは[区間](segments.md)。 |
+| `--segments` | — | 1 本の動画のこの区間だけを復元します。秒または `mm:ss` で指定。例: `10-25,01:10-01:30.5`。`--stream`、`--retarget-high-fps`、`--fmp4`、`--ltx-auto-split`、`--frame-generation` とは併用できず、画像やフォルダーの入力にも使えません。詳しくは[区間](segments.md)。 |
 | `--working-directory` | 出力ディレクトリ | 一時ファイルと保存済み進行状況の書き込み先。詳しくは[区間](segments.md)。 |
 
 ### コーデックの選び方

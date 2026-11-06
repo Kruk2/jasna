@@ -41,7 +41,7 @@ jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 这些示例：1、2、3、4、5、6、7、8
 （想看更多示例，可以浏览 SLS Discord 的新频道和
 旧频道（已归档）），并运行**试用模式（速度测试）**，看看你的电脑能不能运行它、需要多长时间。
-在**修复模型**部分选择它，或使用：
+在**模型**标签页选择它，或使用：
 
 ```bash
 jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
@@ -139,7 +139,7 @@ Jasna 0.11.3 或更早版本请使用 `main` 分支。
 - **LTX 编码器**和 **LTX 解码器**（**专家**视图）：**完整**最清晰也最慢，**半量**更快，**极速**最快，
   画面稍柔和。**自动**（默认）在基础画质下用半量编码器和极速解码器，其他画质用完整。
   如果基础画质看起来太柔和，两个都选完整。还没下载的选项会在点击开始时下载。
-  CLI：见[高级环境变量](tuning.md#高级环境变量)。
+  CLI：`--ltx-vae-encoder`、`--ltx-vae-decoder`。
 
 要预览 LTX，请打开[区间编辑器](segments.md)，选择一个区间，选 LTX，再打开
 **修复预览**。视频播放器总是使用 BasicVSR++。

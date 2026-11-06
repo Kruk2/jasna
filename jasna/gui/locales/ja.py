@@ -109,7 +109,7 @@ JA = {
         "segments_restore_failed": "復元プレビューに失敗しました：{message}",
         "segments_vr_projection": "VR投影",
         "segments_vr_projection_resolved": "VR投影（自動：{projection}）",
-        "segments_vr_projection_hint": "復元プレビューと最終出力に使用します。自動はこの動画に合う投影を選びます。別の投影を選ぶとそちらを使います。VR180 のサイドバイサイド動画でのみ使用できます。",
+        "segments_vr_projection_hint": "復元プレビューと最終出力に使用します。自動はこの動画に合う投影を選びます。別の投影を選ぶとそちらを使います。VR180 動画でのみ使用できます。",
         "segments_vr_projection_auto": "自動",
         "segments_vr_projection_raw": "元のまま",
         "segments_vr_projection_fisheye": "魚眼",
