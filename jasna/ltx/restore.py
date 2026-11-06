@@ -217,7 +217,9 @@ class Progress:
     def learned_rates(self) -> dict[str, float]:
         return speed.learned_rates(self.timings, self._work, self._rates)
 
-    def summary(self, profile_key: str, peak_vram_bytes: int, blocks: tuple[int, int] | None) -> list[str]:
+    def summary(
+        self, profile_key: str, peak_vram_bytes: tuple[int, int | None], blocks: tuple[int, int] | None
+    ) -> list[str]:
         return speed.run_summary(profile_key, self.timings, self._work, peak_vram_bytes, blocks)
 
     def bar(

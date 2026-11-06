@@ -181,16 +181,25 @@ def _medians(samples: dict[int, list[float]], unit: str) -> list[str]:
 
 
 def run_summary(
-    profile_key: str, timings: dict[str, PassTiming], work: Work, peak_vram_bytes: int, blocks: tuple[int, int] | None
+    profile_key: str,
+    timings: dict[str, PassTiming],
+    work: Work,
+    peak_vram_bytes: tuple[int, int | None],
+    blocks: tuple[int, int] | None,
 ) -> list[str]:
     """Log lines for a finished run: totals and the speed profile key its rates belong to,
-    then per pass its wall time and warm rates (medians per canvas); ``blocks`` is
-    ``(resident, total)`` transformer blocks when denoise ran."""
+    then per pass its wall time and warm rates (medians per canvas); ``peak_vram_bytes`` is
+    this process's and the LTX worker's peak, ``blocks`` is ``(resident, total)`` transformer
+    blocks when denoise ran."""
     windows = ", ".join(f"{count} at {canvas}" for canvas, count in sorted(work.windows.items())) or "0"
     window_steps = timings["denoise"].units if "denoise" in timings else 0
+    parent_peak, worker_peak = peak_vram_bytes
+    peak = f"peak VRAM {parent_peak / 2**20:.1f} MiB"
+    if worker_peak is not None:
+        peak += f", LTX worker {worker_peak / 2**20:.1f} MiB"
     lines = [
         f"[timing] LTX: {sum(t.seconds for t in timings.values()):.1f}s, {work.frames} frames, "
-        f"windows {windows}, {window_steps} window-steps, peak VRAM {peak_vram_bytes / 2**20:.1f} MiB",
+        f"windows {windows}, {window_steps} window-steps, {peak}",
         f"[timing] LTX profile: {profile_key}",
     ]
     for stage in SUMMARY_PASSES:

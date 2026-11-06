@@ -194,12 +194,14 @@ class ModelRuntime:
                 self._transformer_source.close()
                 self._transformer_source = None
 
-    def peak_vram_bytes(self) -> int:
+    def peak_vram_bytes(self) -> tuple[int, int | None]:
+        """This process's peak and the worker's (``None`` without one). They are kept apart:
+        the two peaks need not happen at the same time, so their sum overstates the use."""
         parent_peak = torch.cuda.max_memory_allocated(self.device)
         if self.protected and self._client is not None:
             stats, _ = self.request("stats", {}, [])
-            return parent_peak + stats["peak_vram_bytes"]
-        return parent_peak
+            return parent_peak, stats["peak_vram_bytes"]
+        return parent_peak, None
 
     def __enter__(self) -> ModelRuntime:
         return self
