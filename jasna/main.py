@@ -981,7 +981,7 @@ def _main() -> None:
         except ProtectionUnavailableError as exc:
             parser.exit(1, f"Activation error: {exc}\n")
         from jasna.protection import ProtectionError, lease
-        if sys.platform == "win32":
+        if sys.platform == "win32" and not args.online:
             print("Windows may ask for permission once. This is a one-time license check for offline use.")
         # Activation warnings always show, as they did before logging was configured; --log-level can add more.
         _configure_logging(min(getattr(logging, args.log_level.upper()), logging.WARNING))

@@ -391,7 +391,8 @@ class LicenseDialog(ctk.CTkToplevel):
 
     def _activate(self):
         self._set_busy(True, lock_inputs=True)
-        self._status.configure(text=t("license_offline_permission" if sys.platform == "win32" else "license_connecting"),
+        windows_offline = sys.platform == "win32" and self._try_offline.get()
+        self._status.configure(text=t("license_offline_permission" if windows_offline else "license_connecting"),
                                text_color=Colors.TEXT_PRIMARY)
         activation_worker.start_lease_activation(
             self._code.get().strip(),

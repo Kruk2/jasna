@@ -470,3 +470,33 @@ def test_cli_activation_status_reports_an_unreadable_license_store(monkeypatch, 
         main()
     assert exc.value.code == 1
     assert capsys.readouterr().err == "Could not read the activation: license store\n"
+
+
+@pytest.mark.parametrize(("flags", "warns"), [([], True), (["--online"], False)])
+def test_cli_windows_warns_about_the_permission_prompt_only_for_offline_activation(monkeypatch, lease_api, capsys,
+                                                                                  flags, warns):
+    from jasna import main
+    from jasna.protection import lease
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    lease_api.return_value = lease.Activated(["ltx-2.5-v2"], None)
+    monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", "JL1-code", *flags])
+    main.main()
+    assert ("Windows may ask for permission once" in capsys.readouterr().out) is warns
+
+
+@pytest.mark.parametrize(("mode", "status_key"), [(0, "license_offline_permission"), (1, "license_connecting")])
+def test_windows_dialog_warns_about_the_permission_prompt_only_for_offline_activation(
+        tk_root, controlled_activation_workers, monkeypatch, mode, status_key):
+    from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import t
+
+    pending = controlled_activation_workers
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
+    pending.info.pop()((False, None), None)
+    dialog._main_thread._run_pending()
+    monkeypatch.setattr(sys, "platform", "win32")
+    dialog._code.insert(0, "JL1-code")
+    dialog._mode_buttons[mode].invoke()
+    dialog._activate_button.invoke()
+    assert dialog._status.cget("text") == t(status_key)
