@@ -46,6 +46,8 @@ def clamp_strength(strength: float) -> float:
     s = float(strength)
     if s <= 0.0:
         raise ValueError("--sd15-strength must be > 0")
+    if s > SD15_MAX_STRENGTH:
+        logger.warning("SD 1.5 strength %g is above the maximum; using %g", s, SD15_MAX_STRENGTH)
     return min(s, SD15_MAX_STRENGTH)
 
 
