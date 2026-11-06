@@ -40,6 +40,10 @@ class TestBundlePresent:
         assert dl.bundle_present(tmp_path) is False
 
 
+def _closed_stdin(prompt):
+    raise EOFError
+
+
 class TestEnsureBundle:
     def test_noop_when_present(self, tmp_path: Path):
         _make_bundle(tmp_path)
@@ -48,13 +52,25 @@ class TestEnsureBundle:
             mock_dl.assert_not_called()
             mock_input.assert_not_called()
 
-    def test_declined_raises(self, tmp_path: Path):
-        with patch("builtins.input", return_value="n"), patch.object(dl, "download_sd15_bundle") as mock_dl:
-            with pytest.raises(FileNotFoundError):
+    @pytest.mark.parametrize(
+        ("isatty", "answer", "message"),
+        [
+            (True, lambda prompt: "n", "Get it from https://huggingface.co/"),
+            (False, lambda prompt: "y", "Run jasna in a terminal to download it"),
+            (True, _closed_stdin, "Run jasna in a terminal to download it"),
+        ],
+        ids=["declined", "no-terminal", "nul-stdin"],
+    )
+    def test_exits_with_a_message_without_downloading(self, tmp_path: Path, monkeypatch, isatty, answer, message):
+        monkeypatch.setattr("sys.stdin.isatty", lambda: isatty)
+        monkeypatch.setattr("builtins.input", answer)
+        with patch.object(dl, "download_sd15_bundle") as mock_dl:
+            with pytest.raises(SystemExit, match=f"^Error: SD15 model not found .*{message}"):
                 dl.ensure_sd15_bundle(tmp_path / "missing")
             mock_dl.assert_not_called()
 
-    def test_accepted_downloads(self, tmp_path: Path):
+    def test_accepted_downloads(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         target = tmp_path / "bundle"
 
         def fake_download(model_dir, repo_id=dl.SD15_HF_REPO):

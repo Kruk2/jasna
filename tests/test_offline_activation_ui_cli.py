@@ -406,7 +406,7 @@ def test_cli_activation_status_without_activation_fails(monkeypatch, lease_api, 
     assert capsys.readouterr().err == t("license_problem_no_activation") + "\n"
 
 
-def test_cli_activation_status_reports_an_unreachable_service(monkeypatch, lease_api, capsys):
+def test_cli_activation_status_reports_an_unreachable_service_and_succeeds(monkeypatch, lease_api, capsys):
     from jasna.gui.locales import t
     from jasna.main import main
     from jasna.protection import lease, license_store, offline
@@ -422,9 +422,7 @@ def test_cli_activation_status_reports_an_unreachable_service(monkeypatch, lease
 
     monkeypatch.setattr(lease, "device_count", unreachable)
     monkeypatch.setattr(sys, "argv", ["jasna", "--activation-status"])
-    with pytest.raises(SystemExit) as exc:
-        main()
-    assert exc.value.code == 1
+    main()
     output = capsys.readouterr()
     assert output.out == t("license_lease_active") + "\n"
     assert output.err == f"Could not check devices in use: {error}\n"

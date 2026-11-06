@@ -599,3 +599,23 @@ def test_tvai_setup_problems_name_each_missing_folder_and_ffmpeg(tmp_path, monke
     ffmpeg.touch()
     monkeypatch.setenv("TVAI_MODEL_DATA_DIR", str(tmp_path))
     assert tvai_setup_problems(str(ffmpeg)) == []
+
+
+def _closed_stdin(prompt):
+    raise EOFError
+
+
+@pytest.mark.parametrize(
+    ("isatty", "answer", "expected"),
+    [
+        (True, lambda prompt: " Yes ", True),
+        (True, lambda prompt: "", False),
+        (False, lambda prompt: "y", None),
+        (True, _closed_stdin, None),
+    ],
+    ids=["yes", "default-no", "no-terminal", "nul-stdin"],
+)
+def test_confirm_in_terminal(monkeypatch, isatty, answer, expected):
+    monkeypatch.setattr(os_utils.sys.stdin, "isatty", lambda: isatty)
+    monkeypatch.setattr("builtins.input", answer)
+    assert os_utils.confirm_in_terminal("Continue? [y/N]: ") is expected

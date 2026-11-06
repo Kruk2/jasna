@@ -20,6 +20,7 @@ from jasna.os_utils import (
     check_required_executables,
     check_supported_gpu,
     check_windows_nvidia_sysmem_fallback_policy,
+    confirm_in_terminal,
     escape_unencodable_output,
     gpu_check_error,
     install_on_hard_disk,
@@ -831,7 +832,7 @@ def _run_videos(
             continue
         except ResumeMismatchError as e:
             all_commands_ok = False
-            print(f"Error processing {vid.name}: {e}")
+            print(f"Error processing {vid.name}: {e}. Run jasna in a terminal to replace it, or delete that folder.")
             if not in_folder:
                 sys.exit(1)
             continue
@@ -850,10 +851,7 @@ def _run_videos(
 
 def _ask_to_replace_progress(error) -> bool:
     """Without a terminal to ask in, saved progress is kept."""
-    if not sys.stdin.isatty():
-        return False
-    answer = input(f"{error}\nReplace saved progress and start over? [y/N]: ")
-    return answer.strip().lower() in ("y", "yes")
+    return confirm_in_terminal(f"{error}\nReplace saved progress and start over? [y/N]: ") is True
 
 
 def _ensure_ltx_model(config: SessionConfig, segments) -> None:
@@ -894,14 +892,10 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     if updating:
         message += " Models copied from older Jasna versions cannot be used. Your existing License code still works."
     terminal_hint = f"Error: {message} Run jasna in a terminal to download them ({size})."
-    if not sys.stdin.isatty():
+    answer = confirm_in_terminal(f"{message}\nDownload ({size})? [y/N]: ")
+    if answer is None:
         sys.exit(terminal_hint)
-    try:
-        answer = input(f"{message}\nDownload ({size})? [y/N]: ")
-    except EOFError:
-        # Windows reports a NUL stdin as a terminal; reading it ends at once.
-        sys.exit(terminal_hint)
-    if answer.strip().lower() not in ("y", "yes"):
+    if not answer:
         sys.exit(f"Error: {message}")
     from tqdm import tqdm
 
@@ -947,7 +941,8 @@ def _print_activation_status(parser: argparse.ArgumentParser) -> None:
     try:
         use = lease.device_count()
     except (ProtectionError, OSError) as exc:
-        parser.exit(1, f"Could not check devices in use: {exc}\n")
+        print(f"Could not check devices in use: {exc}", file=sys.stderr)
+        return
     print(device_use_text(use))
 
 
