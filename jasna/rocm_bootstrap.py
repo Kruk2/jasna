@@ -72,13 +72,16 @@ def configure_rocm_devices() -> None:
     else:
         name = r"^[ \t]*Name:[ \t]+(gfx[0-9a-f]+(?::[^\s]+)*)[ \t]*$"
         architectures = re.findall(name, result.stdout, re.MULTILINE)
-        devices = re.findall(
-            name + r"\n[ \t]*Uuid:[ \t]+(GPU-[0-9a-fA-F]{16})[ \t]*$",
-            result.stdout, re.MULTILINE,
-        )
-        if not devices or len(devices) != len(architectures) or len({uuid for _, uuid in devices}) != len(devices):
-            log.warning("Could not read unique AMD GPU UUIDs from rocminfo")
+        agents = re.findall(name + r"\n[ \t]*Uuid:[ \t]+(GPU-\S+)[ \t]*$", result.stdout, re.MULTILINE)
+        if not agents or len(agents) != len(architectures):
+            log.warning("Could not read AMD GPUs from rocminfo")
             return
+        uuids = [uuid for _, uuid in agents]
+        # iGPUs report GPU-XX; such a GPU can stay visible but can't be selected by UUID.
+        devices = [
+            (arch, uuid if re.fullmatch(r"GPU-[0-9a-fA-F]{16}", uuid) and uuids.count(uuid) == 1 else None)
+            for arch, uuid in agents
+        ]
         device_count = len(devices)
     shipped = kernel_pack_architectures(root / "torch") or frozenset()
     supported = [(arch.split(":")[0], identifier) for arch, identifier in devices if arch.split(":")[0] in shipped]
@@ -93,5 +96,8 @@ def configure_rocm_devices() -> None:
         return
     chosen = [identifier for arch, identifier in supported if rank(arch) == best]
     if chosen and len(chosen) < device_count:
+        if None in chosen:
+            log.warning("Could not read unique AMD GPU UUIDs from rocminfo")
+            return
         # Filter before torch import: HIP may load kernels for every visible adapter.
         os.environ["HIP_VISIBLE_DEVICES" if windows else "ROCR_VISIBLE_DEVICES"] = ",".join(chosen)
