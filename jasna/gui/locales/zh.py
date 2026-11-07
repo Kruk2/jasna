@@ -470,7 +470,7 @@ ZH = {
         "license_device_offline": "{device}：离线电脑，自 {date} 起",
         "license_device_online": "{device}：正在在线使用",
         "license_device_this_pc": "（本机）",
-        "license_devices_free_hint": "要释放名额，请把你要继续使用的电脑 ID 发给你获得许可证码的地方。",
+        "license_devices_error_hint": "如果激活发生错误，请把此页面截图发给你获得许可证码的地方。",
         "license_offline_retry": "如需离线使用 Jasna，请再次输入许可证码并允许 Windows 的权限提示。",
         "license_chip_offline": "已激活（离线）",
         "license_chip_online": "已激活（在线）",

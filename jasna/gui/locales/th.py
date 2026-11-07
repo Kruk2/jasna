@@ -470,7 +470,7 @@ TH = {
         "license_device_offline": "{device}: PC ออฟไลน์ ตั้งแต่ {date}",
         "license_device_online": "{device}: ใช้ออนไลน์ตอนนี้",
         "license_device_this_pc": "(PC เครื่องนี้)",
-        "license_devices_free_hint": "หากต้องการคืนช่อง ให้ส่ง ID ของ PC ที่จะใช้ต่อไปยังที่ที่คุณได้รับรหัสสิทธิ์",
+        "license_devices_error_hint": "หากการเปิดใช้งานผิดพลาด ให้ส่งภาพหน้าจอของหน้านี้ไปยังที่ที่คุณได้รับรหัสสิทธิ์",
         "license_offline_retry": "หากต้องการใช้ Jasna แบบออฟไลน์ ให้ป้อนรหัสสิทธิ์อีกครั้งและอนุญาตคำขอของ Windows",
         "license_chip_offline": "เปิดใช้แล้ว (ออฟไลน์)",
         "license_chip_online": "เปิดใช้แล้ว (ออนไลน์)",

@@ -470,7 +470,7 @@ EN = {
         "license_device_offline": "{device}: offline PC since {date}",
         "license_device_online": "{device}: online now",
         "license_device_this_pc": "(this PC)",
-        "license_devices_free_hint": "To free a slot, send the IDs of the PCs you keep to where you got your License code.",
+        "license_devices_error_hint": "If activation goes wrong, send a screenshot of this page to where you got your License code.",
         "license_offline_retry": "To use Jasna offline, enter your License code again and allow the Windows prompt.",
         "license_chip_offline": "Active (offline)",
         "license_chip_online": "Active (online)",

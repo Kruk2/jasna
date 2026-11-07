@@ -470,7 +470,7 @@ KO = {
         "license_device_offline": "{device}: {date}부터 오프라인 PC",
         "license_device_online": "{device}: 지금 온라인 사용 중",
         "license_device_this_pc": "(이 PC)",
-        "license_devices_free_hint": "슬롯을 비우려면 계속 쓸 PC의 ID를 라이선스 코드를 받은 곳에 보내세요.",
+        "license_devices_error_hint": "활성화 중 오류가 나면 이 페이지의 스크린샷을 라이선스 코드를 받은 곳에 보내세요.",
         "license_offline_retry": "Jasna를 오프라인으로 사용하려면 라이선스 코드를 다시 입력하고 Windows 권한 요청을 허용하세요.",
         "license_chip_offline": "활성 (오프라인)",
         "license_chip_online": "활성 (온라인)",
