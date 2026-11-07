@@ -372,7 +372,7 @@ class Pipeline:
 
     def _run_ltx(self, metadata) -> None:
         from jasna.ltx.plan import track_max_gap
-        from jasna.ltx.restore import Cancelled, restore_video, video_frames, whole_video_large_canvas
+        from jasna.ltx.restore import Cancelled, FrameNumbers, restore_video, video_frames, whole_video_large_canvas
         from jasna.ltx.speed import profile_path
 
         frame_rate = self._resolve_frame_rate(metadata)
@@ -416,6 +416,7 @@ class Pipeline:
                 min_duration=self.min_detection_duration,
                 super_res=self.ltx_super_res,
                 vr_projector=self.vr_projector,
+                frame_numbers=FrameNumbers.of_video(metadata),
             )
         except Cancelled:
             log.info("LTX restoration cancelled")
@@ -426,7 +427,7 @@ class Pipeline:
         GPU's size, never the VRAM free at that moment, so a segment renders the same in a
         job and in a seed preview."""
         from jasna.ltx.plan import track_max_gap
-        from jasna.ltx.restore import LtxRender, segment_decode_budget, segment_large_canvas
+        from jasna.ltx.restore import FrameNumbers, LtxRender, segment_decode_budget, segment_large_canvas
         from jasna.ltx.speed import profile_path
 
         total_bytes = torch.cuda.get_device_properties(self.device).total_memory
@@ -447,6 +448,7 @@ class Pipeline:
             min_duration=self.min_detection_duration,
             super_res=self.ltx_super_res,
             vr_projector=self.vr_projector,
+            frame_numbers=FrameNumbers.of_video(metadata),
         )
 
     def ltx_span(

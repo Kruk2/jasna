@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from jasna.ltx.camera import PLAN_CANVAS, ZOOM_PER_WINDOW, letterbox, track_camera, zoom_crop_sides
+from jasna.ltx.camera import PLAN_CANVAS, ZOOM_PER_WINDOW, CropFrame, letterbox, track_camera, zoom_crop_sides
 from jasna.ltx.plan import (
     BLEND_FRAMES,
     LARGE_CANVAS,
@@ -16,6 +16,8 @@ from jasna.ltx.plan import (
     Region,
     RegionGroup,
     Track,
+    TrackPlan,
+    Window,
     build_tracks,
     crossfade_weights,
     filled_frames,
@@ -23,7 +25,9 @@ from jasna.ltx.plan import (
     handover_leads,
     handover_presence,
     merge_continuations,
+    plan_summary,
     plan_video,
+    plan_window_lines,
     rejoin_across_cover,
     restart_cameras,
     shared_latents,
@@ -591,3 +595,31 @@ def test_stereo_right_eye_restores_each_left_track_as_a_twin_with_its_noise(kind
         for left_crop, twin_crop in zip(left_window.crops, twin_window.crops):
             x1, y1, x2, y2 = left_crop.crop_box
             assert twin_crop.crop_box == (x1 + dx + disparity, y1 + dy, x2 + dx + disparity, y2 + dy)
+
+
+def _track_plan(track_id: int, canvas: int, windows: list[tuple[int, int, int]]) -> TrackPlan:
+    crop = CropFrame((0, 0, 10, 10), (canvas, canvas), (0, 0, 0, 0))
+    return TrackPlan(
+        track_id, windows[0][1], (), (),
+        tuple(Window(index, track_id, start, frames, (crop,) * frames, index) for index, start, frames in windows),
+        WINDOW_HOP,
+    )
+
+
+_TWO_TRACKS = [_track_plan(4, 512, [(0, 0, 121), (1, 104, 121)]), _track_plan(9, 768, [(2, 30, 50)])]
+
+
+def test_plan_summary_counts_the_windows_of_each_canvas():
+    assert plan_summary(300, 1, _TWO_TRACKS) == "LTX plan: 300 frames, 1 scene cuts, 2 tracks, 3 windows: 2 at 512, 1 at 768"
+    assert plan_summary(50, 0, []) == "LTX plan: 50 frames, 0 scene cuts, 0 tracks, 0 windows"
+
+
+def test_plan_window_lines_give_each_window_in_frames_of_the_whole_input():
+    segment_starting_at_frame_1000 = range(1000, 1300)
+    assert plan_window_lines(_TWO_TRACKS, {150}, segment_starting_at_frame_1000) == [
+        "LTX window 1/3: frames 1000-1120 (track 1, canvas 512, overlap with next 17)",
+        "LTX window 2/3: frames 1104-1224 (track 1, canvas 512)",
+        "LTX window 3/3: frames 1030-1079 (track 2, canvas 768)",
+        "LTX scene cuts: 1150",
+    ]
+    assert plan_window_lines([], set(), range(0)) == []
