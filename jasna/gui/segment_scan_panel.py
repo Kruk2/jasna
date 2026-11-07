@@ -92,7 +92,7 @@ class ScanPanel(ctk.CTkFrame):
         self._was_stopped = False
         self._result: MosaicScanResult | None = None
         self._proposals: tuple[SegmentRange, ...] = ()
-        self._ltx_auto = bool(base_settings().ltx_auto_split)
+        self._ltx_auto = ltx_seed is not None and bool(base_settings().ltx_auto_split)
         self._ltx_percent = int(base_settings().ltx_auto_split_percent)
         self._overlay = True
         self._threshold = clamp_scan_threshold(threshold)

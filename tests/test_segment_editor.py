@@ -464,6 +464,40 @@ def test_scan_ltx_auto_split_is_hidden_when_ltx_cannot_run(build_editor) -> None
     assert not panel._ltx_auto_row.winfo_ismapped()
 
 
+def test_scan_finishes_without_ltx_split_when_ltx_cannot_run(build_editor) -> None:
+    editor = build_editor(
+        settings=AppSettings(ltx_auto_split=True),
+        ltx_unavailable_reason="model_ltx_not_downloaded",
+    )
+    editor._keyframe_index = KeyframeIndex((0, 45, 120, 180), Fraction(1, 30), 0, 1800)
+    panel = editor._scan_panel
+    panel._threshold = 0.5
+    panel._worker = MagicMock(events=queue.Queue())
+    panel._set_locked(True)
+    panel._worker.events.put(
+        ScanCompleted(
+            MosaicScanResult(
+                times=(0.0, 1.0, 2.0, 3.0),
+                scores=(0.0, 0.8, 0.9, 0.0),
+                masks=torch.zeros((4, 90, 160), dtype=torch.uint8),
+                sizes=(0.0, 0.05, 0.3, 0.0),
+                stride=1.0,
+                duration=60.0,
+                completed_until=3.0,
+            ),
+            stopped=False,
+        )
+    )
+
+    editor._poll_workers()
+    editor.update_idletasks()
+
+    assert not panel.active
+    assert panel._status.cget("text") == t("segments_scan_result", count=1, duration="00:00:03")
+    panel._add_detected_ranges()
+    assert editor._state.segments == (SegmentRange(0.5, 3.5, SegmentRestoration("basicvsrpp", None)),)
+
+
 def test_scan_threshold_updates_ranges_and_add_button(build_editor) -> None:
     editor = build_editor()
     result = MosaicScanResult(
