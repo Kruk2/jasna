@@ -190,10 +190,9 @@ def ensure_engines_compiled(
         if line:
             if log_callback:
                 log_callback(line)
-                logger.debug("[compiler] %s", line)
             else:
                 print(line)
-                logger.info("[compiler] %s", line)
+            logger.debug("[compiler] %s", line)
     returncode = proc.wait(timeout=_TIMEOUT_SECONDS)
 
     if returncode != 0:
