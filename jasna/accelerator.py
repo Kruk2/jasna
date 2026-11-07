@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
+import psutil
 import torch
 import torch.nn.functional as F
 
@@ -285,17 +286,36 @@ def _nvml_free_bytes(device: torch.device) -> int:
     _nvml_check(nvml, nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)))
     # SoC GPUs (NVIDIA GB10 and friends) answer the v1 query with a bogus small
     # pool on Windows ARM64: NVML's total disagrees with CUDA's outright (a real
-    # dGPU differs by well under 5% of WDDM reservation). When they disagree
-    # there is nothing to reconcile, so fall back to CUDA's own view.
+    # dGPU differs by well under 5% of WDDM reservation). There CUDA's own free
+    # figure is a near-constant pinned at ~99.5% of its total, so it cannot cap
+    # the budget either. When the totals disagree, return the host's available
+    # RAM: on a unified-memory box it is the honest bound, and the caller's
+    # min() caps the process view at it.
     if memory.total * 20 < torch.cuda.get_device_properties(device).total_memory * 19:
-        return torch.cuda.mem_get_info(device)[0]
+        return psutil.virtual_memory().available
     return memory.free
+
+
+def _forced_free_bytes() -> int | None:
+    """JASNA_FORCE_FREE_BYTES=<GiB>: override the free figure for testing, and for boxes
+    where the OS's available figure under-counts what the GPU can actually use."""
+    raw = os.environ.get("JASNA_FORCE_FREE_BYTES", "").strip()
+    if not raw:
+        return None
+    try:
+        return int(float(raw) * (1 << 30))
+    except ValueError:
+        log.warning("JASNA_FORCE_FREE_BYTES=%r is not a number; ignoring it", raw)
+        return None
 
 
 def device_free_bytes(device: torch.device) -> int:
     """VRAM free on the whole GPU. On Windows, CUDA counts only this process's memory (WDDM
     hides every other process's), so NVML's device-wide figure caps it on NVIDIA there; AMD
-    reads HIP's figure alone."""
+    reads HIP's figure alone. JASNA_FORCE_FREE_BYTES=<GiB> overrides the figure outright."""
+    forced = _forced_free_bytes()
+    if forced is not None:
+        return forced
     free = torch.cuda.mem_get_info(device)[0]
     if sys.platform == "win32" and is_nvidia_device(device):
         return min(free, _nvml_free_bytes(device))
