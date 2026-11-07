@@ -470,7 +470,7 @@ JA = {
         "license_device_offline": "{device}：{date} からオフライン PC",
         "license_device_online": "{device}：オンラインで使用中",
         "license_device_this_pc": "（この PC）",
-        "license_devices_free_hint": "枠を空けるには、使い続ける PC の ID をライセンスコードの入手先に送ってください。",
+        "license_devices_error_hint": "有効化でエラーが出たら、このページのスクリーンショットをライセンスコードの入手先に送ってください。",
         "license_offline_retry": "Jasna をオフラインで使うには、ライセンスコードをもう一度入力し、Windows の確認を許可してください。",
         "license_chip_offline": "有効（オフライン）",
         "license_chip_online": "有効（オンライン）",

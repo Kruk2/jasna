@@ -90,7 +90,7 @@ def device_use_text(use) -> str:
             line = t("license_device_online", device=slot.device)
         lines.append(f"{line} {t('license_device_this_pc')}" if slot.device == use.this_device else line)
     if use.slots:
-        lines.append(t("license_devices_free_hint"))
+        lines.append(t("license_devices_error_hint"))
     return "\n".join(lines)
 
 

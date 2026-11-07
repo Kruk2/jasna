@@ -328,7 +328,7 @@ def test_lease_dialog_names_the_saved_activation_when_reopened(tk_root, lease_ap
     assert dialog._devices.winfo_manager() == "pack"
 
 
-def test_device_list_marks_this_pc_and_says_how_to_free_a_slot():
+def test_device_list_marks_this_pc_and_says_where_to_report_an_activation_error():
     from datetime import datetime
 
     from jasna.gui import activation_worker
@@ -347,7 +347,7 @@ def test_device_list_marks_this_pc_and_says_how_to_free_a_slot():
     assert this_pc.startswith("JT1-1a2b3c4d") and this_pc.endswith(locales.t("license_device_this_pc"))
     assert not older.endswith(locales.t("license_device_this_pc")) and not online.endswith(locales.t("license_device_this_pc"))
     assert online.startswith("JD1-0a1b2c3d") and "2026" not in online
-    assert hint == locales.t("license_devices_free_hint")
+    assert hint == locales.t("license_devices_error_hint")
 
 
 def test_device_count_failure_keeps_the_activation_status(tk_root, lease_api, settle_activation, monkeypatch):
