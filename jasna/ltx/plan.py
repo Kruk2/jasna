@@ -28,7 +28,8 @@ import bisect
 import functools
 import itertools
 import math
-from collections.abc import Mapping, Sequence
+from collections import Counter
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -186,6 +187,33 @@ def plans_from_arrays(arrays: Mapping[str, np.ndarray]) -> list[list[TrackPlan]]
             track_id, start, frame_tuples, tuple(itertools.islice(presence, frames)), tuple(windows.get(t, ())), window_hop,
         ))
     return segments
+
+
+def plan_summary(frames: int, cuts: int, plans: Sequence[TrackPlan]) -> str:
+    canvases = Counter(window.canvas for plan in plans for window in plan.windows)
+    summary = f"LTX plan: {frames} frames, {cuts} scene cuts, {len(plans)} tracks, {canvases.total()} windows"
+    if canvases:
+        summary += ": " + ", ".join(f"{count} at {canvas}" for canvas, count in sorted(canvases.items()))
+    return summary
+
+
+def plan_window_lines(plans: Sequence[TrackPlan], cuts: Collection[int], frame_numbers: Sequence[int]) -> list[str]:
+    """One line per window with its first and last frame in the whole input (``frame_numbers``
+    of the planned frames), its track, canvas and the frames it shares with the track's next
+    window, then the scene cuts."""
+    windows = [(track, window, following)
+               for track, plan in enumerate(plans, 1)
+               for window, following in itertools.zip_longest(plan.windows, plan.windows[1:])]
+    lines = []
+    for number, (track, window, following) in enumerate(windows, 1):
+        overlap = "" if following is None else f", overlap with next {window.stop - following.start}"
+        lines.append(
+            f"LTX window {number}/{len(windows)}: frames {frame_numbers[window.start]}-{frame_numbers[window.stop - 1]} "
+            f"(track {track}, canvas {window.canvas}{overlap})"
+        )
+    if cuts:
+        lines.append("LTX scene cuts: " + ", ".join(str(frame_numbers[cut]) for cut in sorted(cuts)))
+    return lines
 
 
 def feather_pixels(frame_h: int) -> int:

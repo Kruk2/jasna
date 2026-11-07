@@ -25,6 +25,7 @@ from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
+from fractions import Fraction
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -48,7 +49,9 @@ from jasna.ltx.plan import (
     Window,
     crossfade_weights,
     feather_pixels,
+    plan_summary,
     plan_video,
+    plan_window_lines,
     plans_from_arrays,
     plans_to_arrays,
 )
@@ -116,6 +119,22 @@ class LtxSegment:
 
     def contains(self, pts: int) -> bool:
         return self.start_pts <= pts < self.end_pts
+
+
+@dataclass(frozen=True)
+class FrameNumbers:
+    """A frame's 0-based number in the whole input from its pts, whatever stretch was decoded."""
+
+    start_pts: int
+    time_base: Fraction
+    fps: float
+
+    @classmethod
+    def of_video(cls, metadata) -> FrameNumbers:
+        return cls(metadata.start_pts, metadata.time_base, metadata.mean_fps)
+
+    def frame_number(self, pts: int) -> int:
+        return round((int(pts) - self.start_pts) * self.time_base * self.fps)
 
 
 @dataclass(frozen=True)
@@ -547,19 +566,23 @@ def scan_span(
     cancel: threading.Event,
     max_gap: int,
     min_duration: int,
+    frame_numbers: FrameNumbers,
 ) -> list[list[TrackPlan]]:
-    """The track plans of each segment, frame indices counted from the segment's first frame."""
+    """The track plans of each segment, frame indices counted from the segment's first frame.
+    Each plan is logged, its windows (debug) in ``frame_numbers`` of the whole input."""
     regions: list[list[list[Region]]] = [[] for _ in segments]
     cuts: list[set[int]] = [set() for _ in segments]
+    input_frames: list[list[int]] = [[] for _ in segments]
     scenes = [SceneCutDetector() for _ in segments]
-    for owner, batch, _pts in segment_batches(frames(), segments, batch_size):
+    for owner, batch, pts in segment_batches(frames(), segments, batch_size):
         _check(cancel)
         if owner is not None:
             cuts[owner].update(len(regions[owner]) + offset for offset in scenes[owner].find_cuts(batch))
             regions[owner].extend(regions_per_frame(detector(batch, target_hw=(frame_h, frame_w)), frame_h, frame_w))
+            input_frames[owner].extend(frame_numbers.frame_number(p) for p in pts)
         bar.update(len(batch))
     plans = []
-    for segment_regions, segment_cuts in zip(regions, cuts):
+    for segment_regions, segment_cuts, segment_frames in zip(regions, cuts, input_frames):
         segment_plans = plan_video(
             segment_regions,
             segment_cuts,
@@ -571,13 +594,9 @@ def scan_span(
             max_gap=max_gap,
             min_duration=min_duration,
         )
-        logger.info(
-            "LTX plan: %d frames, %d scene cuts, %d tracks, %d windows",
-            len(segment_regions),
-            len(segment_cuts),
-            len(segment_plans),
-            sum(len(plan.windows) for plan in segment_plans),
-        )
+        logger.info(plan_summary(len(segment_regions), len(segment_cuts), segment_plans))
+        for line in plan_window_lines(segment_plans, segment_cuts, segment_frames):
+            logger.debug(line)
         plans.append(segment_plans)
     return plans
 
@@ -937,8 +956,8 @@ class LtxRender:
     canvas and its name (decode tiling follows the budget, so it keys the speed profile),
     the GPU, the speed profile file (``speed.py``), the max detection gap a track bridges
     (``track_max_gap``), the fewest frames a kept track spans, the super resolution of
-    windows compose enlarges (``super_res.py``), if any, and the VR fisheye/gnomonic
-    projector crops are seen through, if any."""
+    windows compose enlarges (``super_res.py``), if any, the VR fisheye/gnomonic
+    projector crops are seen through, if any, and the input's frame numbers the plan logs."""
 
     detector: Callable
     files: LtxModelFiles
@@ -956,6 +975,7 @@ class LtxRender:
     min_duration: int
     super_res: LtxSuperRes | None
     vr_projector: RegionProjector | None
+    frame_numbers: FrameNumbers
 
 
 @dataclass(frozen=True)
@@ -1087,7 +1107,7 @@ def _scan_spans(
                     counted_frames, span.segments, render.detector,
                     batch_size=render.batch_size, frame_h=render.frame_h, frame_w=render.frame_w, stereo=render.stereo,
                     large_canvas=render.large_canvas, window_hop=render.window_hop, bar=bar, cancel=cancel,
-                    max_gap=render.max_gap, min_duration=render.min_duration,
+                    max_gap=render.max_gap, min_duration=render.min_duration, frame_numbers=render.frame_numbers,
                 )
                 _check(cancel)
                 with atomic_write(_plan_path(span, directory), "wb") as stream:
@@ -1363,6 +1383,7 @@ def restore_video(
     min_duration: int,
     super_res: LtxSuperRes | None,
     vr_projector: RegionProjector | None,
+    frame_numbers: FrameNumbers,
 ) -> None:
     """Restore every mosaic of the video ``frames`` yields as one segment. ``large_canvas``
     is ``whole_video_large_canvas``'s decision; the decode tiles follow the free VRAM."""
@@ -1386,6 +1407,7 @@ def restore_video(
             min_duration=min_duration,
             super_res=super_res,
             vr_projector=vr_projector,
+            frame_numbers=frame_numbers,
         ),
         work_dir=work_dir,
         progress=progress,

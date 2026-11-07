@@ -7,6 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, wait as futures_wait
 from pathlib import Path
 from types import SimpleNamespace
 from dataclasses import replace
+from fractions import Fraction
 
 import numpy as np
 import pytest
@@ -18,6 +19,7 @@ from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, MAX_GAP, Region, Window
 from jasna.tensor_utils import half_dtype
 
 FILES = restore.LtxModelFiles(Path("t"), Path("v"), Path("d"))
+TEN_PTS_PER_FRAME = restore.FrameNumbers(start_pts=0, time_base=Fraction(1, 300), fps=30.0)
 REAL_BAR = restore.Progress.bar
 MOSAIC = Region(box=(10.0, 10.0, 40.0, 40.0), polygon=np.array([[10, 10], [40, 10], [40, 40], [10, 40]], dtype=np.int32))
 
@@ -171,7 +173,7 @@ def _render(tmp_path):
         budget_name="segment",
         device=torch.device("cpu"),
         speed_profile=tmp_path / "speed.json",
-        max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None,
+        max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None, frame_numbers=TEN_PTS_PER_FRAME,
     )
 
 
@@ -230,7 +232,7 @@ def test_a_segment_plans_the_same_wherever_decoding_starts(fakes):
             window_hop=restore.WINDOW_HOP,
             bar=_Bar(),
             cancel=threading.Event(),
-            max_gap=MAX_GAP, min_duration=0,
+            max_gap=MAX_GAP, min_duration=0, frame_numbers=TEN_PTS_PER_FRAME,
         )
         results.append((plans, detector.batches))
     assert results[0] == results[1]
@@ -238,6 +240,25 @@ def test_a_segment_plans_the_same_wherever_decoding_starts(fakes):
     assert batches == [[5, 6, 7, 8], [9, 10, 11, 12], [13, 14]]
     assert [w.index for plan in plans for w in plan.windows] == [0]
     assert plans[0].start == 0 and len(plans[0].polygons) == 10
+
+
+def test_frame_numbers_count_from_the_video_start():
+    video = SimpleNamespace(start_pts=1000, time_base=Fraction(1, 15360), mean_fps=30.0)
+    assert restore.FrameNumbers.of_video(video).frame_number(1000 + 10 * 15360) == 300
+
+
+def test_scan_span_logs_the_plan_in_frames_of_the_whole_input(fakes, caplog):
+    video = _video(30, range(3, 28))
+    with caplog.at_level("DEBUG", logger=restore.logger.name):
+        restore.scan_span(
+            _source(video, 3), [restore.LtxSegment(50, 150, seed=0)], _Detector(), batch_size=4, frame_h=64, frame_w=64,
+            stereo=None, large_canvas=False, window_hop=restore.WINDOW_HOP, bar=_Bar(), cancel=threading.Event(),
+            max_gap=MAX_GAP, min_duration=0, frame_numbers=TEN_PTS_PER_FRAME,
+        )
+    assert [(r.levelname, r.getMessage()) for r in caplog.records] == [
+        ("INFO", "LTX plan: 10 frames, 0 scene cuts, 1 tracks, 1 windows: 1 at 512"),
+        ("DEBUG", "LTX window 1/1: frames 5-14 (track 1, canvas 512)"),
+    ]
 
 
 def test_scan_span_bridges_detection_gaps_up_to_max_gap(fakes):
@@ -248,6 +269,7 @@ def test_scan_span_bridges_detection_gaps_up_to_max_gap(fakes):
         (plans,) = restore.scan_span(
             _source(video), [whole], _Detector(), batch_size=4, frame_h=64, frame_w=64, stereo=None, large_canvas=False,
             window_hop=restore.WINDOW_HOP, bar=_Bar(), cancel=threading.Event(), max_gap=max_gap, min_duration=0,
+            frame_numbers=TEN_PTS_PER_FRAME,
         )
         return [(plan.start, plan.stop) for plan in plans]
 
@@ -313,7 +335,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         speed_profile=tmp_path / "speed.json",
         progress=restore.Progress(12, disable=True, report=None),
         cancel=threading.Event(),
-        max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None,
+        max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None, frame_numbers=TEN_PTS_PER_FRAME,
     )
     assert budgets == [(3 << 30) + (123 << 20)]
     assert _Transformer.seeds == [[5]]
@@ -836,7 +858,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
         speed_profile=tmp_path / "speed.json",
         progress=restore.Progress(0, disable=True, report=None),
         cancel=threading.Event(),
-        max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None,
+        max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None, frame_numbers=TEN_PTS_PER_FRAME,
     )
     assert list(json.loads((tmp_path / "speed.json").read_text())) == [
         restore.speed.profile_key("Test GPU", "t", "free VRAM")
