@@ -247,6 +247,30 @@ def test_cli_online_activates_online_and_needs_a_license_code(monkeypatch, lease
     lease_api.assert_called_once_with("JL1-code", try_offline=False)
 
 
+@pytest.mark.parametrize(("arguments", "activated", "activated_with"), [
+    (["--online"], False, ("JL1-env", False)),
+    ([], False, ("JL1-env", True)),
+    ([], True, None),
+    (["--online"], True, None),
+    (["--license-code", "JL1-flag"], True, ("JL1-flag", True)),
+])
+def test_cli_license_code_environment_variable_activates_only_a_pc_without_activation(monkeypatch, lease_api, arguments,
+                                                                                       activated, activated_with):
+    from jasna import main
+    from jasna.protection import lease
+
+    monkeypatch.setenv("JASNA_LICENSE_CODE", " JL1-env ")
+    monkeypatch.setattr(lease, "activated", lambda: activated)
+    monkeypatch.setattr(sys, "argv", ["jasna", *arguments, "--activation-status"])
+    monkeypatch.setattr(main, "_print_activation_status", lambda parser: None)
+    main.main()
+    if activated_with is None:
+        lease_api.assert_not_called()
+    else:
+        code, try_offline = activated_with
+        lease_api.assert_called_once_with(code, try_offline=try_offline)
+
+
 def test_lease_dialog_activates_online_when_chosen_and_explains_an_offline_pc(tk_root, lease_api, settle_activation):
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t

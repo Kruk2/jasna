@@ -289,8 +289,8 @@ To replace the file, use a script with a temporary file. `ffmpeg` must be on
 
 | Option | Notes |
 | ------ | ----- |
-| `--license-code CODE` | Activate with your License code before GPU setup. With no processing options, activate and exit. On a PC with a TPM 2.0 security chip, Jasna then works offline; otherwise, and always in a Linux container or virtual machine, it checks the license online while it uses supporter models. |
-| `--online` | With `--license-code`: check the license online instead of working offline. Use it on rented or shared PCs, so they never keep one of your 3 devices. |
+| `--license-code CODE` | Activate with your License code before GPU setup. With no processing options, activate and exit. On a PC with a TPM 2.0 security chip, Jasna then works offline; otherwise, and always in a Linux container or virtual machine, it checks the license online while it uses supporter models. Instead of this option you can set the `JASNA_LICENSE_CODE` environment variable, so the code doesn't show in the command line; Jasna uses it only on a PC that is not activated yet. |
+| `--online` | With `--license-code` or `JASNA_LICENSE_CODE`: check the license online instead of working offline. Use it on rented or shared PCs, so they never keep one of your 3 devices. |
 | `--activation-status` | Show whether Jasna is activated and which of your devices are in use, then exit. Exits with 1 when Jasna is not activated. |
 
 ```bash

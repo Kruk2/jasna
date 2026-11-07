@@ -7,9 +7,11 @@ CLI_HELP: dict[str, str] = {
         "Activate with your License code. On a computer with a TPM 2.0 security chip, Jasna then works offline; "
         "otherwise, and always in a Linux container or virtual machine, it checks your license online while it "
         "uses supporter models. "
-        "Without --input, --stream or --benchmark, activate and exit."
+        "Without --input, --stream or --benchmark, activate and exit. "
+        "Instead of this option you can set the JASNA_LICENSE_CODE environment variable; Jasna uses it only on a "
+        "computer that is not activated yet."
     ),
-    "online": "With --license-code: check the license online instead of working offline. Use it on rented or shared PCs, where an offline activation would keep one of your 3 devices.",
+    "online": "With --license-code or JASNA_LICENSE_CODE: check the license online instead of working offline. Use it on rented or shared PCs, where an offline activation would keep one of your 3 devices.",
     "activation_status": "Show whether Jasna is activated and how many of your devices are in use, then exit.",
     "restoration_model_name": (
         "Restoration model for video: basicvsrpp (fast), ltx-basic (Basic Quality LTX: about 1.7x faster than ltx, "

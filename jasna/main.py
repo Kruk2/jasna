@@ -3,6 +3,7 @@ import logging
 import os
 import signal
 import sys
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, get_args
@@ -968,28 +969,54 @@ def main() -> None:
         sys.exit(130)
 
 
+LICENSE_CODE_ENVIRONMENT_VARIABLE = "JASNA_LICENSE_CODE"
+
+
+def license_code_to_activate(flag_code: str | None, environment_code: str, activated: Callable[[], bool]) -> str | None:
+    """--license-code always activates; the environment variable only while nothing is activated, so a code kept there
+    never re-activates a PC on later runs."""
+    if flag_code is not None:
+        return flag_code
+    if not environment_code.strip() or activated():
+        return None
+    return environment_code.strip()
+
+
+def _require_protection_for_activation(parser: argparse.ArgumentParser) -> None:
+    from jasna.license_api import ProtectionUnavailableError, require_protection
+
+    try:
+        require_protection()
+    except ProtectionUnavailableError as exc:
+        parser.exit(1, f"Activation error: {exc}\n")
+
+
+def _saved_activation_exists(parser: argparse.ArgumentParser) -> bool:
+    _require_protection_for_activation(parser)
+    from jasna.protection import lease
+
+    return lease.activated()
+
+
 def _main() -> None:
     escape_unencodable_output(sys.stdout, sys.stderr)
     parser = build_parser()
     args = parser.parse_args()
-    if args.online and args.license_code is None:
-        parser.error("--online needs --license-code")
+    environment_code = os.environ.get(LICENSE_CODE_ENVIRONMENT_VARIABLE, "")
+    if args.online and args.license_code is None and not environment_code.strip():
+        parser.error(f"--online needs --license-code or {LICENSE_CODE_ENVIRONMENT_VARIABLE}")
     if args.activation_status and (args.input is not None or args.stream or args.benchmark):
         parser.error("--activation-status cannot be combined with --input, --stream or --benchmark")
-    if args.license_code is not None:
-        from jasna.license_api import ProtectionUnavailableError, require_protection
-
-        try:
-            require_protection()
-        except ProtectionUnavailableError as exc:
-            parser.exit(1, f"Activation error: {exc}\n")
+    license_code = license_code_to_activate(args.license_code, environment_code, lambda: _saved_activation_exists(parser))
+    if license_code is not None:
+        _require_protection_for_activation(parser)
         from jasna.protection import ProtectionError, lease
         if sys.platform == "win32" and not args.online:
             print("Windows may ask for permission once. This is a one-time license check for offline use.")
         # Activation warnings always show, as they did before logging was configured; --log-level can add more.
         _configure_logging(min(getattr(logging, args.log_level.upper()), logging.WARNING))
         try:
-            result = lease.activate_license_code(args.license_code, try_offline=not args.online)
+            result = lease.activate_license_code(license_code, try_offline=not args.online)
         except (ProtectionError, OSError) as exc:
             parser.exit(1, f"Activation error: {exc}\n")
         print(lease.activated_message(result.online_reason))
