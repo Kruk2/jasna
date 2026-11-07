@@ -68,6 +68,35 @@ def test_learned_rates_leave_out_cold_windows_and_take_the_rest_per_frame():
     assert rates["denoise/fixed"] == 25.0
 
 
+def test_a_track_of_several_steps_is_timed_without_its_first_step():
+    timing = speed.PassTiming()
+    timing.add_track(512, 3, [(2, 10.0), (2, 12.0), (2, 14.0)])
+    timing.add_track(768, 3, [(2, 30.0)])
+    assert timing.windows == [(512, pytest.approx(4.0 / 4 * 3))]
+    assert timing.steps == [(512, 1.0), (512, 1.0)]
+
+
+def test_a_one_step_model_learns_its_denoise_rate_from_its_only_step():
+    """ltx-basic denoises each window in one step, so a track's first step is all of it (#748)."""
+    seconds_per_window = 1.2
+    denoise = speed.PassTiming(seconds=25.0)
+    denoise.add_track(512, 1, [(2, 2 * seconds_per_window)])
+    denoise.add_track(512, 1, [(2, 2 * seconds_per_window), (1, 3 * seconds_per_window)])
+    planned = speed.Work(frames=500, megapixels=2.0, windows={512: 5}, crop_megapixels=50.0)
+    rates = speed.learned_rates({"denoise": denoise}, planned, known={})
+    video = speed.Work(frames=9000, megapixels=2.0, windows={512: 80}, crop_megapixels=900.0)
+    known = {
+        "encode/fixed": 0.0, "encode/frame": 0.0, "encode/window512": 0.0,
+        "compose/fixed": 0.0, "compose/crop": 0.0, "compose/window512": 0.0,
+    }
+
+    fixed, variable = speed.pass_estimates({**known, **rates}, video)["denoise"]
+
+    assert variable == pytest.approx(80 * seconds_per_window)
+    assert fixed == pytest.approx(25.0 - 5 * seconds_per_window)
+    assert denoise.steps == [(512, pytest.approx(seconds_per_window))] * 3
+
+
 def test_the_fixed_part_uses_known_rates_for_what_one_window_cannot_time():
     timings = {
         "compose": speed.PassTiming(

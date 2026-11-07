@@ -9,7 +9,8 @@ skips), and per window of each canvas. Compose decodes the next window while it 
 frames, so it takes the longer of its decodes and its blending, and blending is learned
 from the time its frame loop did not wait for a decode. Rates are warm: the
 first batch of a pass and the first window of each canvas are left out, and denoise
-leaves out each track's first step. Every finished run replaces the rates it measured.
+leaves out each track's first step (a one-step model's tracks are timed whole). Every
+finished run replaces the rates it measured.
 The same pass timings make the summary logged at the end of every run (``run_summary``).
 """
 
@@ -82,9 +83,9 @@ class PassTiming:
     ``units`` it counted (frames, or window-steps for denoise); ``warm_seconds`` and
     ``warm_frames`` after its first batch; ``waited_seconds`` (compose) how long its frame
     loop waited for a window decode; ``windows`` the ``(canvas, seconds)`` of each
-    window in order (denoise: seconds per window of a track without its first step);
-    ``steps`` (denoise) the ``(canvas, seconds per window-step)`` of every window group's
-    step after a track's first."""
+    window in order (denoise: seconds per window of each track, ``add_track``);
+    ``steps`` (denoise) the ``(canvas, seconds per window-step)`` of each window group's
+    step a track was timed on."""
 
     seconds: float = 0.0
     units: int = 0
@@ -93,6 +94,21 @@ class PassTiming:
     waited_seconds: float = 0.0
     windows: list[tuple[int, float]] = field(default_factory=list)
     steps: list[tuple[int, float]] = field(default_factory=list)
+
+    def add_track(self, canvas: int, steps: int, group_step_ends: list[tuple[int, float]]) -> None:
+        """Time one track's denoise from the ``(window-steps, seconds since the track
+        started)`` of each window group's step. A track of several steps leaves out its
+        first group step, which carries the track's setup; a one-step model has only its
+        first step, so its track is timed whole."""
+        cold = 1 if steps > 1 else 0
+        group_step_starts = [0.0, *(end for _, end in group_step_ends)]
+        timed = list(zip(group_step_starts, group_step_ends))[cold:]
+        if not timed:
+            return
+        for start, (count, end) in timed:
+            self.steps.append((canvas, (end - start) / count))
+        window_steps = sum(count for _, (count, _) in timed)
+        self.windows.append((canvas, (group_step_ends[-1][1] - timed[0][0]) / window_steps * steps))
 
 
 def _by_canvas(samples: list[tuple[int, float]]) -> dict[int, list[float]]:
@@ -103,8 +119,8 @@ def _by_canvas(samples: list[tuple[int, float]]) -> dict[int, list[float]]:
 
 
 def warm_windows(stage: str, timing: PassTiming) -> dict[int, list[float]]:
-    """Seconds per window of each canvas without its cold first window (denoise windows
-    already leave out each track's first step)."""
+    """Seconds per window of each canvas without its cold first window (denoise times its
+    windows per track instead, ``PassTiming.add_track``)."""
     cold = 0 if stage == "denoise" else 1
     return {
         canvas: samples[cold:] for canvas, samples in _by_canvas(timing.windows).items() if len(samples) > cold
