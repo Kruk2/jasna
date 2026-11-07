@@ -29,7 +29,7 @@ from jasna.media.video_encoder import (
     VideoEncoder,
 )
 
-from factories import write_double_adts_aac_source
+from factories import write_double_adts_aac_source, write_two_block_wma_source
 
 pytestmark = pytest.mark.usefixtures("nvidia_vendor")
 
@@ -711,6 +711,20 @@ class TestSourceStreamPump:
 
         with av.open(str(destination)) as result:
             assert sum(1 for _ in result.decode(audio=0)) > 1
+
+    def test_wma_frames_without_timestamps_transcode_to_mp4(self, tmp_path):
+        source = write_two_block_wma_source(tmp_path)
+        destination = tmp_path / "result.mp4"
+        enc = _make_encoder(tmp_path)
+        with av.open(str(source)) as enc._src, av.open(str(destination), "w") as enc.dst:
+            enc._setup_source_streams(enc._src.streams.video[0])
+            enc._drain_source_streams()
+
+        with av.open(str(source)) as src:
+            source_samples = sum(frame.samples for frame in src.decode(audio=0))
+        with av.open(str(destination)) as result:
+            assert result.streams.audio[0].codec_context.name == "aac"
+            assert sum(frame.samples for frame in result.decode(audio=0)) >= source_samples
 
     def _source_encoder(self, tmp_path, packets):
         enc = _make_encoder(tmp_path)
