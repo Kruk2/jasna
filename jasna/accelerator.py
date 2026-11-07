@@ -292,7 +292,17 @@ def device_free_bytes(device: torch.device) -> int:
     reads HIP's figure alone."""
     free = torch.cuda.mem_get_info(device)[0]
     if sys.platform == "win32" and is_nvidia_device(device):
-        return min(free, _nvml_free_bytes(device))
+        memory = _NvmlMemory()
+        nvml, handle = _nvml_device(str(torch.cuda.get_device_properties(device).uuid))
+        _nvml_check(nvml, nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)))
+        # SoC GPUs (NVIDIA GB10 and friends) answer the v1 query with a bogus small
+        # pool on Windows ARM64: NVML's total disagrees with CUDA's outright (a real
+        # dGPU differs by well under 5% of WDDM reservation). When they disagree
+        # there is nothing to reconcile, so trust CUDA's own view.
+        cuda_total = torch.cuda.get_device_properties(device).total_memory
+        if memory.total * 20 < cuda_total * 19:
+            return free
+        return min(free, memory.free)
     return free
 
 
