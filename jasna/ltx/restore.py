@@ -315,7 +315,7 @@ class _StageBar:
         self._warm_from: tuple[float, int, float] | None = None
         self._windows: list[tuple[int, TimingMark, TimingMark]] = []
         self._waits: list[tuple[TimingMark, TimingMark]] = []
-        self._tracks: list[tuple[int, int, list[tuple[int, TimingMark]]]] = []
+        self._tracks: list[tuple[int, int, TimingMark, list[tuple[int, TimingMark]]]] = []
         progress._advanced(stage, 0, bar.total, None, 0.0, 1.0)
 
     def update(self, n: int) -> None:
@@ -379,9 +379,11 @@ class _StageBar:
 
     def track(self, canvas: int, steps: int) -> Callable[[int], None]:
         """``advance`` for one track's denoise: counts its window-steps and marks the stream
-        after each, so the pass can time the track without its first step."""
-        marks: list[tuple[int, torch.cuda.Event]] = []
-        self._tracks.append((canvas, steps, marks))
+        at the track's start and after each window group's step, for ``PassTiming.add_track``."""
+        start = self._marks()
+        start.record()
+        marks: list[tuple[int, TimingMark]] = []
+        self._tracks.append((canvas, steps, start, marks))
 
         def advance(n: int) -> None:
             self.windows_done(canvas, n / steps)
@@ -405,13 +407,10 @@ class _StageBar:
         for start, end in self._waits:
             end.synchronize()
             timing.waited_seconds += start.elapsed_time(end) / 1000
-        for canvas, steps, marks in self._tracks:
-            if len(marks) > 1:
+        for canvas, steps, start, marks in self._tracks:
+            if marks:
                 marks[-1][1].synchronize()
-                for (_, previous), (n, mark) in zip(marks, marks[1:]):
-                    timing.steps.append((canvas, previous.elapsed_time(mark) / 1000 / n))
-                seconds = marks[0][1].elapsed_time(marks[-1][1]) / 1000
-                timing.windows.append((canvas, seconds / sum(n for n, _ in marks[1:]) * steps))
+            timing.add_track(canvas, steps, [(n, start.elapsed_time(mark) / 1000) for n, mark in marks])
         self._progress._finished(self._stage, timing)
 
     def __enter__(self) -> _StageBar:

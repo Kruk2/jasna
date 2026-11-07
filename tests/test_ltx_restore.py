@@ -743,6 +743,18 @@ def test_stage_bars_time_warm_units_for_the_profile(monkeypatch):
     assert denoise.steps == [(512, 1.0), (512, 1.0)]
 
 
+def test_a_one_step_track_is_timed_from_its_start(monkeypatch):
+    clock = _Clock(monkeypatch)
+    progress = restore.Progress(10, disable=True, report=None)
+    with progress.bar("denoise", 3, unit="step") as bar:
+        clock.now = 5.0
+        advance = bar.track(512, 1)
+        clock.now = 8.0
+        advance(3)
+
+    assert progress.timings["denoise"].windows == [(512, 1.0)]
+
+
 def test_worker_passes_are_timed_on_the_wall_clock(monkeypatch):
     clock = _Clock(monkeypatch)
 
