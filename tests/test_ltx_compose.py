@@ -48,12 +48,15 @@ _REGION_POLYGONS = [
 
 @pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA"))])
 @pytest.mark.parametrize("polygon", _REGION_POLYGONS)
-def test_feather_alpha_inside_the_polygon_box_equals_the_whole_region(device, polygon):
+def test_feather_alpha_inside_the_polygon_box_matches_the_whole_region(device, polygon):
     shape, feather = (120, 200), 12
     mask = polygon_mask([polygon], shape, (0, 0), torch.device(device))
     whole = feather_alpha(mask, feather, (0, 0, shape[1], shape[0]))
+    in_box = feather_alpha(mask, feather, polygon_box([polygon], shape, (0, 0)))
     assert whole.any()
-    assert torch.equal(feather_alpha(mask, feather, polygon_box([polygon], shape, (0, 0))), whole)
+    assert torch.equal(in_box > 0, whole > 0)
+    # oneDNN's CPU conv2d sums the blur taps in an order that depends on the input width, so a cut-out differs by a few float ulps.
+    torch.testing.assert_close(in_box, whole, rtol=0.0, atol=1e-6)
 
 
 @pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA"))])
