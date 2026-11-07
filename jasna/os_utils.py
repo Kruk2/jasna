@@ -561,14 +561,21 @@ def mount_source(mountinfo: str, path: Path) -> str:
 
 
 def sysfs_block_is_rotational(block: Path) -> bool:
-    """``block`` is a ``/sys/dev/block/MAJOR:MINOR`` link; a partition reports its disk's queue."""
+    """``block`` is a ``/sys/dev/block/MAJOR:MINOR`` link; a partition reports its disk's queue.
+    Virtio disks report rotational whatever the host storage is, so they count as unknown."""
     if not block.exists():
         return False
     block = block.resolve()
     if (block / "partition").exists():
         block = block.parent
+    if _sysfs_device_is_on_virtio_bus(block):
+        return False
     rotational = block / "queue" / "rotational"
     return rotational.exists() and rotational.read_text().strip() == "1"
+
+
+def _sysfs_device_is_on_virtio_bus(device: Path) -> bool:
+    return any(re.fullmatch(r"virtio\d+", part) for part in device.parts)
 
 
 def _windows_drive_has_seek_penalty(path: Path) -> bool:

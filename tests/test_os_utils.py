@@ -496,6 +496,17 @@ def test_partition_on_a_spinning_disk_reports_its_disk_as_rotational(tmp_path) -
     assert not os_utils.sysfs_block_is_rotational(links / "0:79")
 
 
+def test_virtio_disks_are_not_reported_as_rotational_because_their_drive_type_is_unknown(tmp_path) -> None:
+    pci_bus = tmp_path / "devices" / "pci0000_00"
+    _virtio_blk, virtio_blk_partition = _sysfs_disk(pci_bus / "0000_00_04.0" / "virtio2", "vda", "1")
+    virtio_scsi, _ = _sysfs_disk(pci_bus / "0000_00_03.0" / "virtio0" / "host0" / "target0_0_1" / "0_0_1_0", "sda", "1")
+    _sata_hdd, sata_hdd_partition = _sysfs_disk(pci_bus / "0000_00_1f.2" / "ata1", "sdb", "1")
+
+    assert not os_utils.sysfs_block_is_rotational(virtio_blk_partition)
+    assert not os_utils.sysfs_block_is_rotational(virtio_scsi)
+    assert os_utils.sysfs_block_is_rotational(sata_hdd_partition)
+
+
 def test_mount_source_is_the_innermost_mount_holding_the_path() -> None:
     mountinfo = "\n".join([
         "29 1 0:26 / / rw,relatime shared:1 - btrfs /dev/mapper/root rw,subvol=/root",
