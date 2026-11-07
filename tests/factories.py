@@ -314,6 +314,46 @@ def write_double_adts_aac_source(tmp_path: Path) -> Path:
     return source
 
 
+def write_two_block_wma_source(tmp_path: Path) -> Path:
+    """WMV whose WMA payloads each carry two blocks, so every second decoded frame has no
+    timestamp; one payload is stamped a block early, as ASF send times can be."""
+    plain = tmp_path / "plain_wma.wmv"
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=12:duration=1",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+            "-ar", "44100", "-ac", "1",
+            "-c:v", "wmv2", "-c:a", "wmav2", str(plain),
+        ],
+        check=True,
+    )
+    source = tmp_path / "two_block_wma.wmv"
+    with av.open(str(plain)) as src, av.open(str(source), "w") as dst:
+        video_out = dst.add_stream_from_template(src.streams.video[0])
+        audio_out = dst.add_stream_from_template(src.streams.audio[0])
+        audio_packets = []
+        for packet in src.demux():
+            if not packet.size:
+                continue
+            if packet.stream.type == "audio":
+                audio_packets.append(packet)
+            else:
+                packet.stream = video_out
+                dst.mux(packet)
+        block_ms = audio_packets[1].pts - audio_packets[0].pts
+        for pair_index, first in enumerate(range(0, len(audio_packets) - 1, 2)):
+            head, tail = audio_packets[first], audio_packets[first + 1]
+            payload = av.Packet(bytes(head) + bytes(tail))
+            payload.pts = payload.dts = head.pts - (block_ms * 6 // 5 if pair_index == 3 else 0)
+            payload.time_base = head.time_base
+            payload.duration = head.duration + tail.duration
+            payload.is_keyframe = True
+            payload.stream = audio_out
+            dst.mux(payload)
+    return source
+
+
 def _length_prefixed_units(data: bytes) -> list[bytes]:
     units, offset = [], 0
     while offset + 4 <= len(data):

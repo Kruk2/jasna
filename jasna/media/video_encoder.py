@@ -634,6 +634,7 @@ class VideoEncoder:
         self._source_iter = None
         self._last_source_dts: dict[int, tuple[int, Fraction]] = {}
         self._warned_source_dts: set[int] = set()
+        self._next_source_audio_pts: dict[int, int] = {}
         if self.smart_fragment:
             return
 
@@ -878,12 +879,26 @@ class VideoEncoder:
         out_packets = []
         sample_time_base = Fraction(1, out_stream.codec_context.sample_rate)
         for aframe in in_packet.decode():
-            if aframe.pts is not None:
-                aframe.pts = round(aframe.pts * aframe.time_base / sample_time_base)
+            aframe.pts = self._source_audio_frame_pts(
+                aframe, in_packet.stream.index, sample_time_base
+            )
             aframe.time_base = sample_time_base
             for rframe in processor.resample(aframe):
                 out_packets.extend(out_stream.encode(rframe))
         return out_packets
+
+    def _source_audio_frame_pts(
+        self, aframe, stream_index: int, sample_time_base: Fraction
+    ) -> int | None:
+        """A decoder that splits one packet into several frames stamps only the first;
+        the rest follow on from the frame before."""
+        if aframe.pts is None:
+            pts = self._next_source_audio_pts.get(stream_index)
+        else:
+            pts = round(aframe.pts * aframe.time_base / sample_time_base)
+        if pts is not None:
+            self._next_source_audio_pts[stream_index] = pts + aframe.samples
+        return pts
 
     @staticmethod
     def _copy_source_packets(in_packet, out_stream, bitstream_filter):
