@@ -223,6 +223,24 @@ def test_ensure_does_not_print_when_log_callback_given(monkeypatch) -> None:
     assert any("Compiling" in m for m in log_messages)
 
 
+def test_cli_shows_each_compiler_line_once(monkeypatch, capsys, caplog) -> None:
+    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: False)
+    monkeypatch.setattr(
+        "jasna.engine_compiler.subprocess.Popen",
+        lambda *a, **kw: _mock_proc(["Compiling BasicVSR++ sub-engines...\n", "BasicVSR++ sub-engines compiled.\n"]),
+    )
+
+    req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
+    with caplog.at_level(logging.INFO, logger="jasna.engine_compiler"):
+        ensure_engines_compiled(req)
+
+    console = capsys.readouterr().out + "".join(
+        record.getMessage() + "\n" for record in caplog.records if record.levelno >= logging.INFO
+    )
+    assert console.count("Compiling BasicVSR++ sub-engines...") == 1
+    assert console.count("BasicVSR++ sub-engines compiled.") == 1
+
+
 def test_ensure_popen_stdin_is_devnull(monkeypatch) -> None:
     # The detached GUI's stdin handle is invalid; the child must not inherit it.
     monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: False)
