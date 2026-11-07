@@ -428,7 +428,7 @@ JA = {
         "license_connecting": "オンラインで有効化中…",
         "license_service_invalid_license_code": "ライセンスコードを省略せずに入力してください。",
         "license_service_license_not_found": "ライセンスコードが見つかりません。確認するか、ライセンスコードの入手先にお問い合わせください。",
-        "license_service_slots_full": "3 台すべてで使用中です。別の端末の Jasna を閉じてからもう一度試すか、端末の入れ替えをライセンスコードの入手先にご相談ください。",
+        "license_service_slots_full": "3 台すべてで使用中です。別の端末の Jasna を閉じてからもう一度試してください。それでもエラーが出たら、このページのスクリーンショットをライセンスコードの入手先に送ってください。",
         "license_service_owner_approval_required": "このデバイスには所有者の承認が必要です。ライセンスコードの入手先にお問い合わせください。",
         "license_source_unavailable": "無料モデルはソースから実行できます。支援者向けモデルの有効化には Jasna の公式リリースをダウンロードしてください。",
         "license_activate": "有効化",
