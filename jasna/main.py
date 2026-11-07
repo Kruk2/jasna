@@ -951,13 +951,16 @@ def _stop_like_ctrl_c(signum, frame) -> None:
     raise KeyboardInterrupt
 
 
-def stop_on_sigterm() -> None:
-    """SIGTERM stops Jasna like Ctrl+C, so exit handlers (license lease release, LTX worker close) still run."""
+def stop_on_termination_signals() -> None:
+    """SIGTERM, and on Windows Ctrl+Break (the only signal a parent can send a console process group), stop Jasna
+    like Ctrl+C, so exit handlers (license lease release, LTX worker close) still run."""
     signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
+    if sys.platform == "win32":
+        signal.signal(signal.SIGBREAK, _stop_like_ctrl_c)
 
 
 def main() -> None:
-    stop_on_sigterm()
+    stop_on_termination_signals()
     try:
         _main()
     except KeyboardInterrupt:
