@@ -370,6 +370,11 @@ TH = {
         "file_conflict_skip": "ข้าม",
         "file_conflict_overwrite_warning": "ไฟล์ที่มีอยู่จะถูกแทนที่อย่างถาวร",
         "tip_file_conflict": "เมื่อไฟล์เอาต์พุตมีอยู่แล้วจะทำอย่างไร",
+        "saved_progress_conflict": "ความคืบหน้าเก่า",
+        "saved_progress_conflict_ask": "ถาม",
+        "saved_progress_conflict_start_over": "เริ่มใหม่",
+        "saved_progress_conflict_skip": "ข้าม",
+        "tip_saved_progress_conflict": "จะทำอย่างไรเมื่อความคืบหน้าที่บันทึกไว้ไม่ตรงกับไฟล์ การตั้งค่า หรือเวอร์ชัน Jasna แล้ว ถามจะรอคำตอบเฉพาะเมื่อไม่มีวิดีโออื่นรอในคิว มิฉะนั้นจะเก็บความคืบหน้าไว้และข้ามวิดีโอนั้น เริ่มใหม่จะลบความคืบหน้าเก่า",
         "conflict_tooltip": "ไฟล์เอาต์พุตมีอยู่แล้ว",
 
         # Advanced Processing

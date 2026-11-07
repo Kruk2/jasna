@@ -96,7 +96,8 @@ After closing Jasna, add the same video again with the same output and settings;
 in the command line, run the same command again.
 
 The last unfinished part may be restored again. If you changed the input or
-settings, or updated Jasna, it asks before starting over. Changing only codec,
+settings, or updated Jasna, it asks before starting over (in the app, see
+**Outdated Progress** in [the queue](gui.md#the-queue)). Changing only codec,
 quality, color LUT or sharpening keeps the saved LTX work and redoes the rest.
 BasicVSR++ jobs without ranges do not resume.
 

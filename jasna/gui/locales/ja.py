@@ -370,6 +370,11 @@ JA = {
         "file_conflict_skip": "スキップ",
         "file_conflict_overwrite_warning": "既存ファイルは完全に置き換えられます",
         "tip_file_conflict": "出力ファイルが既に存在する場合の動作",
+        "saved_progress_conflict": "古い進捗",
+        "saved_progress_conflict_ask": "確認する",
+        "saved_progress_conflict_start_over": "最初から",
+        "saved_progress_conflict_skip": "スキップ",
+        "tip_saved_progress_conflict": "保存済みの進捗がファイル、設定、または Jasna のバージョンと合わなくなったときの動作。「確認する」は、ほかに待機中の動画がないときだけ回答を待ちます。それ以外は進捗を残してその動画をスキップします。「最初から」は古い進捗を削除します。",
         "conflict_tooltip": "出力ファイルが既に存在します",
 
         # Advanced Processing

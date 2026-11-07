@@ -59,6 +59,23 @@ class EncodingSection:
         )
         self._widgets["file_conflict"].pack(side="right")
 
+        progress_conflict_row = ctk.CTkFrame(inner, fg_color="transparent")
+        add_setting_label(progress_conflict_row, "saved_progress_conflict")
+        self._widgets["saved_progress_conflict"] = ValueOptionMenu(
+            progress_conflict_row,
+            options={
+                "ask": t("saved_progress_conflict_ask"),
+                "start_over": t("saved_progress_conflict_start_over"),
+                "skip": t("saved_progress_conflict_skip"),
+            },
+            command=lambda _value: self._on_modified(),
+            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
+            width=140,
+        )
+        self._widgets["saved_progress_conflict"].pack(side="right")
+
         # Codec
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
         row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
@@ -222,6 +239,7 @@ class EncodingSection:
         input_gap = dict(fill="x", pady=(4, 0))
         # File conflict, codec and quality above are always shown.
         self._rows = [
+            Row(progress_conflict_row, row_gap, "advanced"),
             Row(sharpen_row, row_gap, "advanced"),
             Row(retarget_row, row_gap, "advanced"),
             Row(frame_generation_row, row_gap, "advanced"),
@@ -293,6 +311,7 @@ class EncodingSection:
     def apply(self, preset):
         self._widgets["file_conflict"].set_value(preset.file_conflict)
         self._on_file_conflict_changed(self._widgets["file_conflict"].get_value())
+        self._widgets["saved_progress_conflict"].set_value(preset.saved_progress_conflict)
         self._widgets["codec"].set_value(preset.codec)
         self._active_codec = self._widgets["codec"].get_value()
         self._cq_values = {
@@ -336,6 +355,7 @@ class EncodingSection:
     def collect(self) -> dict:
         return {
             "file_conflict": self._widgets["file_conflict"].get_value(),
+            "saved_progress_conflict": self._widgets["saved_progress_conflict"].get_value(),
             "codec": self._widgets["codec"].get_value(),
             "encoder_cq": int(self._widgets["encoder_cq"].get()),
             "sharpen_strength": round(float(self._widgets["sharpen_strength"].get()), 2),

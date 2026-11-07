@@ -409,8 +409,22 @@ class Processor:
     def _run_video_job(self, job_id, input_path, output_path, *, segments, settings):
         run_with_resume_prompt(
             lambda: self._run_video_pipeline(job_id, input_path, output_path, segments=segments, settings=settings),
-            self._confirm_replacing_progress,
+            self._replaces_outdated_progress,
         )
+
+    def _replaces_outdated_progress(self, error: ResumeMismatchError) -> bool:
+        """What ``saved_progress_conflict`` says; "ask" never waits for an answer while
+        other videos are queued, it keeps the progress and skips the video instead."""
+        choice = self._settings.saved_progress_conflict
+        if choice == "start_over":
+            self._log("INFO", "Replacing saved progress that no longer matches, as set in the settings")
+            return True
+        if choice == "skip":
+            return False
+        if self._next_pending_job() is not None:
+            self._log("INFO", "Not asking about saved progress while other videos are queued")
+            return False
+        return self._confirm_replacing_progress(error)
 
     def _confirm_replacing_progress(self, error: ResumeMismatchError) -> bool:
         answer = self._on_resume_conflict(error.directory)
