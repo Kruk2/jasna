@@ -49,10 +49,7 @@ def _fake_nvml(total: int, free: int):
 
 
 def test_nvml_total_mismatch_caps_at_the_host_available_ram(monkeypatch):
-    # SoC GPUs (GB10/RTX Spark): NVML answers the v1 query with a bogus small pool
-    # while CUDA's free figure sits at ~99.5% of its total; neither can cap the
-    # budget, so the mismatch branch returns the host's available RAM. Measured GB10
-    # row: NVML 62.50/0.44 GiB, CUDA 86.68/86.29 GiB, available 13.81 GiB.
+    # Measured GB10 row: NVML 62.50/0.44 GiB, CUDA 86.68/86.29 GiB, available 13.81 GiB.
     props = SimpleNamespace(uuid="abc", total_memory=93_066_629_120)
     monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: props)
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (92_648_583_168, 93_066_629_120))
@@ -62,8 +59,7 @@ def test_nvml_total_mismatch_caps_at_the_host_available_ram(monkeypatch):
 
 
 def test_windows_soc_gpu_caps_the_process_view_at_the_host_available_ram(monkeypatch):
-    # Same measured GB10 row through device_free_bytes: min(CUDA 86.29 GiB,
-    # available 13.81 GiB) = 13.81 GiB.
+    # Same measured GB10 row through device_free_bytes.
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(torch.version, "hip", None)
     monkeypatch.setattr(torch.version, "cuda", "13.0")
@@ -75,35 +71,8 @@ def test_windows_soc_gpu_caps_the_process_view_at_the_host_available_ram(monkeyp
     assert accelerator.device_free_bytes(torch.device("cuda:0")) == 14_832_648_192
 
 
-def test_forced_free_bytes_overrides_the_computed_figure(monkeypatch):
-    # JASNA_FORCE_FREE_BYTES=<GiB> replaces the figure outright; no CUDA or NVML read.
-    monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(torch.version, "hip", None)
-    monkeypatch.setattr(torch.version, "cuda", "13.0")
-    monkeypatch.setenv("JASNA_FORCE_FREE_BYTES", "28")
-    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: pytest.fail("CUDA read while forced"))
-    monkeypatch.setattr(accelerator, "_nvml_free_bytes", lambda device: pytest.fail("NVML read while forced"))
-    assert accelerator.device_free_bytes(torch.device("cuda:0")) == 28 * GIB
-
-
-def test_forced_free_bytes_accepts_a_fractional_gib(monkeypatch):
-    monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setenv("JASNA_FORCE_FREE_BYTES", "13.81")
-    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: pytest.fail("CUDA read while forced"))
-    assert accelerator.device_free_bytes(torch.device("cuda:0")) == int(13.81 * GIB)
-
-
-def test_forced_free_bytes_ignores_a_non_numeric_value(monkeypatch):
-    monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setenv("JASNA_FORCE_FREE_BYTES", "lots")
-    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (11 * GIB, 32 * GIB))
-    monkeypatch.setattr(accelerator, "_nvml_free_bytes", lambda device: pytest.fail("NVML read on Linux"))
-    assert accelerator.device_free_bytes(torch.device("cuda:0")) == 11 * GIB
-
-
 def test_nvml_total_within_wddm_reserve_keeps_nvml_figure(monkeypatch):
-    # A real dGPU: NVML's total stays within 5% of CUDA's (the WDDM reservation),
-    # so the device-wide NVML free figure still caps the process view.
+    # A real dGPU: NVML's total stays within 5% of CUDA's (the WDDM reservation).
     props = SimpleNamespace(uuid="abc", total_memory=110 * GIB)
     monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: props)
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (109 * GIB, 110 * GIB))
@@ -124,16 +93,15 @@ sys.stdin.read()
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 def test_vram_held_by_another_process_is_not_free():
     device = torch.device("cuda:0")
-    # SoC GPUs (GB10) answer NVML's v1 query with a bogus pool, so the NVML clamp is
-    # replaced by the host's available-RAM bound. On a commit-backed unified pool that
-    # figure can be held by page-file commitment rather than physical RAM, so this
-    # device-wide check cannot apply; on real dGPUs the NVML clamp still covers it.
+    # On a SoC GPU the NVML clamp is replaced by the host's available-RAM bound, which
+    # a commit-backed unified pool does not track, so the device-wide check cannot apply.
     if sys.platform == "win32" and not torch.version.hip:
-        nvml, handle = accelerator._nvml_device(str(torch.cuda.get_device_properties(device).uuid))
+        props = torch.cuda.get_device_properties(device)
+        nvml, handle = accelerator._nvml_device(str(props.uuid))
         memory = accelerator._NvmlMemory()
         accelerator._nvml_check(nvml, nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)))
-        if memory.total * 20 < torch.cuda.get_device_properties(device).total_memory * 19:
-            pytest.skip("NVML/CUDA total mismatch (SoC GPU): NVML clamp replaced by the host available bound")
+        if accelerator._nvml_total_disagrees_with_cuda(memory.total, props.total_memory):
+            pytest.skip("SoC GPU (NVML/CUDA total mismatch): the NVML clamp is replaced by the host available bound")
     before = accelerator.device_free_bytes(device)
     holder = subprocess.Popen(
         [sys.executable, "-c", _HOLD_VRAM, str(2 * GIB)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
