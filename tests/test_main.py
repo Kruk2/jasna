@@ -2,14 +2,16 @@ import logging
 import os
 import re
 import signal
+import subprocess
 import sys
 from contextlib import contextmanager, nullcontext
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from factories import cli_args, cli_environment, run_cli
-from jasna.main import batch_size_from_args, build_parser, stop_on_sigterm
+from jasna.main import batch_size_from_args, build_parser, stop_on_termination_signals
 from jasna.media.probe import UnsupportedVideoError
 from jasna.post_export_action import PostExportVideoCommandError
 from jasna.restorer.denoise import DenoiseStrength
@@ -382,8 +384,39 @@ def test_ctrl_c_stops_the_cli_with_a_short_message(tmp_path, capsys):
 def test_sigterm_stops_like_ctrl_c():
     previous = signal.getsignal(signal.SIGTERM)
     try:
-        stop_on_sigterm()
+        stop_on_termination_signals()
         with pytest.raises(KeyboardInterrupt):
             os.kill(os.getpid(), signal.SIGTERM)
     finally:
         signal.signal(signal.SIGTERM, previous)
+
+
+_WAIT_FOR_CTRL_BREAK = """
+import time
+import jasna.main
+
+def wait_for_ctrl_break():
+    print("ready", flush=True)
+    while True:
+        time.sleep(0.05)
+
+jasna.main._main = wait_for_ctrl_break
+jasna.main.main()
+"""
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Ctrl+Break is a Windows console event")
+def test_ctrl_break_stops_like_ctrl_c():
+    child = subprocess.Popen(
+        [sys.executable, "-c", _WAIT_FOR_CTRL_BREAK], cwd=Path(__file__).resolve().parents[1],
+        stdout=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
+    try:
+        assert child.stdout.readline() == "ready\n"
+        child.send_signal(signal.CTRL_BREAK_EVENT)
+        output, _ = child.communicate(timeout=30)
+    finally:
+        child.kill()
+
+    assert child.returncode == 130
+    assert output.splitlines()[-1] == "Stopped"
