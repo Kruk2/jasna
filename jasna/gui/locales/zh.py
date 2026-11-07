@@ -370,6 +370,11 @@ ZH = {
         "file_conflict_skip": "跳过",
         "file_conflict_overwrite_warning": "现有文件将被永久替换",
         "tip_file_conflict": "输出文件已存在时的处理方式",
+        "saved_progress_conflict": "过时的进度",
+        "saved_progress_conflict_ask": "询问",
+        "saved_progress_conflict_start_over": "重新开始",
+        "saved_progress_conflict_skip": "跳过",
+        "tip_saved_progress_conflict": "视频保存的进度与文件、设置或 Jasna 版本不再匹配时的处理方式。“询问”仅在队列中没有其他视频时等待你的回答；否则保留进度并跳过该视频。“重新开始”会删除旧进度。",
         "conflict_tooltip": "输出文件已存在",
         
         # Advanced Processing

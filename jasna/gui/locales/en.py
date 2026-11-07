@@ -370,6 +370,11 @@ EN = {
         "file_conflict_skip": "Skip",
         "file_conflict_overwrite_warning": "Existing files will be replaced permanently",
         "tip_file_conflict": "What to do if output file already exists",
+        "saved_progress_conflict": "Outdated Progress",
+        "saved_progress_conflict_ask": "Ask",
+        "saved_progress_conflict_start_over": "Start Over",
+        "saved_progress_conflict_skip": "Skip",
+        "tip_saved_progress_conflict": "What to do when a video's saved progress no longer fits its file, settings or Jasna version. Ask waits for your answer only when no other video is queued; otherwise it keeps the progress and skips the video. Start Over deletes the old progress.",
         "conflict_tooltip": "Output file already exists",
         
         # Advanced Processing

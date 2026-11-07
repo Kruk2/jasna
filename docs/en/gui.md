@@ -34,7 +34,9 @@ models slowly, and it warns you at startup.
 - **Ⅱ** (pause) appears for jobs using LTX or ranges. It asks first, then keeps saved work
   and puts the current item back to **Pending**. Press **▶** to continue.
   If the input, settings or Jasna version changed, Jasna asks before replacing saved work;
-  **No** keeps it and skips that video.
+  **No** keeps it and skips that video. It only asks when no other video is waiting,
+  so a queue never stops on this question; otherwise it keeps the work and skips the video.
+  **Outdated Progress** (in the **Output** tab, Advanced) can always start over or always skip instead.
 - **■** (stop) is used for other jobs. They start over next time;
   **File Conflict** decides what happens to any unfinished output.
 - Closing the window while a video is processing asks first: **Minimize** keeps

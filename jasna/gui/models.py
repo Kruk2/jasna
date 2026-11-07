@@ -201,6 +201,7 @@ class AppSettings:
     output_folder: str = ""
     output_pattern: str = DEFAULT_OUTPUT_PATTERN
     file_conflict: str = "auto_rename"  # auto_rename, overwrite, skip
+    saved_progress_conflict: str = "ask"  # ask, start_over, skip
     working_directory: str = ""  # empty = same directory as the output video
 
 

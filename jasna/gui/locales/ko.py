@@ -370,6 +370,11 @@ KO = {
         "file_conflict_skip": "건너뛰기",
         "file_conflict_overwrite_warning": "기존 파일이 영구적으로 대체됩니다",
         "tip_file_conflict": "출력 파일이 이미 존재할 때 수행할 작업",
+        "saved_progress_conflict": "오래된 진행 상황",
+        "saved_progress_conflict_ask": "묻기",
+        "saved_progress_conflict_start_over": "처음부터",
+        "saved_progress_conflict_skip": "건너뛰기",
+        "tip_saved_progress_conflict": "저장된 진행 상황이 파일, 설정 또는 Jasna 버전과 더 이상 맞지 않을 때 수행할 작업입니다. 묻기는 대기 중인 다른 동영상이 없을 때만 답을 기다리고, 그렇지 않으면 진행 상황을 유지하고 동영상을 건너뜁니다. 처음부터는 이전 진행 상황을 삭제합니다.",
         "conflict_tooltip": "출력 파일이 이미 존재합니다",
 
         # Advanced Processing

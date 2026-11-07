@@ -92,6 +92,7 @@ _NON_DEFAULT_SETTINGS = AppSettings(
     post_export_command="echo done",
     post_export_video_command="remux {output}",
     file_conflict="skip",
+    saved_progress_conflict="start_over",
     working_directory="/scratch",
     decode_backend="pyav-sw",
 )
@@ -522,6 +523,7 @@ def test_simple_view_hides_tuning_rows_and_keeps_their_values(panel_factory) -> 
     assert _shown(panel._widgets["codec"].master) and _shown(panel._widgets["file_conflict"].master)
     assert _shown(panel._widgets["post_export_command"].master)
     assert not _shown(panel._widgets["sharpen_strength"].master)
+    assert not _shown(panel._widgets["saved_progress_conflict"].master)
     assert not _shown(panel._widgets["post_export_video_command"])
     assert not _shown(_section(panel, DetectionSection).frame)
 

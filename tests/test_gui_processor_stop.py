@@ -122,34 +122,73 @@ def test_failing_job_still_marked_error(tmp_path):
     assert updates[-1].status is JobStatus.ERROR
 
 
-@pytest.mark.parametrize("accepted", [False, True])
-def test_changed_progress_requires_confirmation_and_declining_skips_only_that_job(tmp_path, accepted):
+@pytest.mark.parametrize(
+    "choice,queued_after,answer,asked,replaced",
+    [
+        ("ask", 0, True, True, True),
+        ("ask", 0, False, True, False),
+        ("ask", 1, True, False, False),
+        ("start_over", 1, False, False, True),
+        ("skip", 0, True, False, False),
+    ],
+)
+def test_outdated_progress_never_holds_up_videos_queued_after_it(
+    tmp_path, monkeypatch, choice, queued_after, answer, asked, replaced
+):
+    """#755: a question about outdated saved progress must not stall an unattended queue."""
     from concurrent.futures import Future
     from unittest.mock import MagicMock
 
+    import torch
+
     from jasna.job_resume import ResumeMismatchError
 
-    directory = tmp_path / ".saved.jasna-resume"
-    directory.mkdir()
-    marker = directory / "saved"
-    marker.touch()
-    processor, job, updates = _processor_with_job(tmp_path, lambda *_a, **_k: None)
-    next_job = JobItem(path=tmp_path / "next.mp4")
-    processor._jobs.append(next_job)
-    error = ResumeMismatchError(directory)
-    processor._run_video_pipeline = MagicMock(side_effect=[error, None, None])
-    processor._run_pipeline = processor._run_video_job
-    answer = Future()
-    answer.set_result(accepted)
-    processor._on_resume_conflict = MagicMock(return_value=answer)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "model_weights").mkdir()
+    (tmp_path / "model_weights" / "rfdetr-v6.onnx").touch()
+    saved = tmp_path / "saved-progress"
+    saved.mkdir()
+    jobs = [JobItem(path=tmp_path / f"clip{index}.mp4") for index in range(1 + queued_after)]
+    for job in jobs:
+        job.path.touch()
+
+    class SavedProgressPipeline:
+        cancel_requested = False
+        completed = True
+
+        def __init__(self, input_path):
+            self.input_path = input_path
+
+        def run(self):
+            if self.input_path == jobs[0].path and saved.exists():
+                raise ResumeMismatchError(saved)
+
+    monkeypatch.setattr(
+        "jasna.gui.processor.build_job_pipeline",
+        lambda _config, _session, input_path, *_a, **_k: SavedProgressPipeline(input_path),
+    )
+    monkeypatch.setattr(
+        "jasna.gui.processor.build_video_session", lambda *_a, **_k: MagicMock(device=torch.device("cpu"))
+    )
+    monkeypatch.setattr("jasna.engine_compiler.ensure_engines_compiled", lambda *_a, **_k: None)
+    questions: list[Path] = []
+
+    def answer_question(directory):
+        questions.append(directory)
+        future = Future()
+        future.set_result(answer)
+        return future
+
     completions = []
-    processor._on_complete = completions.append
-    processor._run()
-    processor._on_resume_conflict.assert_called_once_with(directory)
-    assert marker.exists() is not accepted
-    assert processor._run_video_pipeline.call_count == (3 if accepted else 2)
-    assert job.status is (JobStatus.COMPLETED if accepted else JobStatus.SKIPPED)
-    assert next_job.status is JobStatus.COMPLETED
+    processor = Processor(on_resume_conflict=answer_question, on_complete=completions.append)
+    processor.start(jobs, AppSettings(saved_progress_conflict=choice), str(tmp_path), DEFAULT_OUTPUT_PATTERN)
+    processor.join()
+
+    assert not processor.is_running()
+    assert questions == ([saved] if asked else [])
+    assert saved.exists() is not replaced
+    assert jobs[0].status is (JobStatus.COMPLETED if replaced else JobStatus.SKIPPED)
+    assert all(job.status is JobStatus.COMPLETED for job in jobs[1:])
     assert completions == [True]
 
 
