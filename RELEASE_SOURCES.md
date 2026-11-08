@@ -1,7 +1,7 @@
 # Release source correspondence
 
 This file records the custom and patched inputs selected for the next
-v0.12.2 packages. Already published packages keep their original inputs.
+v0.12.3 packages. Already published packages keep their original inputs.
 Native build receipts identify the exact native sources and
 toolchains. Windows freeze receipts identify the frozen application inputs;
 Linux builds require a fresh application freeze. Qualification reports bind
@@ -14,7 +14,7 @@ notices, and full license texts.
 
 | Component | Revision or source |
 | --- | --- |
-| Jasna | `0.12.2` source checkout; exact packaged inputs are recorded in build receipts |
+| Jasna | `0.12.3` source checkout; exact packaged inputs are recorded in build receipts |
 | Protection component | Private gitlink plus receipt-bound native sources; source is not published |
 | PyAV | Unmodified PyPI `av` 18.1.0, tag [`v18.1.0`](https://github.com/PyAV-Org/PyAV/commit/7e3d950a8b72062502c1a60d672f8ca565313af5) |
 | VALI | [`fc39271be92ece6d2b3fd043367aa235f0b73366`](https://codeberg.org/Kruk2/vali/commit/fc39271be92ece6d2b3fd043367aa235f0b73366) in the public Kruk2 fork |
