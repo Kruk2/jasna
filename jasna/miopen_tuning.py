@@ -19,6 +19,7 @@ DATABASE_SUFFIXES = (".HIP.fdb.txt", ".db.txt")
 COMPUTE_UNITS: Mapping[str, Sequence[int]] = {
     "gfx1201": (64, 56, 48),  # RX 9070 XT / AI PRO R9700, RX 9070, RX 9070 GRE
     "gfx1200": (32, 28),  # RX 9060 XT, RX 9060
+    "gfx1101": (60, 54, 48, 27),  # RX 7800 XT, RX 7700 XT, PRO W7700, Radeon PRO V710 as Azure exposes it
 }
 
 
