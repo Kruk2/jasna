@@ -20,7 +20,16 @@ COMPUTE_UNITS: Mapping[str, Sequence[int]] = {
     "gfx1201": (64, 56, 48),  # RX 9070 XT / AI PRO R9700, RX 9070, RX 9070 GRE
     "gfx1200": (32, 28),  # RX 9060 XT, RX 9060
     "gfx1101": (60, 54, 48, 27),  # RX 7800 XT, RX 7700 XT, PRO W7700, Radeon PRO V710 as Azure exposes it
+    "gfx1100": (96, 84, 80),  # RX 7900 XTX / PRO W7900, RX 7900 XT, RX 7900 GRE
+    "gfx1102": (32, 28),  # RX 7600 XT / 7600, PRO W7600
+    "gfx1150": (16, 12),  # Radeon 890M, 880M
+    "gfx1151": (40, 32),  # Radeon 8060S, 8050S
 }
+
+TUNED_ON: Mapping[str, str] = {"gfx1100": "gfx1101", "gfx1102": "gfx1101", "gfx1150": "gfx1101", "gfx1151": "gfx1101"}
+"""Architectures without a GPU to tune on, and the one whose tuning they take: the same RDNA3 compute units
+and MIOpen CK conv kernels, so its solver picks and kernel parameters apply (MIOpen searches again for any
+that do not). Unmeasured on these GPUs."""
 
 
 def database_names(architecture: str, compute_units: int, suffix: str) -> tuple[str, str]:
@@ -46,14 +55,15 @@ def merged(text: str, entries: Mapping[str, str]) -> str:
 
 
 def install(system_db: Path, tuned_dir: Path = TUNED_DIR,
-            compute_units: Mapping[str, Sequence[int]] = COMPUTE_UNITS) -> list[Path]:
-    """Merge the tuned entries into ``system_db`` for every known GPU of each tuned architecture; returns
-    the files written."""
+            compute_units: Mapping[str, Sequence[int]] = COMPUTE_UNITS,
+            tuned_on: Mapping[str, str] = TUNED_ON) -> list[Path]:
+    """Merge the tuned entries into ``system_db`` for every known GPU of each tuned architecture (or of the
+    architecture it takes its tuning from); returns the files written."""
     system_db.mkdir(parents=True, exist_ok=True)
     written = []
     for architecture, units in compute_units.items():
         for suffix in DATABASE_SUFFIXES:
-            tuned = tuned_dir / f"{architecture}{suffix}"
+            tuned = tuned_dir / f"{tuned_on.get(architecture, architecture)}{suffix}"
             if not tuned.is_file():
                 continue
             entries = read_entries(tuned.read_text(encoding="utf-8"))

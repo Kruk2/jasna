@@ -38,6 +38,17 @@ def test_install_writes_every_known_gpu_of_a_tuned_architecture(tmp_path):
     assert not (system / "gfx110060.HIP.fdb.txt").exists()
 
 
+def test_install_gives_an_untuned_architecture_the_tuning_it_takes(tmp_path):
+    tuned = tmp_path / "tuned"
+    tuned.mkdir()
+    (tuned / "gfx1101.HIP.fdb.txt").write_text("conv-a=Solver:1.0\n")
+    system = tmp_path / "db"
+    install(system, tuned, {"gfx1100": (96,), "gfx1102": (32,)}, {"gfx1100": "gfx1101"})
+    assert (system / "gfx110060.HIP.fdb.txt").read_text() == "conv-a=Solver:1.0\n"
+    assert (system / "gfx1100_96.HIP.fdb.txt").read_text() == "conv-a=Solver:1.0\n"
+    assert not list(system.glob("gfx1102*"))
+
+
 def test_install_creates_a_missing_database_folder(tmp_path):
     tuned = tmp_path / "tuned"
     tuned.mkdir()
