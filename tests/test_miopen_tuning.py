@@ -1,9 +1,9 @@
-from jasna.miopen_tuning import database_name, install, merged, read_entries
+from jasna.miopen_tuning import database_names, install, merged, read_entries
 
 
-def test_database_name_is_the_architecture_and_hex_compute_units():
-    assert database_name("gfx1201", 64, ".HIP.fdb.txt") == "gfx120140.HIP.fdb.txt"
-    assert database_name("gfx1100", 84, ".db.txt") == "gfx110054.db.txt"
+def test_database_names_cover_both_miopen_namings():
+    assert database_names("gfx1201", 64, ".HIP.fdb.txt") == ("gfx120140.HIP.fdb.txt", "gfx1201_64.HIP.fdb.txt")
+    assert database_names("gfx1101", 27, ".db.txt") == ("gfx11011b.db.txt", "gfx1101_27.db.txt")
 
 
 def test_read_entries_skips_lines_without_a_key():
@@ -31,6 +31,7 @@ def test_install_writes_every_known_gpu_of_a_tuned_architecture(tmp_path):
 
     assert sorted(path.name for path in written) == [
         "gfx120138.HIP.fdb.txt", "gfx120138.db.txt", "gfx120140.HIP.fdb.txt", "gfx120140.db.txt",
+        "gfx1201_56.HIP.fdb.txt", "gfx1201_56.db.txt", "gfx1201_64.HIP.fdb.txt", "gfx1201_64.db.txt",
     ]
     assert (system / "gfx120140.HIP.fdb.txt").read_text() == "conv-amd=Other:2.0\nconv-a=Solver:1.0\n"
     assert (system / "gfx120138.db.txt").read_text() == "conv-a=Solver:params\n"
