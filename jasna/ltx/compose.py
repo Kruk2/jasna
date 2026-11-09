@@ -110,13 +110,29 @@ def _grown(box: tuple[int, int, int, int], reach: int, shape: tuple[int, int]) -
     return max(x1 - reach, 0), max(y1 - reach, 0), min(x2 + reach, width), min(y2 + reach, height)
 
 
+@functools.cache
+def _gaussian_band(radius: int, size: int, device: torch.device) -> torch.Tensor:
+    """``[size + 2*radius, size]`` matrix with the Gaussian at rows ``j..j + 2*radius`` of column ``j``."""
+    offsets = torch.arange(size + 2 * radius, device=device)[:, None] - torch.arange(size, device=device)[None, :]
+    taps = _gaussian(radius, device)[offsets.clamp(0, 2 * radius)]
+    return torch.where((offsets >= 0) & (offsets <= 2 * radius), taps, 0.0)
+
+
+def _blur_band(radius: int, length: int, device: torch.device) -> torch.Tensor:
+    """Blurs a line of ``length`` px reflect-padded by ``radius``: the top-left block of a band
+    cached per power of two."""
+    size = 1 << (length - 1).bit_length()
+    return _gaussian_band(radius, size, device)[: length + 2 * radius, :length]
+
+
 def _dilate_and_blur(mask: torch.Tensor, feather: int) -> torch.Tensor:
-    dilated = dilate_ellipse(mask, feather)[None, None]
-    kernel = _gaussian(feather, mask.device)
-    x = F.pad(dilated.float(), (feather, feather, 0, 0), mode="reflect")
-    x = F.conv2d(x, kernel.view(1, 1, 1, -1))
-    x = F.pad(x, (0, 0, feather, feather), mode="reflect")
-    return F.conv2d(x, kernel.view(1, 1, -1, 1))[0, 0]
+    # Matrix products, not conv2d: the box size changes every frame, and MIOpen benchmarks
+    # every new conv shape (~50 ms each on an R9700) before it runs it.
+    dilated = dilate_ellipse(mask, feather)[None, None].float()
+    height, width = mask.shape
+    rows = F.pad(dilated, (feather, feather, 0, 0), mode="reflect")[0, 0] @ _blur_band(feather, width, mask.device)
+    columns = F.pad(rows[None, None], (0, 0, feather, feather), mode="reflect")[0, 0]
+    return _blur_band(feather, height, mask.device).T @ columns
 
 
 def crop_edge_ramp(

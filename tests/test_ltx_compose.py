@@ -23,13 +23,19 @@ def _frame(seed: int = 0) -> torch.Tensor:
     return torch.randint(0, 256, (3, 360, 640), dtype=torch.uint8, generator=generator)
 
 
-def test_feather_alpha_matches_opencv():
-    mask = np.zeros((200, 300), dtype=np.uint8)
-    cv2.circle(mask, (150, 100), 40, 255, -1)
-    feather = 12
+@pytest.mark.parametrize(
+    ("shape", "feather"),
+    [((200, 300), 12), ((64, 65), 6), ((129, 128), 30), ((33, 257), 3), ((513, 70), 20)],
+)
+def test_feather_alpha_matches_opencv(shape, feather):
+    height, width = shape
+    mask = np.zeros(shape, dtype=np.uint8)
+    cv2.ellipse(mask, (width // 2, height // 2), (width // 5, height // 5), 0, 0, 360, 255, -1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * feather + 1,) * 2)
     expected = cv2.GaussianBlur(cv2.dilate(mask, kernel).astype(np.float32) / 255.0, (2 * feather + 1,) * 2, 0.0)
-    actual = feather_alpha(torch.from_numpy(mask > 0), feather, (110, 60, 191, 141)).numpy()
+    ys, xs = np.nonzero(mask)
+    box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+    actual = feather_alpha(torch.from_numpy(mask > 0), feather, box).numpy()
     assert np.abs(actual - expected).max() < 1e-5
 
 
@@ -55,7 +61,7 @@ def test_feather_alpha_inside_the_polygon_box_matches_the_whole_region(device, p
     in_box = feather_alpha(mask, feather, polygon_box([polygon], shape, (0, 0)))
     assert whole.any()
     assert torch.equal(in_box > 0, whole > 0)
-    # oneDNN's CPU conv2d sums the blur taps in an order that depends on the input width, so a cut-out differs by a few float ulps.
+    # The blur's matrix products sum the taps in an order that depends on the cut-out's size, so it differs by a few float ulps.
     torch.testing.assert_close(in_box, whole, rtol=0.0, atol=1e-6)
 
 
