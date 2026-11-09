@@ -7,7 +7,6 @@ from tkinter import messagebox
 import pytest
 
 from factories import ltx_models, write_sparse_file
-from jasna import os_utils
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui import ltx_models as ltx_models_module
 from jasna.gui.locales import t
@@ -190,9 +189,7 @@ def test_ensure_skips_installed_models_and_unavailable_downloads(tmp_path, monke
 
 
 @pytest.fixture
-def tk_root(tk_root, monkeypatch, tmp_path):
-    monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+def tk_root(tk_root, user_config_dir):
     return tk_root
 
 

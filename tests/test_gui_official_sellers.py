@@ -21,10 +21,9 @@ def test_wizard_names_the_official_sellers(tk_root, monkeypatch):
     assert t("official_sellers_notice") in _label_texts(dialog)
 
 
-def test_license_dialog_names_the_official_sellers(tk_root, settle_activation, monkeypatch, tmp_path):
+def test_license_dialog_names_the_official_sellers(tk_root, settle_activation, user_config_dir):
     from jasna.gui.components import LicenseDialog
 
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     settle_activation(dialog)
 

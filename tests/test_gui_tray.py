@@ -30,8 +30,7 @@ def fake_tray(monkeypatch):
     return icons
 
 
-def test_options_dialog_saves_switches_and_shows_them_again(tk_root, monkeypatch, tmp_path):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_options_dialog_saves_switches_and_shows_them_again(tk_root, user_config_dir):
     dialog = TrayOptionsDialog(tk_root, TraySupport(available=True, has_menu=True))
     dialog.switches["minimize_to_tray"]._toggle()
     dialog.destroy()
@@ -51,8 +50,7 @@ def test_options_dialog_saves_switches_and_shows_them_again(tk_root, monkeypatch
         (TraySupport(available=False, has_menu=False), "disabled", "disabled"),
     ],
 )
-def test_options_dialog_disables_what_the_desktop_cannot_do(tk_root, monkeypatch, tmp_path, support, minimize_state, close_state):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+def test_options_dialog_disables_what_the_desktop_cannot_do(tk_root, user_config_dir, support, minimize_state, close_state):
     dialog = TrayOptionsDialog(tk_root, support)
 
     assert dialog.switches["minimize_to_tray"].cget("state") == minimize_state
