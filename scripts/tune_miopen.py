@@ -7,11 +7,12 @@ with placeholder weights: tuning depends on shapes only. Each path runs in its o
 MIOpen user database and ``MIOPEN_FIND_ENFORCE=SEARCH``; the solvers it settles on are merged into
 ``jasna/media/miopen/<arch>.HIP.fdb.txt`` and ``<arch>.db.txt``. Takes 30-60 minutes.
 
-``--install`` instead merges the committed results into the MIOpen databases of the installed ROCm
-(``jasna.miopen_tuning.install``), as release builds do.
+``--backends prebuilt`` tunes only the release path (Windows needs a Visual Studio build environment for
+the Triton one). ``--install`` instead merges the committed results into the MIOpen databases of the
+installed ROCm (``jasna.miopen_tuning.install``), as release builds do.
 
 Usage (an otherwise idle AMD GPU):
-    python scripts/tune_miopen.py
+    python scripts/tune_miopen.py [--backends prebuilt]
     python scripts/tune_miopen.py --install
 """
 
@@ -69,10 +70,10 @@ def tuned_entries(user_db: Path, user_suffix: str) -> dict[str, str]:
     return entries
 
 
-def tune() -> None:
+def tune(backends: list[str]) -> None:
     architecture = accelerator.amd_gpu_architecture(torch.device("cuda"))
     collected = {suffix: {} for suffix in DATABASE_SUFFIXES}
-    for backend in BACKENDS:
+    for backend in backends:
         with tempfile.TemporaryDirectory(prefix="miopen-tune-") as user_db:
             environment = {
                 **os.environ, "MIOPEN_FIND_ENFORCE": "SEARCH", "MIOPEN_FIND_MODE": "NORMAL",
@@ -92,6 +93,7 @@ def tune() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--backend", choices=BACKENDS, help=argparse.SUPPRESS)
+    parser.add_argument("--backends", nargs="+", choices=BACKENDS, default=list(BACKENDS), help="kernel paths to tune")
     parser.add_argument("--install", action="store_true", help="merge the committed results into the installed ROCm")
     args = parser.parse_args()
     if args.backend:
@@ -100,7 +102,7 @@ def main() -> None:
         for path in install(accelerator.rocm_libraries_dir() / "share" / "miopen" / "db"):
             print(path)
     else:
-        tune()
+        tune(args.backends)
 
 
 if __name__ == "__main__":
