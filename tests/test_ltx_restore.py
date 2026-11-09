@@ -952,12 +952,15 @@ def test_segment_encoder_feeds_each_window_its_crops_padded_with_the_last(device
     encoded = {}
     store = SimpleNamespace(put=lambda index, latent: encoded.__setitem__(index, latent.cpu()))
     buffers = restore._WindowBuffers()
-    encoder = restore._SegmentEncoder(
-        [SimpleNamespace(windows=windows)], lambda pixels: pixels, store, buffers, torch.device(device), _Bar(), None
-    )
-    for value in range(5):
-        encoder.frame(torch.full((3, 16, 16), value * 10, dtype=torch.uint8, device=device))
-    encoder.finish()
+    encodes = restore._WindowEncodes(lambda pixels: pixels, buffers, torch.device(device), _Bar())
+    encoder = restore._SegmentEncoder([SimpleNamespace(windows=windows)], store, buffers, encodes, None)
+    try:
+        for value in range(5):
+            encoder.frame(torch.full((3, 16, 16), value * 10, dtype=torch.uint8, device=device))
+        encodes.finish()
+        encoder.finish()
+    finally:
+        encodes.close()
 
     def expected(values):
         frames = values + [values[-1]] * (restore.WINDOW_FRAMES - len(values))
@@ -967,6 +970,52 @@ def test_segment_encoder_feeds_each_window_its_crops_padded_with_the_last(device
     assert torch.equal(encoded[0], expected([10, 20, 30]))
     assert torch.equal(encoded[1], expected([20, 30]))
     assert torch.equal(encoded[2], expected([40]))
+
+
+def _two_window_encoder(encode, directory):
+    crop = CropFrame(crop_box=(0, 0, 8, 8), resize_hw=(8, 8), pad=(0, 0, 0, 0))
+    windows = (Window(0, 0, 0, 2, (crop,) * 2, 0), Window(1, 0, 2, 2, (crop,) * 2, 1))
+    plan = restore.TrackPlan(0, 0, ((),) * 4, (1.0,) * 4, windows, 2)
+    store = restore.LatentStore(directory, "reference")
+    buffers = restore._WindowBuffers()
+    encodes = restore._WindowEncodes(encode, buffers, torch.device("cpu"), _Bar())
+    return restore._SegmentEncoder([plan], store, buffers, encodes, None), encodes, store
+
+
+def test_the_frame_loop_fills_the_next_window_while_a_window_encodes(tmp_path):
+    next_window_filled = threading.Event()
+    waited = []
+
+    def encode(pixels):
+        if not waited:
+            waited.append(next_window_filled.wait(timeout=5))
+        return pixels
+
+    segment, encodes, store = _two_window_encoder(encode, tmp_path)
+    try:
+        for value in range(4):
+            segment.frame(torch.full((3, 16, 16), value, dtype=torch.uint8))
+        next_window_filled.set()
+        encodes.finish()
+    finally:
+        encodes.close()
+    assert waited == [True]
+    assert [store.has(index) for index in (0, 1)] == [True, True]
+
+
+def test_a_failed_window_encode_fails_the_encode_pass(tmp_path):
+    def encode(pixels):
+        raise RuntimeError("encode failed")
+
+    segment, encodes, store = _two_window_encoder(encode, tmp_path)
+    try:
+        with pytest.raises(RuntimeError, match="encode failed"):
+            for value in range(4):
+                segment.frame(torch.full((3, 16, 16), value, dtype=torch.uint8))
+            encodes.finish()
+    finally:
+        encodes.close()
+    assert [store.has(index) for index in (0, 1)] == [False, False]
 
 
 def test_window_buffers_reuse_an_encoded_windows_buffer():
@@ -1055,7 +1104,7 @@ def test_encrypted_worker_starts_on_its_own_thread_while_the_scan_runs(fakes, mo
         progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(),
     )
     assert requests[0] == ("prepare_transformer", False)
-    assert requests[1:3] == [("load_encoder", True), ("encode", True)]
+    assert requests[1:3] == [("load_encoder", True), ("encode", False)]
 
 
 def test_a_failed_scan_waits_for_the_worker_start_before_it_raises(fakes, monkeypatch, tmp_path):

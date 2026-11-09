@@ -90,6 +90,9 @@ DECODE_BUDGET_EXACT_BELOW = 4 << 30
 DECODE_AHEAD = 2
 """Windows a compose pass keeps decoding or decoded ahead of the frames; each waits in host
 memory (~95 MB at 512 px)."""
+ENCODE_AHEAD = 2
+"""Filled windows an encode pass keeps encoding or queued while its frame loop fills the next
+ones; each keeps its host pixels (~95 MB at 512 px) until it is encoded."""
 WHOLE_VIDEO_PTS = (-(1 << 63), (1 << 63) - 1)
 SPEED_TEST_FRAMES = WINDOW_FRAMES + WINDOW_HOP
 """Two windows per track: the speed profile leaves out each canvas's cold first window."""
@@ -626,26 +629,63 @@ def _copy_canvas(window_pixels: torch.Tensor, position: int, real_frames: int, c
     window_pixels[:, position : WINDOW_FRAMES if last else position + 1].copy_(canvas.unsqueeze(1))
 
 
+class _WindowEncodes:
+    """Encodes filled windows on a thread of its own (on CUDA on a stream of its own), so the frame
+    loop decodes and crops the next windows while the encoder runs; once ``ENCODE_AHEAD`` windows
+    wait, ``submit`` first finishes the oldest. A window's buffer goes back once it is encoded."""
+
+    def __init__(self, encoder, buffers: _WindowBuffers, device: torch.device, bar: _StageBar) -> None:
+        self._encoder = encoder
+        self._buffers = buffers
+        self._device = device
+        self._bar = bar
+        self._thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxEncode")
+        self._stream = torch.cuda.Stream(device) if device.type == "cuda" else None
+        self._queued: list[tuple[Future[None], int, torch.Tensor]] = []
+
+    def submit(self, store: LatentStore, index: int, canvas: int, window_pixels: torch.Tensor) -> None:
+        while len(self._queued) >= ENCODE_AHEAD:
+            self._finish_oldest()
+        self._queued.append((self._thread.submit(self._encode, store, index, canvas, window_pixels), canvas, window_pixels))
+
+    def _encode(self, store: LatentStore, index: int, canvas: int, window_pixels: torch.Tensor) -> None:
+        with torch.cuda.stream(self._stream), self._bar.window(canvas), torch.inference_mode():
+            pixels = (
+                window_pixels.unsqueeze(0)
+                if isinstance(self._encoder, WorkerEncoder) else _vae_pixels(window_pixels, self._device)
+            )
+            store.put(index, self._encoder(pixels))
+
+    def _finish_oldest(self) -> None:
+        future, canvas, window_pixels = self._queued.pop(0)
+        future.result()
+        self._bar.windows_done(canvas, 1)
+        self._buffers.give_back(canvas, window_pixels)
+
+    def finish(self) -> None:
+        while self._queued:
+            self._finish_oldest()
+
+    def close(self) -> None:
+        self._thread.shutdown(cancel_futures=True)
+
+
 class _SegmentEncoder:
     def __init__(
         self,
         plans: list[TrackPlan],
-        encoder,
         store: LatentStore,
         buffers: _WindowBuffers,
-        device: torch.device,
-        bar: _StageBar,
+        encodes: _WindowEncodes,
         projector: RegionProjector | None,
     ) -> None:
         self._pending = iter(sorted((w for plan in plans for w in plan.windows), key=lambda w: w.start))
         self._upcoming = next(self._pending, None)
         self._active: dict[int, tuple[Window, torch.Tensor]] = {}
         self._projector = projector
-        self._encoder = encoder
         self._store = store
         self._buffers = buffers
-        self._device = device
-        self._bar = bar
+        self._encodes = encodes
         self._frame_idx = 0
 
     def frame(self, frame: torch.Tensor) -> None:
@@ -656,14 +696,7 @@ class _SegmentEncoder:
             position = self._frame_idx - window.start
             _copy_canvas(window_pixels, position, window.real_frames, crop_to_canvas(frame, window.crops[position], self._projector))
             if position == window.real_frames - 1:
-                with self._bar.window(window.canvas), torch.inference_mode():
-                    pixels = (
-                        window_pixels.unsqueeze(0)
-                        if isinstance(self._encoder, WorkerEncoder) else _vae_pixels(window_pixels, self._device)
-                    )
-                    self._store.put(index, self._encoder(pixels))
-                self._bar.windows_done(window.canvas, 1)
-                self._buffers.give_back(window.canvas, window_pixels)
+                self._encodes.submit(self._store, index, window.canvas, window_pixels)
                 del self._active[index]
         self._frame_idx += 1
 
@@ -687,15 +720,20 @@ def encode_span(
 ) -> None:
     """VAE-encode every planned window's reference crops into its segment's store."""
     buffers = _WindowBuffers()
-    encoders = [_SegmentEncoder(p, encoder, store, buffers, device, bar, projector) for p, store in zip(plans, stores)]
-    for owner, batch, _pts in segment_batches(frames(), segments, batch_size):
-        _check(cancel)
-        bar.update(len(batch))
-        if owner is not None:
-            for frame in batch:
-                encoders[owner].frame(frame)
-    for segment_encoder in encoders:
-        segment_encoder.finish()
+    encodes = _WindowEncodes(encoder, buffers, device, bar)
+    try:
+        encoders = [_SegmentEncoder(p, store, buffers, encodes, projector) for p, store in zip(plans, stores)]
+        for owner, batch, _pts in segment_batches(frames(), segments, batch_size):
+            _check(cancel)
+            bar.update(len(batch))
+            if owner is not None:
+                for frame in batch:
+                    encoders[owner].frame(frame)
+        encodes.finish()
+        for segment_encoder in encoders:
+            segment_encoder.finish()
+    finally:
+        encodes.close()
 
 
 def denoise_track(
