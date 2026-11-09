@@ -114,11 +114,20 @@ def _quantize_fp4(gelu: bool) -> Variant:
     )
 
 
+def _quantize_fp4_gated(k: int, head_dim: int) -> Variant:
+    return Variant(
+        "quantize_fp4_gated", kernels._quantize_fp4_gated_kernel,
+        ("*bf16", "*bf16", "*fp32", "*u8", "*u8", "i32"), ("o_ptr", "g_ptr", "q_ptr", "s_ptr"),
+        (("K", k), ("HEAD_DIM", head_dim), ("BM", policy.FP4_QUANTIZE_ROWS), ("BK", policy.FP4_QUANTIZE_COLS)),
+        policy.FP4_QUANTIZE_WARPS, 3, (),
+    )
+
+
 def variants(architecture: tuple[int, int] | str, dims: BlockDims, *, fp4: bool) -> list[Variant]:
     """Every kernel variant an INT8 (``fp4`` False) or NVFP4 block launches on ``architecture``,
     for linears with and without a bias."""
     if fp4:
-        return [_quantize_fp4(False), _quantize_fp4(True)]
+        return [_quantize_fp4(False), _quantize_fp4(True), _quantize_fp4_gated(dims.dim, dims.dim // dims.heads)]
     # the attention outputs quantize gated straight from their heads: on AMD as transformer._gated_heads
     # does, on NVIDIA with the sigmoid of the native block's gate_heads
     found = [_rotate_quantize(dims.dim, True), _rotate_quantize(dims.dim, False), _rotate_quantize(dims.ff_dim, False),
