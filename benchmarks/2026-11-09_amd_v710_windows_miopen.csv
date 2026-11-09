@@ -1,0 +1,5 @@
+date,gpu,os,commit,path,canvas,system_database,first_window_s,s_per_window
+2026-11-09,Radeon PRO V710 (gfx1101),Windows 11,31e7fcec,prebuilt,512,none (ROCm ships none),119.2,3.457
+2026-11-09,Radeon PRO V710 (gfx1101),Windows 11,31e7fcec,prebuilt,768,none (ROCm ships none),254.3,8.468
+2026-11-09,Radeon PRO V710 (gfx1101),Windows 11,31e7fcec,prebuilt,512,Jasna tuning,10.7,2.736
+2026-11-09,Radeon PRO V710 (gfx1101),Windows 11,31e7fcec,prebuilt,768,Jasna tuning,13.8,6.210
