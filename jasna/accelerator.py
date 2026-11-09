@@ -62,9 +62,9 @@ def rocm_libraries_dir() -> Path | None:
 
 
 def windows_miopen_system_db(platform: str, libraries: Path | None) -> Path | None:
-    """The folder MIOpen should read its system databases (tuned solver picks, precompiled kernels) from on
-    Windows: there it looks beside MIOpen.dll in ``bin``, while the ROCm wheels ship them in ``share/miopen/db``,
-    so every conv shape would be searched and compiled at run time."""
+    """The folder MIOpen should read its system databases (tuned solvers) from on Windows. The Windows ROCm
+    wheels ship none, so Jasna's release build puts its own tuning in ``share/miopen/db``
+    (``jasna.miopen_tuning``); MIOpen there looks beside MIOpen.dll in ``bin`` instead."""
     if platform != "win32" or libraries is None:
         return None
     database = libraries / "share" / "miopen" / "db"
