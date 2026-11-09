@@ -1,0 +1,5 @@
+date,gpu,commit,run,clip,model,vae,ltx_s,scan_s,encode_s,denoise_s,compose_s,encode_s_per_window,denoise_s_per_window_step,decode_s_per_window,wall_s
+2026-11-09,Radeon RX 9060 XT,81111262,cold,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,1950.8,67.7,270.9,922.4,689.7,1.86,3.19,2.80,2411.6
+2026-11-09,Radeon RX 9060 XT,81111262,warm,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,1711.3,67.1,273.9,918.4,452.0,1.86,3.16,2.75,1720.2
+2026-11-09,Radeon RX 9060 XT,1140c2f1,cold,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,1481.4,63.3,223.2,822.5,372.4,1.54,2.85,2.55,1585.2
+2026-11-09,Radeon RX 9060 XT,1140c2f1,warm,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,1489.4,63.9,226.8,823.3,375.3,1.54,2.85,2.54,1498.2
