@@ -3,8 +3,9 @@
 
 ``install`` merges them into MIOpen's system databases, so a fresh install neither searches these convs
 (about a minute per canvas size on the first window) nor runs their untuned kernels (~15 % slower encode).
-MIOpen reads only the file named after the exact GPU, ``<arch><compute units in hex>``, so every known
-compute-unit count of an architecture gets its own copy."""
+MIOpen reads only the file named after the exact GPU, so every known compute-unit count of an architecture
+gets its own copy, under both names seen in the field: ``<arch><CUs in hex>`` (``gfx120140`` on Linux,
+``gfx110054`` in a Windows RX 7900 XT log) and ``<arch>_<CUs>`` (``gfx1101_27`` on a Windows V710)."""
 
 from __future__ import annotations
 
@@ -21,9 +22,10 @@ COMPUTE_UNITS: Mapping[str, Sequence[int]] = {
 }
 
 
-def database_name(architecture: str, compute_units: int, suffix: str) -> str:
-    """MIOpen's system database file for one GPU, e.g. ``gfx120140.HIP.fdb.txt`` for a 64-CU gfx1201."""
-    return f"{architecture}{compute_units:x}{suffix}"
+def database_names(architecture: str, compute_units: int, suffix: str) -> tuple[str, str]:
+    """MIOpen's system database files for one GPU, e.g. ``gfx120140.HIP.fdb.txt`` and ``gfx1201_64.HIP.fdb.txt``
+    for a 64-CU gfx1201."""
+    return f"{architecture}{compute_units:x}{suffix}", f"{architecture}_{compute_units}{suffix}"
 
 
 def read_entries(text: str) -> dict[str, str]:
@@ -55,8 +57,9 @@ def install(system_db: Path, tuned_dir: Path = TUNED_DIR,
                 continue
             entries = read_entries(tuned.read_text(encoding="utf-8"))
             for count in units:
-                target = system_db / database_name(architecture, count, suffix)
-                text = target.read_text(encoding="utf-8") if target.is_file() else ""
-                target.write_text(merged(text, entries), encoding="utf-8", newline="\n")
-                written.append(target)
+                for name in database_names(architecture, count, suffix):
+                    target = system_db / name
+                    text = target.read_text(encoding="utf-8") if target.is_file() else ""
+                    target.write_text(merged(text, entries), encoding="utf-8", newline="\n")
+                    written.append(target)
     return written
