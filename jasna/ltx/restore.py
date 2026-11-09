@@ -89,7 +89,11 @@ DECODE_BUDGET_STEP_BYTES = 512 << 20
 DECODE_BUDGET_EXACT_BELOW = 4 << 30
 DECODE_AHEAD = 2
 """Windows a compose pass keeps decoding or decoded ahead of the frames; each waits in host
-memory (~95 MB at 512 px)."""
+memory (~95 MB at 512 px), or on the GPU from ``GPU_WINDOWS_MIN_FREE_BYTES`` of budget on."""
+GPU_WINDOWS_MIN_FREE_BYTES = 18 << 30
+"""Decode budget from which decoded windows stay on the GPU: the few held at once (~95 MB each
+at 512 px, ~210 MB at 768) still leave every later decode the 14.75 GiB that decodes a 768 px
+window in one tile, so no tile layout changes, and each frame skips uploading its canvases."""
 ENCODE_AHEAD = 2
 """Filled windows an encode pass keeps encoding or queued while its frame loop fills the next
 ones; each keeps its host pixels (~95 MB at 512 px) until it is encoded."""
@@ -771,17 +775,19 @@ def segment_decode_budget(total_bytes: int) -> DecodeBudget:
 def _decode_window(
     decoder, latent: torch.Tensor, seed: int, canvas: int, budget: DecodeBudget, device: torch.device
 ) -> torch.Tensor:
-    """Decoded window as uint8 ``[F, 3, S, S]`` in host memory: a frame can need every open
-    window of its tracks, and holding them on the GPU would shrink the next decode's budget."""
+    """Decoded window as uint8 ``[F, 3, S, S]``, in host memory while the budget is under
+    ``GPU_WINDOWS_MIN_FREE_BYTES``: a frame can need every open window of its tracks, and holding
+    them on the GPU would shrink the next decode's budget. From there on it stays on the GPU."""
     torch.cuda.empty_cache()
     free = budget(canvas)
+    held = device if device.type == "cuda" and free >= GPU_WINDOWS_MIN_FREE_BYTES else torch.device("cpu")
     if isinstance(decoder, WorkerDecoder):
-        return decoder.decode_window(latent, seed, free)
+        return decoder.decode_window(latent, seed, free).to(held)
     generator = torch.Generator(device=device).manual_seed(seed)
     with torch.inference_mode():
         video = decode_latent(decoder, latent.to(device), free_bytes=free, generator=generator)
         video = ((video + 1.0) / 2.0).clamp(0.0, 1.0)[0].float()
-        return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous().cpu()
+        return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous().to(held)
 
 
 def _decode_shares(windows: list[Window]) -> dict[int, list[tuple[int, float]]]:
@@ -867,6 +873,10 @@ class _SegmentComposer:
     def _decoded_window(self, window: Window) -> torch.Tensor:
         with self._bar.waiting():
             video = self._decoding.pop(window.index).result()
+        if video.is_cuda:
+            # decoded on the decode stream, read by this stream's frames: keep its memory from the
+            # next decode until they ran
+            video.record_stream(torch.cuda.current_stream(video.device))
         self._decode_ahead()
         return video
 

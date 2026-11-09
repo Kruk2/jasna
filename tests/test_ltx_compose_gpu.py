@@ -77,7 +77,23 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
     assert len(writes) == 6 and all(priority < 0 for priority in writes)
 
 
-def test_decoded_windows_wait_in_host_memory_and_upload_without_waiting_for_the_gpu(monkeypatch):
+def test_decoded_windows_stay_on_the_gpu_from_a_roomy_decode_budget_on(monkeypatch):
+    from jasna.ltx import restore
+
+    device = torch.device("cuda")
+    monkeypatch.setattr(
+        restore, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.zeros(1, 3, 6, 4, 4, device=device)
+    )
+
+    def decoded(free_bytes):
+        return restore._decode_window(None, torch.zeros(1, 128, 1, 1, 1), 0, 512, lambda canvas: free_bytes, device)
+
+    assert decoded(restore.GPU_WINDOWS_MIN_FREE_BYTES).is_cuda
+    assert decoded(restore.GPU_WINDOWS_MIN_FREE_BYTES - 1).is_cpu
+
+
+@pytest.mark.parametrize("roomy", [False, True], ids=["host-memory windows", "gpu windows"])
+def test_frames_take_decoded_windows_without_waiting_for_the_gpu(monkeypatch, roomy):
     import contextlib
     import threading
     from types import SimpleNamespace
@@ -90,7 +106,7 @@ def test_decoded_windows_wait_in_host_memory_and_upload_without_waiting_for_the_
     monkeypatch.setattr(
         restore, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.zeros(1, 3, 6, 4, 4, device=device)
     )
-    assert restore._decode_window(None, torch.zeros(1, 128, 1, 1, 1), 0, 512, lambda canvas: 1, device).is_cpu
+    budget = restore.GPU_WINDOWS_MIN_FREE_BYTES if roomy else 1
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
     plan = TrackPlan(0, 0, ((),) * 6, (1.0,) * 6, (Window(0, 0, 0, 6, (crop,) * 6, 0),), 3)
     canvases = []
@@ -108,7 +124,8 @@ def test_decoded_windows_wait_in_host_memory_and_upload_without_waiting_for_the_
     try:
         composer = restore._SegmentComposer(
             [plan], None, SimpleNamespace(get=lambda index: torch.zeros(1)), seed=0, feather=1,
-            budget=lambda canvas: 1, device=device, bar=bar, decodes=decodes, stream=torch.cuda.Stream(device), super_res=None, projector=None,
+            budget=lambda canvas: budget, device=device, bar=bar, decodes=decodes, stream=torch.cuda.Stream(device),
+            super_res=None, projector=None,
         )
         composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))
         torch.cuda.set_sync_debug_mode("error")
@@ -144,3 +161,22 @@ def test_composite_frame_queues_its_work_without_waiting_for_the_gpu():
         torch.cuda.set_sync_debug_mode("default")
     assert torch.equal(out, expected)
     assert not torch.equal(out, source)
+
+
+@pytest.mark.parametrize("feather", [7, 12, 40])
+def test_crop_edge_ramps_are_bit_identical_on_the_gpu_and_the_cpu(feather):
+    from jasna.ltx.compose import crop_edge_ramp
+
+    shape, box, window = (300, 500), (37, 23, 431, 277), (10, 5, 480, 290)
+    on_gpu = crop_edge_ramp(box, shape, feather, window, torch.device("cuda"))
+    assert on_gpu.is_cuda
+    assert torch.equal(on_gpu.cpu(), crop_edge_ramp(box, shape, feather, window, torch.device("cpu")))
+
+
+@pytest.mark.parametrize("out_size, in_size", [(1, 512), (37, 64), (300, 333), (511, 512), (700, 768)])
+def test_area_weights_are_bit_identical_on_the_gpu_and_the_cpu(out_size, in_size):
+    from jasna.ltx.compose import _area_weights
+
+    on_gpu = _area_weights(out_size, in_size, torch.device("cuda"))
+    assert on_gpu.is_cuda
+    assert torch.equal(on_gpu.cpu(), _area_weights(out_size, in_size, torch.device("cpu")))
