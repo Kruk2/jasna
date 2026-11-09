@@ -588,7 +588,7 @@ def _offered_tabs(panel) -> list[str]:
         ("advanced", ["model", "detection", "upscale", "output", "images"]),
     ],
 )
-def test_each_view_offers_only_the_tabs_it_has_settings_in(panel_factory, view, tabs) -> None:
+def test_each_view_offers_only_the_tabs_it_has_settings_in(panel_factory, show_window, view, tabs) -> None:
     panel = panel_factory()
     panel.set_view("advanced")
     panel.show_tab("detection")
@@ -598,8 +598,9 @@ def test_each_view_offers_only_the_tabs_it_has_settings_in(panel_factory, view, 
     assert _offered_tabs(panel) == tabs
     assert _shown(_section(panel, DetectionSection).frame) is (view != "simple")
     panel.pack(fill="both", expand=True)
-    panel.winfo_toplevel().geometry("1000x700")
-    panel.update()
+    window = panel.winfo_toplevel()
+    window.geometry("1000x700")
+    show_window(window)
     buttons = panel._tab_bar._buttons_dict.values()
     assert sum(button.winfo_width() for button in buttons) >= panel.winfo_width() * 0.9
 
