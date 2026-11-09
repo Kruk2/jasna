@@ -50,14 +50,20 @@ def crop_to_canvas(frame: torch.Tensor, crop: CropFrame, projector: RegionProjec
     return content
 
 
+@functools.lru_cache(maxsize=64)
 def _area_weights(out_size: int, in_size: int, device: torch.device) -> torch.Tensor:
-    """``[out, in]`` pixel-area resampling weights (OpenCV INTER_AREA for downscaling)."""
+    """``[out, in]`` pixel-area resampling weights (OpenCV INTER_AREA for downscaling), computed on
+    the host in float64 (dividing by the scale as CUDA divides by a scalar: times its reciprocal)
+    and uploaded once; kept per size, as a crop keeps its size over many frames (at most 768x768
+    floats each)."""
     scale = in_size / out_size
-    starts = torch.arange(out_size, dtype=torch.float64, device=device) * scale
-    edges = torch.arange(in_size + 1, dtype=torch.float64, device=device)
-    lo = torch.maximum(starts[:, None], edges[None, :-1])
-    hi = torch.minimum(starts[:, None] + scale, edges[None, 1:])
-    return ((hi - lo).clamp(min=0) / scale).float()
+    starts = np.arange(out_size, dtype=np.float64) * scale
+    edges = np.arange(in_size + 1, dtype=np.float64)
+    lo = np.maximum(starts[:, None], edges[None, :-1])
+    hi = np.minimum(starts[:, None] + scale, edges[None, 1:])
+    weights = (np.maximum(hi - lo, 0.0) * (1.0 / scale)).astype(np.float32)
+    # Non-blocking: the driver stages a small pageable source before returning, without waiting for queued kernels.
+    return torch.from_numpy(weights).to(device, non_blocking=True)
 
 
 def canvas_to_source(
@@ -143,21 +149,28 @@ def crop_edge_ramp(
     device: torch.device,
 ) -> torch.Tensor:
     """1 inside the crop, falling to 0 over ``feather`` px at every crop edge that is not the
-    region border, 0 outside; only its ``window`` (x1, y1, x2, y2) of the region."""
+    region border, 0 outside; only its ``window`` (x1, y1, x2, y2) of the region. The two axes
+    are computed on the host in float32 and uploaded in one copy (a frame's composite is short
+    kernels, each waiting for the GPU), dividing as CUDA divides by a scalar: times the float32
+    reciprocal."""
     height, width = shape
     x1, y1, x2, y2 = box
     wx1, wy1, wx2, wy2 = window
+    inverse = np.float32(1.0) / np.float32(max(feather, 1))
 
-    def axis(low: int, high: int, size: int) -> torch.Tensor:
-        centre = torch.arange(size, dtype=torch.float32, device=device) + 0.5
-        ramp = ((centre > low) & (centre < high)).float()
+    def axis(low: int, high: int, size: int, start: int, stop: int) -> np.ndarray:
+        centre = np.arange(start, stop, dtype=np.float32) + np.float32(0.5)
+        ramp = ((centre > low) & (centre < high)).astype(np.float32)
         if low > 0:
-            ramp = torch.minimum(ramp, (centre - low) / max(feather, 1))
+            ramp = np.minimum(ramp, (centre - np.float32(low)) * inverse)
         if high < size:
-            ramp = torch.minimum(ramp, (high - centre) / max(feather, 1))
-        return ramp.clamp(0.0, 1.0)
+            ramp = np.minimum(ramp, (np.float32(high) - centre) * inverse)
+        return np.clip(ramp, np.float32(0.0), np.float32(1.0))
 
-    return torch.minimum(axis(y1, y2, height)[wy1:wy2, None], axis(x1, x2, width)[None, wx1:wx2])
+    rows, cols = axis(y1, y2, height, wy1, wy2), axis(x1, x2, width, wx1, wx2)
+    # Non-blocking: the driver stages a small pageable source before returning, without waiting for queued kernels.
+    both = torch.from_numpy(np.concatenate((rows, cols))).to(device, non_blocking=True)
+    return torch.minimum(both[: len(rows), None], both[len(rows) :][None, :])
 
 
 def _contours(polygons: Sequence[Polygon], offset: tuple[int, int]) -> list[np.ndarray]:
