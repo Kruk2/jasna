@@ -43,9 +43,11 @@ INT8_MM_TILES = {
     (12, 1): ((128, 256, 128, 3, 8), (128, 128, 128, 3, 4)),
 }
 # The same per AMD architecture, keyed by name: ROCm reports gfx1201 as capability 12.0. Swept on
-# a Radeon AI PRO R9700 (gfx1201); waves_per_eu, stages 1-3 and 4 vs 8 warps moved the
-# plateau tiles by under 2 %. gfx1200, RDNA3 (gfx110x) and RDNA3.5 (gfx115x) take the same tiles, unmeasured.
-AMD_INT8_MM_TILES = dict.fromkeys(TRITON_HIP_ARCHITECTURES, ((128, 256, 128, 2, 8), (128, 128, 128, 1, 8)))
+# a Radeon AI PRO R9700 (gfx1201) at the block's 8192-row shapes, 64-256 BM/BN/BK x 1-3 stages x
+# 4-8 warps: one tile is fastest on all three (4096x4096 227 TOPS, FF up with GELU 202, FF down 204;
+# 128x256 / 128x128 tiles gave 199, 130 and 193). gfx1200, RDNA3 (gfx110x) and RDNA3.5 (gfx115x)
+# take the same tiles, unmeasured.
+AMD_INT8_MM_TILES = dict.fromkeys(TRITON_HIP_ARCHITECTURES, ((64, 128, 128, 1, 4), (64, 128, 128, 1, 4)))
 # GPUs on which Triton runs dots as scalar FMA (it has no tensor-core dot below SM 8.0): the
 # int8 GEMM runs on cuBLAS (``torch._int_mm``) and only its epilogue in Triton.
 CUBLAS_INT8_MM = {(7, 5)}  # RTX 20 series
