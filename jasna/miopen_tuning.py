@@ -17,6 +17,7 @@ DATABASE_SUFFIXES = (".HIP.fdb.txt", ".db.txt")
 
 COMPUTE_UNITS: Mapping[str, Sequence[int]] = {
     "gfx1201": (64, 56, 48),  # RX 9070 XT / AI PRO R9700, RX 9070, RX 9070 GRE
+    "gfx1200": (32, 28),  # RX 9060 XT, RX 9060
 }
 
 
