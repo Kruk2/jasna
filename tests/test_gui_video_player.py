@@ -278,7 +278,8 @@ def test_closing_while_playing_stops_the_worker_first(player) -> None:
     assert closed == [True]
 
 
-def test_same_sized_frames_reuse_the_scaled_tk_image(player) -> None:
+def test_same_sized_frames_reuse_the_scaled_tk_image(player, monkeypatch) -> None:
+    monkeypatch.setattr(video_player_module, "_create_native_video_renderer", lambda _host: None)
     dialog, _closed = player()
     first = SimpleNamespace(generation=0, image=Image.new("RGB", (640, 360), "red"))
     second = SimpleNamespace(generation=0, image=Image.new("RGB", (640, 360), "blue"))
