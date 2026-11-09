@@ -402,7 +402,7 @@ class GnomonicProjector(RegionProjector):
 
 class FisheyeProjector(RegionProjector):
     """Equidistant-180 fisheye sub-window covering the mosaic region: the space
-    several studios bake the mosaic in. Window is the region's disc bbox, squared
+    some sources bake the mosaic in. Window is the region's disc bbox, squared
     with a small margin (matches the Phase-4 experiment)."""
 
     kind = "fisheye"

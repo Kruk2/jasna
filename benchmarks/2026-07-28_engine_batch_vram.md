@@ -41,7 +41,7 @@ Clip-size sweep, overlap 8 (`2026-07-28_clip_size_sweep.csv`): 30 / 60 / 90 / 18
 FP8 upsample was the v0.9.1 VRAM regression (+1.8 GB): the shippable QDQ-ONNX route compiles to one Myelin node
 with ~5.7 GB scratch at b180 (a `STRONGLY_TYPED` build: 945 MiB, 18.66 ms at b30). The better modelopt FP8 engine saves only ~230 MiB with no wall change and −10 dB,
 and would need modelopt on every user machine, so FP8 is removed. Quantizing loop_body is ~1.9× slower.
-The GUI clip-size slider now goes to 720. Not yet re-run on this code: 8K VR (3 repeats, ~2 min) and HUBLK-063 (~16 min; the earlier 15:40.8 / 11789 MiB
+The GUI clip-size slider now goes to 720. Not yet re-run on this code: 8K VR (3 repeats, ~2 min) and H063 (~16 min; the earlier 15:40.8 / 11789 MiB
 predates this change and is not a v0.9.1 number).
 
 The release suite was cut to one H.264 input per resolution plus 8K VR (`docs/en/development.md`): codec variants

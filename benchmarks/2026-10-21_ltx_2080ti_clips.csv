@@ -1,7 +1,7 @@
 date,version,commit,gpu,video,canvas,model,run,compile_cache,job_wall_s,ltx_s,scan_s,encode_s,encode_s_per_window,denoise_s,denoise_s_per_step,compose_s,decode_s_per_window,peak_vram_mib,peak_rss_gb
-2026-10-21,v0.11.3,6ebb294,RTX 2080 Ti 22 GB (150 W cap),miab-506-1 1080p30 20s 7 windows,512,Standard (2 steps),1,warm,364.1,358.8,14.9,145.1,19.79,57.3,3.80,141.5,19.99,20829,15.6
-2026-10-21,v0.11.3-dev,64d823f,RTX 2080 Ti 22 GB (150 W cap),miab-506-1 1080p30 20s 7 windows,512,Standard (2 steps),1,cold,306.2,299.1,14.4,51.9,2.01,149.0,3.54,83.7,10.78,16575,16.4
-2026-10-21,v0.11.3-dev,64d823f,RTX 2080 Ti 22 GB (150 W cap),miab-506-1 1080p30 20s 7 windows,512,Standard (2 steps),2,warm,180.5,174.5,14.8,25.7,2.02,55.5,3.77,78.5,10.75,14661,15.8
-2026-10-21,v0.11.3,6ebb294,RTX 2080 Ti 22 GB (150 W cap),mimk-284-1 1080p29.97 15s 5 windows,512,Standard (2 steps),1,warm,257.5,252.2,8.4,101.4,20.07,42.2,3.78,100.3,19.80,20797,15.5
-2026-10-21,v0.11.3-dev,64d823f,RTX 2080 Ti 22 GB (150 W cap),mimk-284-1 1080p29.97 15s 5 windows,512,Standard (2 steps),1,cold,127.3,120.9,8.4,16.3,2.03,40.4,3.74,55.8,10.59,15621,15.7
-2026-10-21,v0.11.3-dev,64d823f,RTX 2080 Ti 22 GB (150 W cap),mimk-284-1 1080p29.97 15s 5 windows,512,Standard (2 steps),2,warm,126.6,120.3,8.3,16.4,2.05,39.6,3.67,56.0,10.65,15621,15.7
+2026-10-21,v0.11.3,6ebb294,RTX 2080 Ti 22 GB (150 W cap),m506-1 1080p30 20s 7 windows,512,Standard (2 steps),1,warm,364.1,358.8,14.9,145.1,19.79,57.3,3.80,141.5,19.99,20829,15.6
+2026-10-21,v0.11.3-dev,64d823f,RTX 2080 Ti 22 GB (150 W cap),m506-1 1080p30 20s 7 windows,512,Standard (2 steps),1,cold,306.2,299.1,14.4,51.9,2.01,149.0,3.54,83.7,10.78,16575,16.4
+2026-10-21,v0.11.3-dev,64d823f,RTX 2080 Ti 22 GB (150 W cap),m506-1 1080p30 20s 7 windows,512,Standard (2 steps),2,warm,180.5,174.5,14.8,25.7,2.02,55.5,3.77,78.5,10.75,14661,15.8
+2026-10-21,v0.11.3,6ebb294,RTX 2080 Ti 22 GB (150 W cap),m284-1 1080p29.97 15s 5 windows,512,Standard (2 steps),1,warm,257.5,252.2,8.4,101.4,20.07,42.2,3.78,100.3,19.80,20797,15.5
+2026-10-21,v0.11.3-dev,64d823f,RTX 2080 Ti 22 GB (150 W cap),m284-1 1080p29.97 15s 5 windows,512,Standard (2 steps),1,cold,127.3,120.9,8.4,16.3,2.03,40.4,3.74,55.8,10.59,15621,15.7
+2026-10-21,v0.11.3-dev,64d823f,RTX 2080 Ti 22 GB (150 W cap),m284-1 1080p29.97 15s 5 windows,512,Standard (2 steps),2,warm,126.6,120.3,8.3,16.4,2.05,39.6,3.67,56.0,10.65,15621,15.7

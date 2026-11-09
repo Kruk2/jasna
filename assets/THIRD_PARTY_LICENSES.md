@@ -61,7 +61,7 @@ Apache-2.0 headers; the directory's `NOTICE` records the upstream notices and
 Jasna's changes.
 
 Jasna also contains code derived from
-[Lada](https://codeberg.org/ladaapp/lada), licensed under AGPL-3.0. Jasna's
+Lada (by ladaapp), licensed under AGPL-3.0. Jasna's
 root `LICENSE` contains the complete AGPL-3.0 text.
 
 ## Proprietary vendor components

@@ -1,11 +1,11 @@
 date,version,commit,gpu,video,model,run,job_wall_s,ltx_s,frames,windows,window_steps,ltx_peak_vram_mib,scan_s,encode_s,denoise_s,compose_s,note
-2026-11-06,0.12.2,e015764b,RTX 5090,10 s cut of SONE-610_bench_1080p_h264_8bit,Basic (1 step),warm,10.8,7.9,302,4,4,15962.4,0.7,2.2,3.1,1.9,"warm-up, discarded"
-2026-11-06,0.12.2,e015764b,RTX 5090,10 s cut of SONE-610_bench_1080p_h264_8bit,Standard (2 steps),warm,21.4,18.5,302,4,8,16574.6,0.7,3.4,11.1,3.3,"warm-up, discarded"
-2026-11-06,0.12.2,e015764b,RTX 5090,10 s cut of SONE-610_bench_1080p_h264_8bit,Good (4 steps),warm,25.9,21.3,302,4,16,16574.9,0.8,3.2,13.2,4.0,"warm-up, discarded"
-2026-11-06,0.12.2,e015764b,RTX 5090,10 s cut of SONE-610_bench_1080p_h264_8bit,High (8 steps),warm,36.1,32.0,302,4,32,16575.6,0.7,3.9,24.2,3.3,"warm-up, discarded"
-2026-11-06,0.12.2,e015764b,RTX 5090,10 s cut of SONE-610_bench_1080p_h264_8bit,Top (undistilled),warm,103.4,46.8,302,4,60,16060.8,0.5,1.8,41.6,2.9,"warm-up, discarded; wall time includes the first-use LTX speed test (209 frames)"
-2026-11-06,0.12.2,e015764b,RTX 5090,SONE-610_bench_1080p_h264_8bit (3:22),Basic (1 step),1,170.2,166.6,6056,143,143,15978.2,15.8,35.8,74.6,40.4,
-2026-11-06,0.12.2,e015764b,RTX 5090,SONE-610_bench_1080p_h264_8bit (3:22),Basic (1 step),2,164.2,161.0,6056,143,143,15978.2,14.9,35.9,70.5,39.8,
-2026-11-06,0.12.2,e015764b,RTX 5090,SONE-610_bench_1080p_h264_8bit (3:22),Standard (2 steps),1,305.4,302.7,6056,143,286,15978.4,15.4,58.9,144.9,83.5,
-2026-11-06,0.12.2,e015764b,RTX 5090,SONE-610_bench_1080p_h264_8bit (3:22),Standard (2 steps),2,298.1,294.6,6056,143,286,15978.4,15.1,60.2,138.8,80.4,
-2026-11-06,0.12.2,e015764b,RTX 5090,SONE-610_bench_1080p_h264_8bit (3:22),Good (4 steps),1,436.8,434.0,6056,143,572,15978.7,14.9,58.3,277.4,83.4,
+2026-11-06,0.12.2,e015764b,RTX 5090,10 s cut of S610_bench_1080p_h264_8bit,Basic (1 step),warm,10.8,7.9,302,4,4,15962.4,0.7,2.2,3.1,1.9,"warm-up, discarded"
+2026-11-06,0.12.2,e015764b,RTX 5090,10 s cut of S610_bench_1080p_h264_8bit,Standard (2 steps),warm,21.4,18.5,302,4,8,16574.6,0.7,3.4,11.1,3.3,"warm-up, discarded"
+2026-11-06,0.12.2,e015764b,RTX 5090,10 s cut of S610_bench_1080p_h264_8bit,Good (4 steps),warm,25.9,21.3,302,4,16,16574.9,0.8,3.2,13.2,4.0,"warm-up, discarded"
+2026-11-06,0.12.2,e015764b,RTX 5090,10 s cut of S610_bench_1080p_h264_8bit,High (8 steps),warm,36.1,32.0,302,4,32,16575.6,0.7,3.9,24.2,3.3,"warm-up, discarded"
+2026-11-06,0.12.2,e015764b,RTX 5090,10 s cut of S610_bench_1080p_h264_8bit,Top (undistilled),warm,103.4,46.8,302,4,60,16060.8,0.5,1.8,41.6,2.9,"warm-up, discarded; wall time includes the first-use LTX speed test (209 frames)"
+2026-11-06,0.12.2,e015764b,RTX 5090,S610_bench_1080p_h264_8bit (3:22),Basic (1 step),1,170.2,166.6,6056,143,143,15978.2,15.8,35.8,74.6,40.4,
+2026-11-06,0.12.2,e015764b,RTX 5090,S610_bench_1080p_h264_8bit (3:22),Basic (1 step),2,164.2,161.0,6056,143,143,15978.2,14.9,35.9,70.5,39.8,
+2026-11-06,0.12.2,e015764b,RTX 5090,S610_bench_1080p_h264_8bit (3:22),Standard (2 steps),1,305.4,302.7,6056,143,286,15978.4,15.4,58.9,144.9,83.5,
+2026-11-06,0.12.2,e015764b,RTX 5090,S610_bench_1080p_h264_8bit (3:22),Standard (2 steps),2,298.1,294.6,6056,143,286,15978.4,15.1,60.2,138.8,80.4,
+2026-11-06,0.12.2,e015764b,RTX 5090,S610_bench_1080p_h264_8bit (3:22),Good (4 steps),1,436.8,434.0,6056,143,572,15978.7,14.9,58.3,277.4,83.4,

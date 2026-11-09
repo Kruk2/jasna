@@ -2,7 +2,7 @@
 
 RTX 5090 (driver 595.104.02), Linux, source checkout at main `e015764b` (0.12.2) with the raw INT8 weights,
 CLI with default settings (HEVC, NVIDIA defaults, 512 canvas, default VAEs: Basic half + max, others full + full).
-Input: `SONE-610_bench_1080p_h264_8bit.mp4` (3:22, 6056 frames, 143 windows). Each model first ran once on a 10 s
+Input: `S610_bench_1080p_h264_8bit.mp4` (3:22, 6056 frames, 143 windows). Each model first ran once on a 10 s
 cut to take the compiles and the first-use speed test; those rows are discarded. LTX time is the `[timing] LTX`
 total; job wall time adds about 3-7 s. Per-run values in the `.csv`.
 

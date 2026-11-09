@@ -113,10 +113,6 @@ memory (VRAM)? Lower **Max Clip Size**, for example from `90` to `60`. See
 
 - [App guide](docs/en/gui.md): the queue, presets, output names, the Video
   Player and activation.
-- [SLS Discord](https://discord.gg/FgrSuwZS3s): examples, help and settings.
-  Jasna has a [new channel](https://discord.com/channels/1196376491815092265/1556960822578909244);
-  older posts stay in the [old channel (archived)](https://discord.com/channels/1196376491815092265/1199059436199759943).
-  Please don't be too weird.
 - Problem? Click **Logs** at the bottom of the app, then **Export** to save a
   log file. Attach it when you ask for help.
 
@@ -134,17 +130,9 @@ Supporters who gave **$15 USD or more on or before 14 October 2026** get LTX for
 
 **Before you choose LTX:**
 
-- Look at these LTX samples: [1](https://discord.com/channels/1196376491815092265/1199059436199759943/1556346988486856826), [2](https://discord.com/channels/1196376491815092265/1199059436199759943/1556337300814958684), [3](https://discord.com/channels/1196376491815092265/1199059436199759943/1555612574643388598), [4](https://discord.com/channels/1196376491815092265/1556960822578909244/1559341521575084063), [5](https://discord.com/channels/1196376491815092265/1556960822578909244/1559295317529202780), [6](https://discord.com/channels/1196376491815092265/1556960822578909244/1559205894959403121), [7](https://discord.com/channels/1196376491815092265/1556960822578909244/1559197341473574973), [8](https://discord.com/channels/1196376491815092265/1556960822578909244/1558798127195226112).
-  Explore the [new channel](https://discord.com/channels/1196376491815092265/1556960822578909244) and the
-  [old channel (archived)](https://discord.com/channels/1196376491815092265/1199059436199759943) on SLS Discord for more samples.
 - Run LTX in **Trial mode (speed test)** on your PC. It is free and shows if your GPU can
   run LTX and how long it takes. The video is not restored. See
   [What LTX needs](docs/en/models.md#what-ltx-needs).
-
-More examples:
-[UNet 4x](https://discord.com/channels/1196376491815092265/1199059436199759943/1516497879684874260),
-[SD 1.5](https://discord.com/channels/1196376491815092265/1199059436199759943/1492139124348420106),
-[more SD 1.5](https://discord.com/channels/1196376491815092265/1199059436199759943/1516571355317800990).
 
 ### Where to support
 
@@ -262,27 +250,25 @@ jasna --input input_folder --output output_folder
 Time to restore a whole 3:22 video with BasicVSR++ on an RTX 5090 (Linux).
 Lower is better.
 
-| Input | Lada 0.11.0 | Jasna v0.9.1 |
+| Input | Jasna v0.4.1 | Jasna v0.9.1 |
 | --- | ---: | ---: |
-| 720p H.264 | 01:47 | **00:32** (3.4x faster) |
-| 1080p H.264 | 02:02 | **00:34** (3.6x faster) |
-| 2160p H.264 | 04:56 | **01:03** (4.7x faster) |
+| 720p H.264 | 01:35 | **00:32** (3.0x faster) |
+| 1080p H.264 | 01:46 | **00:34** (3.1x faster) |
+| 2160p H.264 | 03:23 | **01:03** (3.2x faster) |
 
 <details>
 <summary>GPU memory, older versions and how it was measured</summary>
 
-GPU memory used (typical / peak, in GB). `—` means not measured. Lada uses
-less GPU memory than Jasna.
+GPU memory used (typical / peak, in GB). `—` means not measured.
 
-| Input | Lada | v0.4.1 | v0.5.0 | v0.9.0 | **v0.9.1** |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 720p H.264 8-bit | 1.8/3.1 | 17.6/19.9 | 8.6/9.0 | 8.6/9.1 | **4.2/4.6** |
-| 1080p H.264 8-bit | 2.0/3.3 | 18.9/21.4 | 9.5/10.2 | 9.3/10.1 | **4.8/5.6** |
-| 2160p H.264 8-bit | 2.6/4.1 | 26.0/30.5 | 12.9/15.0 | 11.4/15.4 | **7.2/10.9** |
-| 8K VR HEVC 60 fps (15 s) | — | — | — | 17.1/18.3 | — |
+| Input | v0.4.1 | v0.5.0 | v0.9.0 | **v0.9.1** |
+| --- | ---: | ---: | ---: | ---: |
+| 720p H.264 8-bit | 17.6/19.9 | 8.6/9.0 | 8.6/9.1 | **4.2/4.6** |
+| 1080p H.264 8-bit | 18.9/21.4 | 9.5/10.2 | 9.3/10.1 | **4.8/5.6** |
+| 2160p H.264 8-bit | 26.0/30.5 | 12.9/15.0 | 11.4/15.4 | **7.2/10.9** |
+| 8K VR HEVC 60 fps (15 s) | — | — | 17.1/18.3 | — |
 
-Times for older versions (v0.4.1: 01:35 / 01:46 / 03:23; v0.5.0: 00:45 /
-00:47 / 01:22; v0.9.0: 00:34 / 00:39 / 01:15 for 720p / 1080p / 2160p; 8K VR:
+Times for older versions (v0.5.0: 00:45 / 00:47 / 01:22; v0.9.0: 00:34 / 00:39 / 01:15 for 720p / 1080p / 2160p; 8K VR:
 00:34), the test settings, RAM use and every codec are in the
 [full benchmark report](benchmarks/2026-07-26_release_matrix.md). Older
 full-length videos: [legacy report](benchmarks/2026-07-26_legacy_videos.md).
@@ -298,7 +284,7 @@ keep their own terms. See [licensing and source availability](LICENSING.md),
 
 ### Acknowledgments
 
-- **[Lada](https://codeberg.org/ladaapp/lada) (Codeberg)**: Jasna is inspired
+- **Lada**: Jasna is inspired
   by Lada and in some places based on it. The `mosaic_restoration_1.2` model
   used by Jasna was trained by ladaapp, the author of Lada.
 - **ZeLeFans**: for the VR detection model and the detailed analysis of mosaic

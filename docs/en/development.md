@@ -251,7 +251,6 @@ P=python   # the venv Python with jasna installed
 $P scripts/benchmark_decode_backends.py --backends vali pyav-hw pyav-sw   # e2e per decoder
 $P scripts/benchmark_scan_backends.py --backends vali                     # GUI mosaic scan
 $P scripts/benchmark_releases.py --release v0.9.0=/path/to/jasna --source HEAD=. --workdir WORKDIR/releases --csv out.csv
-$P scripts/benchmark_lada_flatpak.py --workdir WORKDIR/lada --csv out.csv   # Lada baseline
 $P scripts/benchmark_ltx_denoise.py --model undistilled --csv out.csv    # LTX denoise, trial weights
 $P scripts/benchmark_ltx_decode.py --variants shipped,kitchen,eager      # LTX VAE decode
 $P scripts/benchmark_ltx_encode.py --variants fp32,eager,shipped        # LTX VAE encode, real weights

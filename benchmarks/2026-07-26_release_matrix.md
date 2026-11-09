@@ -7,8 +7,8 @@ differences as noise unless a paired rerun repeats them). Official Linux NVIDIA 
 [v0.7.2](https://github.com/Kruk2/jasna/releases/tag/v0.7.2), [v0.8.1](https://github.com/Kruk2/jasna/releases/tag/v0.8.1)
 and v0.9.0 source `4a171c9` (VALI, PyAV 18.0.0 built with CUDA-stream support, tmpfs scratch).
 `--max-clip-size 180 --temporal-overlap 15 --secondary-restoration none`, each version's default models, HEVC output,
-one warmup discarded. Releases and Lada: one run; v0.9.0: median of three interleaved runs; commit and feature rows:
-median of three. RAM RSS / process VRAM sampled every 0.5 s, median/peak MiB. SONE inputs: six encodings of one
+one warmup discarded. Releases: one run; v0.9.0: median of three interleaved runs; commit and feature rows:
+median of three. RAM RSS / process VRAM sampled every 0.5 s, median/peak MiB. S610 inputs: six encodings of one
 6,056-frame (202.07 s) source; VR: 8K, 900 frames. v0.8.1 2160p AV1 is excluded (release bug on that input).
 
 ## Releases
@@ -79,45 +79,31 @@ clearest step. LUT, denoise and explicit VR projection are off here, so read tho
 
 The blend input is a synthetic 2160p black clip, 1,800 frames, no detections.
 
-## Lada Flatpak 0.11.0
-
-Accurate `v2` detector, CUDA FP16, `--max-clip-length 180`, `hevc-nvidia-gpu-hq`; RAM covers the whole Flatpak
-cgroup; no 8K run.
-
-| Input | Wall | fps | RAM med/peak MiB | VRAM med/peak MiB | Jasna v0.9.0 speedup |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 720p H.264 8-bit | 01:47.3 | 56.4 | 5134/5361 | 1893/3142 | 3.1x |
-| 1080p H.264 8-bit | 02:02.4 | 49.5 | 6738/7101 | 2020/3351 | 3.2x |
-| 1080p HEVC 10-bit | 02:06.5 | 47.9 | 7558/8103 | 2045/3613 | 3.5x |
-| 2160p H.264 8-bit | 04:55.6 | 20.5 | 13748/16576 | 2653/4225 | 3.9x |
-| 2160p HEVC 10-bit | 05:10.7 | 19.5 | 12700/17454 | 2613/4079 | 3.9x |
-| 2160p AV1 10-bit | 05:20.9 | 18.9 | 15016/18570 | 2649/3871 | 5.0x |
-
 ## Legacy full-length videos
 
-`9b6a089` (before the performance commits), v0.9.0 and, except ABF, v0.7.2; original clip sizes, temporal overlap 8,
+`9b6a089` (before the performance commits), v0.9.0 and, except A017, v0.7.2; original clip sizes, temporal overlap 8,
 no secondary restoration, one full-file run each after warmup.
 
 | Input | Version | Wall | fps | RAM med/peak MiB | VRAM med/peak MiB | Status |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| ABF-017 4K (260,913 frames) | `9b6a089` | 43:20.0 | 100.3 | 1652/3530 | 9034/9564 | OK |
-| ABF-017 4K (260,913 frames) | v0.9.0 | 42:16.6 | 102.9 | 2009/3378 | 9296/9446 | OK |
-| HUBLK-063 1080p (342,237 frames) | v0.7.2 | 23:38.1 | 241.3 | 1302/2790 | 10345/10345 | OK |
-| HUBLK-063 1080p (342,237 frames) | `9b6a089` | 17:42.6 | 322.1 | 841/2698 | 10019/10093 | OK |
-| HUBLK-063 1080p (342,237 frames) | v0.9.0 | 18:00.9 | 316.6 | 1781/2661 | 9673/9673 | OK |
-| DASS-570_2m (3,636 frames) | v0.7.2 | 01:05.4 | 55.6 | 1006/2563 | 3285/3339 | OK |
-| DASS-570_2m (3,636 frames) | `9b6a089` | 00:22.7 | 159.9 | 2582/2588 | 2981/3025 | OK |
-| DASS-570_2m (3,636 frames) | v0.9.0 | 00:22.0 | 165.6 | 2457/2463 | 2883/2973 | OK |
-| NASK-223_Test (6,413 frames) | v0.7.2 | 01:06.6 | 96.2 | 2657/2665 | 3289/3289 | OK |
-| NASK-223_Test (6,413 frames) | `9b6a089` | 01:03.9 | 100.4 | 2603/2612 | 3075/3075 | OK |
-| NASK-223_Test (6,413 frames) | v0.9.0 | 01:01.1 | 105.0 | 2469/2477 | 2953/3029 | OK |
+| A017 4K (260,913 frames) | `9b6a089` | 43:20.0 | 100.3 | 1652/3530 | 9034/9564 | OK |
+| A017 4K (260,913 frames) | v0.9.0 | 42:16.6 | 102.9 | 2009/3378 | 9296/9446 | OK |
+| H063 1080p (342,237 frames) | v0.7.2 | 23:38.1 | 241.3 | 1302/2790 | 10345/10345 | OK |
+| H063 1080p (342,237 frames) | `9b6a089` | 17:42.6 | 322.1 | 841/2698 | 10019/10093 | OK |
+| H063 1080p (342,237 frames) | v0.9.0 | 18:00.9 | 316.6 | 1781/2661 | 9673/9673 | OK |
+| D570_2m (3,636 frames) | v0.7.2 | 01:05.4 | 55.6 | 1006/2563 | 3285/3339 | OK |
+| D570_2m (3,636 frames) | `9b6a089` | 00:22.7 | 159.9 | 2582/2588 | 2981/3025 | OK |
+| D570_2m (3,636 frames) | v0.9.0 | 00:22.0 | 165.6 | 2457/2463 | 2883/2973 | OK |
+| N223_Test (6,413 frames) | v0.7.2 | 01:06.6 | 96.2 | 2657/2665 | 3289/3289 | OK |
+| N223_Test (6,413 frames) | `9b6a089` | 01:03.9 | 100.4 | 2603/2612 | 3075/3075 | OK |
+| N223_Test (6,413 frames) | v0.9.0 | 01:01.1 | 105.0 | 2469/2477 | 2953/3029 | OK |
 | test-007 (3,813 frames) | v0.7.2 | 00:27.4 | 139.3 | 2601/2643 | 3469/3481 | OK |
 | test-007 (3,813 frames) | `9b6a089` | 00:30.7 | 124.0 | 2587/2615 | 3205/3255 | OK |
 | test-007 (3,813 frames) | v0.9.0 | 00:26.8 | 142.5 | 2462/2484 | 3105/3105 | OK |
 
-v0.9.0 vs `9b6a089`: ABF −2.4 %, DASS −3.5 %, NASK −4.4 %, test-007 −12.9 %, HUBLK +1.7 % (noise).
-v0.7.2 HUBLK is 23.6 % faster than the old v0.6.2 result (30:58) but 33.5 % slower than `9b6a089`; its DASS run was
+v0.9.0 vs `9b6a089`: A017 −2.4 %, D570 −3.5 %, N223 −4.4 %, test-007 −12.9 %, H063 +1.7 % (noise).
+v0.7.2 H063 is 23.6 % faster than the old v0.6.2 result (30:58) but 33.5 % slower than `9b6a089`; its D570 run was
 unusually slow with no warning in the log.
 
 Raw data: `2026-07-26_release_matrix.csv`, `2026-07-26_perf_commit_series.csv`, `2026-07-26_perf_feature_pairs.csv`,
-`2026-07-26_legacy_videos.csv`, `2026-07-26_lada_flatpak.csv`.
+`2026-07-26_legacy_videos.csv`.

@@ -8,10 +8,10 @@ import torch
 from jasna.media.probe import VideoMetadata
 from jasna.mosaic.detections import Detections
 from jasna.vr180 import (
-    DIRECT_STUDIO_TOKENS,
-    FISHEYE_STUDIO_TOKENS,
+    DIRECT_VR_NAME_TOKENS,
+    FISHEYE_NAME_TOKENS,
     PROJECTION_CHOICES,
-    STUDIO_PROJECTION,
+    NAME_PREFIX_PROJECTION,
     StereoDetectionAdapter,
     StereoLayout,
     left_eye,
@@ -49,34 +49,34 @@ def _metadata(
     )
 
 
-@pytest.mark.parametrize("token", sorted(FISHEYE_STUDIO_TOKENS))
-def test_auto_resolves_known_fisheye_studios(token: str) -> None:
+@pytest.mark.parametrize("token", sorted(FISHEYE_NAME_TOKENS))
+def test_auto_resolves_known_fisheye_prefixes(token: str) -> None:
     result = resolve_vr_mode("auto", _metadata(), Path(f"{token}-001.mp4"))
     assert result.resolved == "sbs"
     assert result.projection == "fisheye"
     assert token in result.reason
 
 
-@pytest.mark.parametrize("token", sorted(DIRECT_STUDIO_TOKENS))
-def test_auto_resolves_known_direct_sbs_studios(token: str) -> None:
+@pytest.mark.parametrize("token", sorted(DIRECT_VR_NAME_TOKENS))
+def test_auto_resolves_known_direct_sbs_prefixes(token: str) -> None:
     result = resolve_vr_mode("auto", _metadata(), Path(f"{token}-001.mp4"))
     assert result.resolved == "sbs"
     assert token in result.reason
 
 
-def test_auto_fisheye_studio_overrides_direct_token() -> None:
+def test_auto_fisheye_prefix_overrides_direct_token() -> None:
     result = resolve_vr_mode("auto", _metadata(), Path("VRKM-FSVSS-001.mp4"))
     assert result.resolved == "sbs"
     assert result.projection == "fisheye"
 
 
-def test_auto_matches_studio_code_glued_to_number() -> None:
-    # Real 8K releases glue the studio code to the number (savr00327-2);
+def test_auto_matches_prefix_glued_to_number() -> None:
+    # File names may glue the prefix to the number (savr00001-2);
     # detection is a substring match, not a separator-bounded token.
-    savr = resolve_vr_mode("auto", _metadata(), Path("savr00327-2.mp4"))
+    savr = resolve_vr_mode("auto", _metadata(), Path("savr00001-2.mp4"))
     assert savr.resolved == "sbs"
     assert savr.projection == "fisheye"
-    mdvr = resolve_vr_mode("auto", _metadata(), Path("mdvr00271-2.mp4"))
+    mdvr = resolve_vr_mode("auto", _metadata(), Path("mdvr00002-2.mp4"))
     assert mdvr.resolved == "sbs"
     assert mdvr.projection == "raw"
 
@@ -165,8 +165,8 @@ def test_projection_override_does_not_enable_vr_layout() -> None:
     assert result.projection == "none"
 
 
-@pytest.mark.parametrize(("code", "kind"), sorted(STUDIO_PROJECTION.items()))
-def test_resolve_projection_routes_confident_studios(code: str, kind: str) -> None:
+@pytest.mark.parametrize(("code", "kind"), sorted(NAME_PREFIX_PROJECTION.items()))
+def test_resolve_projection_routes_confident_prefixes(code: str, kind: str) -> None:
     assert resolve_projection(Path(f"{code}-001.mp4")) == kind
     assert resolve_projection(Path(f"{code.lower()}00123-4.mp4")) == kind
 
@@ -175,24 +175,24 @@ def test_resolve_projection_routes_confident_studios(code: str, kind: str) -> No
     ("code", "longer_code"),
     [("CCVR", "3CCVR"), ("DSVR", "3DSVR"), ("JPSVR", "3JPSVR"), ("KBVR", "3KBVR"), ("KMVR", "BIKMVR"), ("MAXVR", "3MAXVR")],
 )
-def test_fisheye_studio_rows_need_the_exact_studio_code(code: str, longer_code: str) -> None:
+def test_fisheye_prefix_rows_need_the_exact_prefix(code: str, longer_code: str) -> None:
     auto = resolve_vr_mode("auto", _metadata(), Path(f"{code}-001.mp4"))
-    assert auto.reason == f"routed VR studio {code}"
+    assert auto.reason == f"routed VR name prefix {code}"
     assert auto.projection == "fisheye"
     assert resolve_projection(Path(f"{longer_code}-001.mp4")) == "raw"
 
 
-def test_resolve_projection_falls_back_to_raw_for_unknown_studio() -> None:
+def test_resolve_projection_falls_back_to_raw_for_unknown_prefix() -> None:
     assert resolve_projection(Path("unknownvr-001.mp4")) == "raw"
-    # Direct-SBS token with no routing entry stays raw (its studio prior).
-    assert resolve_projection(Path("mdvr00271-2.mp4")) == "raw"
+    # Direct-SBS token with no routing entry stays raw (its prefix prior).
+    assert resolve_projection(Path("mdvr00002-2.mp4")) == "raw"
 
 
 def test_resolve_projection_fisheye_token_without_table_entry() -> None:
     # SAVR/URVRSP are fisheye-shot but absent from the confident table;
     # the fisheye-token prior still routes them to fisheye.
-    assert resolve_projection(Path("savr00327-2.mp4")) == "fisheye"
-    assert resolve_projection(Path("urvrsp00285-3.mp4")) == "fisheye"
+    assert resolve_projection(Path("savr00001-2.mp4")) == "fisheye"
+    assert resolve_projection(Path("urvrsp00003-3.mp4")) == "fisheye"
 
 
 def test_resolve_projection_explicit_override_wins() -> None:
@@ -206,7 +206,7 @@ def test_resolve_projection_rejects_unknown_override() -> None:
 
 
 def test_resolve_projection_strips_release_site_tag() -> None:
-    assert resolve_projection(Path("[98T.TV]VRPRD-004-A.mp4")) == "gnomonic"
+    assert resolve_projection(Path("[site.tv]VRPRD-001-A.mp4")) == "gnomonic"
 
 
 class _FakeDetector:
@@ -351,7 +351,7 @@ def test_tb_adapter_rejects_odd_source_height() -> None:
         ("SAVR-001.mp4", _metadata(width=1080, height=2160)),
         ("unknown.mp4", _metadata(width=1024, height=2048, stereo_layout="top and bottom", spherical_projection="equirectangular")),
     ],
-    ids=["1:2-above-1080p", "studio-token", "spatial-metadata"],
+    ids=["1:2-above-1080p", "prefix-token", "spatial-metadata"],
 )
 def test_auto_detects_top_bottom_vr(name: str, metadata: VideoMetadata) -> None:
     assert resolve_vr_mode("auto", metadata, Path(name)).resolved == "tb"
@@ -367,8 +367,8 @@ def test_side_by_side_metadata_does_not_turn_on_a_top_bottom_frame() -> None:
     assert resolve_vr_mode("auto", metadata, Path("unknown.mp4")).resolved == "off"
 
 
-def test_explicit_tb_uses_the_studio_projection_and_rejects_odd_height() -> None:
-    result = resolve_vr_mode("tb", _metadata(width=1920, height=3840), Path("savr00327.mp4"))
+def test_explicit_tb_uses_the_prefix_projection_and_rejects_odd_height() -> None:
+    result = resolve_vr_mode("tb", _metadata(width=1920, height=3840), Path("savr00001.mp4"))
     assert (result.resolved, result.projection) == ("tb", "fisheye")
     with pytest.raises(ValueError, match="even frame height"):
         resolve_vr_mode("tb", _metadata(width=1920, height=3839), Path("movie.mp4"))

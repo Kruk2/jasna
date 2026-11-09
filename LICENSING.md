@@ -12,7 +12,7 @@ repository is licensed under the GNU Affero General Public License version
 copyright and license notices.
 
 Jasna includes code and model weights from
-[Lada](https://codeberg.org/ladaapp/lada). Those components remain covered by
+Lada (by ladaapp). Those components remain covered by
 their applicable AGPL-3.0 notices. The vendored MMagic subset retains its
 OpenMMLab copyright and Apache-2.0 notices. The LTX restoration code ported
 from Lightricks LTX-2.5 (`jasna/ltx/transformer.py`, `jasna/models/ltx_vae/`)

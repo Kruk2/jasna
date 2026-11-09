@@ -7,7 +7,7 @@ assignees: ''
 
 ---
 
-! ! ! DO NOT POST NSFW VIDEOS or SCREENSHOTS ! ! !
+! ! ! DO NOT POST THE VIDEO OR SCREENSHOTS OF ITS CONTENT ! ! !
 ! ! ! USE ENGLISH ! ! !
 Failing to fill this form will result in closing the issue immediately!
 Remove this section
@@ -22,7 +22,7 @@ jasna --input "D:/video.mp4" [other params]
 OR 
 GUI screenshot with all settings
 1. [optional if not related to video] MediaInfo for video that failed
-1. [optional] JAV Code with timestamp: 
+1. [optional] Video ID with timestamp: 
 
 **Desktop (please complete the following information):**
  - OS: [e.g. iOS]

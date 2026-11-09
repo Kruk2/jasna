@@ -28,7 +28,7 @@ NTSC_60 = Fraction(60_000, 1_001)
         (Fraction(50), 50.0, True, 1, Fraction(50), False),
         (Fraction(120), 120.0, True, 1, Fraction(120), False),
         (Fraction(60), 60.0, False, 1, Fraction(60), False),
-        # NHDTB-634.mp4 from issue #248: r_frame_rate says 59.94, frames arrive at 29.98.
+        # N634.mp4 from issue #248: r_frame_rate says 59.94, frames arrive at 29.98.
         (NTSC_60, 29.9803, True, 1, NTSC_60, True),
         (Fraction(24), 12.0, True, 1, Fraction(24), False),
     ],

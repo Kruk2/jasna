@@ -7,7 +7,7 @@ must fail or update this file when a bundled model changes.
 
 - Jasna model name: `basicvsrpp`
 - File: `lada_mosaic_restoration_model_generic_v1.2.pth`
-- Upstream: <https://huggingface.co/ladaapp/lada/blob/3bfd69ffc21518bde80ba6b61696d51efd0a398b/lada_mosaic_restoration_model_generic_v1.2.pth>
+- Upstream: `ladaapp/lada` model repository
 - Upstream revision: `3bfd69ffc21518bde80ba6b61696d51efd0a398b`
 - SHA-256: `d404152576ce64fb5b2f315c03062709dac4f5f8548934866cd01c823c8104ee`
 - License: AGPL-3.0
@@ -19,7 +19,7 @@ This checkpoint is redistributed unmodified.
 
 - Jasna model name: `lada-yolo-v4`
 - File: `lada_mosaic_detection_model_v4_fast.pt`
-- Upstream: <https://huggingface.co/ladaapp/lada/blob/404620fe2f6b72657b92f76e62af914c8b3ee686/lada_mosaic_detection_model_v4_fast.pt>
+- Upstream: `ladaapp/lada` model repository
 - Upstream revision: `404620fe2f6b72657b92f76e62af914c8b3ee686`
 - SHA-256: `9a6b660d1d3e3797d39515e08b0e72fcc59815f38279faa7a4ab374ab2c1e3b4`
 - License: AGPL-3.0

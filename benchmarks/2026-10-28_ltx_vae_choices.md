@@ -29,28 +29,28 @@ Encode + decode per 512 window across versions (earlier rows from `2026-10-19_lt
 
 ## Whole jobs
 
-Four real 1080p30 videos (pred-894-1 30 s, ipx-564-1 15 s, sone-485-1 45 s converted from 60 fps, the first
-20 s of midv-488-2 scaled from 4K60), seconds per job including ~8 s of startup; each arm ran a 2 s segment
+Four real 1080p30 videos (p894-1 30 s, i564-1 15 s, s485-1 45 s converted from 60 fps, the first
+20 s of m488-2 scaled from 4K60), seconds per job including ~8 s of startup; each arm ran a 2 s segment
 first so that compiling is not timed. Per-run values with encode / denoise / compose in the `.csv`.
 
 | Video, model, canvas | full + full | half + half | max + max | half + max |
 |---|---|---|---|---|
-| pred, Basic, 512 | 21.9 | 18.7 | 17.5 | 18.1 (-17 %) |
-| midv, Basic, 512 | 17.7 | 15.3 | 14.9 | 15.3 (-14 %) |
-| ipx, Basic, 512 | 18.2 | 12.9 | 12.1 | 13.0 (-29 %) |
-| sone, Basic, 512 | 39.1 | 32.6 | 30.4 | 31.3 (-20 %) |
-| pred, Basic, 768 | 40.7 | 32.2 | 28.8 | 30.3 (-26 %) |
-| pred, Good, 512 | 35.6 | 31.6 | 31.1 | 31.1 (-13 %) |
-| midv, Good, 512 | 26.2 | 24.0 | 23.1 | 23.8 (-9 %) |
-| ipx, Good, 512 | 22.7 | 20.9 | 19.3 | 19.6 (-14 %) |
-| sone, Good, 512 | 64.2 | 58.7 | 58.7 | 59.1 (-8 %) |
+| p894, Basic, 512 | 21.9 | 18.7 | 17.5 | 18.1 (-17 %) |
+| m488, Basic, 512 | 17.7 | 15.3 | 14.9 | 15.3 (-14 %) |
+| i564, Basic, 512 | 18.2 | 12.9 | 12.1 | 13.0 (-29 %) |
+| s485, Basic, 512 | 39.1 | 32.6 | 30.4 | 31.3 (-20 %) |
+| p894, Basic, 768 | 40.7 | 32.2 | 28.8 | 30.3 (-26 %) |
+| p894, Good, 512 | 35.6 | 31.6 | 31.1 | 31.1 (-13 %) |
+| m488, Good, 512 | 26.2 | 24.0 | 23.1 | 23.8 (-9 %) |
+| i564, Good, 512 | 22.7 | 20.9 | 19.3 | 19.6 (-14 %) |
+| s485, Good, 512 | 64.2 | 58.7 | 58.7 | 59.1 (-8 %) |
 
-midv has no mosaic large enough for the 768 canvas (its 768 run equals the 512 one).
+m488 has no mosaic large enough for the 768 canvas (its 768 run equals the 512 one).
 
 ## Quality and defaults
 
 Human A/Bs (full + full vs half + max, all eight video/model pairs above): full is "slightly sharper, not much"
-or "very similar" every time; on pred with Good, each step full -> half -> max is "a bit softer". Earlier A/Bs on
+or "very similar" every time; on p894 with Good, each step full -> half -> max is "a bit softer". Earlier A/Bs on
 val and real clips: half + max close to the 0.12.1 VAE, which is ~1 % sharper on fine hair.
 
 The VAE is a large share of a Basic or Standard job and a small one of a Good, High or Top job, so Basic and

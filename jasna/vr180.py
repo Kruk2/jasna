@@ -14,15 +14,15 @@ from jasna.mosaic.detections import Detections
 log = logging.getLogger(__name__)
 
 VR_MODES = ("auto", "off", "sbs", "sbs-fisheye", "tb")
-FISHEYE_STUDIO_TOKENS = frozenset({"FSVSS", "SAVR", "URVRSP", "CRVR", "PXVR"})
-DIRECT_STUDIO_TOKENS = frozenset({"S1VR", "MDVR", "VRKM", "IPVR"})
+FISHEYE_NAME_TOKENS = frozenset({"FSVSS", "SAVR", "URVRSP", "CRVR", "PXVR"})
+DIRECT_VR_NAME_TOKENS = frozenset({"S1VR", "MDVR", "VRKM", "IPVR"})
 PROJECTION_KINDS = ("raw", "fisheye", "gnomonic")
 PROJECTION_CHOICES = ("auto", *PROJECTION_KINDS)
 _SBS_ASPECT_MIN = 1.90
 _SBS_ASPECT_MAX = 2.10
 _AUTO_MIN_EYE_SIZE = 1080
 
-STUDIO_PROJECTION: dict[str, str] = {
+NAME_PREFIX_PROJECTION: dict[str, str] = {
     "ATVR": "raw",
     "CCVR": "fisheye",
     "CJVR": "raw",
@@ -113,14 +113,14 @@ def left_eye(image, stereo: str):
     return image
 
 
-def _studio_matches(path: Path, codes: frozenset[str]) -> list[str]:
-    # Substring match: real releases glue the studio code to the number
-    # (e.g. ``savr00327``), which a token split on separators would miss.
+def _name_token_matches(path: Path, codes: frozenset[str]) -> list[str]:
+    # Substring match: file names often glue the prefix to the number
+    # (e.g. ``savr00001``), which a token split on separators would miss.
     stem = path.stem.upper()
     return sorted(code for code in codes if code in stem)
 
 
-def studio_code(name: str) -> str:
+def name_prefix(name: str) -> str:
     stem = re.sub(r"^\[[^\]]*\]\s*", "", name).upper()
     m = re.match(r"^([0-9]?[A-Z]{2,7})", stem)
     return m.group(1) if m else ""
@@ -140,10 +140,10 @@ def resolve_projection(input_path: Path, requested: str = "auto") -> str:
     projection = _normalize_projection(requested)
     if projection != "auto":
         return projection
-    routed = STUDIO_PROJECTION.get(studio_code(input_path.stem))
+    routed = NAME_PREFIX_PROJECTION.get(name_prefix(input_path.stem))
     if routed:
         return routed
-    if _studio_matches(input_path, FISHEYE_STUDIO_TOKENS):
+    if _name_token_matches(input_path, FISHEYE_NAME_TOKENS):
         return "fisheye"
     return "raw"
 
@@ -185,21 +185,21 @@ def _auto_layout(metadata, input_path: Path, width: int, height: int, aspect: fl
     if split % 2:
         return "off", f"odd frame {'width' if layout == 'sbs' else 'height'} {split}"
 
-    fisheye_matches = _studio_matches(input_path, FISHEYE_STUDIO_TOKENS)
-    direct_matches = _studio_matches(input_path, DIRECT_STUDIO_TOKENS)
-    routed_code = studio_code(input_path.stem)
+    fisheye_matches = _name_token_matches(input_path, FISHEYE_NAME_TOKENS)
+    direct_matches = _name_token_matches(input_path, DIRECT_VR_NAME_TOKENS)
+    routed_prefix = name_prefix(input_path.stem)
     if fisheye_matches:
-        return layout, f"known fisheye-remap studio token {fisheye_matches[0]}"
+        return layout, f"known fisheye-remap name token {fisheye_matches[0]}"
     if direct_matches:
-        return layout, f"known direct VR studio token {direct_matches[0]}"
-    if routed_code in STUDIO_PROJECTION:
-        return layout, f"routed VR studio {routed_code}"
+        return layout, f"known direct VR name token {direct_matches[0]}"
+    if routed_prefix in NAME_PREFIX_PROJECTION:
+        return layout, f"routed VR name prefix {routed_prefix}"
     if _has_spatial_metadata(metadata, layout):
         return layout, f"{layout.upper()} equirectangular spatial metadata"
     if exact:
         shape = "2:1" if layout == "sbs" else "1:2"
         return layout, f"{shape} frame above {_AUTO_MIN_EYE_SIZE}p"
-    return "off", "no trusted studio token or spatial metadata"
+    return "off", "no trusted name token or spatial metadata"
 
 
 def resolve_vr_mode(

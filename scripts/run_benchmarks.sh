@@ -20,9 +20,9 @@ cd "$ROOT"
 
 CLIPS="$ROOT/assets/benchmark"
 SUITE=(
-    "$CLIPS/SONE-610_bench_720p_h264_8bit.mp4"
-    "$CLIPS/SONE-610_bench_1080p_h264_8bit.mp4"
-    "$CLIPS/SONE-610_bench_2160p_h264_8bit.mp4"
+    "$CLIPS/S610_bench_720p_h264_8bit.mp4"
+    "$CLIPS/S610_bench_1080p_h264_8bit.mp4"
+    "$CLIPS/S610_bench_2160p_h264_8bit.mp4"
     "$CLIPS/vr1_8k_vr_hevc_8bit_60fps.mp4"
 )
 WITH_SCAN=0
@@ -30,9 +30,9 @@ for arg in "$@"; do
     case "$arg" in
         --codecs)
             SUITE+=(
-                "$CLIPS/SONE-610_bench_1080p_hevc_10bit.mp4"
-                "$CLIPS/SONE-610_bench_2160p_hevc_10bit.mp4"
-                "$CLIPS/SONE-610_bench_2160p_av1_10bit.mp4"
+                "$CLIPS/S610_bench_1080p_hevc_10bit.mp4"
+                "$CLIPS/S610_bench_2160p_hevc_10bit.mp4"
+                "$CLIPS/S610_bench_2160p_av1_10bit.mp4"
             )
             ;;
         --scan) WITH_SCAN=1 ;;
