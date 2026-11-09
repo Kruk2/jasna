@@ -35,7 +35,9 @@ from jasna.ltx.plan import (
     window_hop,
     window_starts,
 )
-from jasna.ltx.regions import trace_region
+from jasna.ltx import regions as ltx_regions
+from jasna.ltx.regions import regions_per_frame
+from jasna.mosaic.detections import Detections
 from jasna.vr180 import StereoLayout
 
 
@@ -398,13 +400,56 @@ def test_large_crops_use_the_large_canvas():
 
 
 def test_traced_polygons_are_compact_int32_points():
-    mask = torch.zeros(16, 16)
-    mask[4:10, 5:12] = 1.0
-    region = trace_region(np.array([20.7, 16.2, 50.0, 41.9]), mask, 64, 64)
+    mask = torch.zeros(1, 16, 16, dtype=torch.bool)
+    mask[0, 4:10, 5:12] = True
+    ((region,),) = regions_per_frame(Detections([np.array([[20.7, 16.2, 50.0, 41.9]])], [mask]), 64, 64)
     assert region.box == (20.0, 16.0, 50.0, 41.0)
     assert isinstance(region.polygon, np.ndarray)
     assert region.polygon.dtype == np.int32 and region.polygon.ndim == 2 and region.polygon.shape[1] == 2
     assert RegionGroup(region.box, (region.polygon,)).extent == (0.0, 0.0, 63.0, 59.0)
+
+
+def _random_detections(seed: int, frames: int, mask_hw: tuple[int, int]) -> Detections:
+    """Blobs of many sizes per frame, from specks to most of the frame, some touching an edge;
+    a frame may have none."""
+    rng = np.random.default_rng(seed)
+    boxes, masks = [], []
+    for _ in range(frames):
+        count = int(rng.integers(0, 5))
+        frame_masks = torch.zeros((count, *mask_hw), dtype=torch.bool)
+        for mask in frame_masks:
+            h, w = (int(rng.integers(1, side)) for side in mask_hw)
+            y, x = int(rng.integers(0, mask_hw[0] - h + 1)), int(rng.integers(0, mask_hw[1] - w + 1))
+            mask[y : y + h, x : x + w] = torch.from_numpy(rng.random((h, w)) < 0.8)
+        boxes.append(rng.uniform(0, 500, (count, 4)).astype(np.float32))
+        masks.append(frame_masks)
+    return Detections(boxes, masks)
+
+
+def _same_regions(a: list[list[Region]], b: list[list[Region]]) -> bool:
+    return [[(r.box, r.polygon.tolist()) for r in frame] for frame in a] == [
+        [(r.box, r.polygon.tolist()) for r in frame] for frame in b
+    ]
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_a_batch_traces_each_detection_as_alone(seed, monkeypatch):
+    detections = _random_detections(seed, frames=6, mask_hw=(36, 64))
+    batched = regions_per_frame(detections, 270, 480)
+    alone = [
+        [region for box, mask in zip(boxes, masks) for region in regions_per_frame(Detections([box[None]], [mask[None]]), 270, 480)[0]]
+        for boxes, masks in zip(detections.boxes_xyxy, detections.masks)
+    ]
+    monkeypatch.setattr(ltx_regions, "UPSAMPLE_BYTES", 3 * 4 * 270 * 480)
+    monkeypatch.setattr(ltx_regions, "DILATE_PIXELS", 200 * 200)
+    in_small_calls = regions_per_frame(detections, 270, 480)
+    assert sum(map(len, batched)) > 6
+    assert _same_regions(batched, alone) and _same_regions(in_small_calls, alone)
+
+
+def test_frames_without_masks_trace_no_regions():
+    empty = torch.zeros((0, 36, 64), dtype=torch.bool)
+    assert regions_per_frame(Detections([np.zeros((0, 4))] * 2, [empty, empty]), 270, 480) == [[], []]
 
 
 def test_gap_polygons_map_points_exactly_as_float64_arithmetic():

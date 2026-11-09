@@ -164,3 +164,18 @@ def test_dilate_ellipse_matches_opencv(radius: int, density: float) -> None:
     actual = dilate_ellipse(torch.from_numpy(mask > 0), radius).numpy()
 
     assert np.array_equal(actual, cv2.dilate(mask, kernel) > 0)
+
+
+def test_masks_padded_into_a_batch_dilate_as_each_alone() -> None:
+    rng = np.random.default_rng(7)
+    sizes = [(40, 90), (150, 230), (3, 5), (120, 20)]
+    masks = [torch.from_numpy(rng.random(size) < 0.02) for size in sizes]
+    masks[1][0, 0] = masks[1][-1, -1] = True
+    padded = torch.zeros((len(masks), 150, 230), dtype=torch.bool)
+    for slot, mask in enumerate(masks):
+        padded[slot, : mask.shape[0], : mask.shape[1]] = mask
+
+    batched = dilate_ellipse(padded, 12)
+
+    for slot, mask in enumerate(masks):
+        assert torch.equal(batched[slot, : mask.shape[0], : mask.shape[1]], dilate_ellipse(mask, 12))
