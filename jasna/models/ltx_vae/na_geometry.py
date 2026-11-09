@@ -16,10 +16,12 @@ class NaConfig(NamedTuple):
 
 
 # Fastest in scripts/benchmark_na3d.py, stage 5 (11x11x11 windows) and stages 1-4 (3x5x5, 3x7x7):
-# on an RTX 5090 the flattened box walk, on an R9700 (gfx1201) one box row per KV chunk.
+# on an RTX 5090 the flattened box walk, on an R9700 (gfx1201) one box row per KV chunk. AMD's stage 5
+# (9x9x9, the only large window it builds): 8-wide query rows fill a 16-key box row exactly, 29 % faster
+# than 4x2x4 tiles on an R9700 at the decode's real calls; it cannot take windows wider than 9.
 LARGE_WINDOW = NaConfig((4, 4, 4), 32, 2, 3, False)
 SMALL_WINDOW = NaConfig((2, 4, 4), 32, 2, 2, False)
-AMD_LARGE_WINDOW = NaConfig((4, 2, 4), 16, 2, 1, True)
+AMD_LARGE_WINDOW = NaConfig((2, 2, 8), 16, 1, 2, True)
 AMD_SMALL_WINDOW = NaConfig((1, 4, 4), 16, 1, 1, True)
 CONFIGS = (LARGE_WINDOW, SMALL_WINDOW, AMD_LARGE_WINDOW, AMD_SMALL_WINDOW)
 LARGE_WINDOW_MIN_VOLUME = 512

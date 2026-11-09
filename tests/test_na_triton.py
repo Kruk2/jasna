@@ -57,8 +57,8 @@ def _interpreter_dot_in_fp32(monkeypatch):
         ((2, 5, 7, 9, 3, 32), (3, 5, 7), (2, 5), SMALL_WINDOW_CONFIG),
         ((1, 3, 6, 17, 1, 64), (5, 7, 3), (0, 17), SMALL_WINDOW_CONFIG),
         ((1, 6, 9, 11, 2, 16), (5, 5, 5), (1, 9), tile_config((4, 4, 8), 64, 4, 2, False)),
-        ((1, 12, 13, 14, 2, 16), (11, 11, 11), (0, 14), AMD_LARGE_WINDOW_CONFIG),
-        ((1, 13, 13, 20, 2, 16), (11, 11, 11), (5, 10), AMD_LARGE_WINDOW_CONFIG),
+        ((1, 12, 13, 14, 2, 16), (9, 9, 9), (0, 14), AMD_LARGE_WINDOW_CONFIG),
+        ((1, 13, 13, 20, 2, 16), (9, 9, 9), (5, 10), AMD_LARGE_WINDOW_CONFIG),
         ((2, 5, 7, 9, 3, 32), (3, 5, 7), (2, 5), AMD_SMALL_WINDOW_CONFIG),
         ((1, 3, 6, 17, 1, 64), (5, 7, 3), (0, 17), AMD_SMALL_WINDOW_CONFIG),
         ((1, 6, 9, 11, 2, 16), (5, 5, 5), (1, 9), tile_config((2, 2, 8), 16, 2, 1, True)),
@@ -84,7 +84,7 @@ def test_box_rows_reject_a_box_wider_than_a_chunk():
 
 
 def test_amd_takes_the_box_row_configs():
-    assert config_for((11, 11, 11), amd=True) is AMD_LARGE_WINDOW_CONFIG
+    assert config_for((9, 9, 9), amd=True) is AMD_LARGE_WINDOW_CONFIG
     assert config_for((3, 7, 7), amd=True) is AMD_SMALL_WINDOW_CONFIG
 
 

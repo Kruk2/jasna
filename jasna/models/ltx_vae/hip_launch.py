@@ -6,7 +6,7 @@ Each entry is (function, grid, threads per block, dynamic shared memory bytes).
 
 KERNEL_LAUNCH = {
     'gfx1100': {
-        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
+        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 32, 4096),
         'ltx_na3d_3x7x7': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_gate_up_256x1024': ('_swiglu_gate_up_kernel', (0, 0, 0), 256, 32768),
@@ -22,7 +22,7 @@ KERNEL_LAUNCH = {
         'ltx_channels_first_fp16_bf16': ('_channels_first_kernel', (0, 0, 0), 128, 8192),
     },
     'gfx1101': {
-        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
+        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 32, 4096),
         'ltx_na3d_3x7x7': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_gate_up_256x1024': ('_swiglu_gate_up_kernel', (0, 0, 0), 256, 32768),
@@ -38,7 +38,7 @@ KERNEL_LAUNCH = {
         'ltx_channels_first_fp16_bf16': ('_channels_first_kernel', (0, 0, 0), 128, 8192),
     },
     'gfx1102': {
-        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
+        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 32, 4096),
         'ltx_na3d_3x7x7': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_gate_up_256x1024': ('_swiglu_gate_up_kernel', (0, 0, 0), 256, 32768),
@@ -54,7 +54,7 @@ KERNEL_LAUNCH = {
         'ltx_channels_first_fp16_bf16': ('_channels_first_kernel', (0, 0, 0), 128, 8192),
     },
     'gfx1103': {
-        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
+        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 32, 4096),
         'ltx_na3d_3x7x7': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_gate_up_256x1024': ('_swiglu_gate_up_kernel', (0, 0, 0), 256, 32768),
@@ -70,7 +70,7 @@ KERNEL_LAUNCH = {
         'ltx_channels_first_fp16_bf16': ('_channels_first_kernel', (0, 0, 0), 128, 8192),
     },
     'gfx1150': {
-        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
+        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 32, 4096),
         'ltx_na3d_3x7x7': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_gate_up_256x1024': ('_swiglu_gate_up_kernel', (0, 0, 0), 256, 32768),
@@ -86,7 +86,7 @@ KERNEL_LAUNCH = {
         'ltx_channels_first_fp16_bf16': ('_channels_first_kernel', (0, 0, 0), 128, 8192),
     },
     'gfx1151': {
-        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
+        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 32, 4096),
         'ltx_na3d_3x7x7': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_gate_up_256x1024': ('_swiglu_gate_up_kernel', (0, 0, 0), 256, 32768),
@@ -102,7 +102,7 @@ KERNEL_LAUNCH = {
         'ltx_channels_first_fp16_bf16': ('_channels_first_kernel', (0, 0, 0), 128, 8192),
     },
     'gfx1200': {
-        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
+        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 32, 4096),
         'ltx_na3d_3x7x7': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_gate_up_256x1024': ('_swiglu_gate_up_kernel', (0, 0, 0), 256, 32768),
@@ -118,7 +118,7 @@ KERNEL_LAUNCH = {
         'ltx_channels_first_fp16_bf16': ('_channels_first_kernel', (0, 0, 0), 128, 8192),
     },
     'gfx1201': {
-        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
+        'ltx_na3d_9x9x9': ('_na3d_fwd_kernel', (0, 0, 0), 32, 4096),
         'ltx_na3d_3x7x7': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_gate_up_256x1024': ('_swiglu_gate_up_kernel', (0, 0, 0), 256, 32768),
