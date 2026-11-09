@@ -231,7 +231,7 @@ def test_wizard_distinguishes_an_unverified_driver_from_an_old_one(wizard_factor
     assert completed == [(can_continue, False)]
 
 
-def test_wizard_fits_a_long_check_result(wizard_factory, monkeypatch) -> None:
+def test_wizard_fits_a_long_check_result(wizard_factory, monkeypatch, show_window) -> None:
     from jasna import accelerator
 
     monkeypatch.setattr(accelerator, "is_amd_device", lambda: True)
@@ -245,7 +245,7 @@ def test_wizard_fits_a_long_check_result(wizard_factory, monkeypatch) -> None:
     wizard._start_checks_in_background()
     wizard._checks_thread.join()
     wizard._poll_checks_thread()
-    wizard.update_idletasks()
+    show_window(wizard)
 
     info_label = wizard._check_labels["driver"][1]
     assert info_label.winfo_width() >= info_label.winfo_reqwidth()
