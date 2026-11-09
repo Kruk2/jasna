@@ -31,6 +31,24 @@ warm runs reuse it. LTX stage seconds:
   window decodes it waits for (144 x 1.38 s).
 - The warm base runs are its best case: a different video brings new box sizes and pays the search again.
 
+With `930b0da8` (tuned MIOpen solvers for the encoder, installed into the ROCm system databases as a
+release build does) and an empty user cache: **794.0 s** cold (encode 128.1 s, 0.86 s/window; scan 38.6,
+denoise 426.6, compose 200.7). That is -29 % against the old cold run and faster than the old code's warm
+runs (-14 %). 143 windows in this run against 144 above.
+
+## MIOpen tuning of the encoder
+
+Encoder alone, full VAE, production MIOpen settings, s/window and the first window of a fresh cache:
+
+| | 512 first | 512 | 768 first | 768 |
+|---|---|---|---|---|
+| fresh cache | 62.7 s | 1.053 | 225.9 s | 2.226 |
+| warm cache | 5.6 s | 1.046 | 6.5 s | 2.221 |
+| tuned entries in the system database | 5.6 s | 0.892 | 6.2 s | 1.863 |
+
+MIOpen reads only the system file named after the exact GPU (architecture + compute units, `gfx120140` for
+64 CUs); entries under another CU count or the bare architecture are ignored (first window 63 s again).
+
 ## Kernels
 
 Feather blur, 300 real box sizes of this clip, per call:

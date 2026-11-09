@@ -5,3 +5,4 @@ date,gpu,commit,run,clip,model,vae,ltx_s,scan_s,encode_s,denoise_s,compose_s,enc
 2026-11-09,Radeon AI PRO R9700,f685e952,warm1,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,823.8,38.1,151.6,429.5,204.6,1.02,1.48,1.37,831.1
 2026-11-09,Radeon AI PRO R9700,81111262,warm2,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,915.7,38.9,151.7,463.3,261.8,1.02,1.59,1.51,922.9
 2026-11-09,Radeon AI PRO R9700,f685e952,warm2,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,825.6,37.9,151.8,429.7,206.1,1.02,1.48,1.38,832.9
+2026-11-09,Radeon AI PRO R9700,930b0da8,cold with shipped MIOpen tuning,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,794.0,38.6,128.1,426.6,200.7,0.86,1.48,1.35,801.6
