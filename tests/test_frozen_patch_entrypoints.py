@@ -299,6 +299,7 @@ def test_frozen_build_compiles_in_process_with_prebuilt_triton_modules(monkeypat
     monkeypatch.setattr(_frozen, "_patched", False)
     monkeypatch.setattr(_frozen, "is_frozen", lambda: True)
     monkeypatch.setattr(_frozen, "register_ltx_sources", registered_roots.append)
+    monkeypatch.setattr(_frozen, "name_a_nameless_user", lambda: None)
     monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.setattr(os_utils, "get_application_executable", lambda: str(tmp_path / "jasna"))
     monkeypatch.delenv("TRITON_BACKENDS_IN_TREE", raising=False)
