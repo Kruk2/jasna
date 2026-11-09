@@ -5,6 +5,7 @@ from contextlib import nullcontext
 import ctypes
 from enum import StrEnum
 import functools
+import importlib.util
 import logging
 import os
 from pathlib import Path
@@ -50,11 +51,34 @@ def has_aotriton_flash_images(torch_lib: Path) -> bool:
     return any((torch_lib / "aotriton.images").glob("*/flash/attn_fwd.zip"))
 
 
+def rocm_libraries_dir() -> Path | None:
+    """The ROCm wheels' ``_rocm_sdk_libraries`` folder: beside a frozen app's executable, else the installed package."""
+    if is_frozen():
+        from jasna.os_utils import get_application_executable
+
+        return Path(get_application_executable()).resolve().parent / "_rocm_sdk_libraries"
+    spec = importlib.util.find_spec("_rocm_sdk_libraries")
+    return Path(next(iter(spec.submodule_search_locations))) if spec and spec.submodule_search_locations else None
+
+
+def windows_miopen_system_db(platform: str, libraries: Path | None) -> Path | None:
+    """The folder MIOpen should read its system databases (tuned solver picks, precompiled kernels) from on
+    Windows: there it looks beside MIOpen.dll in ``bin``, while the ROCm wheels ship them in ``share/miopen/db``,
+    so every conv shape would be searched and compiled at run time."""
+    if platform != "win32" or libraries is None:
+        return None
+    database = libraries / "share" / "miopen" / "db"
+    return database if database.is_dir() else None
+
+
 def configure_rocm_process_env() -> None:
     """Apply the ROCm defaults to this process; call at entry points before GPU work."""
     if not torch.version.hip:
         return
     apply_rocm_env_defaults(os.environ)
+    system_db = windows_miopen_system_db(sys.platform, rocm_libraries_dir())
+    if system_db is not None:
+        os.environ.setdefault("MIOPEN_SYSTEM_DB_PATH", str(system_db))
     # MIOpen then runs channels-last 3D convs in NDHWC instead of transposing every input, weight
     # and output: the compiled LTX VAE encoder 5 % faster and 0.5 GiB lighter on an R9700. Eager
     # encoders (no Triton: Windows ROCm, AMD releases) run 1.6x slower with it, and BasicVSR++ and

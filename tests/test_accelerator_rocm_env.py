@@ -6,7 +6,12 @@ import pytest
 import torch
 
 from jasna import accelerator
-from jasna.accelerator import apply_rocm_env_defaults, configure_rocm_process_env, has_aotriton_flash_images
+from jasna.accelerator import (
+    apply_rocm_env_defaults,
+    configure_rocm_process_env,
+    has_aotriton_flash_images,
+    windows_miopen_system_db,
+)
 
 ROCM_DEFAULTS = {
     "MIOPEN_FIND_MODE": "HYBRID",
@@ -91,6 +96,42 @@ def test_process_env_gets_rocm_defaults_on_rocm(monkeypatch, sdpa_switches, plat
         monkeypatch.delenv(name, raising=False)
     configure_rocm_process_env()
     assert {name: os.environ.get(name) for name in ROCM_DEFAULTS} == ROCM_DEFAULTS
+
+
+@pytest.mark.parametrize(("platform", "shipped", "expected"), [
+    ("win32", True, True), ("win32", False, False), ("linux", True, False),
+])
+def test_windows_miopen_reads_the_wheels_system_databases(tmp_path, platform, shipped, expected):
+    database = tmp_path / "share" / "miopen" / "db"
+    if shipped:
+        database.mkdir(parents=True)
+    assert windows_miopen_system_db(platform, tmp_path) == (database if expected else None)
+
+
+def test_windows_miopen_system_database_needs_the_rocm_libraries():
+    assert windows_miopen_system_db("win32", None) is None
+
+
+@pytest.mark.parametrize(("platform", "expected"), [("win32", True), ("linux", False)])
+def test_process_env_points_windows_miopen_at_the_system_databases(monkeypatch, tmp_path, sdpa_switches, platform, expected):
+    (tmp_path / "share" / "miopen" / "db").mkdir(parents=True)
+    monkeypatch.setattr(accelerator.sys, "platform", platform)
+    monkeypatch.setattr(torch.version, "hip", "7.2")
+    monkeypatch.setattr(accelerator, "rocm_libraries_dir", lambda: tmp_path)
+    monkeypatch.setenv("MIOPEN_SYSTEM_DB_PATH", "restored after the test")
+    monkeypatch.delenv("MIOPEN_SYSTEM_DB_PATH")
+    configure_rocm_process_env()
+    assert os.environ.get("MIOPEN_SYSTEM_DB_PATH") == (str(tmp_path / "share" / "miopen" / "db") if expected else None)
+
+
+def test_a_user_miopen_system_database_wins(monkeypatch, tmp_path, sdpa_switches):
+    (tmp_path / "share" / "miopen" / "db").mkdir(parents=True)
+    monkeypatch.setattr(accelerator.sys, "platform", "win32")
+    monkeypatch.setattr(torch.version, "hip", "7.2")
+    monkeypatch.setattr(accelerator, "rocm_libraries_dir", lambda: tmp_path)
+    monkeypatch.setenv("MIOPEN_SYSTEM_DB_PATH", "D:/own")
+    configure_rocm_process_env()
+    assert os.environ["MIOPEN_SYSTEM_DB_PATH"] == "D:/own"
 
 
 @pytest.mark.parametrize("triton", [True, False])
