@@ -88,16 +88,24 @@ def _rotate_quantize_row(x, row, j, q_ptr, s_ptr, K: tl.constexpr):
 
 
 @triton.jit
-def _gated_rotate_quantize_kernel(o_ptr, g_ptr, q_ptr, s_ptr, rows, K: tl.constexpr, HEAD_DIM: tl.constexpr):
+def _gated_rotate_quantize_kernel(
+    o_ptr, g_ptr, q_ptr, s_ptr, rows, K: tl.constexpr, HEAD_DIM: tl.constexpr, EXACT_SIGMOID: tl.constexpr
+):
     # Row t of ``o (heads, rows, HEAD_DIM)`` read as one token row of width K, each head times
     # 2 * sigmoid of its gate logit ``g[t, head]`` and rounded to bf16 as the torch path stores it.
+    # EXACT_SIGMOID takes the sigmoid as the native block's gate_heads does (precise exp, correctly
+    # rounded division), so the codes equal its gated heads quantized by rotate_quantize.
     row = tl.program_id(0)
     j = tl.arange(0, K)
     cols = (j // 256) * 256 + 255 - j % 256
     head = cols // HEAD_DIM
     x = tl.load(o_ptr + head * rows * HEAD_DIM + row * HEAD_DIM + cols % HEAD_DIM).to(tl.float32)
-    gate = tl.load(g_ptr + row * (K // HEAD_DIM) + head).to(tl.float32)
-    x = (x * (2.0 * tl.sigmoid(gate))).to(tl.bfloat16).to(tl.float32)
+    logit = tl.load(g_ptr + row * (K // HEAD_DIM) + head).to(tl.float32)
+    if EXACT_SIGMOID:
+        gate = 2.0 * tl.math.div_rn(1.0, 1.0 + libdevice.exp(-logit))
+    else:
+        gate = 2.0 * tl.sigmoid(logit)
+    x = (x * gate).to(tl.bfloat16).to(tl.float32)
     _rotate_quantize_row(x, row, j, q_ptr, s_ptr, K)
 
 
@@ -129,7 +137,8 @@ def gated_rotate_quantize(heads: torch.Tensor, gate_logits: torch.Tensor) -> tup
     codes = torch.empty(rows, k, dtype=torch.int8, device=heads.device)
     scales = torch.empty(rows, dtype=torch.float32, device=heads.device)
     _gated_rotate_quantize_kernel[(rows,)](
-        heads, gate_logits, codes, scales, rows, K=k, HEAD_DIM=head_dim, num_warps=ROTATE_QUANTIZE_WARPS,
+        heads, gate_logits, codes, scales, rows, K=k, HEAD_DIM=head_dim, EXACT_SIGMOID=False,
+        num_warps=ROTATE_QUANTIZE_WARPS,
     )
     return codes, scales
 

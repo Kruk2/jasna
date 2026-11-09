@@ -77,6 +77,26 @@ def test_gated_rotate_quantize_matches_quantizing_the_gated_tokens(kernels):
     assert torch.allclose(scales, expected_scales, rtol=1e-6, atol=0)
 
 
+def test_exact_sigmoid_gated_quantization_is_the_native_gate_then_rotate_quantize_bit_for_bit(kernels):
+    """The native block's gate_heads takes 2 * (1 / (1 + exp(-logit))) with a precise exp and division,
+    as torch does, and rotate_quantize reads its bf16 gated heads back."""
+    generator = torch.Generator().manual_seed(1)
+    heads, rows, head_dim = 32, 300, 128
+    out = _activations(heads * rows, head_dim, generator).view(heads, rows, head_dim)
+    logits = (torch.randn(rows, heads, generator=generator) * 4).to("cuda", torch.bfloat16)
+    gated = out.transpose(0, 1).float() * (2.0 * (1.0 / (1.0 + torch.exp(-logits.float()))))[..., None]
+    codes = torch.empty(rows, heads * head_dim, dtype=torch.int8, device="cuda")
+    scales = torch.empty(rows, dtype=torch.float32, device="cuda")
+
+    kernels._gated_rotate_quantize_kernel[(rows,)](
+        out, logits, codes, scales, rows, K=heads * head_dim, HEAD_DIM=head_dim, EXACT_SIGMOID=True,
+        num_warps=kernel_policy.ROTATE_QUANTIZE_WARPS,
+    )
+
+    expected_codes, expected_scales = kernels.rotate_quantize(gated.to(torch.bfloat16).reshape(rows, heads * head_dim))
+    assert torch.equal(codes, expected_codes) and torch.equal(scales, expected_scales)
+
+
 def test_int8_residual_mm_adds_the_gated_projection_per_half(kernels):
     generator = torch.Generator().manual_seed(0)
     rows, k, n = 256, 512, 384

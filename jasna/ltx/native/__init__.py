@@ -3,15 +3,17 @@
 ``block.cpp`` runs a whole block on plain weight tensors: the Triton kernels of
 ``ltx/kernels.py`` compiled ahead of time for this GPU (``aot.py``), the same cuBLAS
 NVFP4 GEMMs and prompt SDPA as the torch path, the INT8 self-attention vendored from
-comfy-kitchen (``sage_attention/``) and the element-wise glue of ``glue.cu``. Python owns
-every model constant and launch policy value and hands them over in ``Config``.
+comfy-kitchen (``sage_attention/``) and the element-wise glue of ``glue.cu``. An INT8 block's
+attention outputs quantize gated straight from their heads (``kernels.gated_rotate_quantize``; on
+NVIDIA with the sigmoid of glue's ``gate_heads``). Python owns every model constant and launch
+policy value and hands them over in ``Config``.
 
 The same sources build for AMD (ROCm PyTorch, ``gpu_runtime.h`` maps the CUDA spellings):
 INT8 blocks only, with the AMD tiles of ``kernel_policy.AMD_INT8_MM_TILES`` and, as the AMD torch
 path does, comfy-kitchen's HIP INT8 attention (``sage_attention_hip/``) for the self- and
-prompt cross-attention and the attention epilogue ``kernels.gated_rotate_quantize``; the q/k
-norm and RoPE run inside that attention's INT8 quantization (``norm_rope_quant.hip``). hipcc
-compiles ``glue.cu`` and the attention into objects that the host compiler's extension links.
+prompt cross-attention; the q/k norm and RoPE run inside that attention's INT8 quantization
+(``norm_rope_quant.hip``). hipcc compiles ``glue.cu`` and the attention into objects that the
+host compiler's extension links.
 
 Source installs build it on first use into the compile cache (needs nvcc or hipcc, a C++
 compiler and ninja; on Windows MSVC's ``cl`` on PATH, from an x64 Visual Studio developer shell
@@ -331,9 +333,8 @@ def _extension():
 def _prebuilt_manifest(architecture: tuple[int, int] | str, dims: BlockDims, *, fp4: bool) -> Path | None:
     """The shipped kernel manifest of this architecture whose quantizers are specialized for ``dims``
     (``aot.variants``: the only variants that depend on the block's widths)."""
-    widths = set() if fp4 else {("rotate_quantize", dims.dim, None), ("rotate_quantize", dims.ff_dim, None)}
-    if is_amd(architecture) and not fp4:
-        widths.add(("gated_rotate_quantize", dims.dim, dims.dim // dims.heads))
+    widths = set() if fp4 else {("rotate_quantize", dims.dim, None), ("rotate_quantize", dims.ff_dim, None),
+                                ("gated_rotate_quantize", dims.dim, dims.dim // dims.heads)}
     for manifest in sorted((PREBUILT / "kernels").glob(f"{policy.profile_name(architecture, fp4=fp4)}-*/manifest.json")):
         entries = json.loads(manifest.read_text())
         if {(e["family"], e["constexprs"]["K"], e["constexprs"].get("HEAD_DIM")) for e in entries

@@ -605,6 +605,12 @@ class Block::Impl {
     return {codes, scales};
   }
 
+#ifdef USE_ROCM
+  static constexpr bool kExactGateSigmoid = false;  // the sigmoid of the AMD torch path's gated heads
+#else
+  static constexpr bool kExactGateSigmoid = true;  // gate_heads' sigmoid: the codes of its gated heads
+#endif
+
   // rotate_quantize of attention heads (heads, rows, head_dim) read as token rows, each head times
   // 2 * sigmoid(logits[row, head]) (kernels.gated_rotate_quantize).
   std::pair<at::Tensor, at::Tensor> gated_rotate_quantize(const at::Tensor& heads, const at::Tensor& logits) const {
@@ -613,7 +619,7 @@ class Block::Impl {
                 "gated_rotate_quantize needs contiguous (heads, rows, head_dim) heads and (rows, heads) logits");
     const at::Tensor codes = at::empty({rows, k}, heads.options().dtype(at::kChar));
     const at::Tensor scales = at::empty({rows}, heads.options().dtype(at::kFloat));
-    Launch(kernel("gated_rotate_quantize", {{"K", k}, {"HEAD_DIM", head_dim}}))
+    Launch(kernel("gated_rotate_quantize", {{"K", k}, {"HEAD_DIM", head_dim}, {"EXACT_SIGMOID", kExactGateSigmoid}}))
         .ptr(heads).ptr(logits).ptr(codes).ptr(scales).i32(rows)(rows, 1, 1);
     return {codes, scales};
   }
@@ -735,14 +741,13 @@ class Block::Impl {
   // residual + gate[half] * out_projection(attention * 2 * sigmoid(gate_logits)): a new tensor.
   at::Tensor project_gated(const at::Tensor& attention, const at::Tensor& logits, const Linear& w,
                            const at::Tensor& residual, const at::Tensor& gate, int64_t rows, bool fp4) const {
-#ifdef USE_ROCM
-    // as the AMD torch path: an attention output is gated and quantized straight from its heads
-    if (!fp4 && attention.transpose(0, 1).is_contiguous()) {
+    // a bf16 attention output in heads layout is gated and quantized straight from its heads (as the
+    // AMD torch path does), sparing the gated copy gate_heads would write and rotate_quantize read back
+    if (!fp4 && attention.scalar_type() == at::kBFloat16 && attention.transpose(0, 1).is_contiguous()) {
       auto [codes, scales] = gated_rotate_quantize(attention.transpose(0, 1), logits);
       const at::Tensor out = at::empty_like(residual);
       return int8_mm(codes, scales, w, out, false, &residual, &gate, rows / 2, 0);
     }
-#endif
     const at::Tensor gated = at::empty({rows, attention.size(1) * attention.size(2)}, residual.options());
     if (!fp4) {
       gate_heads(attention, logits, gated, nullptr);

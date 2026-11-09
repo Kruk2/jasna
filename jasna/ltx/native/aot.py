@@ -55,11 +55,11 @@ def _rotate_quantize(k: int, modulate: bool) -> Variant:
     )
 
 
-def _gated_rotate_quantize(k: int, head_dim: int) -> Variant:
+def _gated_rotate_quantize(k: int, head_dim: int, exact_sigmoid: bool) -> Variant:
     return Variant(
         "gated_rotate_quantize", kernels._gated_rotate_quantize_kernel,
         ("*bf16", "*bf16", "*i8", "*fp32", "i32"), ("o_ptr", "g_ptr", "q_ptr", "s_ptr"),
-        (("K", k), ("HEAD_DIM", head_dim)), policy.ROTATE_QUANTIZE_WARPS, 3, (),
+        (("K", k), ("HEAD_DIM", head_dim), ("EXACT_SIGMOID", exact_sigmoid)), policy.ROTATE_QUANTIZE_WARPS, 3, (),
     )
 
 
@@ -119,9 +119,10 @@ def variants(architecture: tuple[int, int] | str, dims: BlockDims, *, fp4: bool)
     for linears with and without a bias."""
     if fp4:
         return [_quantize_fp4(False), _quantize_fp4(True)]
-    found = [_rotate_quantize(dims.dim, True), _rotate_quantize(dims.dim, False), _rotate_quantize(dims.ff_dim, False)]
-    if is_amd(architecture):  # the AMD attention epilogue, as transformer._gated_heads runs it there
-        found.append(_gated_rotate_quantize(dims.dim, dims.dim // dims.heads))
+    # the attention outputs quantize gated straight from their heads: on AMD as transformer._gated_heads
+    # does, on NVIDIA with the sigmoid of the native block's gate_heads
+    found = [_rotate_quantize(dims.dim, True), _rotate_quantize(dims.dim, False), _rotate_quantize(dims.ff_dim, False),
+             _gated_rotate_quantize(dims.dim, dims.dim // dims.heads, exact_sigmoid=not is_amd(architecture))]
     projections = (  # (n, k, gelu, residual)
         (dims.dim, dims.dim, False, False),  # Q/K/V, cross-attention Q
         (dims.dim, dims.dim, False, True),  # attention output + gated residual
