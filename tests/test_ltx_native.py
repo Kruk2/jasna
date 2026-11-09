@@ -73,10 +73,16 @@ def test_kernel_variants_follow_the_tile_tables():
         assert not any(v.family == "mm_stream_k" and dict(v.constexprs)["BN"] == kernel_policy.SMALL_MM_TILE[1] for v in found)
     for capability in kernel_policy.CUBLAS_INT8_MM:
         found = aot.variants(capability, dims, fp4=False)
-        assert {v.family for v in found} == {"rotate_quantize", "epilogue"}
+        assert {v.family for v in found} == {"rotate_quantize", "gated_rotate_quantize", "epilogue"}
         epilogue_tiles = {(dict(v.constexprs)["BM"], dict(v.constexprs)["BN"]) for v in found if v.family == "epilogue"}
         assert epilogue_tiles == {kernel_policy.CUBLAS_EPILOGUE_TILE}
     assert {v.family for v in aot.variants((12, 0), dims, fp4=True)} == {"quantize_fp4"}
+
+
+def test_nvidia_quantizes_gated_heads_with_the_native_gates_sigmoid():
+    found = aot.variants((12, 0), aot.BlockDims(dim=4096, ff_dim=16384, heads=32), fp4=False)
+    gated = [dict(v.constexprs) for v in found if v.family == "gated_rotate_quantize"]
+    assert gated == [{"K": 4096, "HEAD_DIM": 128, "EXACT_SIGMOID": True}]
 
 
 def test_every_projection_has_a_variant_with_and_without_bias():
@@ -388,7 +394,8 @@ def test_rtx_3090_native_block_launches_plain_triton_gemms(monkeypatch, tmp_path
     config = built[0]
     assert not config.has_tma and not config.cublas_int8
     assert (tuple(config.narrow_tile), tuple(config.wide_tile)) == kernel_policy.INT8_MM_TILES[(8, 6)]
-    assert {v.family for v in aot.variants((8, 6), aot.BlockDims(4096, 16384, 32), fp4=False)} == {"rotate_quantize", "mm"}
+    assert {v.family for v in aot.variants((8, 6), aot.BlockDims(4096, 16384, 32), fp4=False)} == {
+        "rotate_quantize", "gated_rotate_quantize", "mm"}
     assert "NVFP4 blocks need SM 12.0 / 12.1" in native.unavailable_reason(torch.device("cuda"), _block_specs("nvfp4"))
 
 
@@ -537,7 +544,7 @@ def test_amd_kernel_variants_are_the_amd_torch_paths_triton_kernels(architecture
     found = aot.variants(architecture, aot.BlockDims(dim=4096, ff_dim=16384, heads=32), fp4=False)
     assert {v.family for v in found} == {"rotate_quantize", "gated_rotate_quantize", "mm"}
     gated = [dict(v.constexprs) for v in found if v.family == "gated_rotate_quantize"]
-    assert gated == [{"K": 4096, "HEAD_DIM": 128}]
+    assert gated == [{"K": 4096, "HEAD_DIM": 128, "EXACT_SIGMOID": False}]
     gemm_tiles = {(dict(v.constexprs)["BM"], dict(v.constexprs)["BN"], dict(v.constexprs)["BK"], v.num_stages, v.num_warps)
                   for v in found if v.family == "mm"}
     assert gemm_tiles == {*kernel_policy.AMD_INT8_MM_TILES[architecture], kernel_policy.SMALL_MM_TILE}
