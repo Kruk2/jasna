@@ -78,16 +78,17 @@ __device__ float block_reduce(float value) {
   return value;
 }
 
-__global__ void rms_modulate_kernel(const bf16* x, const bf16* shift, const bf16* scale, bf16* out, float* amax,
-                                    int dim, int half_rows, int amax_group_rows, float eps) {
-  const int row = blockIdx.x;
-  const bf16* in = x + static_cast<int64_t>(row) * dim;
-  float squares = 0.f;
-  for (int c = threadIdx.x * kVector; c < dim; c += blockDim.x * kVector) {
-    const Vec a = load8(in + c);
+// residual + y * gate, as gated_residual stores it before rounding.
+__device__ __forceinline__ Vec gated_sum(const Vec& r, const Vec& v, const Vec& g) {
+  Vec o;
 #pragma unroll
-    for (int i = 0; i < kVector; ++i) squares += a.v[i] * a.v[i];
-  }
+  for (int i = 0; i < kVector; ++i) o.v[i] = r.v[i] + v.v[i] * g.v[i];
+  return o;
+}
+
+// rms_modulate of the row `in` whose sum of squares this thread holds (over its own columns, in order).
+__device__ void modulate_row(const bf16* in, const bf16* shift, const bf16* scale, bf16* out, float* amax, float squares,
+                             int row, int dim, int half_rows, int amax_group_rows, float eps) {
   const float rstd = rsqrtf(block_reduce<false>(squares) / dim + eps);
   const int half = row / half_rows;
   const bf16* shift_row = shift + static_cast<int64_t>(half) * dim;
@@ -107,6 +108,40 @@ __global__ void rms_modulate_kernel(const bf16* x, const bf16* shift, const bf16
     peak = block_reduce<true>(peak);
     if (threadIdx.x == 0) atomic_max_nonnegative(amax + row / amax_group_rows, peak);
   }
+}
+
+__global__ void rms_modulate_kernel(const bf16* x, const bf16* shift, const bf16* scale, bf16* out, float* amax,
+                                    int dim, int half_rows, int amax_group_rows, float eps) {
+  const int row = blockIdx.x;
+  const bf16* in = x + static_cast<int64_t>(row) * dim;
+  float squares = 0.f;
+  for (int c = threadIdx.x * kVector; c < dim; c += blockDim.x * kVector) {
+    const Vec a = load8(in + c);
+#pragma unroll
+    for (int i = 0; i < kVector; ++i) squares += a.v[i] * a.v[i];
+  }
+  modulate_row(in, shift, scale, out, amax, squares, row, dim, half_rows, amax_group_rows, eps);
+}
+
+// gated_residual into h, then rms_modulate of h, row by row: the modulation reads back only what
+// this thread just stored, and the squares are those of the stored (rounded) values.
+__global__ void residual_rms_modulate_kernel(bf16* h, const bf16* residual, const bf16* y, const bf16* gate,
+                                             const bf16* shift, const bf16* scale, bf16* out, float* amax, int dim,
+                                             int half_rows, int amax_group_rows, float eps) {
+  const int row = blockIdx.x;
+  const int64_t base = static_cast<int64_t>(row) * dim;
+  const bf16* gate_row = gate + static_cast<int64_t>(row / half_rows) * dim;
+  float squares = 0.f;
+  for (int c = threadIdx.x * kVector; c < dim; c += blockDim.x * kVector) {
+    const Vec o = gated_sum(load8(residual + base + c), load8(y + base + c), load8(gate_row + c));
+    store8(h + base + c, o);
+#pragma unroll
+    for (int i = 0; i < kVector; ++i) {
+      const float a = round_bf16(o.v[i]);
+      squares += a * a;
+    }
+  }
+  modulate_row(h + base, shift, scale, out, amax, squares, row, dim, half_rows, amax_group_rows, eps);
 }
 
 template <class Out>
@@ -172,7 +207,7 @@ __global__ void gate_heads_kernel(const In* attention, int64_t stride_token, int
       o.v[i] = round_bf16(a.v[i] * gate);
       peak = fmaxf(peak, fabsf(o.v[i]));
     }
-    store8(out + e, o);
+    if (out != nullptr) store8(out + e, o);
   }
   if (amax != nullptr) {
     peak = block_reduce<true>(peak);
@@ -188,10 +223,7 @@ __global__ void gated_residual_kernel(bf16* out, const bf16* residual, const bf1
     const int column = e % dim;
     const Vec r = load8(residual + e), v = load8(y + e);
     const Vec g = load8(gate + (row + row_offset) / half_rows * dim + column);
-    Vec o;
-#pragma unroll
-    for (int i = 0; i < kVector; ++i) o.v[i] = r.v[i] + v.v[i] * g.v[i];
-    store8(out + e, o);
+    store8(out + e, gated_sum(r, v, g));
   }
 }
 
@@ -236,6 +268,30 @@ int elementwise_blocks(int64_t elements) {
   return static_cast<int>(std::max<int64_t>(1, std::min(wanted, cap)));
 }
 
+// out may be null: then only the amax.
+void launch_gate_heads(const at::Tensor& attention, const at::Tensor& logits, bf16* out, float* amax) {
+  TORCH_CHECK(attention.is_cuda() && (attention.scalar_type() == at::kBFloat16 || attention.scalar_type() == at::kHalf) &&
+              reinterpret_cast<uintptr_t>(attention.data_ptr()) % 16 == 0,
+              "attention must be a 16-byte aligned CUDA bf16/fp16 tensor");
+  check_bf16(logits, "logits");
+  TORCH_CHECK(attention.dim() == 3 && attention.stride(2) == 1 && attention.size(2) % kVector == 0 &&
+              attention.stride(0) % kVector == 0 && attention.stride(1) % kVector == 0,
+              "attention must be (rows, heads, head_dim) with a contiguous head_dim");
+  const int64_t rows = attention.size(0), heads = attention.size(1), head_dim = attention.size(2);
+  TORCH_CHECK(logits.dim() == 2 && logits.is_contiguous() && logits.size(0) == rows && logits.size(1) == heads,
+              "gate logits must be (rows, heads)");
+  const auto launch = [&](const auto* values) {
+    gate_heads_kernel<<<elementwise_blocks(rows * heads * head_dim), kThreads, 0, at::cuda::getCurrentCUDAStream()>>>(
+        values, attention.stride(0), attention.stride(1), reinterpret_cast<const bf16*>(logits.data_ptr()), out, rows,
+        static_cast<int>(heads), static_cast<int>(head_dim), amax);
+  };
+  if (attention.scalar_type() == at::kHalf)
+    launch(reinterpret_cast<const __half*>(attention.data_ptr()));
+  else
+    launch(reinterpret_cast<const bf16*>(attention.data_ptr()));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 }  // namespace
 
 void rms_modulate(const at::Tensor& x, const at::Tensor& shift, const at::Tensor& scale, const at::Tensor& out,
@@ -251,6 +307,31 @@ void rms_modulate(const at::Tensor& x, const at::Tensor& shift, const at::Tensor
       reinterpret_cast<const bf16*>(x.data_ptr()), reinterpret_cast<const bf16*>(shift.data_ptr()),
       reinterpret_cast<const bf16*>(scale.data_ptr()), reinterpret_cast<bf16*>(out.data_ptr()), amax,
       static_cast<int>(dim), static_cast<int>(rows / 2), static_cast<int>(amax_group_rows), static_cast<float>(eps));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void residual_rms_modulate(const at::Tensor& h, const at::Tensor& residual, const at::Tensor& y, const at::Tensor& gate,
+                           const at::Tensor& shift, const at::Tensor& scale, const at::Tensor& out, float* amax,
+                           int64_t amax_group_rows, double eps) {
+  check_rows(h, "h");
+  check_rows(residual, "residual");
+  check_rows(y, "y");
+  check_rows(out, "out");
+  check_bf16(gate, "gate");
+  check_bf16(shift, "shift");
+  check_bf16(scale, "scale");
+  const int64_t rows = h.size(0), dim = h.size(1);
+  TORCH_CHECK(rows % 2 == 0 && residual.sizes() == h.sizes() && y.sizes() == h.sizes() && out.sizes() == h.sizes() &&
+              gate.is_contiguous() && shift.is_contiguous() && scale.is_contiguous() && gate.numel() == 2 * dim &&
+              shift.numel() == 2 * dim && scale.numel() == 2 * dim,
+              "residual_rms_modulate needs matching (rows, dim) tensors, an even row count and (2, dim) gate, shift and "
+              "scale rows");
+  residual_rms_modulate_kernel<<<rows, kThreads, 0, at::cuda::getCurrentCUDAStream()>>>(
+      reinterpret_cast<bf16*>(h.data_ptr()), reinterpret_cast<const bf16*>(residual.data_ptr()),
+      reinterpret_cast<const bf16*>(y.data_ptr()), reinterpret_cast<const bf16*>(gate.data_ptr()),
+      reinterpret_cast<const bf16*>(shift.data_ptr()), reinterpret_cast<const bf16*>(scale.data_ptr()),
+      reinterpret_cast<bf16*>(out.data_ptr()), amax, static_cast<int>(dim), static_cast<int>(rows / 2),
+      static_cast<int>(amax_group_rows), static_cast<float>(eps));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -292,27 +373,14 @@ void norm_rope(const at::Tensor& x, const at::Tensor& weight, const at::Tensor* 
 }
 
 void gate_heads(const at::Tensor& attention, const at::Tensor& logits, const at::Tensor& out, float* amax) {
-  TORCH_CHECK(attention.is_cuda() && (attention.scalar_type() == at::kBFloat16 || attention.scalar_type() == at::kHalf) &&
-              reinterpret_cast<uintptr_t>(attention.data_ptr()) % 16 == 0,
-              "attention must be a 16-byte aligned CUDA bf16/fp16 tensor");
-  check_bf16(logits, "logits");
   check_rows(out, "out");
-  TORCH_CHECK(attention.dim() == 3 && attention.stride(2) == 1 && attention.size(2) % kVector == 0 &&
-              attention.stride(0) % kVector == 0 && attention.stride(1) % kVector == 0,
-              "attention must be (rows, heads, head_dim) with a contiguous head_dim");
-  const int64_t rows = attention.size(0), heads = attention.size(1), head_dim = attention.size(2);
-  TORCH_CHECK(logits.dim() == 2 && logits.is_contiguous() && logits.size(0) == rows && logits.size(1) == heads &&
-              out.size(0) == rows && out.size(1) == heads * head_dim, "gate logits must be (rows, heads)");
-  const auto launch = [&](const auto* values) {
-    gate_heads_kernel<<<elementwise_blocks(out.numel()), kThreads, 0, at::cuda::getCurrentCUDAStream()>>>(
-        values, attention.stride(0), attention.stride(1), reinterpret_cast<const bf16*>(logits.data_ptr()),
-        reinterpret_cast<bf16*>(out.data_ptr()), rows, static_cast<int>(heads), static_cast<int>(head_dim), amax);
-  };
-  if (attention.scalar_type() == at::kHalf)
-    launch(reinterpret_cast<const __half*>(attention.data_ptr()));
-  else
-    launch(reinterpret_cast<const bf16*>(attention.data_ptr()));
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  TORCH_CHECK(out.size(0) == attention.size(0) && out.size(1) == attention.size(1) * attention.size(2),
+              "out must be (rows, heads * head_dim)");
+  launch_gate_heads(attention, logits, reinterpret_cast<bf16*>(out.data_ptr()), amax);
+}
+
+void gate_heads_amax(const at::Tensor& attention, const at::Tensor& logits, float* amax) {
+  launch_gate_heads(attention, logits, nullptr, amax);
 }
 
 void gated_residual(const at::Tensor& out, const at::Tensor& residual, const at::Tensor& y, const at::Tensor& gate,

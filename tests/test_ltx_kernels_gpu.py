@@ -171,6 +171,32 @@ def test_quantize_fp4_is_bit_exact(kernels):
         assert torch.equal(block_scales.view(torch.uint8), expected_scales.view(torch.uint8))
 
 
+@needs_blackwell
+@pytest.mark.parametrize("heads, rows, head_dim", [(32, 300, 128), (16, 333, 256)])
+def test_gated_fp4_quantization_is_the_native_gate_then_quantize_fp4_bit_for_bit(kernels, heads, rows, head_dim):
+    """Attention heads gated with gate_heads' 2 * (1 / (1 + exp(-logit))) and quantized from their heads
+    give the codes quantize_fp4 gives the bf16 gated token rows."""
+    generator = torch.Generator().manual_seed(2)
+    k = heads * head_dim
+    out = _activations(heads * rows, head_dim, generator).view(heads, rows, head_dim)
+    logits = (torch.randn(rows, heads, generator=generator) * 4).to("cuda", torch.bfloat16)
+    gated = out.transpose(0, 1).float() * (2.0 * (1.0 / (1.0 + torch.exp(-logits.float()))))[..., None]
+    gated = gated.to(torch.bfloat16).reshape(rows, k)
+    tensor_scale = T.fp4_tensor_scale(gated)
+    packed = torch.empty(rows, k // 2, dtype=torch.uint8, device="cuda")
+    block_scales = torch.zeros(kernels.fp4_scale_shape(rows, k), dtype=torch.uint8, device="cuda")
+    rows_tile, cols_tile = kernel_policy.FP4_QUANTIZE_ROWS, kernel_policy.FP4_QUANTIZE_COLS
+
+    kernels._quantize_fp4_gated_kernel[(-(-rows // rows_tile), k // cols_tile)](
+        out, logits, tensor_scale, packed, block_scales, rows, K=k, HEAD_DIM=head_dim, BM=rows_tile, BK=cols_tile,
+        num_warps=kernel_policy.FP4_QUANTIZE_WARPS,
+    )
+
+    expected_packed, expected_scales = kernels.quantize_fp4(gated, tensor_scale, False)
+    assert torch.equal(packed, expected_packed)
+    assert torch.equal(block_scales, expected_scales.view(torch.uint8))
+
+
 def _quantized_block(dim: int, heads: int, fp4: bool, generator: torch.Generator) -> dict[str, torch.Tensor]:
     def rand(*shape: int) -> torch.Tensor:
         return (torch.randn(*shape, generator=generator) * 0.05).to(torch.bfloat16)
@@ -271,7 +297,7 @@ def test_one_prompt_pair_serves_every_window_and_the_perturbed_pass(kernels):
 
 
 def test_kernels_reject_widths_they_would_compute_wrong(kernels):
-    x = torch.zeros(8, 384, dtype=torch.bfloat16, device="cuda")
+    x = torch.zeros(8, 320, dtype=torch.bfloat16, device="cuda")
     with pytest.raises(ValueError):
         kernels.rotate_quantize(x)
     with pytest.raises(ValueError):

@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 #include <utility>
 
@@ -295,10 +296,18 @@ class Block::Impl {
                                         [&] { return linear(attn_in, w[SelfK]); }, v, q_norm, k_norm, rope_cos,
                                         rope_sin, cta_k);
     }
-    at::Tensor h = project_gated(attention, linear(attn_in, w[SelfGate]), w[SelfOut], xin, ada[2], rows, fp4);
+    // NVFP4 adds each attention residual in the pass that modulates the sum for the next linears
+    at::Tensor h;
+    Activation query;
+    if (fp4) {
+      std::tie(h, query) = residual_modulated(xin, projected_fp4(attention, linear(attn_in, w[SelfGate]), w[SelfOut]),
+                                              ada[2], ada[6], ada[7], rows);
+    } else {
+      h = project_gated(attention, linear(attn_in, w[SelfGate]), w[SelfOut], xin, ada[2], rows);
+      query = modulated(h, ada[6], ada[7], false, rows);
+    }
 
     // gated prompt cross-attention
-    Activation query = modulated(h, ada[6], ada[7], fp4, rows);
 #ifdef USE_ROCM
     const at::Tensor cross = normed_cross_attention(linear(query, w[CrossQ]), cross_q_norm, prompt_key, prompt_value);
 #else
@@ -316,11 +325,13 @@ class Block::Impl {
       cross = at::scaled_dot_product_attention(q_heads, prompt_key, prompt_value)[0].transpose(0, 1);
     }
 #endif
-    h = project_gated(cross, linear(query, w[CrossGate]), w[CrossOut], h, ada[8], rows, fp4);
-
     // feed-forward with gated residual, quantized or modulated over all rows, then in row chunks
-    return (fp4 ? feed_forward_fp4(h, ada, w[FfUp], w[FfDown], rows) : feed_forward_int8(h, ada, w[FfUp], w[FfDown], rows))
-        .view({1, rows, dim});
+    if (fp4) {
+      const at::Tensor y = projected_fp4(cross, linear(query, w[CrossGate]), w[CrossOut]);
+      return feed_forward_fp4(h, y, ada, w[FfUp], w[FfDown], rows).view({1, rows, dim});
+    }
+    h = project_gated(cross, linear(query, w[CrossGate]), w[CrossOut], h, ada[8], rows);
+    return feed_forward_int8(h, ada, w[FfUp], w[FfDown], rows).view({1, rows, dim});
   }
 
   // comfy-kitchen's INT8 attention of token-major (queries, heads * head_dim) q against (keys,
@@ -629,14 +640,35 @@ class Block::Impl {
     const int64_t rows = x.size(0), k = x.size(1);
     TORCH_CHECK(x.is_contiguous() && k % config_.fp4_quantize_cols == 0, "quantize_fp4 needs contiguous rows of a width divisible by ",
                 config_.fp4_quantize_cols);
-    const at::Tensor packed = at::empty({rows, k / 2}, x.options().dtype(at::kByte));
-    const int64_t scale_rows = cdiv(rows, config_.fp4_scale_tile_rows) * config_.fp4_scale_tile_rows;
-    const int64_t scale_cols = cdiv(k / config_.fp4_block, config_.fp4_scale_tile_cols) * config_.fp4_scale_tile_cols;
-    const at::Tensor scales = at::zeros({scale_rows, scale_cols}, x.options().dtype(at::kByte));
+    auto [packed, scales] = fp4_codes(rows, k, x);
     Launch(kernel("quantize_fp4", {{"GELU", gelu}, {"BM", config_.fp4_quantize_rows}, {"BK", config_.fp4_quantize_cols}}))
         .ptr(x).ptr(tensor_scale).ptr(packed).ptr(scales).i32(rows).i32(k).i32(x.stride(0))(
             cdiv(rows, config_.fp4_quantize_rows), k / config_.fp4_quantize_cols, 1);
     return {packed, scales.view(at::kFloat8_e4m3fn)};
+  }
+
+  // quantize_fp4 of attention heads (heads, rows, head_dim) read as token rows, each head times
+  // 2 * sigmoid(logits[row, head]) as gate_heads stores it (kernels._quantize_fp4_gated_kernel).
+  std::pair<at::Tensor, at::Tensor> quantize_fp4_gated(const at::Tensor& heads, const at::Tensor& logits,
+                                                       const at::Tensor& tensor_scale) const {
+    const int64_t count = heads.size(0), rows = heads.size(1), head_dim = heads.size(2), k = count * head_dim;
+    const int64_t tile = config_.fp4_quantize_cols;
+    TORCH_CHECK(heads.is_contiguous() && logits.is_contiguous() && logits.size(0) == rows && logits.size(1) == count &&
+                head_dim % tile == 0, "quantize_fp4_gated needs contiguous (heads, rows, head_dim) heads, (rows, heads) "
+                "logits and a head size that is a multiple of its column tile");
+    auto [packed, scales] = fp4_codes(rows, k, heads);
+    Launch(kernel("quantize_fp4_gated", {{"K", k}, {"HEAD_DIM", head_dim}, {"BM", config_.fp4_quantize_rows}, {"BK", tile}}))
+        .ptr(heads).ptr(logits).ptr(tensor_scale).ptr(packed).ptr(scales).i32(rows)(
+            cdiv(rows, config_.fp4_quantize_rows), k / tile, 1);
+    return {packed, scales.view(at::kFloat8_e4m3fn)};
+  }
+
+  // Packed codes and zero-padded block scales (cuBLAS tiles) for an FP4 quantization of (rows, k).
+  std::pair<at::Tensor, at::Tensor> fp4_codes(int64_t rows, int64_t k, const at::Tensor& like) const {
+    const int64_t scale_rows = cdiv(rows, config_.fp4_scale_tile_rows) * config_.fp4_scale_tile_rows;
+    const int64_t scale_cols = cdiv(k / config_.fp4_block, config_.fp4_scale_tile_cols) * config_.fp4_scale_tile_cols;
+    return {at::empty({rows, k / 2}, like.options().dtype(at::kByte)),
+            at::zeros({scale_rows, scale_cols}, like.options().dtype(at::kByte))};
   }
 
   at::Tensor zeros_f32(int64_t count, const at::Tensor& like) const {
@@ -738,29 +770,48 @@ class Block::Impl {
     TORCH_CHECK(false, "unreachable");
   }
 
-  // residual + gate[half] * out_projection(attention * 2 * sigmoid(gate_logits)): a new tensor.
+  // residual + gate[half] * out_projection(attention * 2 * sigmoid(gate_logits)) with INT8 activations: a new tensor.
   at::Tensor project_gated(const at::Tensor& attention, const at::Tensor& logits, const Linear& w,
-                           const at::Tensor& residual, const at::Tensor& gate, int64_t rows, bool fp4) const {
+                           const at::Tensor& residual, const at::Tensor& gate, int64_t rows) const {
     // a bf16 attention output in heads layout is gated and quantized straight from its heads (as the
     // AMD torch path does), sparing the gated copy gate_heads would write and rotate_quantize read back
-    if (!fp4 && attention.scalar_type() == at::kBFloat16 && attention.transpose(0, 1).is_contiguous()) {
+    if (attention.scalar_type() == at::kBFloat16 && attention.transpose(0, 1).is_contiguous()) {
       auto [codes, scales] = gated_rotate_quantize(attention.transpose(0, 1), logits);
       const at::Tensor out = at::empty_like(residual);
       return int8_mm(codes, scales, w, out, false, &residual, &gate, rows / 2, 0);
     }
     const at::Tensor gated = at::empty({rows, attention.size(1) * attention.size(2)}, residual.options());
-    if (!fp4) {
-      gate_heads(attention, logits, gated, nullptr);
-      auto [codes, scales] = rotate_quantize(gated, nullptr, nullptr);
-      const at::Tensor out = at::empty_like(residual);
-      return int8_mm(codes, scales, w, out, false, &residual, &gate, rows / 2, 0);
+    gate_heads(attention, logits, gated, nullptr);
+    auto [codes, scales] = rotate_quantize(gated, nullptr, nullptr);
+    const at::Tensor out = at::empty_like(residual);
+    return int8_mm(codes, scales, w, out, false, &residual, &gate, rows / 2, 0);
+  }
+
+  // out_projection(attention * 2 * sigmoid(gate_logits)) with NVFP4 activations; its gated residual is
+  // added by residual_modulated / feed_forward_fp4.
+  at::Tensor projected_fp4(const at::Tensor& attention, const at::Tensor& logits, const Linear& w) const {
+    const at::Tensor amax = zeros_f32(1, logits);
+    // a bf16 attention output in heads layout is gated as it is quantized, sparing the gated copy
+    if (attention.scalar_type() == at::kBFloat16 && attention.transpose(0, 1).is_contiguous() &&
+        attention.size(2) % config_.fp4_quantize_cols == 0) {
+      gate_heads_amax(attention, logits, amax.data_ptr<float>());
+      const at::Tensor tensor_scale = tensor_scales(amax);
+      auto [packed, block_scales] = quantize_fp4_gated(attention.transpose(0, 1), logits, tensor_scale);
+      return fp4_mm(packed, block_scales, tensor_scale, w);
     }
-    const at::Tensor amax = zeros_f32(1, residual);
+    const at::Tensor gated = at::empty({attention.size(0), attention.size(1) * attention.size(2)}, logits.options());
     gate_heads(attention, logits, gated, amax.data_ptr<float>());
     const Activation a = fp4_activation(gated, tensor_scales(amax));
-    const at::Tensor out = at::empty_like(residual);
-    gated_residual(out, residual, fp4_mm(a.packed, a.block_scales, a.tensor_scale, w), gate, rows / 2, 0);
-    return out;
+    return fp4_mm(a.packed, a.block_scales, a.tensor_scale, w);
+  }
+
+  // h = residual + y * gate[half] and h's rms_modulate quantized for the NVFP4 linears, in one pass.
+  std::pair<at::Tensor, Activation> residual_modulated(const at::Tensor& residual, const at::Tensor& y,
+                                                       const at::Tensor& gate, const at::Tensor& shift,
+                                                       const at::Tensor& scale, int64_t rows) const {
+    const at::Tensor h = at::empty_like(residual), values = at::empty_like(residual), amax = zeros_f32(1, residual);
+    residual_rms_modulate(h, residual, y, gate, shift, scale, values, amax.data_ptr<float>(), rows, config_.eps);
+    return {h, fp4_activation(values, tensor_scales(amax))};
   }
 
   at::Tensor feed_forward_int8(const at::Tensor& x, const at::Tensor& ada, const Linear& up, const Linear& down,
@@ -779,12 +830,14 @@ class Block::Impl {
     return out;
   }
 
-  at::Tensor feed_forward_fp4(const at::Tensor& x, const at::Tensor& ada, const Linear& up, const Linear& down,
-                              int64_t rows) const {
-    // as transformer.block_forward: modulate every row, then per chunk one tensor scale per linear call
+  // the feed-forward of x = residual + y * ada[8][half], the cross-attention residual added in the pass that
+  // modulates x; as transformer.block_forward: modulate every row, then per chunk one tensor scale per linear call
+  at::Tensor feed_forward_fp4(const at::Tensor& residual, const at::Tensor& y, const at::Tensor& ada, const Linear& up,
+                              const Linear& down, int64_t rows) const {
     const int64_t chunks = cdiv(rows, config_.chunk_rows);
-    const at::Tensor values = at::empty_like(x), amax = zeros_f32(chunks, x);
-    rms_modulate(x, ada[3], ada[4], values, amax.data_ptr<float>(), config_.chunk_rows, config_.eps);
+    const at::Tensor x = at::empty_like(residual), values = at::empty_like(residual), amax = zeros_f32(chunks, residual);
+    residual_rms_modulate(x, residual, y, ada[8], ada[3], ada[4], values, amax.data_ptr<float>(), config_.chunk_rows,
+                          config_.eps);
     const at::Tensor chunk_scales = tensor_scales(amax);
     const at::Tensor out = at::empty_like(x);
     for (int64_t chunk = 0; chunk < chunks; ++chunk) {

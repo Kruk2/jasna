@@ -76,7 +76,13 @@ def test_kernel_variants_follow_the_tile_tables():
         assert {v.family for v in found} == {"rotate_quantize", "gated_rotate_quantize", "epilogue"}
         epilogue_tiles = {(dict(v.constexprs)["BM"], dict(v.constexprs)["BN"]) for v in found if v.family == "epilogue"}
         assert epilogue_tiles == {kernel_policy.CUBLAS_EPILOGUE_TILE}
-    assert {v.family for v in aot.variants((12, 0), dims, fp4=True)} == {"quantize_fp4"}
+    assert {v.family for v in aot.variants((12, 0), dims, fp4=True)} == {"quantize_fp4", "quantize_fp4_gated"}
+
+
+def test_nvfp4_gated_heads_quantize_at_the_blocks_width_and_head_size():
+    found = aot.variants((12, 0), aot.BlockDims(dim=3072, ff_dim=12288, heads=24), fp4=True)
+    gated = [dict(v.constexprs) for v in found if v.family == "quantize_fp4_gated"]
+    assert [(c["K"], c["HEAD_DIM"]) for c in gated] == [(3072, 128)]
 
 
 def test_nvidia_quantizes_gated_heads_with_the_native_gates_sigmoid():
@@ -462,6 +468,15 @@ def test_shipped_kernels_must_fit_the_models_widths_and_gpu(monkeypatch, tmp_pat
     assert "no shipped kernels for gfx1100" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
     with pytest.raises(RuntimeError, match="no shipped native-block kernels"):
         native._kernel_manifest("gfx1100", aot.BlockDims(4096, 16384, 32), fp4=False)
+
+
+def test_shipped_nvfp4_kernels_must_fit_the_models_head_size(monkeypatch, tmp_path):
+    monkeypatch.setattr(native, "PREBUILT", tmp_path)
+    plain = [_quantizer("quantize_fp4", GELU=gelu, BM=16, BK=128) for gelu in (0, 1)]
+    manifest = _shipped_manifest(
+        tmp_path, "sm120-nvfp4", [*plain, _quantizer("quantize_fp4_gated", K=4096, HEAD_DIM=64, BM=16, BK=128)])
+    assert native._prebuilt_manifest((12, 0), aot.BlockDims(4096, 16384, 32), fp4=True) is None
+    assert native._prebuilt_manifest((12, 0), aot.BlockDims(4096, 16384, 64), fp4=True) == manifest
 
 
 @pytest.mark.parametrize("frozen,windows,expected", [

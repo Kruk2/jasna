@@ -10,6 +10,12 @@ namespace jasna_ltx {
 void rms_modulate(const at::Tensor& x, const at::Tensor& shift, const at::Tensor& scale, const at::Tensor& out,
                   float* amax, int64_t amax_group_rows, double eps);
 
+// h = residual + y * gate[half] (as gated_residual) and out = rms_modulate(h) (as rms_modulate, amax
+// likewise) in one pass over each row: the modulation reads h back from where it was just stored.
+void residual_rms_modulate(const at::Tensor& h, const at::Tensor& residual, const at::Tensor& y, const at::Tensor& gate,
+                           const at::Tensor& shift, const at::Tensor& scale, const at::Tensor& out, float* amax,
+                           int64_t amax_group_rows, double eps);
+
 // out = rope(bf16(rms_norm(x) * weight)) per head, split halves, for x (rows, dim) token-major; the
 // second half of the rows reuses the first half's positions. Without cos/sin only the norm. out is
 // bf16, or fp16 holding the bf16-rounded values.
@@ -19,6 +25,9 @@ void norm_rope(const at::Tensor& x, const at::Tensor& weight, const at::Tensor* 
 // out (rows, heads * head_dim) = attention (rows, heads, head_dim, any token/head strides; bf16, or
 // fp16 rounded to bf16 first) * 2 * sigmoid(logits (rows, heads)); with amax, also max|out| (atomic).
 void gate_heads(const at::Tensor& attention, const at::Tensor& logits, const at::Tensor& out, float* amax);
+
+// max|gate_heads(attention, logits)| (atomic, zeroed by the caller) without storing the gated heads.
+void gate_heads_amax(const at::Tensor& attention, const at::Tensor& logits, float* amax);
 
 // out = residual + y * gate[half] for rows starting at row_offset of a block whose halves have
 // half_rows rows; out may be residual.

@@ -25,8 +25,10 @@ STREAM_K_MAX_WAVES = 8
 # on an RTX 2080 Ti (8-17 % faster than 64x64 on every large shape).
 CUBLAS_EPILOGUE_TILE = (8, 512)
 CUBLAS_EPILOGUE_WARPS = 8
-FP4_QUANTIZE_ROWS = 32
-FP4_QUANTIZE_COLS = 256
+# NVFP4 quantize tiles: 16 x 128 from a sweep on an RTX 5090 (a block's quantizers 0.53 -> 0.44 ms at a
+# 512 canvas vs 32 x 256; the same codes).
+FP4_QUANTIZE_ROWS = 16
+FP4_QUANTIZE_COLS = 128
 FP4_QUANTIZE_WARPS = 4
 # cuBLAS block-scale layout: 128 x 4 tiles of float8 scales, zero padded.
 FP4_SCALE_TILE_ROWS = 128

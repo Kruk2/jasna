@@ -405,6 +405,35 @@ def _quantize_fp4_kernel(
     x = tl.load(x_ptr + rows[:, None] * stride_x + cols[None, :], mask=row_mask[:, None], other=0.0).to(tl.float32)
     if GELU:
         x = (0.5 * x * (1 + libdevice.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)))).to(tl.bfloat16).to(tl.float32)
+    _quantize_fp4_tile(x, rows, row_mask, ts_ptr, q_ptr, s_ptr, K, BM, BK)
+
+
+@triton.jit
+def _quantize_fp4_gated_kernel(
+    o_ptr, g_ptr, ts_ptr, q_ptr, s_ptr, M, K: tl.constexpr, HEAD_DIM: tl.constexpr, BM: tl.constexpr,
+    BK: tl.constexpr
+):
+    # quantize_fp4 of the token rows of attention heads o (K / HEAD_DIM, M, HEAD_DIM), each head times
+    # 2 * sigmoid of its logit g[row, head] as the native block's gate_heads takes it (precise exp,
+    # correctly rounded division) and rounded to bf16 as it stores it. A tile lies within one head
+    # (HEAD_DIM a multiple of BK).
+    rows = tl.program_id(0) * BM + tl.arange(0, BM)
+    row_mask = rows < M
+    # head and offset from the tile index, not from its first column: Triton then sees aligned rows
+    head = tl.program_id(1) // (HEAD_DIM // BK)
+    offset = tl.program_id(1) % (HEAD_DIM // BK) * BK
+    x = tl.load(o_ptr + (head * M + rows[:, None]) * HEAD_DIM + offset + tl.arange(0, BK)[None, :],
+                mask=row_mask[:, None], other=0.0).to(tl.float32)
+    logit = tl.load(g_ptr + rows * (K // HEAD_DIM) + head, mask=row_mask, other=0.0).to(tl.float32)
+    gate = 2.0 * tl.math.div_rn(1.0, 1.0 + libdevice.exp(-logit))
+    x = (x * gate[:, None]).to(tl.bfloat16).to(tl.float32)
+    _quantize_fp4_tile(x, rows, row_mask, ts_ptr, q_ptr, s_ptr, K, BM, BK)
+
+
+@triton.jit
+def _quantize_fp4_tile(x, rows, row_mask, ts_ptr, q_ptr, s_ptr, K, BM: tl.constexpr, BK: tl.constexpr):
+    """Stores the NVFP4 codes and block scales of the fp32 ``[BM, BK]`` tile ``x`` of ``rows`` (column tile
+    ``program_id(1)``)."""
     tensor_scale = tl.load(ts_ptr)
     blocks = tl.reshape(x, (BM, BK // 16, 16))
     block_amax = tl.max(tl.abs(blocks), axis=2)
