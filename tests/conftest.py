@@ -32,6 +32,38 @@ def pytest_configure(config):
         import customtkinter as ctk
 
         ctk.deactivate_automatic_dpi_awareness()
+        _open_tcl_standard_channels_on_nul()
+
+
+def _open_tcl_standard_channels_on_nul() -> None:
+    """Create Tcl's standard channels on a NUL handle that stays open for the whole run.
+
+    Tcl makes its stdin/stdout/stderr channels once per thread from the standard handles of
+    that moment, and finds file channels by handle value. pytest's output capture swaps and
+    closes those handles between tests; when Windows reuses a closed one's value for a file
+    Tk opens later, Tcl refuses that file and the window fails to start ("couldn't read file
+    ...tk8.6...: no such file or directory"). Tcl's own background errors now go to NUL.
+    """
+    import ctypes
+    import msvcrt
+    import os
+    import tkinter
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+    kernel32.GetStdHandle.restype = wintypes.HANDLE
+    kernel32.SetStdHandle.argtypes = [wintypes.DWORD, wintypes.HANDLE]
+    standard_handles = (0xFFFFFFF6, 0xFFFFFFF5, 0xFFFFFFF4)  # STD_INPUT, STD_OUTPUT, STD_ERROR
+    nul = msvcrt.get_osfhandle(os.open(os.devnull, os.O_RDWR))  # never closed: Tcl keeps using it
+    previous = [kernel32.GetStdHandle(kind) for kind in standard_handles]
+    for kind in standard_handles:
+        kernel32.SetStdHandle(kind, nul)
+    try:
+        tkinter.Tcl().call("fconfigure", "stderr")
+    finally:
+        for kind, handle in zip(standard_handles, previous):
+            kernel32.SetStdHandle(kind, handle)
 
 
 @pytest.fixture(scope="session", autouse=True)
