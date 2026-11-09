@@ -37,10 +37,7 @@ jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 | GPU | 所有支持的 GPU | NVIDIA 或兼容的 AMD 显卡（Windows AMD LTX 为测试版） |
 | 费用 | 免费 | 支持者专享（[支持本项目](../../README.zh.md#支持本项目)） |
 
-把 LTX 用在你最在意的视频或场景上。选择之前，先看看
-这些示例：1、2、3、4、5、6、7、8
-（想看更多示例，可以浏览 SLS Discord 的新频道和
-旧频道（已归档）），并运行**试用模式（速度测试）**，看看你的电脑能不能运行它、需要多长时间。
+把 LTX 用在你最在意的视频或场景上。选择之前，先运行**试用模式（速度测试）**，看看你的电脑能不能运行它、需要多长时间。
 在**模型**标签页选择它，或使用：
 
 ```bash
@@ -173,8 +170,7 @@ Jasna 把每个马赛克修复成一张 256x256 的图。在大马赛克、特�
 UNet 4x 支持 NVIDIA 和兼容的 AMD 显卡。RTX Super Res 和 Topaz TVAI 需要 NVIDIA。
 
 - **UNet 4x**（支持者专享）：质量接近 TVAI `iris-2`，比 TVAI 快。见
-  SLS Discord 上的示例
-  和[支持本项目](../../README.zh.md#支持本项目)。
+  [支持本项目](../../README.zh.md#支持本项目)。
 - **RTX Super Res**（免费）：非常快，无需安装任何东西。质量尚可。部分视频
   会闪烁，请先用短片段测试。
 - **Topaz TVAI**：和 UNet 4x 相近，但非常慢。需要
@@ -197,7 +193,7 @@ Topaz Video 模型文件夹，如下图。`--tvai-args` 可修改 Topaz 的其�
 
 两个 1080p 视频的耗时和显存：
 
-| 二次修复类型 | CAWD 1080p | K109 1080p |
+| 二次修复类型 | 样例 1 1080p | 样例 2 1080p |
 | ------------------------ | -----------------:| -----------------:|
 | 无二次修复 | 22秒 / 10.0 GB VRAM | 11秒 / 10.7 GB VRAM |
 | UNet 4x                  | 29秒 / 12.5 GB VRAM | 14秒 / 12.6 GB VRAM |
@@ -229,7 +225,3 @@ jasna --input photo.png --output restored.png --sd15-variants 4
 要在 GUI 中逐个尝试种子，请使用[交互式处理图片](gui.md#逐张处理图片)。所有选项
 （`--sd15-steps`、`--sd15-strength`、`--sd15-seed` 等）都在
 [CLI 参考](cli.md#sd-15-图片修复)中。
-
-示例：
-SLS Discord 上的 SD 1.5 示例
-和更多。

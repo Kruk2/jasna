@@ -26,12 +26,12 @@ def test_ltx_progress_reaches_the_progress_callback_with_its_stage():
     [
         ("VRKM00002.mp4", "auto", "raw", type(None)),
         ("FSVSS00002.mp4", "auto", "fisheye", FisheyeProjector),
-        ("VRPRD00001.mp4", "auto", "gnomonic", GnomonicProjector),
+        ("VRPRD00002.mp4", "auto", "gnomonic", GnomonicProjector),
         ("VRKM00002.mp4", "fisheye", "fisheye", FisheyeProjector),
     ],
-    ids=["direct-sbs", "fisheye-studio", "gnomonic-studio", "per-job-override"],
+    ids=["direct-sbs", "fisheye-prefix", "gnomonic-prefix", "per-job-override"],
 )
-def test_configure_vr_detects_per_eye_and_builds_the_studio_projector(
+def test_configure_vr_detects_per_eye_and_builds_the_prefix_projector(
     file_name, projection_override, projection, projector
 ):
     pipeline = make_pipeline(input_video=Path(file_name), vr_mode="auto", vr_projection=projection_override)

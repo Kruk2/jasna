@@ -41,11 +41,8 @@ for each video.
 | GPU | Every supported GPU | NVIDIA or supported AMD GPUs (Windows AMD LTX: beta) |
 | Cost | Free | For supporters ([Supporting the project](../../README.md#supporting-the-project)) |
 
-Use LTX for the videos or scenes you care about most. Before you choose it, look
-at these samples: 1, 2, 3, 4, 5, 6, 7, 8
-(explore the new channel and the
-old channel (archived) on SLS Discord for more samples),
-and run **Trial mode** to see if your PC can run it and how long it takes. Pick it in the
+Use LTX for the videos or scenes you care about most. Before you choose it, run
+**Trial mode** to see if your PC can run it and how long it takes. Pick it in the
 **Model** tab, or:
 
 ```bash
@@ -205,9 +202,8 @@ UNet 4x works on NVIDIA and supported AMD GPUs. RTX Super Res and Topaz TVAI
 require NVIDIA.
 
 - **UNet 4x** (for supporters): quality close to TVAI `iris-2`, and faster than
-  TVAI. See the
-  examples on SLS Discord
-  and [Supporting the project](../../README.md#supporting-the-project).
+  TVAI. See
+  [Supporting the project](../../README.md#supporting-the-project).
 - **RTX Super Res** (free): very fast, nothing to install. Quality is
   OK. Some videos flicker, so test a short clip first.
 - **Topaz TVAI**: similar to UNet 4x, but very slow. Needs
@@ -231,7 +227,7 @@ changes other Topaz settings.
 
 Time and VRAM for two 1080p videos:
 
-| Secondary type           | CAWD 1080p        | K109 1080p      |
+| Secondary type           | Sample 1 1080p    | Sample 2 1080p    |
 | ------------------------ | -----------------:| -----------------:|
 | No secondary             | 22s / 10.0 GB VRAM | 11s / 10.7 GB VRAM |
 | UNet 4x                  | 29s / 12.5 GB VRAM | 14s / 12.6 GB VRAM |
@@ -266,7 +262,3 @@ To try seeds one by one in the GUI, use
 [Process images interactively](gui.md#images-one-by-one). All options
 (`--sd15-steps`, `--sd15-strength`, `--sd15-seed`, ...) are in the
 [CLI reference](cli.md#sd-15-image-restoration).
-
-Examples:
-SD 1.5 examples on SLS Discord
-and more.
