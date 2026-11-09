@@ -112,7 +112,17 @@ def tk_root():
 
 
 @pytest.fixture
-def jasna_app(monkeypatch, tmp_path):
+def user_config_dir(monkeypatch, tmp_path):
+    """Jasna's per-user config folder (settings.json) under ``tmp_path / "config"``, on every
+    platform: Windows keeps it in %APPDATA%, the others in $XDG_CONFIG_HOME."""
+    home = tmp_path / "config"
+    monkeypatch.setenv("APPDATA", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home))
+    return home / "jasna"
+
+
+@pytest.fixture
+def jasna_app(monkeypatch, tmp_path, user_config_dir):
     """The real main window after its startup work, on a machine reporting a Blackwell NVIDIA
     GPU and an SSD install, with settings under ``tmp_path / "config"`` and restoration models
     (LTX included) under ``tmp_path / "models"``."""
@@ -123,7 +133,6 @@ def jasna_app(monkeypatch, tmp_path):
     from jasna.accelerator import AcceleratorVendor
     from jasna.gui import app as app_module
 
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setattr(app_module, "_warm_up_cuda", lambda: (AcceleratorVendor.NVIDIA, True, True))
     monkeypatch.setattr(os_utils, "install_on_hard_disk", lambda: False)
     monkeypatch.setattr(os_utils, "windows_module_loaded", lambda _name: False)
@@ -145,11 +154,10 @@ def jasna_app(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def gui_language(monkeypatch, tmp_path):
+def gui_language(user_config_dir):
     """Switch the GUI language for one test; the choice is saved under ``tmp_path``."""
     from jasna.gui.locales import get_locale
 
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     locale = get_locale()
     original = locale.current_language
     yield locale.set_language

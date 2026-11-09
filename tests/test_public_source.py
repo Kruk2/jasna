@@ -19,7 +19,7 @@ def public_checkout(tmp_path, request):
 
 
 def run_public(checkout, script):
-    environment = {**os.environ, "PYTHONPATH": str(checkout),
+    environment = {**os.environ, "PYTHONPATH": str(checkout), "APPDATA": str(checkout / "config"),
                    "XDG_CONFIG_HOME": str(checkout / "config"), "CUDA_VISIBLE_DEVICES": "", "PYTHONIOENCODING": "utf-8"}
     environment.pop("JASNA_MAIN_PID", None)
     prefix = """

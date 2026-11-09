@@ -4,7 +4,6 @@ from dataclasses import fields, replace
 
 import pytest
 
-from jasna import os_utils
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui.models import AppSettings, PresetManager
 from jasna.gui.settings_sections.detection import DetectionSection
@@ -34,12 +33,10 @@ def test_value_option_menu_maps_values_to_labels_and_falls_back_to_the_first(tk_
 
 
 @pytest.fixture
-def panel_factory(monkeypatch, tmp_path, tk_root):
+def panel_factory(monkeypatch, tmp_path, tk_root, user_config_dir):
     from jasna.gui.settings_panel import SettingsPanel
     from jasna.mosaic import detection_registry
 
-    monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setattr(
         detection_registry, "detection_model_choices", lambda *a, **k: ["rfdetr-v6", "rfdetr-v6-large"]
     )
