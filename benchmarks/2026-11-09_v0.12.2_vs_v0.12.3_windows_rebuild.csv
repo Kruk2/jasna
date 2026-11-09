@@ -1,0 +1,17 @@
+date,version,source,gpu,video,mode,sample,job_wall_s,launch_to_check_done_s,check_done_to_first_log_s,first_log_to_exit_s,ltx_s,scan_s,encode_s,denoise_s,compose_s,note
+2026-11-09,0.12.2,tag v0.12.2 (12510264) official archive,RTX 5090,15 s 1080p30 clip (449 frames),BasicVSR++,first run,215.8,,,,,,,,,first run: builds the TensorRT detector engine
+2026-11-09,0.12.3,main 2065852e clean build,RTX 5090,15 s 1080p30 clip (449 frames),BasicVSR++,first run,179.9,,,,,,,,,first run: builds the TensorRT detector engine
+2026-11-09,0.12.2,tag v0.12.2 (12510264) official archive,RTX 5090,15 s 1080p30 clip (449 frames),BasicVSR++,median of 3,20.66,,,,,,,,,benchmark_releases.py interleaved
+2026-11-09,0.12.3,main 2065852e clean build,RTX 5090,15 s 1080p30 clip (449 frames),BasicVSR++,median of 3,21.73,,,,,,,,,benchmark_releases.py interleaved
+2026-11-09,0.12.2,tag v0.12.2 (12510264) official archive,RTX 5090,15 s 1080p30 clip (449 frames),BasicVSR++,phase run 1,20.38,6.63,6.26,7.49,,,,,,
+2026-11-09,0.12.3,main 2065852e clean build,RTX 5090,15 s 1080p30 clip (449 frames),BasicVSR++,phase run 1,22.96,7.21,7.60,8.15,,,,,,
+2026-11-09,0.12.3,main 2065852e clean build,RTX 5090,15 s 1080p30 clip (449 frames),BasicVSR++,phase run 2,22.00,6.94,7.71,7.35,,,,,,
+2026-11-09,0.12.2,tag v0.12.2 (12510264) official archive,RTX 5090,15 s 1080p30 clip (449 frames),BasicVSR++,phase run 2,20.67,6.73,6.83,7.11,,,,,,
+2026-11-09,0.12.2,tag v0.12.2 (12510264) official archive,RTX 5090,15 s 1080p30 clip (449 frames),BasicVSR++,phase run 3,20.34,6.71,6.47,7.16,,,,,,
+2026-11-09,0.12.3,main 2065852e clean build,RTX 5090,15 s 1080p30 clip (449 frames),BasicVSR++,phase run 3,21.94,6.98,7.54,7.42,,,,,,
+2026-11-09,0.12.2,tag v0.12.2 (12510264) official archive,RTX 5090,15 s 1080p30 clip (449 frames),LTX Standard (2 steps),first run,477.8,,,,,,,,,first run: compiles GPU kernels and runs the LTX speed test
+2026-11-09,0.12.3,main 2065852e clean build,RTX 5090,15 s 1080p30 clip (449 frames),LTX Standard (2 steps),first run,502.5,,,,,,,,,first run: compiles GPU kernels and runs the LTX speed test
+2026-11-09,0.12.2,tag v0.12.2 (12510264) official archive,RTX 5090,15 s 1080p30 clip (449 frames),LTX Standard (2 steps),median of 3,102.33,,,,,,,,,benchmark_releases.py interleaved
+2026-11-09,0.12.3,main 2065852e clean build,RTX 5090,15 s 1080p30 clip (449 frames),LTX Standard (2 steps),median of 3,105.04,,,,,,,,,benchmark_releases.py interleaved
+2026-11-09,0.12.3,main 2065852e clean build,RTX 5090,15 s 1080p30 clip (449 frames),LTX Standard (2 steps),phase run,104.45,6.93,9.41,88.11,86.0,2.0,45.6,26.7,11.7,output kept for the known-answer comparison
+2026-11-09,0.12.2,tag v0.12.2 (12510264) official archive,RTX 5090,15 s 1080p30 clip (449 frames),LTX Standard (2 steps),phase run,99.22,6.49,8.12,84.61,82.5,2.0,42.4,27.7,10.4,output kept for the known-answer comparison
