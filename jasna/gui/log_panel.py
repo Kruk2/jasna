@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
-from jasna.gui.log_export import export_log_entries_txt
+from jasna.gui.log_export import export_log_entries_txt, log_timestamp
 from jasna.gui.log_filter import should_include_log_entry
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
 
@@ -152,7 +152,7 @@ class LogPanel(ctk.CTkFrame):
         export_log_entries_txt(Path(filepath), self._entries)
         
     def add_log(self, level: str, message: str):
-        timestamp = datetime.now().strftime("%I:%M:%S %p")
+        timestamp = log_timestamp(datetime.now())
         level = level.upper()
         self._log_text.configure(state="normal")
         if len(self._entries) == self._entries.maxlen:

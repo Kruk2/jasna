@@ -13,6 +13,7 @@ from jasna.post_export_action import (
     run_post_export_action,
     run_post_export_action_safely,
     run_post_export_video_command,
+    uses_log_placeholder,
     validate_post_export_action,
 )
 
@@ -89,6 +90,36 @@ def test_expand_post_export_video_command_quotes_paths(monkeypatch, tmp_path: Pa
         f"tool {shlex.quote(str(input_path))} {shlex.quote(str(output_path))} "
         f"{shlex.quote(str(tmp_path))}/{shlex.quote('output file')}_remuxed.mp4"
     )
+
+
+def test_expand_post_export_video_command_quotes_log_path(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("jasna.post_export_action.sys.platform", "linux")
+    log_path = tmp_path / "output file.log"
+
+    expanded = expand_post_export_video_command(
+        "cp {log} /logs/",
+        tmp_path / "in.mp4",
+        tmp_path / "output file.mp4",
+        log_path=log_path,
+    )
+
+    assert expanded == f"cp {shlex.quote(str(log_path))} /logs/"
+
+
+def test_expansion_without_a_log_file_leaves_log_as_typed(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("jasna.post_export_action.sys.platform", "linux")
+
+    expanded = expand_post_export_video_command("cp {log} /logs/", tmp_path / "in.mp4", tmp_path / "out.mp4")
+
+    assert expanded == "cp {log} /logs/"
+
+
+@pytest.mark.parametrize(
+    ("command", "uses_log"),
+    [("cp {log} /logs/", True), ("remux {output}", False), ("echo {logs}", False)],
+)
+def test_uses_log_placeholder(command: str, uses_log: bool) -> None:
+    assert uses_log_placeholder(command) is uses_log
 
 
 def test_expansion_does_not_reprocess_placeholders_inside_paths(

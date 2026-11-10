@@ -1,5 +1,6 @@
 """Tests for GUI job ordering — stable job_id tracking during reorder/remove/add."""
 
+import logging
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -165,7 +166,7 @@ class TestProcessorPullLoop:
             patch.object(p, "_run_pipeline"),
             patch(
                 "jasna.post_export_action.run_post_export_video_command",
-                lambda command, input_path, output_path, _cancel: calls.append(
+                lambda command, input_path, output_path, _cancel, **_kwargs: calls.append(
                     (command, input_path, output_path)
                 ),
             ),
@@ -196,7 +197,7 @@ class TestProcessorPullLoop:
         p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs(str(tmp_path / "a.mp4"), str(tmp_path / "b.mp4"))
 
-        def run_command(_command, _input_path, output_path, _cancel):
+        def run_command(_command, _input_path, output_path, _cancel, **_kwargs):
             if output_path.name == "a_restored.mp4":
                 raise PostExportVideoCommandError("exit code 7")
 
@@ -260,6 +261,61 @@ class TestProcessorPullLoop:
 
         assert command.call_args.args[2] == tmp_path / "clip_restored (1).mp4"
 
+
+    def test_log_placeholder_gets_a_file_with_only_that_videos_log(self, tmp_path):
+        logs_seen_by_command: dict[str, tuple[Path, str]] = {}
+        p = Processor(on_resume_conflict=no_resume_conflict)
+        jobs = _make_jobs(str(tmp_path / "a.mp4"), str(tmp_path / "b.mp4"))
+
+        def restore(_job_id, input_path, _output_path, **_kwargs):
+            logging.getLogger("jasna.restorer").warning("restoring %s", input_path.name)
+
+        def run_command(_command, input_path, _output_path, _cancel, *, log_path):
+            logs_seen_by_command[input_path.name] = (log_path, log_path.read_text(encoding="utf-8"))
+
+        with (
+            patch.object(p, "_run_pipeline", side_effect=restore),
+            patch("jasna.post_export_action.run_post_export_video_command", side_effect=run_command),
+        ):
+            p.start(
+                jobs,
+                AppSettings(post_export_video_command="copy {log} logs"),
+                output_folder=str(tmp_path),
+                output_pattern="{original}_restored.mp4",
+            )
+            p.join(timeout=5.0)
+
+        a_log_path, a_log = logs_seen_by_command["a.mp4"]
+        b_log_path, b_log = logs_seen_by_command["b.mp4"]
+        assert (a_log_path, b_log_path) == (tmp_path / "a_restored.log", tmp_path / "b_restored.log")
+        assert "Started processing a.mp4" in a_log and "restoring a.mp4" in a_log
+        assert "Started processing b.mp4" in b_log and "restoring b.mp4" in b_log
+        assert "a.mp4" not in b_log
+        assert "b.mp4" not in a_log
+        assert all(job.status is JobStatus.COMPLETED for job in jobs)
+
+    def test_command_without_log_placeholder_writes_no_log_file(self, tmp_path):
+        log_paths: list[Path | None] = []
+        p = Processor(on_resume_conflict=no_resume_conflict)
+        jobs = _make_jobs(str(tmp_path / "a.mp4"))
+
+        with (
+            patch.object(p, "_run_pipeline"),
+            patch(
+                "jasna.post_export_action.run_post_export_video_command",
+                lambda *_args, log_path: log_paths.append(log_path),
+            ),
+        ):
+            p.start(
+                jobs,
+                AppSettings(post_export_video_command="remux {output}"),
+                output_folder=str(tmp_path),
+                output_pattern="{original}_restored.mp4",
+            )
+            p.join(timeout=5.0)
+
+        assert log_paths == [None]
+        assert list(tmp_path.glob("*.log")) == []
 
 class TestJobItemId:
     def test_unique_ids(self):

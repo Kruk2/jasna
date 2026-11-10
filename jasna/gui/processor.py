@@ -11,12 +11,14 @@ from typing import Callable
 
 from jasna.job_resume import ResumeMismatchError, resume_directories, run_with_resume_prompt
 from jasna.license_api import LicenseCheckStopped
+from jasna.gui.job_log import JobLog, job_log_path
 from jasna.gui.locales import t
-from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus, AppSettings
+from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobProcessingSnapshot, JobStatus, AppSettings
 from jasna.gui.video_session import SessionCache, build_image_session, build_video_session, video_session_config
 from jasna.media.probe import UnsupportedVideoError
 from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
+from jasna.post_export_action import uses_log_placeholder
 from jasna.progressbar import StageProgress
 from jasna.session_config import SessionConfig
 from jasna.system_report import log_system_summary
@@ -138,6 +140,7 @@ class Processor:
         # Settings are fixed per run; per-job detector overrides swap inside the session.
         self._video_sessions = SessionCache(key=lambda _settings: None)
         self._current_pipeline = None
+        self._job_log: JobLog | None = None
         
     def start(
         self,
@@ -177,6 +180,9 @@ class Processor:
         return self._stop_event.is_set()
         
     def _log(self, level: str, message: str):
+        job_log = self._job_log
+        if job_log is not None:
+            job_log.add_entry(level, message)
         if self._on_log:
             self._on_log(level, message)
             
@@ -221,6 +227,35 @@ class Processor:
         snapshot = job.begin_processing()
         if snapshot is None:
             return
+        self._start_job_log(job.path)
+        try:
+            self._run_job(job, snapshot)
+        finally:
+            self._end_job_log()
+
+        try:
+            import torch
+            _cleanup_torch(torch)
+        except Exception:
+            logger.warning("Torch cleanup failed after job", exc_info=True)
+
+    def _start_job_log(self, input_path: Path) -> None:
+        """Collect the video's log when the post-export command asks for it with ``{log}``."""
+        if media_files.is_image(input_path) or not uses_log_placeholder(self._settings.post_export_video_command):
+            return
+        self._job_log = JobLog()
+        logging.getLogger("jasna").addHandler(self._job_log)
+
+    def _end_job_log(self) -> Path | None:
+        """Stop collecting and close the log file; returns its path when one was written."""
+        job_log, self._job_log = self._job_log, None
+        if job_log is None:
+            return None
+        logging.getLogger("jasna").removeHandler(job_log)
+        job_log.close()
+        return job_log.path
+
+    def _run_job(self, job: JobItem, snapshot: JobProcessingSnapshot):
         segments = snapshot.segments
         from jasna.gui.validation import job_is_resumable
 
@@ -280,6 +315,8 @@ class Processor:
                 # "overwrite" - just proceed and let the file be replaced
         
             output_path.parent.mkdir(parents=True, exist_ok=True)
+            if self._job_log is not None:
+                self._job_log.save_to(job_log_path(output_path))
 
             if is_image:
                 self._close_video_session()
@@ -344,12 +381,6 @@ class Processor:
             ))
             self._log("ERROR", f"Failed to process {job.filename}: {e}\n{tb}")
 
-        try:
-            import torch
-            _cleanup_torch(torch)
-        except Exception:
-            logger.warning("Torch cleanup failed after job", exc_info=True)
-
     def _run_post_export_video_command(self, input_path: Path, output_path: Path) -> None:
         command = self._settings.post_export_video_command.strip()
         if not command:
@@ -362,12 +393,14 @@ class Processor:
         )
 
         self._log("INFO", f"Running post-export command for {output_path.name}")
+        log_path = self._end_job_log()
         try:
             run_post_export_video_command(
                 command,
                 input_path,
                 output_path,
                 self._stop_event.is_set,
+                log_path=log_path,
             )
         except PostExportVideoCommandCancelled as exc:
             raise ProcessingStopped("Processing stopped") from exc
