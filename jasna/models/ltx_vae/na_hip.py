@@ -3,6 +3,7 @@
 
 import torch
 
+from jasna.accelerator import amd_gpu_architecture
 from jasna.media.cuda_kernel import aot_kernel
 from jasna.models.ltx_vae import na_geometry
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
@@ -34,7 +35,7 @@ def na3d(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, kernel_size: list[in
         raise ValueError(f"the ahead-of-time NA kernel takes bf16 with head dim {HEAD_DIM}, got {q.dtype} {tuple(k.shape)}")
     q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
     window = tuple(kernel_size)
-    config = na_geometry.config_for(window, amd=True)
+    config = na_geometry.config_for(window, amd_gpu_architecture(q.device))
     launch = na_geometry.na_launch(q, k, v, window, query_w_start, config.tile, config.block_n, config.box_rows)
     if any(stride % 16 for stride in launch.scalars[len(_SIZES):]):
         raise ValueError(f"the ahead-of-time NA kernel needs strides divisible by 16, got {launch.scalars[len(_SIZES):]}")

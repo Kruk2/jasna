@@ -104,7 +104,8 @@ def main() -> None:
     if parser.parse_args().tune:
         tune()
     else:
-        build(_kernel_specs(), LAUNCH_TABLE, "fused BasicVSR++ kernels", "scripts/build_basicvsrpp_hipfbs.py")
+        specs = _kernel_specs()
+        build(lambda architecture: specs, LAUNCH_TABLE, "fused BasicVSR++ kernels", "scripts/build_basicvsrpp_hipfbs.py")
 
 
 if __name__ == "__main__":

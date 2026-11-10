@@ -1,10 +1,10 @@
 """Build the LTX VAE decoder's Triton kernels into committed AMD .hipfb bundles.
 
 Compiled ahead of time, bf16: ``na_triton._na3d_fwd_kernel`` (head dim 64) once per window size of the
-shipped DiffVAE decoder with that size's AMD ``na_geometry`` config, ``diffusion_triton``'s residual MLP
-(gate/up and down, every ``FUSED_MLP_DIMS`` width), attention projection, context inject and slab Q/K/V kernels
-at the shipped shapes (Q/K/V also at the 512-wide deterministic stages), and the eager encoder's channels-first
-copy (``layout_triton``). Every AMD GPU launches these through ``na_hip``, ``diffusion_hip`` and ``layout_hip``.
+shipped DiffVAE decoder with that size's ``na_geometry`` config on each architecture, ``diffusion_triton``'s
+residual MLP (gate/up and down, every ``FUSED_MLP_DIMS`` width), attention projection, context inject and slab
+Q/K/V kernels at the shipped shapes (Q/K/V also at the 512-wide deterministic stages), and the eager encoder's
+channels-first copy (``layout_triton``). Every AMD GPU launches these through ``na_hip``, ``diffusion_hip`` and ``layout_hip``.
 
 Usage (Linux, ROCm Torch + Triton, ROCm's clang-offload-bundler):
     python scripts/build_ltx_vae_hipfbs.py
@@ -35,11 +35,12 @@ LAUNCH_TABLE = REPO / "jasna" / "models" / "ltx_vae" / "hip_launch.py"
 _GRID = (0, 0, 0)
 
 
-def _kernel_specs():
-    """stem -> (kernel, arguments, constants, num_warps, num_stages, grid); the launchers compute the grids."""
+def _kernel_specs(architecture: str):
+    """stem -> (kernel, arguments, constants, num_warps, num_stages, grid) on ``architecture``; the launchers
+    compute the grids."""
     specs = {}
     for window in na_hip.WINDOWS:
-        config = config_for(window, amd=True)
+        config = config_for(window, architecture)
         tile_t, tile_h, tile_w = config.tile
         constants = {
             "KERNEL_T": window[0], "KERNEL_H": window[1], "KERNEL_W": window[2], "HEAD_DIM": na_hip.HEAD_DIM,
@@ -89,7 +90,7 @@ def _kernel_specs():
 
 
 def main() -> None:
-    build(_kernel_specs(), LAUNCH_TABLE, "LTX VAE decoder kernels", "scripts/build_ltx_vae_hipfbs.py")
+    build(_kernel_specs, LAUNCH_TABLE, "LTX VAE decoder kernels", "scripts/build_ltx_vae_hipfbs.py")
 
 
 if __name__ == "__main__":
