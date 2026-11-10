@@ -301,6 +301,16 @@ def test_color_tags_and_frame_count(tmp_path):
         assert n == 24
 
 
+def test_hevc_main_profile_gives_eight_bit_output(tmp_path):
+    src = _make_source(tmp_path, "src.mp4", acodec=None)
+    dst = tmp_path / "main.mp4"
+    _transcode(src, dst, encoder_settings={"profile": "main"})
+
+    with av.open(str(dst)) as c:
+        ctx = c.streams.video[0].codec_context
+        assert (ctx.profile, ctx.pix_fmt) == ("Main", "yuv420p")
+
+
 def test_smart_fragment_keeps_periodic_random_access_points(tmp_path):
     src = _make_source(tmp_path, "smart-src.mp4", acodec=None, duration=3)
     metadata = get_video_meta_data(str(src))

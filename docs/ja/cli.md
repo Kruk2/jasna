@@ -210,7 +210,7 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 
 | コーデック | 追加キー |
 | ----- | ---------- |
-| `hevc` | `profile`（`main`、`main10` — デフォルト `main10`）、`tier` |
+| `hevc` | `profile`（デフォルト `main10`。`main` は古いプレーヤーや機器向けの 8-bit 映像）、`tier` |
 | `h264` | `profile`（`baseline`、`main`、`high` — デフォルト `high`）、`coder`（`cabac`/`cavlc`） |
 | `av1` | `tier`、`tile-rows`、`tile-columns`（大きなフレームのデコードを並列化） |
 
@@ -256,9 +256,9 @@ NVIDIA H.264 は復元したディテールを保つためにより多くのビ�
 
 | コーデック | 追加キー |
 | ----- | ---------- |
-| `hevc` | `tier`、`bitdepth`（デフォルト 10）、`vbaq`（デフォルトで無効） |
+| `hevc` | `tier`、`bitdepth`（デフォルト 10。`8` または `profile=main` で 8-bit 映像）、`vbaq`（デフォルトで無効） |
 | `h264` | `coder`、`bf_ref`（B フレーム参照）、`pa_adaptive_mini_gop`（適応型 B フレーム配置）、`vbaq`（デフォルトで無効） |
-| `av1` | `bitdepth`（デフォルト 10）、`aq_mode`（デフォルトで無効） |
+| `av1` | `bitdepth`（デフォルト 10。`8` で 8-bit 映像）、`aq_mode`（デフォルトで無効） |
 
 ## ストリーミング
 

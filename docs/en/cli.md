@@ -208,7 +208,7 @@ Per-codec extras:
 
 | Codec | Extra keys |
 | ----- | ---------- |
-| `hevc` | `profile` (`main`, `main10` — default `main10`), `tier` |
+| `hevc` | `profile` (`main10` — default; `main` gives 8-bit video for older players and devices), `tier` |
 | `h264` | `profile` (`baseline`, `main`, `high` — default `high`), `coder` (`cabac`/`cavlc`) |
 | `av1` | `tier`, `tile-rows`, `tile-columns` (parallelize decode of large frames) |
 
@@ -254,9 +254,9 @@ Per-codec extras:
 
 | Codec | Extra keys |
 | ----- | ---------- |
-| `hevc` | `tier`, `bitdepth` (default 10), `vbaq` (off by default) |
+| `hevc` | `tier`, `bitdepth` (default 10; `8` or `profile=main` gives 8-bit video), `vbaq` (off by default) |
 | `h264` | `coder`, `bf_ref` (B-frame references), `pa_adaptive_mini_gop` (adaptive B-frame placement), `vbaq` (off by default) |
-| `av1` | `bitdepth` (default 10), `aq_mode` (off by default) |
+| `av1` | `bitdepth` (default 10; `8` gives 8-bit video), `aq_mode` (off by default) |
 
 ## Streaming
 
