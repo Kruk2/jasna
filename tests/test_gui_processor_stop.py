@@ -224,6 +224,7 @@ def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conf
         "jasna.mosaic.detection_registry.require_detection_model_weights": lambda name: tmp_path / "det.onnx",
         "jasna.session_factory.provide_restoration_models": lambda *_a, **_k: None,
         "jasna.pipeline.require_encodable_size": lambda *_a: None,
+        "jasna.pipeline.device_used_bytes": lambda _device: 0,
     }.items():
         module, name = target.rsplit(".", 1)
         monkeypatch.setattr(importlib.import_module(module), name, value)
