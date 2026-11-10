@@ -73,7 +73,7 @@ class TestContainerOptions:
     @pytest.mark.parametrize("suffix", [".mp4", ".MP4", ".mov"])
     def test_fragmented_replaces_faststart(self, suffix):
         assert _mov_container_options(suffix, fmp4=True) == {
-            "movflags": "+frag_keyframe+empty_moov"
+            "movflags": "+frag_keyframe+empty_moov+delay_moov"
         }
 
     @pytest.mark.parametrize("suffix", [".mkv", ".nut", ".ts"])
