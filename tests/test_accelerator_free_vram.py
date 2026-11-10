@@ -48,14 +48,17 @@ def _fake_nvml(total: int, free: int):
     return SimpleNamespace(nvmlDeviceGetMemoryInfo=_NvmlQuery(query))
 
 
-def test_nvml_total_mismatch_caps_at_the_host_available_ram(monkeypatch):
-    # Measured GB10 row: NVML 62.50/0.44 GiB, CUDA 86.68/86.29 GiB, available 13.81 GiB.
-    props = SimpleNamespace(uuid="abc", total_memory=93_066_629_120)
-    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: props)
-    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (92_648_583_168, 93_066_629_120))
-    monkeypatch.setattr(accelerator, "_nvml_device", lambda uuid: (_fake_nvml(67_108_864_000, 475_320_320), None))
-    monkeypatch.setattr(accelerator.psutil, "virtual_memory", lambda: SimpleNamespace(available=14_832_648_192))
-    assert accelerator._nvml_free_bytes(torch.device("cuda:0")) == 14_832_648_192
+@pytest.mark.parametrize(
+    ("nvml_total", "cuda_total", "disagrees"),
+    [
+        # Measured GB10 row: NVML answers the v1 query with a bogus ~62.5 GiB pool while CUDA sees 86.68 GiB.
+        (67_108_864_000, 93_066_629_120, True),
+        # A real dGPU: NVML's total stays within the WDDM reservation, well under 5% of CUDA's.
+        (105 * GIB, 110 * GIB, False),
+    ],
+)
+def test_nvml_total_disagrees_with_cuda(nvml_total, cuda_total, disagrees):
+    assert accelerator._nvml_total_disagrees_with_cuda(nvml_total, cuda_total) is disagrees
 
 
 def test_windows_soc_gpu_caps_the_process_view_at_the_host_available_ram(monkeypatch):
@@ -96,10 +99,7 @@ def test_vram_held_by_another_process_is_not_free():
     # On a SoC GPU the NVML clamp is replaced by the host's available-RAM bound, which
     # a commit-backed unified pool does not track, so the device-wide check cannot apply.
     if sys.platform == "win32" and not torch.version.hip:
-        props = torch.cuda.get_device_properties(device)
-        nvml, handle = accelerator._nvml_device(str(props.uuid))
-        memory = accelerator._NvmlMemory()
-        accelerator._nvml_check(nvml, nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)))
+        props, memory = accelerator._nvml_memory(device)
         if accelerator._nvml_total_disagrees_with_cuda(memory.total, props.total_memory):
             pytest.skip("SoC GPU (NVML/CUDA total mismatch): the NVML clamp is replaced by the host available bound")
     before = accelerator.device_free_bytes(device)
