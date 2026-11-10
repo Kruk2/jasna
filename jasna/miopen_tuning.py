@@ -20,10 +20,10 @@ COMPUTE_UNITS: Mapping[str, Sequence[int]] = {
     "gfx1201": (64, 56, 48),  # RX 9070 XT / AI PRO R9700, RX 9070, RX 9070 GRE
     "gfx1200": (32, 28),  # RX 9060 XT, RX 9060
     "gfx1101": (60, 54, 48, 27),  # RX 7800 XT, RX 7700 XT, PRO W7700, Radeon PRO V710 as Azure exposes it
-    "gfx1100": (96, 84, 80),  # RX 7900 XTX / PRO W7900, RX 7900 XT, RX 7900 GRE
+    "gfx1100": (96, 84, 80, 72, 70),  # RX 7900 XTX / PRO W7900, RX 7900 XT, RX 7900 GRE, RX 7900M, PRO W7800
     "gfx1102": (32, 28),  # RX 7600 XT / 7600, PRO W7600
     "gfx1150": (16, 12),  # Radeon 890M, 880M
-    "gfx1151": (40, 32),  # Radeon 8060S, 8050S
+    "gfx1151": (40, 32, 16),  # Radeon 8060S, 8050S, 8040S
 }
 
 BORROWED_TUNING: Mapping[str, Sequence[str]] = {
