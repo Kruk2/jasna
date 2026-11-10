@@ -1010,13 +1010,14 @@ def _main() -> None:
     license_code = license_code_to_activate(args.license_code, environment_code, lambda: _saved_activation_exists(parser))
     if license_code is not None:
         _require_protection_for_activation(parser)
+        from jasna.license_api import typed_license_code
         from jasna.protection import ProtectionError, lease
         if sys.platform == "win32" and not args.online:
             print("Windows may ask for permission once. This is a one-time license check for offline use.")
         # Activation warnings always show, as they did before logging was configured; --log-level can add more.
         _configure_logging(min(getattr(logging, args.log_level.upper()), logging.WARNING))
         try:
-            result = lease.activate_license_code(license_code, try_offline=not args.online)
+            result = lease.activate_license_code(typed_license_code(license_code), try_offline=not args.online)
         except (ProtectionError, OSError) as exc:
             parser.exit(1, f"Activation error: {exc}\n")
         print(lease.activated_message(result.online_reason))

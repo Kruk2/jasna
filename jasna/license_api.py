@@ -1,5 +1,6 @@
 """Keep public source usable without the optional private protection package."""
 
+import unicodedata
 from importlib.util import find_spec
 
 from jasna._frozen import is_frozen
@@ -20,6 +21,13 @@ def protection_available() -> bool:
 def require_protection() -> None:
     if not protection_available():
         raise ProtectionUnavailableError("Supporter models and activation require the official Jasna release.")
+
+
+def typed_license_code(text: str) -> str:
+    """The License code as pasted, without the full-width characters, spaces, line breaks and invisible characters
+    that input methods and chat apps add."""
+    normalized = unicodedata.normalize("NFKC", text)
+    return "".join(c for c in normalized if not c.isspace() and unicodedata.category(c) != "Cf")
 
 
 class LicenseCheckStopped(Exception):

@@ -4,7 +4,7 @@ import threading
 from collections.abc import Callable
 from typing import TypeVar
 
-from jasna.license_api import protection_available, require_protection
+from jasna.license_api import protection_available, require_protection, typed_license_code
 
 Result = TypeVar("Result")
 
@@ -101,6 +101,6 @@ def start_lease_activation(code: str, try_offline: bool, on_done) -> threading.T
         require_protection()
         from jasna.protection import lease
 
-        return lease.activate_license_code(code, try_offline)
+        return lease.activate_license_code(typed_license_code(code), try_offline)
 
     return _start(activate, on_done)
