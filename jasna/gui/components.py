@@ -1,7 +1,9 @@
 """Reusable UI components for Jasna GUI."""
 
 import logging
+import math
 import sys
+import time
 import tkinter
 import customtkinter as ctk
 import webbrowser
@@ -32,6 +34,25 @@ def grab_modal(dialog) -> None:
     """
     if not dialog.winfo_viewable():
         dialog.wait_visibility()
+    _grab_viewable_modal(dialog)
+
+
+def grab_modal_once_shown(dialog) -> None:
+    """``grab_modal`` without waiting: a dialog that cannot be shown yet (locked screen) takes
+    the grab when it is mapped, so the caller's own timers keep running meanwhile."""
+    if dialog.winfo_viewable():
+        _grab_viewable_modal(dialog)
+        return
+
+    def grab_when_mapped(event) -> None:
+        if event.widget is dialog:
+            dialog.unbind("<Map>", binding)
+            _grab_viewable_modal(dialog)
+
+    binding = dialog.bind("<Map>", grab_when_mapped, add="+")
+
+
+def _grab_viewable_modal(dialog) -> None:
     dialog.grab_set()
     dialog.lift()
     dialog.focus_force()
@@ -772,12 +793,19 @@ class CloseWhileProcessingDialog(ctk.CTkToplevel):
         self._on_quit()
 
 
+def countdown_tick(time_left: float) -> tuple[int, int]:
+    """Whole seconds a countdown shows with ``time_left`` to go, and milliseconds until that
+    number drops; 0 seconds means it has expired."""
+    shown = max(0, math.ceil(time_left))
+    return shown, math.ceil((time_left - (shown - 1)) * 1000)
+
+
 class ShutdownCountdownDialog(ctk.CTkToplevel):
     """Counts down before shutting the PC down; Cancel or closing the window aborts it."""
 
     def __init__(self, master, seconds: int, on_expired, on_cancelled):
         super().__init__(master)
-        self._remaining = seconds
+        self._deadline = time.monotonic() + seconds
         self._on_expired = on_expired
         self._on_cancelled = on_cancelled
 
@@ -813,17 +841,17 @@ class ShutdownCountdownDialog(ctk.CTkToplevel):
         scaling.place_centered_on_parent(
             self, master, max(minimum_width, self.winfo_reqwidth()), self.winfo_reqheight()
         )
-        grab_modal(self)
-        self._tick_id = self.after(1000, self._tick)
+        self._tick()
+        grab_modal_once_shown(self)
 
     def _tick(self):
-        self._remaining -= 1
-        if self._remaining > 0:
-            self._message.configure(text=t("shutdown_countdown_message", seconds=self._remaining))
-            self._tick_id = self.after(1000, self._tick)
+        seconds_left, next_tick_ms = countdown_tick(self._deadline - time.monotonic())
+        if seconds_left == 0:
+            self.destroy()
+            self._on_expired()
             return
-        self.destroy()
-        self._on_expired()
+        self._message.configure(text=t("shutdown_countdown_message", seconds=seconds_left))
+        self._tick_id = self.after(next_tick_ms, self._tick)
 
     def cancel(self):
         self.after_cancel(self._tick_id)

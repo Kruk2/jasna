@@ -6,7 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from jasna.gui.components import ShutdownCountdownDialog
+from jasna.gui import components
+from jasna.gui.components import ShutdownCountdownDialog, countdown_tick
 from jasna.gui.models import AppSettings
 
 
@@ -23,20 +24,74 @@ def _logged(app) -> list[str]:
     return [message for _, _, message in app._log_panel._entries]
 
 
-def test_countdown_shows_remaining_seconds_and_expires(tk_root):
+@pytest.fixture
+def clock(monkeypatch) -> list[float]:
+    now = [1000.0]
+    monkeypatch.setattr(components.time, "monotonic", lambda: now[0])
+    return now
+
+
+@pytest.mark.parametrize(
+    ("time_left", "expected"),
+    [
+        (60.0, (60, 1000)),
+        (59.75, (60, 750)),
+        (0.5, (1, 500)),
+    ],
+)
+def test_countdown_tick_shows_whole_seconds_until_the_next_drop(time_left, expected):
+    assert countdown_tick(time_left) == expected
+
+
+@pytest.mark.parametrize("time_left", [0.0, -5.0])
+def test_countdown_tick_shows_zero_once_expired(time_left):
+    assert countdown_tick(time_left)[0] == 0
+
+
+def test_countdown_shows_remaining_seconds_and_expires(tk_root, clock):
     expired: list[bool] = []
     cancelled: list[bool] = []
     dialog = ShutdownCountdownDialog(tk_root, 2, lambda: expired.append(True), lambda: cancelled.append(True))
     assert "2" in dialog._message.cget("text")
 
+    clock[0] += 1
     dialog._tick()
     assert "1" in dialog._message.cget("text")
     assert expired == []
 
+    clock[0] += 1
     dialog._tick()
     assert expired == [True]
     assert cancelled == []
     assert not dialog.winfo_exists()
+
+
+def _locked_screen_never_shows(window) -> None:
+    pytest.fail("waited for a window that a locked screen never shows")
+
+
+def test_countdown_runs_while_the_screen_is_locked(tk_root, clock, monkeypatch):
+    monkeypatch.setattr(ShutdownCountdownDialog, "wait_visibility", _locked_screen_never_shows)
+    expired: list[bool] = []
+    dialog = ShutdownCountdownDialog(tk_root, 60, lambda: expired.append(True), lambda: None)
+
+    dialog.withdraw()
+    tk_root.update()
+    assert not dialog.winfo_viewable()
+
+    clock[0] += 60
+    dialog._tick()
+    assert expired == [True]
+    assert not dialog.winfo_exists()
+
+
+def test_countdown_takes_the_grab_once_shown(tk_root, show_window):
+    dialog = ShutdownCountdownDialog(tk_root, 60, lambda: None, lambda: None)
+
+    show_window(dialog)
+
+    assert tk_root.grab_current() is dialog
+    dialog.cancel()
 
 
 def test_countdown_cancel_stops_shutdown(tk_root):
