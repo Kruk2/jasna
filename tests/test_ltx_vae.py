@@ -268,6 +268,30 @@ def test_an_eager_amd_encoder_keeps_only_the_kitchen_head_channels_last(tmp_path
     converted = video_encoder._layer_input(sample, tail)
     tail_format = torch.channels_last_3d if triton else torch.contiguous_format
     assert converted.dtype == torch.bfloat16 and converted.is_contiguous(memory_format=tail_format)
+    assert encoder.releases_cache_between_stages is not triton
+
+
+def _reserved_peak_of_a_larger_window_after_a_smaller_one(encoder: VideoEncoder) -> int:
+    generator = torch.Generator(device="cuda").manual_seed(0)
+    small, large = (torch.rand(1, 3, 17, size, size, device="cuda", generator=generator).bfloat16() * 2 - 1
+                    for size in (256, 512))
+    torch.cuda.empty_cache()
+    with torch.inference_mode():
+        video_encoder.encode_cropped(encoder, small)
+        torch.cuda.reset_peak_memory_stats()
+        video_encoder.encode_cropped(encoder, large)
+    return torch.cuda.max_memory_reserved()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_releasing_the_cache_between_stages_lowers_the_reserved_peak():
+    torch.manual_seed(0)
+    encoder = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG))).cuda().bfloat16()
+    keeping = _reserved_peak_of_a_larger_window_after_a_smaller_one(encoder.eval())
+    encoder.release_cache_between_stages()
+    releasing = _reserved_peak_of_a_larger_window_after_a_smaller_one(encoder)
+
+    assert releasing < keeping
 
 
 def test_load_video_encoder_on_amd_runs_the_full_resolution_head_on_kitchen(tmp_path, monkeypatch):
