@@ -55,7 +55,8 @@ and a command line, and runs on your GPU.
 <summary>More details</summary>
 
 - NVIDIA: your GPU needs compute capability 7.5 or higher in NVIDIA's
-  [GPU table](https://developer.nvidia.com/cuda/gpus).
+  [GPU table](https://developer.nvidia.com/cuda/gpus). Data-center GPUs like
+  A100, H100 and B200 don't work.
 - AMD: see the table below. UNet 4x secondary restoration is supported.
 - Disk format: NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux. Network disks
   are not supported. Use an SSD; on a hard disk (HDD) Jasna starts and loads

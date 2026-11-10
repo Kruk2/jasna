@@ -49,3 +49,13 @@ def test_check_gpu_names_unsupported_amd_arch(monkeypatch):
     assert passed is False
     assert "gfx1103" in msg
     assert "AMD" in msg
+
+
+def test_check_gpu_names_unsupported_datacenter_gpu(monkeypatch):
+    from jasna import os_utils
+
+    monkeypatch.setattr(os_utils, "check_supported_gpu", lambda: (False, ("datacenter_unsupported", "NVIDIA H100 80GB")))
+    passed, msg = check_gpu()
+    assert passed is False
+    assert "NVIDIA H100 80GB" in msg
+    assert "RTX" in msg

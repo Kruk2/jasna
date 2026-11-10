@@ -667,6 +667,7 @@ EN = {
         "wizard_no_cuda": "No compatible GPU",
         "wizard_gpu_compute_too_low": "Compute capability 7.5+ required (GPU: {major}.{minor})",
         "wizard_gpu_arch_unsupported": "This AMD GPU ({arch}) is not supported by this Jasna version",
+        "wizard_gpu_datacenter_unsupported": "Jasna doesn't support data-center GPUs like A100, H100 or B200 ({gpu}). Use an RTX GPU",
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "Not available",

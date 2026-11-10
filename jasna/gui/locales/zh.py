@@ -667,6 +667,7 @@ ZH = {
         "wizard_no_cuda": "无兼容 GPU",
         "wizard_gpu_compute_too_low": "需要计算能力 7.5 或更高（当前 GPU：{major}.{minor}）",
         "wizard_gpu_arch_unsupported": "此版本 Jasna 不支持这块 AMD GPU（{arch}）",
+        "wizard_gpu_datacenter_unsupported": "Jasna 不支持 A100、H100、B200 等数据中心 GPU（{gpu}）。请使用 RTX GPU",
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}，计算能力 {major}.{minor}",
         "wizard_not_available": "不可用",

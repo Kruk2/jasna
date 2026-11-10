@@ -9,6 +9,8 @@
 ## 必要なもの
 
 - ドライバー **580 以降**の NVIDIA GPU と、**80 GB** 以上のディスク。
+  RTX カード（例: RTX 4090、RTX 5090、RTX A6000、L40S）を借りてください。
+  A100、H100、B200 などのデータセンター向け GPU では動きません。
 - テンプレートかインスタンスの設定に `NVIDIA_DRIVER_CAPABILITIES=all`。
   これがないと動画を読み込めず、保存もできません。Vast では Docker
   オプションに `-e NVIDIA_DRIVER_CAPABILITIES=all` を追加します。

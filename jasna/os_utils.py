@@ -15,6 +15,9 @@ from jasna._frozen import is_frozen
 logger = logging.getLogger(__name__)
 
 MIN_GPU_COMPUTE = (7, 5)
+# A100, H100, B200. TensorRT builds engines only with its builder resource for the GPU's own SM,
+# and releases may leave these out.
+DATACENTER_NVIDIA_COMPUTE = frozenset({(8, 0), (9, 0), (10, 0)})
 MIN_DRIVER_VERSION = 580 if sys.platform == "linux" else 610
 MIN_AMD_WINDOWS_DRIVER = (32, 0, 21017, 2052)
 # AMD's loaded module version ends in the driver release: 30100200 = 30.10.2.
@@ -73,7 +76,15 @@ def check_supported_gpu(
     capability = torch.cuda.get_device_capability(device)
     if capability < MIN_GPU_COMPUTE:
         return False, ("compute_too_low", capability[0], capability[1])
+    if is_frozen() and capability in DATACENTER_NVIDIA_COMPUTE and not _ships_tensorrt_builder(capability):
+        return False, ("datacenter_unsupported", torch.cuda.get_device_name(device))
     return True, torch.cuda.get_device_name(device)
+
+
+def _ships_tensorrt_builder(capability: tuple[int, int]) -> bool:
+    root = Path(get_application_executable()).parent
+    pattern = f"*builder_resource_sm{capability[0]}{capability[1]}[._]*"
+    return any(any(directory.glob(pattern)) for directory in (root, root / "tensorrt_libs"))
 
 
 def gpu_check_error(result: str | tuple) -> str:
@@ -82,6 +93,8 @@ def gpu_check_error(result: str | tuple) -> str:
         return "No compatible GPU was found for this Jasna build."
     if result[0] == "arch_unsupported":
         return f"This AMD GPU ({result[1]}) is not supported by this Jasna build."
+    if result[0] == "datacenter_unsupported":
+        return f"Jasna doesn't support data-center GPUs like A100, H100 or B200 (GPU: {result[1]}). Use an RTX GPU."
     _, major, minor = result
     return f"Compute capability 7.5+ required (GPU: {major}.{minor})."
 def _bundled_exe_filename(name: str) -> str:

@@ -667,6 +667,7 @@ KO = {
         "wizard_no_cuda": "호환 GPU 없음",
         "wizard_gpu_compute_too_low": "Compute capability 7.5 이상 필요 (GPU: {major}.{minor})",
         "wizard_gpu_arch_unsupported": "이 버전의 Jasna는 이 AMD GPU({arch})를 지원하지 않습니다",
+        "wizard_gpu_datacenter_unsupported": "Jasna는 A100, H100, B200 같은 데이터센터 GPU({gpu})를 지원하지 않습니다. RTX GPU를 사용하세요",
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "사용 불가",

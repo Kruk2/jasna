@@ -667,6 +667,7 @@ TH = {
         "wizard_no_cuda": "ไม่พบ GPU ที่รองรับ",
         "wizard_gpu_compute_too_low": "ต้องการ Compute capability 7.5+ (GPU: {major}.{minor})",
         "wizard_gpu_arch_unsupported": "Jasna เวอร์ชันนี้ไม่รองรับ AMD GPU นี้ ({arch})",
+        "wizard_gpu_datacenter_unsupported": "Jasna ไม่รองรับ GPU สำหรับดาต้าเซ็นเตอร์ เช่น A100, H100 หรือ B200 ({gpu}) โปรดใช้ GPU RTX",
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "ไม่พร้อมใช้งาน",

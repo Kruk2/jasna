@@ -48,7 +48,7 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 <summary>更多细节</summary>
 
 - NVIDIA：你的 GPU 在 NVIDIA 的 [GPU 表格](https://developer.nvidia.com/cuda/gpus)
-  中需要计算能力 7.5 或更高。
+  中需要计算能力 7.5 或更高。A100、H100、B200 等数据中心 GPU 无法使用。
 - AMD：见下表。支持 UNet 4x 二次修复。
 - 磁盘格式：Windows 用 NTFS；Linux 用 ext4、Btrfs、XFS 或 ZFS。不支持网络磁盘。请使用
   固态硬盘（SSD）；在机械硬盘（HDD）上 Jasna 启动和加载模型都很慢。
