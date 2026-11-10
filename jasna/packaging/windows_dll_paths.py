@@ -68,30 +68,20 @@ def sanitize_windows_path_for_cuda(path_value: str, *, preferred_dirs: list[str]
     return _WINDOWS_PATHSEP.join(merged)
 
 
-def _iter_top_level_lib_dirs(root: Path) -> list[Path]:
+# Packaged DLL folders outside the dist root. Every bundled DLL lives exactly once, in the
+# folder its package loads it from; these folders make each one reachable by name too.
+FROZEN_PACKAGE_DLL_DIRECTORIES = (
+    "torch/lib", "tensorrt_libs", "nvvfx", "nvvfx/libs", "torch_tensorrt/lib", "tools", "vlc",
+)
+
+
+def frozen_dll_directories(root: Path) -> list[Path]:
+    """The frozen app's DLL search folders: the dist root, its ``*.libs`` folders and the package folders."""
     if not root.is_dir():
         return []
-
     out: list[Path] = [root]
-
-    for child in root.iterdir():
-        if not child.is_dir():
-            continue
-        if child.name.lower().endswith(".libs"):
-            out.append(child)
-
-    torch_lib = root / "torch" / "lib"
-    if torch_lib.is_dir():
-        out.append(torch_lib)
-
-    for name in ["tensorrt_libs", "nvvfx"]:
-        p = root / name
-        if p.is_dir():
-            out.append(p)
-            libs = p / "libs"
-            if libs.is_dir():
-                out.append(libs)
-
+    out += sorted(child for child in root.iterdir() if child.is_dir() and child.name.lower().endswith(".libs"))
+    out += [root / name for name in FROZEN_PACKAGE_DLL_DIRECTORIES if (root / name).is_dir()]
     return out
 
 
@@ -103,7 +93,7 @@ def configure_windows_dll_search_paths() -> None:
     # PyInstaller _internal/ subdir and no _MEIPASS.
     app_dir = Path(sys.executable).resolve().parent
 
-    preferred_dirs: list[str] = [str(p) for p in _iter_top_level_lib_dirs(app_dir)]
+    preferred_dirs: list[str] = [str(p) for p in frozen_dll_directories(app_dir)]
 
     cuda_roots: list[str] = []
     for key in ["CUDA_PATH", "CUDA_HOME"]:

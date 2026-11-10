@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from jasna.packaging.windows_dll_paths import (
-    _iter_top_level_lib_dirs,
+    frozen_dll_directories,
     sanitize_windows_path_for_cuda,
 )
 
@@ -26,19 +26,14 @@ def test_sanitize_windows_path_removes_cuda_toolkit_and_prepends_preferred() -> 
     assert r"C:\SomethingElse\bin" in out
 
 
-def test_iter_top_level_lib_dirs_finds_nuitka_root_layout(tmp_path) -> None:
-    # Nuitka dist: torch/lib, the *_libs vendor dirs, and *.libs siblings all live at the
-    # dist root (no _internal/). configure_windows_dll_search_paths relies on this set.
-    (tmp_path / "torch" / "lib").mkdir(parents=True)
-    (tmp_path / "tensorrt_libs").mkdir()
-    (tmp_path / "nvvfx" / "libs").mkdir(parents=True)
-    (tmp_path / "numpy.libs").mkdir()
+def test_frozen_dll_directories_find_every_packaged_dll_folder(tmp_path) -> None:
+    for name in ("torch/lib", "tensorrt_libs", "nvvfx/libs", "numpy.libs", "torch_tensorrt/lib", "tools", "vlc",
+                 "triton/backends"):
+        (tmp_path / name).mkdir(parents=True)
 
-    dirs = {str(p) for p in _iter_top_level_lib_dirs(tmp_path)}
+    dirs = frozen_dll_directories(tmp_path)
 
-    assert str(tmp_path) in dirs
-    assert str(tmp_path / "torch" / "lib") in dirs
-    assert str(tmp_path / "tensorrt_libs") in dirs
-    assert str(tmp_path / "nvvfx" / "libs") in dirs
-    assert str(tmp_path / "numpy.libs") in dirs
-
+    assert dirs[0] == tmp_path
+    assert {p.relative_to(tmp_path).as_posix() for p in dirs[1:]} == {
+        "numpy.libs", "torch/lib", "tensorrt_libs", "nvvfx", "nvvfx/libs", "torch_tensorrt/lib", "tools", "vlc",
+    }
