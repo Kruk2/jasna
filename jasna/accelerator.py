@@ -287,11 +287,19 @@ def _nvml_total_disagrees_with_cuda(nvml_total: int, cuda_total: int) -> bool:
     return nvml_total * 20 < cuda_total * 19
 
 
-def _nvml_free_bytes(device: torch.device) -> int:
+def _nvml_memory(device: torch.device):
+    """NVML's device-wide memory info for ``device``, with the CUDA properties a caller needs
+    to compare NVML's total against CUDA's (``_nvml_total_disagrees_with_cuda``), so the query
+    is not repeated at each call site."""
     props = torch.cuda.get_device_properties(device)
     nvml, handle = _nvml_device(str(props.uuid))
     memory = _NvmlMemory()
     _nvml_check(nvml, nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)))
+    return props, memory
+
+
+def _nvml_free_bytes(device: torch.device) -> int:
+    props, memory = _nvml_memory(device)
     if _nvml_total_disagrees_with_cuda(memory.total, props.total_memory):
         # CUDA's own free figure is pinned at ~99.5% of its total on these boxes, so
         # it cannot cap the budget either; the host's available RAM is the honest
