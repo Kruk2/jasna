@@ -202,7 +202,7 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 
 | 编解码器 | 额外参数 |
 | ----- | ---------- |
-| `hevc` | `profile`（`main`、`main10` — 默认 `main10`）、`tier` |
+| `hevc` | `profile`（默认 `main10`；`main` 输出 8-bit 视频，适合老播放器和设备）、`tier` |
 | `h264` | `profile`（`baseline`、`main`、`high` — 默认 `high`）、`coder`（`cabac`/`cavlc`） |
 | `av1` | `tier`、`tile-rows`、`tile-columns`（并行解码大分辨率画面） |
 
@@ -244,9 +244,9 @@ Jasna 会记录警告，并且不设上限。AMD 默认使用固定 QP，没有�
 
 | 编解码器 | 额外参数 |
 | ----- | ---------- |
-| `hevc` | `tier`、`bitdepth`（默认 10）、`vbaq`（默认关闭） |
+| `hevc` | `tier`、`bitdepth`（默认 10；`8` 或 `profile=main` 输出 8-bit 视频）、`vbaq`（默认关闭） |
 | `h264` | `coder`、`bf_ref`（B 帧引用）、`pa_adaptive_mini_gop`（自适应 B 帧排列）、`vbaq`（默认关闭） |
-| `av1` | `bitdepth`（默认 10）、`aq_mode`（默认关闭） |
+| `av1` | `bitdepth`（默认 10；`8` 输出 8-bit 视频）、`aq_mode`（默认关闭） |
 
 ## 流媒体
 

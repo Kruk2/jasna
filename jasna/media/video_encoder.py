@@ -382,6 +382,22 @@ def _normalized_audio_layout(layout: av.AudioLayout) -> av.AudioLayout:
     return layout
 
 
+def _requests_eight_bit_output(codec: str, overrides: Mapping[str, str]) -> bool:
+    # NVENC and AMF take their output depth from the input frames, so an 8-bit
+    # profile or bit depth only works when the frames are 8-bit too.
+    return (codec == "hevc" and overrides.get("profile") == "main") or overrides.get("bitdepth") == "8"
+
+
+def _eight_bit_spec(spec: EncoderSpec, codec: str) -> EncoderSpec:
+    options = dict(spec.default_options)
+    if codec == "hevc":
+        options["profile"] = "main"
+    # AMF pins output depth via "bitdepth"; dropping it lets FFmpeg
+    # derive 8-bit from the nv12 input instead of conflicting with it.
+    options.pop("bitdepth", None)
+    return replace(spec, frame_format="nv12", default_options=MappingProxyType(options))
+
+
 def resolve_encoder_options(
     vendor: AcceleratorVendor,
     codec: str,
@@ -396,23 +412,19 @@ def resolve_encoder_options(
     if codec not in specs:
         raise ValueError(f"Unsupported codec: {codec}")
     spec = specs[codec]
-    # Smart-render fragments are spliced between copied source spans, so they
-    # keep the source bit depth instead of the codec's 10-bit default.
-    if smart_fragment and codec in {"hevc", "av1"} and not metadata.is_10bit:
-        options = dict(spec.default_options)
-        if codec == "hevc":
-            options["profile"] = "main"
-        # AMF pins output depth via "bitdepth"; dropping it lets FFmpeg
-        # derive 8-bit from the nv12 input instead of conflicting with it.
-        options.pop("bitdepth", None)
-        spec = replace(spec, frame_format="nv12", default_options=MappingProxyType(options))
     if encoder_settings:
         validate_encoder_settings(encoder_settings, codec=codec, vendor=vendor)
+    overrides = {k: _option_value(v) for k, v in encoder_settings.items()}
+    # Smart-render fragments are spliced between copied source spans, so they
+    # keep the source bit depth instead of the codec's 10-bit default.
+    matches_eight_bit_source = smart_fragment and not metadata.is_10bit
+    if codec in {"hevc", "av1"} and (
+        matches_eight_bit_source or _requests_eight_bit_output(codec, overrides)
+    ):
+        spec = _eight_bit_spec(spec, codec)
 
     encoder_options = dict(spec.default_options)
-    overrides: dict[str, str] = {}
-    if encoder_settings:
-        overrides = {k: _option_value(v) for k, v in encoder_settings.items()}
+    if overrides:
         # FFmpeg accepts both spellings for HEVC/H.264, but their defaults
         # use the underscore key. Normalize the alias so a user override
         # replaces that default instead of passing two conflicting options.

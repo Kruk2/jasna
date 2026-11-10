@@ -879,6 +879,44 @@ class TestResolveEncoderOptions:
         assert options["profile"] == "main"
         assert options["forced-idr"] == "1"
 
+    @pytest.mark.parametrize(
+        ("vendor", "codec", "settings", "expected"),
+        [
+            ("nvidia", "hevc", {"profile": "main"}, {"profile": "main"}),
+            ("amd", "hevc", {"profile": "main"}, {"profile": "main", "bitdepth": None}),
+            ("amd", "hevc", {"bitdepth": 8}, {"profile": "main", "bitdepth": "8"}),
+            ("amd", "av1", {"bitdepth": 8}, {"profile": "main", "bitdepth": "8"}),
+        ],
+    )
+    def test_eight_bit_request_encodes_eight_bit_frames(self, vendor, codec, settings, expected):
+        from jasna.accelerator import AcceleratorVendor
+        from jasna.media.video_encoder import resolve_encoder_options
+
+        spec, options = resolve_encoder_options(
+            AcceleratorVendor(vendor), codec, _fake_metadata(), settings, smart_fragment=False
+        )
+
+        assert spec.frame_format == "nv12"
+        assert {key: options.get(key) for key in expected} == expected
+
+    @pytest.mark.parametrize(
+        ("vendor", "codec", "settings"),
+        [
+            ("nvidia", "hevc", {"profile": "main10"}),
+            ("amd", "hevc", {"profile": "main10"}),
+            ("amd", "av1", {"profile": "main"}),
+        ],
+    )
+    def test_ten_bit_profiles_keep_ten_bit_frames(self, vendor, codec, settings):
+        from jasna.accelerator import AcceleratorVendor
+        from jasna.media.video_encoder import resolve_encoder_options
+
+        spec, _ = resolve_encoder_options(
+            AcceleratorVendor(vendor), codec, _fake_metadata(), settings, smart_fragment=False
+        )
+
+        assert spec.frame_format == "p010le"
+
     def test_amd_hevc_cq_maps_to_cqp_quantizers_without_bitrate_cap(self):
         from jasna.accelerator import AcceleratorVendor
         from jasna.media.video_encoder import resolve_encoder_options
