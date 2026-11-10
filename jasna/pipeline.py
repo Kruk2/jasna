@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import psutil
 import torch
 
-from jasna.accelerator import vendor_for_device
+from jasna.accelerator import device_used_bytes, vendor_for_device
 from jasna.job_resume import ResumeJob, resume_directory
 from jasna.media.container_utils import MOV_SUFFIXES
 from jasna.media.encoder_settings import require_encodable_size
@@ -32,6 +32,7 @@ from jasna.media.splice import (
     resolve_smart_encoder_settings,
 )
 from jasna.os_utils import commit_file
+from jasna.peak_sampler import PeakSampler
 from jasna.pipeline_threads import run_restoration_pass
 from jasna.progressbar import JobProgress, ProgressCallback, Progressbar
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
@@ -46,6 +47,8 @@ if TYPE_CHECKING:
     from jasna.session_factory import RestorationSession
 
 log = logging.getLogger(__name__)
+
+GPU_MEMORY_SAMPLE_SECONDS = 1.0
 
 
 def _span_seconds(span: SpliceSpan, index: KeyframeIndex) -> float:
@@ -695,6 +698,17 @@ class Pipeline:
         mux_final_output(assembled, self.input_video, self.output_video, codec=self.codec, comment=comment)
 
     def run(self) -> None:
+        """Run the job and log the whole GPU's peak used memory while it ran: unlike the models'
+        own peaks it counts CUDA/HIP contexts, allocator caches, native allocations and other
+        programs on that GPU, so it tells whether the settings fit on a card."""
+        gpu_memory = PeakSampler(lambda: device_used_bytes(self.device), GPU_MEMORY_SAMPLE_SECONDS)
+        gpu_memory.start()
+        try:
+            self._run_job()
+        finally:
+            log.info("Peak GPU memory (whole card, incl. other apps) — %.1f MiB", gpu_memory.stop() / (1024 ** 2))
+
+    def _run_job(self) -> None:
         metadata = get_video_meta_data(str(self.input_video))
         self.validate_metadata(metadata)
         require_encodable_size(vendor_for_device(self.device), self.codec, metadata.video_width, metadata.video_height)

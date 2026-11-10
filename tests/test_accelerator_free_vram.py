@@ -79,3 +79,12 @@ def test_resident_blocks_probe_only_what_all_resident_needs(free, resident):
     limits = []
     assert sampler.resident_block_count([GIB] * 4, lambda limit: limits.append(limit) or min(free, limit)) == resident
     assert limits == [4 * GIB + sampler.ACTIVATION_RESERVE_BYTES + 2 * GIB]
+
+
+def test_used_vram_is_what_the_whole_gpu_does_not_have_free(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(torch.version, "hip", None)
+    monkeypatch.setattr(torch.version, "cuda", "13.0")
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (30 * GIB, 32 * GIB))
+    monkeypatch.setattr(accelerator, "_nvml_free_bytes", lambda device: 12 * GIB)
+    assert accelerator.device_used_bytes(torch.device("cuda:0")) == 20 * GIB

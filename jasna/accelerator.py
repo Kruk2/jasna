@@ -320,6 +320,12 @@ def device_free_bytes(device: torch.device) -> int:
     return free
 
 
+def device_used_bytes(device: torch.device) -> int:
+    """VRAM in use on the whole GPU, by every program on it: CUDA/HIP contexts, allocator
+    caches and native allocations included."""
+    return torch.cuda.mem_get_info(device)[1] - device_free_bytes(device)
+
+
 _ALLOCATION_PROBE_CHUNK_BYTES = 64 << 20
 
 

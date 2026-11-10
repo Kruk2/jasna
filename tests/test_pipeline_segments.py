@@ -26,6 +26,13 @@ FOUR_SPANS = (
 ONE_RENDER = (SpliceSpan("copy", 0, 60), SpliceSpan("render", 60, 120, ((75, 90),)), SpliceSpan("copy", 120, 240))
 
 
+@pytest.fixture(autouse=True)
+def _cpu_gpu_memory():
+    """The pipelines here run on the CPU, which has no GPU memory to sample."""
+    with patch("jasna.pipeline.device_used_bytes", return_value=0):
+        yield
+
+
 def _segment_pipeline(tmp_path, segments, spans, *, max_b_frames=0, **overrides) -> Pipeline:
     settings = dict(
         input_video=tmp_path / "input.mp4",

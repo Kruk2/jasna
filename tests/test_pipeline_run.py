@@ -29,6 +29,7 @@ def _mock_gpu_monitoring():
     with (
         patch("jasna.pipeline_threads.VramOffloader", autospec=True),
         patch.object(Pipeline, "_log_memory_at_end"),
+        patch("jasna.pipeline.device_used_bytes", return_value=0),
     ):
         yield
 
