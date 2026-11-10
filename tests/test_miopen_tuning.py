@@ -1,4 +1,4 @@
-from jasna.miopen_tuning import database_names, install, merged, read_entries
+from jasna.miopen_tuning import database_names, install, merged, read_entries, tuned_entries
 
 
 def test_database_names_cover_both_miopen_namings():
@@ -38,15 +38,25 @@ def test_install_writes_every_known_gpu_of_a_tuned_architecture(tmp_path):
     assert not (system / "gfx110060.HIP.fdb.txt").exists()
 
 
-def test_install_gives_an_untuned_architecture_the_tuning_it_takes(tmp_path):
+def test_tuned_entries_prefer_the_architectures_own_then_the_nearest_borrowed(tmp_path):
+    (tmp_path / "gfx1101.HIP.fdb.txt").write_text("conv-a=Own:1.0\n")
+    (tmp_path / "gfx1100.HIP.fdb.txt").write_text("conv-a=Far:1.0\nconv-b=Far:2.0\nconv-c=Far:3.0\n")
+    (tmp_path / "gfx1103.HIP.fdb.txt").write_text("conv-b=Near:2.0\n")
+    borrowed = {"gfx1101": ("gfx1103", "gfx1100")}
+    assert tuned_entries("gfx1101", ".HIP.fdb.txt", tmp_path, borrowed) == {
+        "conv-a": "Own:1.0", "conv-b": "Near:2.0", "conv-c": "Far:3.0",
+    }
+
+
+def test_install_gives_an_untuned_architecture_the_tuning_it_borrows(tmp_path):
     tuned = tmp_path / "tuned"
     tuned.mkdir()
     (tuned / "gfx1101.HIP.fdb.txt").write_text("conv-a=Solver:1.0\n")
     system = tmp_path / "db"
-    install(system, tuned, {"gfx1100": (96,), "gfx1102": (32,)}, {"gfx1100": "gfx1101"})
-    assert (system / "gfx110060.HIP.fdb.txt").read_text() == "conv-a=Solver:1.0\n"
-    assert (system / "gfx1100_96.HIP.fdb.txt").read_text() == "conv-a=Solver:1.0\n"
-    assert not list(system.glob("gfx1102*"))
+    install(system, tuned, {"gfx1102": (32,), "gfx1150": (16,)}, {"gfx1102": ("gfx1101",)})
+    assert (system / "gfx110220.HIP.fdb.txt").read_text() == "conv-a=Solver:1.0\n"
+    assert (system / "gfx1102_32.HIP.fdb.txt").read_text() == "conv-a=Solver:1.0\n"
+    assert not list(system.glob("gfx1150*"))
 
 
 def test_install_creates_a_missing_database_folder(tmp_path):

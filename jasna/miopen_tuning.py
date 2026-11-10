@@ -26,10 +26,16 @@ COMPUTE_UNITS: Mapping[str, Sequence[int]] = {
     "gfx1151": (40, 32),  # Radeon 8060S, 8050S
 }
 
-TUNED_ON: Mapping[str, str] = {"gfx1100": "gfx1101", "gfx1102": "gfx1101", "gfx1150": "gfx1101", "gfx1151": "gfx1101"}
-"""Architectures without a GPU to tune on, and the one whose tuning they take: the same RDNA3 compute units
-and MIOpen CK conv kernels, so its solver picks and kernel parameters apply (MIOpen searches again for any
-that do not). Unmeasured on these GPUs."""
+BORROWED_TUNING: Mapping[str, Sequence[str]] = {
+    "gfx1101": ("gfx1100",),
+    "gfx1102": ("gfx1101", "gfx1100"),
+    "gfx1150": ("gfx1101", "gfx1100"),
+    "gfx1151": ("gfx1101", "gfx1100"),
+}
+"""Where an architecture takes the convs its own tuning lacks, nearest first: the same RDNA3 compute units
+and MIOpen CK conv kernels, so those solver picks and kernel parameters apply (MIOpen searches again for any
+that do not). gfx1101 was tuned on Windows, which has the prebuilt path's convs only; gfx1102 and the
+iGPUs have no GPU to tune on. Unmeasured on the borrowing GPUs."""
 
 
 def database_names(architecture: str, compute_units: int, suffix: str) -> tuple[str, str]:
@@ -54,19 +60,28 @@ def merged(text: str, entries: Mapping[str, str]) -> str:
     return "".join(f"{line}\n" for line in [*kept, *(f"{key}={value}" for key, value in entries.items())])
 
 
+def tuned_entries(architecture: str, suffix: str, tuned_dir: Path, borrowed: Mapping[str, Sequence[str]]) -> dict[str, str]:
+    """The tuned entries ``architecture`` gets: its own, then the convs only its ``borrowed`` sources have."""
+    entries = {}
+    for source in reversed((architecture, *borrowed.get(architecture, ()))):
+        tuned = tuned_dir / f"{source}{suffix}"
+        if tuned.is_file():
+            entries |= read_entries(tuned.read_text(encoding="utf-8"))
+    return entries
+
+
 def install(system_db: Path, tuned_dir: Path = TUNED_DIR,
             compute_units: Mapping[str, Sequence[int]] = COMPUTE_UNITS,
-            tuned_on: Mapping[str, str] = TUNED_ON) -> list[Path]:
-    """Merge the tuned entries into ``system_db`` for every known GPU of each tuned architecture (or of the
-    architecture it takes its tuning from); returns the files written."""
+            borrowed: Mapping[str, Sequence[str]] = BORROWED_TUNING) -> list[Path]:
+    """Merge the tuned entries (``tuned_entries``) into ``system_db`` for every known GPU of each architecture
+    that has any; returns the files written."""
     system_db.mkdir(parents=True, exist_ok=True)
     written = []
     for architecture, units in compute_units.items():
         for suffix in DATABASE_SUFFIXES:
-            tuned = tuned_dir / f"{tuned_on.get(architecture, architecture)}{suffix}"
-            if not tuned.is_file():
+            entries = tuned_entries(architecture, suffix, tuned_dir, borrowed)
+            if not entries:
                 continue
-            entries = read_entries(tuned.read_text(encoding="utf-8"))
             for count in units:
                 for name in database_names(architecture, count, suffix):
                     target = system_db / name
