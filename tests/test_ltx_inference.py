@@ -94,10 +94,11 @@ def test_runtime_construction_and_unused_close_do_not_start_worker(monkeypatch):
 @pytest.fixture
 def allocator(monkeypatch):
     """PyTorch's peak allocation stats for a backend on the CPU (the worker runs on CUDA)."""
-    stats = {"peak": 0}
+    stats = {"peak": 0, "allocated": 0}
     monkeypatch.setattr(torch.cuda, "is_initialized", lambda: True)
-    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda device: stats.update(peak=0))
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda device: stats.update(peak=stats["allocated"]))
     monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda device: stats["peak"])
+    monkeypatch.setattr(torch.cuda, "memory_allocated", lambda device: stats["allocated"])
     return stats
 
 
@@ -195,6 +196,42 @@ def test_worker_peak_vram_counts_the_native_block_store(monkeypatch, allocator):
 
     stats, _ = backend.dispatch("stats", {}, [], lambda _n: None)
     assert stats["peak_vram_bytes"] == (5 << 30) + (13 << 30)
+
+
+def test_worker_peak_vram_does_not_add_the_freed_load_probe_to_the_blocks(monkeypatch, allocator):
+    """Loading probes how much VRAM it can allocate and frees it before the native store
+    allocates the blocks, so the probe and the blocks never coexist."""
+    gib = 1 << 30
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (20 * gib, 24 * gib))
+
+    class Transformer:
+        conditions = [None] * 8
+        blocks = SimpleNamespace(resident=48, count=48)
+
+        def __init__(self, source, device, free_vram):
+            allocator["peak"] = 15 * gib
+            self.native = 12 * gib
+
+        def native_vram_bytes(self):
+            return self.native
+
+    monkeypatch.setattr(inference, "TransformerSource", lambda path: path)
+    monkeypatch.setattr(inference, "LtxTransformer", Transformer)
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend.dispatch("load_transformer", {"free_bytes": 20 * gib}, [], lambda _n: None)
+
+    stats, _ = backend.dispatch("stats", {}, [], lambda _n: None)
+    assert stats["peak_vram_bytes"] == 15 * gib
+
+
+@pytest.mark.parametrize("torch_peak,torch_end,native_before,native_after,expected", [
+    pytest.param(15994, 120, 0, 12831, 15994, id="load-probe-freed-before-the-blocks"),
+    pytest.param(8000, 120, 0, 12831, 12951, id="load-blocks-outlast-a-smaller-probe"),
+    pytest.param(5000, 300, 12831, 12831, 17831, id="denoise-beside-resident-blocks"),
+    pytest.param(400, 0, 12831, 0, 13231, id="unload-frees-the-blocks"),
+])
+def test_operation_peak_counts_native_bytes_only_while_they_exist(torch_peak, torch_end, native_before, native_after, expected):
+    assert inference.operation_peak_vram_bytes(torch_peak, torch_end, native_before, native_after) == expected
 
 
 def test_worker_reports_denoise_progress_after_gpu_completion(monkeypatch, allocator):

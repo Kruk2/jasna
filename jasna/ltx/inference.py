@@ -218,6 +218,13 @@ def free_vram_beside_parent(device: torch.device, parent_free_bytes: int) -> Cal
     return lambda current: max(0, torch.cuda.mem_get_info(current)[0] - hidden)
 
 
+def operation_peak_vram_bytes(torch_peak: int, torch_end: int, native_before: int, native_after: int) -> int:
+    """One operation's peak: PyTorch's allocator plus the transformer blocks the native store
+    holds outside it. PyTorch's peak only coexists with the native bytes there at the start:
+    loading probes VRAM and frees it before the store allocates the blocks."""
+    return max(torch_peak + native_before, torch_end + native_after)
+
+
 class WorkerBackend:
     """Only the authenticated child owns models; dispatch exposes whole inference operations."""
 
@@ -248,16 +255,17 @@ class WorkerBackend:
             return {"peak_vram_bytes": self.peak_vram_bytes}, []
         if torch.cuda.is_initialized():
             torch.cuda.reset_peak_memory_stats(self.device)
+        native_before = self._native_vram_bytes()
         result = self._run(op, params, tensors, advance)
         if torch.cuda.is_initialized():
-            self._record_peak_vram()
+            self.peak_vram_bytes = max(self.peak_vram_bytes, operation_peak_vram_bytes(
+                torch.cuda.max_memory_allocated(self.device), torch.cuda.memory_allocated(self.device),
+                native_before, self._native_vram_bytes(),
+            ))
         return result
 
-    def _record_peak_vram(self) -> None:
-        """The operation's PyTorch peak plus the transformer blocks the native store holds
-        outside PyTorch's allocator."""
-        native = self.transformer.native_vram_bytes() if self.transformer is not None else 0
-        self.peak_vram_bytes = max(self.peak_vram_bytes, torch.cuda.max_memory_allocated(self.device) + native)
+    def _native_vram_bytes(self) -> int:
+        return self.transformer.native_vram_bytes() if self.transformer is not None else 0
 
     def _run(self, op: str, params: dict, tensors: list[torch.Tensor], advance: Callable[[int], None]):
         if op == "load_encoder":
