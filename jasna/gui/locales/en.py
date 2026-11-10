@@ -609,7 +609,7 @@ EN = {
         "tip_encoder_cq": "Video quality (CQ). Lower numbers give better quality but bigger files. Close values can give the same file, because Jasna also limits the output size.\nNVIDIA: H.264 25, HEVC 28, AV1 35 by default; range 1–51 (AV1 1–63).\nAMD: H.264 24, HEVC 25, AV1 16 by default; range 0–51 (AV1 1–51).",
         "tip_encoder_custom_args": "Advanced encoder parameters as comma-separated key=value pairs.\nLeave empty unless you know what you're doing.\n\nExample: rc-lookahead=32",
         "tip_post_export_action": "Optional action after the whole queue finishes.\n\nNone: do nothing.\nShutdown PC: powers off the computer after a 60-second countdown you can cancel.\nCustom Command: runs the command below in the system shell.\n\nYou can change this while jobs are running.",
-        "tip_post_export_video_command": "Runs in the system shell after each successful video export and waits for it to finish. Leave empty to disable. Paths are already quoted.\n\nPlaceholders: {input}, {output}, {output_dir}, {output_stem}, {output_suffix}",
+        "tip_post_export_video_command": "Runs in the system shell after each successful video export and waits for it to finish. Leave empty to disable. Paths are already quoted.\n\nPlaceholders: {input}, {output}, {output_dir}, {output_stem}, {output_suffix}, {log}\n\n{log} is a file next to the output with this video's log.",
         "tip_output_location": "Folder where processed videos are saved.\nLeave empty to save next to the original file.",
         "tip_output_pattern": "Filename template for output files.\nUse {original} as a placeholder for the input filename (without extension).\n\nExample: {original}_restored.mp4 → my_video_restored.mp4",
         

@@ -141,3 +141,7 @@ fails, that video is marked as failed. The command runs in the output folder.
 Placeholders: `{input}`, `{output}`, `{output_dir}`, `{output_stem}`,
 `{output_suffix}`. They are already quoted. There is an example in the
 [CLI reference](cli.md#post-export).
+
+In the GUI, `{log}` is a file with that video's log, saved next to the output
+as `<output name>.log`. Copy or move it wherever you want, for example
+`copy {log} D:\logs`.

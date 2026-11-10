@@ -117,3 +117,6 @@ jasna --input folder_in --output folder_out --post-export-action command --post-
 
 占位符：`{input}`、`{output}`、`{output_dir}`、`{output_stem}`、`{output_suffix}`。
 它们已经加好引号。示例见 [CLI 参考](cli.md#导出后操作)。
+
+在 GUI 中还可以使用 `{log}`：这是该视频的日志文件，保存在输出文件旁边，名为
+`<输出文件名>.log`。可以把它复制或移动到任意位置，例如 `copy {log} D:\logs`。

@@ -73,11 +73,18 @@ def _quote_shell_value(value: str) -> str:
     return shlex.quote(value)
 
 
+def uses_log_placeholder(command: str) -> bool:
+    return "{log}" in command
+
+
 def expand_post_export_video_command(
     command: str,
     input_path: Path,
     output_path: Path,
+    *,
+    log_path: Path | None = None,
 ) -> str:
+    """Without a ``log_path`` (the CLI writes no log file) ``{log}`` is left as typed."""
     resolved_input = input_path.resolve(strict=False)
     resolved_output = output_path.resolve(strict=False)
     values = {
@@ -87,6 +94,8 @@ def expand_post_export_video_command(
         "output_stem": resolved_output.stem,
         "output_suffix": resolved_output.suffix,
     }
+    if log_path is not None:
+        values["log"] = str(log_path.resolve(strict=False))
     pattern = re.compile(r"\{(" + "|".join(values) + r")\}")
     return pattern.sub(
         lambda match: _quote_shell_value(values[match.group(1)]),
@@ -129,8 +138,10 @@ def run_post_export_video_command(
     input_path: Path,
     output_path: Path,
     cancel_requested: Callable[[], bool],
+    *,
+    log_path: Path | None = None,
 ) -> None:
-    expanded = expand_post_export_video_command(command, input_path, output_path)
+    expanded = expand_post_export_video_command(command, input_path, output_path, log_path=log_path)
     kwargs = subprocess_no_window_kwargs()
     if sys.platform == "win32":
         kwargs["creationflags"] = (

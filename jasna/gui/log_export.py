@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 
 LogEntry = tuple[str, str, str]  # (timestamp, level, message)
+
+
+def log_timestamp(moment: datetime) -> str:
+    return moment.strftime("%I:%M:%S %p")
 
 
 def format_log_entries(entries: list[LogEntry]) -> str:

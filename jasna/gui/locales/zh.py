@@ -609,7 +609,7 @@ ZH = {
         "tip_encoder_cq": "视频质量（CQ）。数值越低质量越好，但文件越大。由于 Jasna 还会限制输出大小，相近的数值可能得到相同的文件。\nNVIDIA：默认 H.264 25，HEVC 28，AV1 35；范围 1–51（AV1 为 1–63）。\nAMD：默认 H.264 24，HEVC 25，AV1 16；范围 0–51（AV1 为 1–51）。",
         "tip_encoder_custom_args": "高级编码器参数，以逗号分隔的 key=value 格式。\n如果不清楚用途，请留空。\n\n示例：rc-lookahead=32",
         "tip_post_export_action": "整个队列完成后的可选操作。\n\n无：不执行任何操作。\n关闭电脑：60 秒倒计时后关闭计算机，倒计时期间可取消。\n自定义命令：在系统 shell 中运行下方命令。\n\n任务运行时也可以更改此项。",
-        "tip_post_export_video_command": "每个视频成功导出后在系统 shell 中运行，并等待命令完成。留空即可禁用。路径已自动加引号。\n\n占位符：{input}, {output}, {output_dir}, {output_stem}, {output_suffix}",
+        "tip_post_export_video_command": "每个视频成功导出后在系统 shell 中运行，并等待命令完成。留空即可禁用。路径已自动加引号。\n\n占位符：{input}, {output}, {output_dir}, {output_stem}, {output_suffix}, {log}\n\n{log} 是保存在输出文件旁边的此视频日志文件。",
         "tip_output_location": "处理后视频的保存文件夹。\n留空则保存在原始文件旁边。",
         "tip_output_pattern": "输出文件的命名模板。\n使用 {original} 作为输入文件名（不含扩展名）的占位符。\n\n示例：{original}_restored.mp4 → my_video_restored.mp4",
 

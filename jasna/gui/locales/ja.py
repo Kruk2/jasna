@@ -609,7 +609,7 @@ JA = {
         "tip_encoder_cq": "動画の品質（CQ）。数値が低いほど高品質ですが、ファイルは大きくなります。Jasna は出力サイズも制限するため、近い値で同じファイルになることがあります。\nNVIDIA：デフォルトは H.264 25、HEVC 28、AV1 35。範囲 1–51（AV1 は 1–63）。\nAMD：デフォルトは H.264 24、HEVC 25、AV1 16。範囲 0–51（AV1 は 1–51）。",
         "tip_encoder_custom_args": "上級者向けのエンコーダーパラメータ（カンマ区切りの key=value 形式）。\nよくわからない場合は空欄のままにしてください。\n\n例：rc-lookahead=32",
         "tip_post_export_action": "キュー全体が完了した後に実行する任意のアクションです。\n\nなし：何もしません。\nPC をシャットダウン：60 秒のカウントダウン後に電源を切ります。カウントダウン中はキャンセルできます。\nカスタムコマンド：下のコマンドをシステムシェルで実行します。\n\nジョブの実行中でも変更できます。",
-        "tip_post_export_video_command": "各動画の書き出しが正常に完了した後、システムシェルで実行し、終了するまで待機します。空欄にすると無効です。パスは引用符で保護されています。\n\nプレースホルダー：{input}, {output}, {output_dir}, {output_stem}, {output_suffix}",
+        "tip_post_export_video_command": "各動画の書き出しが正常に完了した後、システムシェルで実行し、終了するまで待機します。空欄にすると無効です。パスは引用符で保護されています。\n\nプレースホルダー：{input}, {output}, {output_dir}, {output_stem}, {output_suffix}, {log}\n\n{log} は出力の隣に保存される、この動画のログファイルです。",
         "tip_output_location": "処理済み動画の保存先フォルダー。\n空欄の場合、元のファイルと同じ場所に保存されます。",
         "tip_output_pattern": "出力ファイルの名前テンプレート。\n{original} は入力ファイル名（拡張子なし）のプレースホルダーです。\n\n例：{original}_restored.mp4 → my_video_restored.mp4",
 
