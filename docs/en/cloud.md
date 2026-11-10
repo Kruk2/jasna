@@ -8,6 +8,8 @@ while Jasna runs, and it needs internet while you use supporter models. GitHub s
 ## What you need
 
 - An NVIDIA GPU with driver **580 or newer**, and at least **80 GB** of disk.
+  Rent an RTX card (for example RTX 4090, RTX 5090, RTX A6000 or L40S).
+  Data-center GPUs like A100, H100 and B200 don't work.
 - `NVIDIA_DRIVER_CAPABILITIES=all` in your template or instance settings, or
   Jasna can't read or save videos. On Vast, add
   `-e NVIDIA_DRIVER_CAPABILITIES=all` to the Docker options.

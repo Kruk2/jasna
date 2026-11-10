@@ -94,6 +94,8 @@ def check_gpu() -> tuple[bool, str]:
             return False, t("wizard_no_cuda")
         if result[0] == "arch_unsupported":
             return False, t("wizard_gpu_arch_unsupported", arch=result[1])
+        if result[0] == "datacenter_unsupported":
+            return False, t("wizard_gpu_datacenter_unsupported", gpu=result[1])
         _, major, minor = result
         return False, t("wizard_gpu_compute_too_low", major=major, minor=minor)
     except Exception as e:

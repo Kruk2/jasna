@@ -50,7 +50,8 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
 <summary>詳細</summary>
 
 - NVIDIA: NVIDIA の [GPU 一覧](https://developer.nvidia.com/cuda/gpus)で
-  コンピュート能力が 7.5 以上である必要があります。
+  コンピュート能力が 7.5 以上である必要があります。A100、H100、B200 などの
+  データセンター向け GPU では動きません。
 - AMD: 下の表をご覧ください。UNet 4x の二次復元に対応しています。
 - ディスク形式: Windows では NTFS、Linux では ext4、Btrfs、XFS、ZFS。ネットワーク
   ディスクは非対応です。SSD を使ってください。ハードディスク（HDD）では起動と

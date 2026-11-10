@@ -667,6 +667,7 @@ JA = {
         "wizard_no_cuda": "対応 GPU なし",
         "wizard_gpu_compute_too_low": "Compute capability 7.5 以上が必要です（GPU: {major}.{minor}）",
         "wizard_gpu_arch_unsupported": "この AMD GPU（{arch}）はこのバージョンの Jasna では使えません",
+        "wizard_gpu_datacenter_unsupported": "Jasna は A100・H100・B200 などのデータセンター向け GPU（{gpu}）には対応していません。RTX GPU を使ってください",
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}、compute {major}.{minor}",
         "wizard_not_available": "利用不可",

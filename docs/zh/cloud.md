@@ -8,6 +8,8 @@
 ## 需要准备
 
 - NVIDIA 显卡，驱动 **580 或更新**，以及至少 **80 GB** 磁盘。
+  请租 RTX 显卡（例如 RTX 4090、RTX 5090、RTX A6000 或 L40S）。
+  A100、H100、B200 等数据中心 GPU 无法使用。
 - 在模板或实例设置里加上 `NVIDIA_DRIVER_CAPABILITIES=all`，否则 Jasna 读不了也存不了视频。
   Vast 上把 `-e NVIDIA_DRIVER_CAPABILITIES=all` 加到 Docker 选项里。
 - 用 `root` 登录。RunPod 和 Vast 默认就是。

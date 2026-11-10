@@ -405,8 +405,43 @@ def test_check_supported_gpu_needs_an_amd_arch_the_build_contains(
     assert os_utils.check_supported_gpu() == expected
 
 
+@pytest.mark.parametrize(
+    ("frozen", "capability", "builders", "expected"),
+    [
+        (True, (9, 0), ("tensorrt_libs/nvinfer_builder_resource_sm86_10.dll",),
+         (False, ("datacenter_unsupported", "NVIDIA H100"))),
+        (True, (8, 0), ("libnvinfer_builder_resource_sm86.so.10.16.1",), (False, ("datacenter_unsupported", "NVIDIA H100"))),
+        (True, (8, 0), ("libnvinfer_builder_resource_sm80.so.10.16.1",), (True, "NVIDIA H100")),
+        (True, (9, 0), ("tensorrt_libs/nvinfer_builder_resource_sm90_10.dll",), (True, "NVIDIA H100")),
+        (True, (8, 6), (), (True, "NVIDIA H100")),
+        (False, (9, 0), (), (True, "NVIDIA H100")),
+    ],
+    ids=["release-without-h100", "release-without-a100", "release-with-a100", "release-with-h100",
+         "release-rtx-3090", "source-h100"],
+)
+def test_release_refuses_datacenter_gpus_it_cannot_build_engines_for(
+    monkeypatch, tmp_path, frozen, capability, builders, expected,
+) -> None:
+    for name in builders:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).touch()
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            get_device_capability=lambda device: capability,
+            get_device_name=lambda device: "NVIDIA H100",
+        )
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: frozen)
+    monkeypatch.setattr(os_utils, "get_application_executable", lambda: str(tmp_path / "jasna"))
+
+    assert os_utils.check_supported_gpu() == expected
+
+
 def test_gpu_check_error_names_each_failure() -> None:
     assert "No compatible GPU" in os_utils.gpu_check_error("no_cuda")
+    assert "H100" in os_utils.gpu_check_error(("datacenter_unsupported", "NVIDIA H100"))
     assert "gfx1103" in os_utils.gpu_check_error(("arch_unsupported", "gfx1103"))
     assert "6.1" in os_utils.gpu_check_error(("compute_too_low", 6, 1))
 
