@@ -194,11 +194,25 @@ def _make_rich_source(tmp_path: Path) -> Path:
     return source
 
 
-def _transcode(src: Path, dst: Path, codec: str = "hevc") -> None:
+def _transcode(
+    src: Path,
+    dst: Path,
+    codec: str = "hevc",
+    *,
+    encoder_settings: dict[str, object] | None = None,
+    fmp4: bool = False,
+) -> None:
     metadata = get_video_meta_data(str(src))
     with (
         VideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
-        VideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec=codec, encoder_settings={}) as encoder,
+        VideoEncoder(
+            str(dst),
+            device=DEVICE,
+            metadata=metadata,
+            codec=codec,
+            encoder_settings=encoder_settings or {},
+            fmp4=fmp4,
+        ) as encoder,
     ):
         for frames, pts_list in reader.frames():
             for i, pts in enumerate(pts_list):
@@ -618,21 +632,7 @@ def test_faststart_moov_before_mdat(tmp_path):
 
 
 def _transcode_fragmented(src: Path, dst: Path, gop: int) -> None:
-    metadata = get_video_meta_data(str(src))
-    with (
-        VideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
-        VideoEncoder(
-            str(dst),
-            device=DEVICE,
-            metadata=metadata,
-            codec="hevc",
-            encoder_settings={"g": str(gop)},
-            fmp4=True,
-        ) as encoder,
-    ):
-        for frames, pts_list in reader.frames():
-            for i, pts in enumerate(pts_list):
-                encoder.encode(frames[i], pts)
+    _transcode(src, dst, encoder_settings={"g": str(gop)}, fmp4=True)
 
 
 def _box_offsets(data: bytes, box: bytes) -> list[int]:
@@ -644,8 +644,9 @@ def _box_offsets(data: bytes, box: bytes) -> list[int]:
     return offsets
 
 
-def test_fmp4_writes_moov_up_front_then_fragments(tmp_path):
-    src = _make_source(tmp_path, "src.mp4")
+@pytest.mark.parametrize("acodec", ["aac", "ac3"])
+def test_fmp4_writes_moov_up_front_then_fragments(tmp_path, acodec):
+    src = _make_source(tmp_path, "src.mkv", acodec=acodec)
     dst = tmp_path / "out.mp4"
     _transcode_fragmented(src, dst, gop=8)
 
@@ -656,8 +657,9 @@ def test_fmp4_writes_moov_up_front_then_fragments(tmp_path):
         assert container.streams.video[0].codec_tag == "hvc1"
 
 
-def test_fmp4_truncated_output_still_decodes(tmp_path):
-    src = _make_source(tmp_path, "src.mp4")
+@pytest.mark.parametrize("acodec", ["aac", "ac3"])
+def test_fmp4_truncated_output_still_decodes(tmp_path, acodec):
+    src = _make_source(tmp_path, "src.mkv", acodec=acodec)
     dst = tmp_path / "out.mp4"
     _transcode_fragmented(src, dst, gop=8)
 
@@ -668,6 +670,30 @@ def test_fmp4_truncated_output_still_decodes(tmp_path):
     with av.open(str(partial)) as container:
         decoded = sum(1 for _ in container.decode(video=0))
     assert decoded > 0
+
+
+@pytest.mark.parametrize(
+    ("acodec", "suffix", "fmp4"),
+    [
+        ("ac3", ".mp4", True),
+        ("eac3", ".mp4", True),
+        ("ac3", ".mp4", False),
+        ("ac3", ".mov", True),
+        ("ac3", ".mkv", False),
+    ],
+)
+def test_ac3_family_audio_is_copied(tmp_path, acodec, suffix, fmp4):
+    src = _make_source(tmp_path, "src.mkv", acodec=acodec)
+    dst = tmp_path / f"out{suffix}"
+    _transcode(src, dst, fmp4=fmp4)
+
+    with av.open(str(dst)) as container:
+        audio = container.streams.audio[0]
+        assert audio.codec_context.name == acodec
+        assert sum(1 for _ in container.decode(video=0)) == 24
+        container.seek(0)
+        samples = sum(frame.samples for frame in container.decode(audio))
+    assert samples / audio.codec_context.sample_rate == pytest.approx(2.0, abs=0.1)
 
 
 def test_video_pts_deltas_passthrough(tmp_path):

@@ -368,8 +368,10 @@ def _mov_container_options(suffix: str, *, fmp4: bool) -> dict[str, str]:
     # A fragmented MP4 writes a sample-free moov up front and one moof+mdat per
     # keyframe, so the growing file stays playable; +faststart instead relocates
     # a single moov at close, leaving the file unreadable until then. The two
-    # are mutually exclusive.
-    flags = "+frag_keyframe+empty_moov" if fmp4 else "+faststart"
+    # are mutually exclusive. +delay_moov holds the moov until the first
+    # fragment, because the MP4 sample entry for copied AC-3/E-AC-3 needs
+    # header fields parsed from the first audio packet.
+    flags = "+frag_keyframe+empty_moov+delay_moov" if fmp4 else "+faststart"
     return {"movflags": flags}
 
 
