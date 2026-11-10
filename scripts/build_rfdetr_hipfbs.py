@@ -70,7 +70,9 @@ def main() -> None:
     if parser.parse_args().tune:
         tune()
     else:
-        build(_kernel_specs(), LAUNCH_TABLE, "fused RF-DETR segmentation-head kernel", "scripts/build_rfdetr_hipfbs.py")
+        specs = _kernel_specs()
+        build(lambda architecture: specs, LAUNCH_TABLE, "fused RF-DETR segmentation-head kernel",
+              "scripts/build_rfdetr_hipfbs.py")
 
 
 if __name__ == "__main__":

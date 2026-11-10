@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from jasna.accelerator import TRITON_HIP_ARCHITECTURES
@@ -35,16 +36,18 @@ def bundle(code_objects: dict[str, bytes], output: Path) -> None:
         )
 
 
-def build(kernel_specs: dict[str, tuple], launch_table: Path, title: str, script: str) -> None:
-    """Compile every ``stem -> (kernel, arguments, constexprs, num_warps, num_stages, grid)`` for every
-    ``TRITON_HIP_ARCHITECTURES`` entry into ``jasna/media/<stem>.hipfb`` and write the launch table.
-    ``arguments`` maps each runtime argument to its Triton type (``compile_hip``); ``grid`` is the
-    launch-table grid (zeros where the launcher computes it)."""
+def build(kernel_specs: Callable[[str], dict[str, tuple]], launch_table: Path, title: str, script: str) -> None:
+    """Compile every ``stem -> (kernel, arguments, constexprs, num_warps, num_stages, grid)`` of
+    ``kernel_specs(architecture)`` for every ``TRITON_HIP_ARCHITECTURES`` entry into ``jasna/media/<stem>.hipfb``
+    and write the launch table. ``arguments`` maps each runtime argument to its Triton type (``compile_hip``);
+    ``grid`` is the launch-table grid (zeros where the launcher computes it)."""
     launch: dict[str, dict[str, tuple]] = {architecture: {} for architecture in TRITON_HIP_ARCHITECTURES}
-    for stem, (kernel, arguments, constants, num_warps, num_stages, grid) in kernel_specs.items():
+    specs = {architecture: kernel_specs(architecture) for architecture in TRITON_HIP_ARCHITECTURES}
+    for stem in specs[TRITON_HIP_ARCHITECTURES[0]]:
         code_objects = {}
-        options = {"num_warps": num_warps, "num_stages": num_stages}
         for architecture in TRITON_HIP_ARCHITECTURES:
+            kernel, arguments, constants, num_warps, num_stages, grid = specs[architecture][stem]
+            options = {"num_warps": num_warps, "num_stages": num_stages}
             compiled = compile_hip(kernel, arguments, constants, options, architecture)
             code_objects[architecture] = compiled.asm["hsaco"]
             launch[architecture][stem] = (compiled.metadata.name, grid, num_warps * WARP_SIZE, compiled.metadata.shared)

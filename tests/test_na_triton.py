@@ -16,6 +16,7 @@ from jasna.models.ltx_vae.na_triton import (  # noqa: E402
     AMD_LARGE_WINDOW_CONFIG,
     AMD_SMALL_WINDOW_CONFIG,
     LARGE_WINDOW_CONFIG,
+    RDNA3_LARGE_WINDOW_CONFIG,
     SMALL_WINDOW_CONFIG,
     config_for,
     na3d_with_config,
@@ -59,6 +60,7 @@ def _interpreter_dot_in_fp32(monkeypatch):
         ((1, 6, 9, 11, 2, 16), (5, 5, 5), (1, 9), tile_config((4, 4, 8), 64, 4, 2, False)),
         ((1, 12, 13, 14, 2, 16), (9, 9, 9), (0, 14), AMD_LARGE_WINDOW_CONFIG),
         ((1, 13, 13, 20, 2, 16), (9, 9, 9), (5, 10), AMD_LARGE_WINDOW_CONFIG),
+        ((1, 13, 13, 20, 2, 16), (9, 9, 9), (5, 10), RDNA3_LARGE_WINDOW_CONFIG),
         ((2, 5, 7, 9, 3, 32), (3, 5, 7), (2, 5), AMD_SMALL_WINDOW_CONFIG),
         ((1, 3, 6, 17, 1, 64), (5, 7, 3), (0, 17), AMD_SMALL_WINDOW_CONFIG),
         ((1, 6, 9, 11, 2, 16), (5, 5, 5), (1, 9), tile_config((2, 2, 8), 16, 2, 1, True)),
@@ -83,15 +85,22 @@ def test_box_rows_reject_a_box_wider_than_a_chunk():
         na3d_with_config(q, q, q, (3, 3, 11), 0, tile_config((1, 4, 8), 16, 1, 1, True))
 
 
-def test_amd_takes_the_box_row_configs():
-    assert config_for((9, 9, 9), amd=True) is AMD_LARGE_WINDOW_CONFIG
-    assert config_for((3, 7, 7), amd=True) is AMD_SMALL_WINDOW_CONFIG
+@pytest.mark.parametrize("architecture", ["gfx1201", "gfx1200"])
+def test_rdna4_takes_the_pipelined_box_row_configs(architecture):
+    assert config_for((9, 9, 9), architecture) is AMD_LARGE_WINDOW_CONFIG
+    assert config_for((3, 7, 7), architecture) is AMD_SMALL_WINDOW_CONFIG
+
+
+@pytest.mark.parametrize("architecture", ["gfx1100", "gfx1102", "gfx1151"])
+def test_rdna3_takes_the_unpipelined_large_window_config(architecture):
+    assert config_for((9, 9, 9), architecture) is RDNA3_LARGE_WINDOW_CONFIG
+    assert config_for((3, 7, 7), architecture) is AMD_SMALL_WINDOW_CONFIG
 
 
 def test_large_windows_take_the_large_tile_config():
-    assert config_for((11, 11, 11), amd=False) is LARGE_WINDOW_CONFIG
-    assert config_for((3, 5, 5), amd=False) is SMALL_WINDOW_CONFIG
-    assert config_for((3, 7, 7), amd=False) is SMALL_WINDOW_CONFIG
+    assert config_for((11, 11, 11), None) is LARGE_WINDOW_CONFIG
+    assert config_for((3, 5, 5), None) is SMALL_WINDOW_CONFIG
+    assert config_for((3, 7, 7), None) is SMALL_WINDOW_CONFIG
 
 
 def test_rejects_query_columns_outside_the_grid():

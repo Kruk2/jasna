@@ -17,7 +17,7 @@ import torch
 import triton
 import triton.language as tl
 
-from jasna.accelerator import is_amd_device
+from jasna.accelerator import amd_gpu_architecture, is_amd_device
 from jasna.models.ltx_vae import na_geometry
 
 LOG2E = tl.constexpr(1.4426950408889634)
@@ -39,11 +39,12 @@ _CONFIGS = {config: tile_config(*config) for config in na_geometry.CONFIGS}
 LARGE_WINDOW_CONFIG = _CONFIGS[na_geometry.LARGE_WINDOW]
 SMALL_WINDOW_CONFIG = _CONFIGS[na_geometry.SMALL_WINDOW]
 AMD_LARGE_WINDOW_CONFIG = _CONFIGS[na_geometry.AMD_LARGE_WINDOW]
+RDNA3_LARGE_WINDOW_CONFIG = _CONFIGS[na_geometry.RDNA3_LARGE_WINDOW]
 AMD_SMALL_WINDOW_CONFIG = _CONFIGS[na_geometry.AMD_SMALL_WINDOW]
 
 
-def config_for(kernel_size: tuple[int, int, int], amd: bool) -> triton.Config:
-    return _CONFIGS[na_geometry.config_for(kernel_size, amd)]
+def config_for(kernel_size: tuple[int, int, int], amd_architecture: str | None) -> triton.Config:
+    return _CONFIGS[na_geometry.config_for(kernel_size, amd_architecture)]
 
 
 @triton.jit
@@ -194,7 +195,8 @@ def na3d(
     ``q`` holds the queries of W columns ``[query_w_start, query_w_start + q.shape[3])``.
     """
     kernel = tuple(kernel_size)
-    return na3d_with_config(q, k, v, kernel, query_w_start, config_for(kernel, is_amd_device(q.device)))
+    architecture = amd_gpu_architecture(q.device) if is_amd_device(q.device) else None
+    return na3d_with_config(q, k, v, kernel, query_w_start, config_for(kernel, architecture))
 
 
 @na3d.register_fake

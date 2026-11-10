@@ -20,6 +20,7 @@ import triton
 from triton.runtime.errors import OutOfResources
 
 from benchmark_ltx_decode import full_width_queries, kitchen_na3d
+from jasna.accelerator import amd_gpu_architecture
 from jasna.models.ltx_vae.na_triton import config_for, na3d_with_config, tile_config
 
 # name: (K/V shape (B, T, H, W, heads, head_dim), kernel, first query column, query columns)
@@ -86,7 +87,7 @@ def run_benchmark(names: list[str], sweep: bool) -> None:
                 "natten",
                 lambda: natten.na3d(full_q, k, v, kernel_size=kernel, scale=1.0)[:, :, :, w_start : w_start + w_len],
             )
-        shipped = config_for(kernel, amd=torch.version.hip is not None)
+        shipped = config_for(kernel, amd_gpu_architecture(device) if torch.version.hip else None)
         report(f"triton {config_name(shipped)}", lambda: na3d_with_config(q, k, v, kernel, w_start, shipped))
         for config in SWEEP if sweep else []:
             report(f"  {config_name(config)}", lambda config=config: na3d_with_config(q, k, v, kernel, w_start, config))

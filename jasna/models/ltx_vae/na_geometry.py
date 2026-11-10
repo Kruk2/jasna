@@ -18,20 +18,25 @@ class NaConfig(NamedTuple):
 # Fastest in scripts/benchmark_na3d.py, stage 5 (11x11x11 windows) and stages 1-4 (3x5x5, 3x7x7):
 # on an RTX 5090 the flattened box walk, on an R9700 (gfx1201) one box row per KV chunk. AMD's stage 5
 # (9x9x9, the only large window it builds): 8-wide query rows fill a 16-key box row exactly, 29 % faster
-# than 4x2x4 tiles on an R9700 at the decode's real calls; it cannot take windows wider than 9.
+# than 4x2x4 tiles on an R9700 at the decode's real calls; it cannot take windows wider than 9. RDNA3
+# runs it 10 % faster unpipelined (one stage: 419 against 468 ms per 512 decode on an RX 7900 XTX).
 LARGE_WINDOW = NaConfig((4, 4, 4), 32, 2, 3, False)
 SMALL_WINDOW = NaConfig((2, 4, 4), 32, 2, 2, False)
 AMD_LARGE_WINDOW = NaConfig((2, 2, 8), 16, 1, 2, True)
+RDNA3_LARGE_WINDOW = AMD_LARGE_WINDOW._replace(num_stages=1)
 AMD_SMALL_WINDOW = NaConfig((1, 4, 4), 16, 1, 1, True)
-CONFIGS = (LARGE_WINDOW, SMALL_WINDOW, AMD_LARGE_WINDOW, AMD_SMALL_WINDOW)
+CONFIGS = (LARGE_WINDOW, SMALL_WINDOW, AMD_LARGE_WINDOW, RDNA3_LARGE_WINDOW, AMD_SMALL_WINDOW)
 LARGE_WINDOW_MIN_VOLUME = 512
 
 
-def config_for(kernel_size: tuple[int, int, int], amd: bool) -> NaConfig:
+def config_for(kernel_size: tuple[int, int, int], amd_architecture: str | None) -> NaConfig:
+    """The config for this window on an AMD GPU of ``amd_architecture`` (``gfx1100``), or on NVIDIA (None)."""
     large = math.prod(kernel_size) >= LARGE_WINDOW_MIN_VOLUME
-    if amd:
-        return AMD_LARGE_WINDOW if large else AMD_SMALL_WINDOW
-    return LARGE_WINDOW if large else SMALL_WINDOW
+    if amd_architecture is None:
+        return LARGE_WINDOW if large else SMALL_WINDOW
+    if not large:
+        return AMD_SMALL_WINDOW
+    return RDNA3_LARGE_WINDOW if amd_architecture.startswith("gfx11") else AMD_LARGE_WINDOW
 
 
 class NaLaunch(NamedTuple):
