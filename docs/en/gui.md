@@ -42,6 +42,9 @@ models slowly, and it warns you at startup.
 - Closing the window while a video is processing asks first: **Minimize** keeps
   it running, **Stop and quit** ends it.
 - **Clear done** removes finished items. **Clear** removes everything.
+- Jasna keeps the queue when you close it or restart the PC. Next time it comes back
+  without finished items, with each video's ranges and settings. Paused LTX or range
+  jobs continue where they stopped. Files that were moved or deleted are left out.
 
 ## Output settings
 

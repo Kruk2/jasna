@@ -1,6 +1,7 @@
 """Queue panel - left side job list management."""
 
 import logging
+from typing import Iterable
 
 import customtkinter as ctk
 from pathlib import Path
@@ -288,15 +289,12 @@ class QueuePanel(ctk.CTkFrame):
                 (t("file_type_all"), "*.*"),
             ]
         )
-        for f in files:
-            self.add_job(Path(f))
+        self.add_jobs(JobItem(path=Path(f)) for f in files)
 
     def _on_add_folder(self):
         folder = filedialog.askdirectory(title=t("select_folder"))
         if folder:
-            folder_path = Path(folder)
-            for f in folder_media_in_processing_order(folder_path):
-                self.add_job(f)
+            self.add_jobs(JobItem(path=f) for f in folder_media_in_processing_order(Path(folder)))
                     
     def _on_browse_output(self):
         folder = filedialog.askdirectory(title=t("select_output_folder"))
@@ -413,18 +411,23 @@ class QueuePanel(ctk.CTkFrame):
             widget.set_conflict(True)
 
     def add_job(self, path: Path):
-        if any(j.path == path for j in self._jobs):
+        self.add_jobs([JobItem(path=path)])
+
+    def add_jobs(self, jobs: Iterable[JobItem]) -> None:
+        """Append the jobs whose input is not queued yet, keeping their own options."""
+        added = False
+        for job in jobs:
+            if any(j.path == job.path for j in self._jobs):
+                continue
+            self._jobs.append(job)
+            output_path = self._get_output_path(job.path)
+            job.has_conflict = output_path.exists() if output_path else False
+            self._job_widgets.append(None)
+            if len(self._jobs) <= (self._page + 1) * _PAGE_SIZE and len(self._jobs) > self._page * _PAGE_SIZE:
+                self._create_job_widget(len(self._jobs) - 1)
+            added = True
+        if not added:
             return
-
-        job = JobItem(path=path)
-        self._jobs.append(job)
-
-        # Check for output file conflict
-        output_path = self._get_output_path(path)
-        job.has_conflict = output_path.exists() if output_path else False
-        self._job_widgets.append(None)
-        if len(self._jobs) <= (self._page + 1) * _PAGE_SIZE and len(self._jobs) > self._page * _PAGE_SIZE:
-            self._create_job_widget(len(self._jobs) - 1)
 
         self._update_empty_state()
         self._update_count()
@@ -538,6 +541,8 @@ class QueuePanel(ctk.CTkFrame):
         widget = self._job_widgets[idx]
         if widget is not None:
             widget.set_segment_summary(self._segment_summary(job), selected=bool(segments))
+        if self._on_jobs_changed:
+            self._on_jobs_changed()
 
     def _segment_summary(self, job: JobItem) -> str:
         if job.segments:
@@ -857,10 +862,10 @@ class QueuePanel(ctk.CTkFrame):
         return paths
 
     def _on_file_drop(self, event):
-        paths = self._parse_drop_data(event.data)
-        for p in paths:
+        files = []
+        for p in self._parse_drop_data(event.data):
             if p.is_dir():
-                for f in folder_media_in_processing_order(p):
-                    self.add_job(f)
+                files.extend(folder_media_in_processing_order(p))
             elif p.is_file() and p.suffix.lower() in MEDIA_EXTENSIONS:
-                self.add_job(p)
+                files.append(p)
+        self.add_jobs(JobItem(path=f) for f in files)
