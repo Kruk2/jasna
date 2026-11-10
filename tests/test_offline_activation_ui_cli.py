@@ -524,3 +524,23 @@ def test_windows_dialog_warns_about_the_permission_prompt_only_for_offline_activ
     dialog._mode_buttons[mode].invoke()
     dialog._activate_button.invoke()
     assert dialog._status.cget("text") == t(status_key)
+
+
+PASTED_LICENSE_CODE = "JL1-" + "aB3_x-9Zq" * 4 + "Kp7Ld0w"
+
+
+def _full_width(text: str) -> str:
+    return "".join(chr(ord(character) + 0xFEE0) for character in text)
+
+
+@pytest.mark.parametrize("typed", [
+    PASTED_LICENSE_CODE,
+    _full_width(PASTED_LICENSE_CODE),
+    f" {PASTED_LICENSE_CODE[:12]} {PASTED_LICENSE_CODE[12:30]}\r\n{PASTED_LICENSE_CODE[30:]}\t",
+    f"\ufeff{PASTED_LICENSE_CODE[:8]}\u200b{PASTED_LICENSE_CODE[8:]}\u200d",
+    f"{_full_width(PASTED_LICENSE_CODE[:4])}\u3000{PASTED_LICENSE_CODE[4:]}",
+], ids=["clean", "full_width", "spaces_and_line_breaks", "zero_width", "ime_space"])
+def test_typed_license_code_drops_paste_artifacts(typed):
+    from jasna.license_api import typed_license_code
+
+    assert typed_license_code(typed) == PASTED_LICENSE_CODE
