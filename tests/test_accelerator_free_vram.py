@@ -1,5 +1,7 @@
+import ctypes
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -33,6 +35,54 @@ def test_amd_windows_reads_hip_without_nvml(monkeypatch):
     assert accelerator.device_free_bytes(torch.device("cuda:0")) == 20 * GIB
 
 
+_NvmlQuery = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(accelerator._NvmlMemory))
+
+
+def _fake_nvml(total: int, free: int):
+    def query(handle, out):
+        out.contents.total = total
+        out.contents.free = free
+        out.contents.used = total - free
+        return 0
+
+    return SimpleNamespace(nvmlDeviceGetMemoryInfo=_NvmlQuery(query))
+
+
+@pytest.mark.parametrize(
+    ("nvml_total", "cuda_total", "disagrees"),
+    [
+        # Measured GB10 row: NVML answers the v1 query with a bogus ~62.5 GiB pool while CUDA sees 86.68 GiB.
+        (67_108_864_000, 93_066_629_120, True),
+        # A real dGPU: NVML's total stays within the WDDM reservation, well under 5% of CUDA's.
+        (105 * GIB, 110 * GIB, False),
+    ],
+)
+def test_nvml_total_disagrees_with_cuda(nvml_total, cuda_total, disagrees):
+    assert accelerator._nvml_total_disagrees_with_cuda(nvml_total, cuda_total) is disagrees
+
+
+def test_windows_soc_gpu_caps_the_process_view_at_the_host_available_ram(monkeypatch):
+    # Same measured GB10 row through device_free_bytes.
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(torch.version, "hip", None)
+    monkeypatch.setattr(torch.version, "cuda", "13.0")
+    props = SimpleNamespace(uuid="abc", total_memory=93_066_629_120)
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: props)
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (92_648_583_168, 93_066_629_120))
+    monkeypatch.setattr(accelerator, "_nvml_device", lambda uuid: (_fake_nvml(67_108_864_000, 475_320_320), None))
+    monkeypatch.setattr(accelerator.psutil, "virtual_memory", lambda: SimpleNamespace(available=14_832_648_192))
+    assert accelerator.device_free_bytes(torch.device("cuda:0")) == 14_832_648_192
+
+
+def test_nvml_total_within_wddm_reserve_keeps_nvml_figure(monkeypatch):
+    # A real dGPU: NVML's total stays within 5% of CUDA's (the WDDM reservation).
+    props = SimpleNamespace(uuid="abc", total_memory=110 * GIB)
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: props)
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (109 * GIB, 110 * GIB))
+    monkeypatch.setattr(accelerator, "_nvml_device", lambda uuid: (_fake_nvml(105 * GIB, 40 * GIB), None))
+    assert accelerator._nvml_free_bytes(torch.device("cuda:0")) == 40 * GIB
+
+
 _HOLD_VRAM = """
 import sys
 import torch
@@ -46,6 +96,12 @@ sys.stdin.read()
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 def test_vram_held_by_another_process_is_not_free():
     device = torch.device("cuda:0")
+    # On a SoC GPU the NVML clamp is replaced by the host's available-RAM bound, which
+    # a commit-backed unified pool does not track, so the device-wide check cannot apply.
+    if sys.platform == "win32" and not torch.version.hip:
+        props, memory = accelerator._nvml_memory(device)
+        if accelerator._nvml_total_disagrees_with_cuda(memory.total, props.total_memory):
+            pytest.skip("SoC GPU (NVML/CUDA total mismatch): the NVML clamp is replaced by the host available bound")
     before = accelerator.device_free_bytes(device)
     holder = subprocess.Popen(
         [sys.executable, "-c", _HOLD_VRAM, str(2 * GIB)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
