@@ -46,8 +46,8 @@ and a command line, and runs on your GPU.
 
 - **NVIDIA** GTX 16-series / RTX 20-series or newer, with a recent driver
   (610+ on Windows, 580+ on Linux). GTX 10-series and older don't work.
-- Or **AMD** Radeon RX 5000 or newer (experimental). RX 7000/9000 are tested;
-  RX 5000/6000 are untested.
+- Or **AMD** Radeon RX 6000 or newer (experimental). RX 7000/9000 are tested;
+  RX 6000 is untested.
 - A folder on a local disk, with no Chinese, Japanese, accented or other
   non-English characters in its path.
 
@@ -69,9 +69,9 @@ and a command line, and runs on your GPU.
 | Radeon RX 9060/9070, Radeon AI PRO R9700 | yes | yes (Windows: beta) |
 | Radeon RX 7600–7900, Radeon PRO W7000 | yes | yes (Windows: beta) |
 | Radeon 740M/760M/780M/880M/890M, Ryzen AI Max (8050S/8060S) | yes, untested | yes, untested |
-| Radeon RX 5000/6000, Radeon PRO W5000/W6000 | yes, untested | no |
+| Radeon RX 6000, Radeon PRO W6000 | yes, untested | no |
 | Radeon 610M/660M/680M/820M/840M/860M | yes, untested | no |
-| Radeon RX Vega, RX 500 and older | no | no |
+| Radeon RX 5000, Radeon PRO W5000, RX Vega, RX 500 and older | no | no |
 
 </details>
 

@@ -41,8 +41,8 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
 
 - **NVIDIA** の GTX 16 シリーズ / RTX 20 シリーズ以降と、新しいドライバー
   （Windows で 610 以上、Linux で 580 以上）。GTX 10 シリーズ以前では動きません。
-- または **AMD** Radeon RX 5000 以降（実験的）。検証済みは RX 7000/9000 で、
-  RX 5000/6000 は未検証です。
+- または **AMD** Radeon RX 6000 以降（実験的）。検証済みは RX 7000/9000 で、
+  RX 6000 は未検証です。
 - ローカルディスク上のフォルダー。パスに日本語、中国語、アクセント付きの文字
   など、英語以外の文字を含まないこと。
 
@@ -64,9 +64,9 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
 | Radeon RX 9060/9070、Radeon AI PRO R9700 | 対応 | 対応（Windows はベータ版） |
 | Radeon RX 7600–7900、Radeon PRO W7000 | 対応 | 対応（Windows はベータ版） |
 | Radeon 740M/760M/780M/880M/890M、Ryzen AI Max（8050S/8060S） | 対応（未検証） | 対応（未検証） |
-| Radeon RX 5000/6000、Radeon PRO W5000/W6000 | 対応（未検証） | 非対応 |
+| Radeon RX 6000、Radeon PRO W6000 | 対応（未検証） | 非対応 |
 | Radeon 610M/660M/680M/820M/840M/860M | 対応（未検証） | 非対応 |
-| Radeon RX Vega、RX 500 以前 | 非対応 | 非対応 |
+| Radeon RX 5000、Radeon PRO W5000、RX Vega、RX 500 以前 | 非対応 | 非対応 |
 
 </details>
 

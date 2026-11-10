@@ -89,7 +89,7 @@ packs from AMD's index:
 
 ```powershell
 $I = "https://stable.repo.amd.com/rocm/whl-next/"
-$D = "device-gfx1010,device-gfx1011,device-gfx1012,device-gfx1030,device-gfx1031,device-gfx1032,device-gfx1033,device-gfx1034,device-gfx1035,device-gfx1036,device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1150,device-gfx1151,device-gfx1152,device-gfx1153,device-gfx1200,device-gfx1201"
+$D = "device-gfx1030,device-gfx1031,device-gfx1032,device-gfx1033,device-gfx1034,device-gfx1035,device-gfx1036,device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1150,device-gfx1151,device-gfx1152,device-gfx1153,device-gfx1200,device-gfx1201"
 pip install --index-url $I "torch[$D]==2.14.0+rocm10.1.0" "torchvision[$D]==0.29.0a0+rocm10.1.0"
 uv pip install -e ".[amd,dev]"
 ```
