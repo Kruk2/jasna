@@ -221,6 +221,8 @@ def load_video_encoder(vae_path: Path, device: torch.device, encoder_path: Path 
         eager_amd = backend is KernelBackend.AMD_PREBUILT
         for layer in (encoder.conv_in, *encoder.down_blocks[:KITCHEN_DOWN_BLOCKS]) if eager_amd else (encoder,):
             layer.to(memory_format=torch.channels_last_3d)
+        if eager_amd:
+            encoder.release_cache_between_stages()
         _clear_tensors(bf16_contiguous_weights, encoder)
         compile_video_encoder(device, dtype)
         return encoder

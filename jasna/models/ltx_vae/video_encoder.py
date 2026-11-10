@@ -167,6 +167,7 @@ class VideoEncoder(nn.Module):
         self.conv_act = nn.SiLU()
         # One extra channel: the checkpoint's (unused) constant log-variance.
         self.conv_out = CausalConv3d(feature_channels, out_channels + 1)
+        self.releases_cache_between_stages = False
 
     def to_fp16_head(self, down_blocks: int) -> "VideoEncoder":
         """fp16 for ``conv_in`` and the first ``down_blocks`` down blocks; the rest keeps its dtype."""
@@ -182,6 +183,16 @@ class VideoEncoder(nn.Module):
         for module in self.modules():
             if isinstance(module, CausalConv3d):
                 module.kitchen = True
+
+    def release_cache_between_stages(self) -> None:
+        """Empty PyTorch's allocator cache before each stage of an eager encode. Every eager layer
+        allocates its activations anew, ~1.1 GiB apiece at 768 px but a few frames or pixels apart
+        in size, and a 768 window finds only the smaller blocks a 512 one left, so the cache grows
+        past the live peak (an R9700 reserved up to 14.7 GiB for a 7 GiB peak; 8.3 GiB with this),
+        and the driver spills what the card lacks into system memory instead of failing (#707).
+        Costs ~4 % of the encode; emptying it before every residual block too saves another
+        ~0.7 GiB for ~11 %."""
+        self.releases_cache_between_stages = True
 
     def to_fp16_with_float32_tail(self) -> "VideoEncoder":
         """fp16 for the high-resolution layers (nearly all the FLOPs), fp32 for the tail."""
@@ -221,15 +232,23 @@ def _layer_input(sample: torch.Tensor, layer: nn.Module) -> torch.Tensor:
     return sample.to(dtype=weight.dtype, memory_format=torch.contiguous_format)
 
 
+def _release_cache(encoder: VideoEncoder) -> None:
+    if encoder.releases_cache_between_stages:
+        torch.cuda.empty_cache()
+
+
 def encode_cropped(encoder: VideoEncoder, sample: torch.Tensor) -> torch.Tensor:
     """Latent means of ``sample`` (in ``conv_in``'s dtype); every later layer computes in its
     own weights' dtype and memory format."""
     sample = patchify(sample, patch_size_hw=encoder.patch_size)
+    _release_cache(encoder)
     sample = encoder.conv_in(sample)
 
     for down_block in encoder.down_blocks:
+        _release_cache(encoder)
         sample = down_block(_layer_input(sample, down_block))
 
+    _release_cache(encoder)
     sample = _layer_input(sample, encoder.conv_out)
     sample = encoder.conv_norm_out(sample)
     sample = encoder.conv_act(sample)
