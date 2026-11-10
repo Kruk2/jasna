@@ -154,10 +154,11 @@ def user_config_dir(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def jasna_app(monkeypatch, tmp_path, user_config_dir):
-    """The real main window after its startup work, on a machine reporting a Blackwell NVIDIA
-    GPU and an SSD install, with settings under ``tmp_path / "config"`` and restoration models
-    (LTX included) under ``tmp_path / "models"``."""
+def make_jasna_app(monkeypatch, tmp_path, user_config_dir):
+    """Build real main windows after their startup work, on a machine reporting a Blackwell
+    NVIDIA GPU and an SSD install, with settings under ``tmp_path / "config"`` and restoration
+    models (LTX included) under ``tmp_path / "models"``. Windows the test left open are
+    destroyed afterwards."""
     import threading
     from tkinter import TclError
 
@@ -169,20 +170,33 @@ def jasna_app(monkeypatch, tmp_path, user_config_dir):
     monkeypatch.setattr(os_utils, "install_on_hard_disk", lambda: False)
     monkeypatch.setattr(os_utils, "windows_module_loaded", lambda _name: False)
     monkeypatch.setattr(engine_paths, "default_restoration_model_path", lambda name: tmp_path / "models" / name)
-    try:
-        app = app_module.JasnaApp(skip_wizard=True)
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
-    app.update_idletasks()
-    for thread in threading.enumerate():
-        if thread.name == "cuda-warmup":
-            thread.join()
-    app._main_thread._run_pending()
-    yield app
-    if app.children:  # empty once the test has closed the window
-        app._stop_system_stats_poller()
-        app._main_thread.close()
-        app.destroy()
+    apps = []
+
+    def make():
+        try:
+            app = app_module.JasnaApp(skip_wizard=True)
+        except TclError as exc:
+            pytest.skip(f"Tk display unavailable: {exc}")
+        apps.append(app)
+        app.update_idletasks()
+        for thread in threading.enumerate():
+            if thread.name == "cuda-warmup":
+                thread.join()
+        app._main_thread._run_pending()
+        return app
+
+    yield make
+    for app in apps:
+        if app.children:  # empty once the test has closed the window
+            app._stop_system_stats_poller()
+            app._main_thread.close()
+            app.destroy()
+
+
+@pytest.fixture
+def jasna_app(make_jasna_app):
+    """The real main window after its startup work (see ``make_jasna_app``)."""
+    return make_jasna_app()
 
 
 @pytest.fixture

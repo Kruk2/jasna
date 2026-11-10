@@ -32,7 +32,7 @@ from jasna.gui.log_filter import runtime_log_level_for_filter
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.user_settings import read_settings
 from jasna.gui.queues import MainThreadCalls
-from jasna.gui import tray
+from jasna.gui import saved_queue, tray
 from jasna.gui.models import JobStatus, PresetManager
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
@@ -119,6 +119,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._preview_gpu_busy = False
         self._video_player_dialog = None
         self._closing_after_player = False
+        self._queue_restored = False
         self._preset_manager = PresetManager()
         self._tray = tray.TrayIcon(
             on_open=lambda: self._main_thread.post(self._show_from_tray),
@@ -136,6 +137,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.protocol("WM_DELETE_WINDOW", self._on_close_requested)
         self.bind("<Unmap>", self._on_unmap, add="+")
 
+        self.after_idle(self._restore_saved_queue)
         self.after_idle(self._log_startup_timing)
         self.after_idle(self._start_cuda_warmup)
         self.after_idle(self._warn_if_windhawk_loaded)
@@ -534,6 +536,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             if self._processor:
                 self._processor.stop()
                 self._processor.join(timeout=5.0)
+            self._save_queue()
         finally:
             self._tray.hide()
             self._stop_system_stats_poller()
@@ -632,6 +635,16 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         jobs = self._queue_panel.get_jobs()
         self._control_bar.update_progress(queue_total=len(jobs))
         self._update_start_button_state()
+        self._save_queue()
+
+    def _restore_saved_queue(self):
+        """Runs once the log panel shows logs, before anything may save over the saved queue."""
+        self._queue_restored = True
+        self._queue_panel.add_jobs(saved_queue.load_queue())
+
+    def _save_queue(self):
+        if self._queue_restored:
+            saved_queue.save_queue(self._queue_panel.get_jobs())
 
     def _on_output_changed(self, folder: str, pattern: str):
         self._preset_manager.set_last_output_folder(folder)
@@ -923,6 +936,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             )
         except Exception:
             logger.warning("Failed to update job status in queue panel", exc_info=True)
+        if update.status is not JobStatus.PROCESSING:
+            self._save_queue()
             
     def _on_processor_log(self, level: str, message: str):
         self._main_thread.post(lambda: self._log_panel.add_log(level, message))
