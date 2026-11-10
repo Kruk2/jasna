@@ -133,7 +133,8 @@ def job_inputs(config: SessionConfig, source: Path, output: Path, metadata, spli
     latents = {
         "format": FORMAT_VERSION,
         "version": __version__,
-        "input": [str(source.resolve()), stat.st_size, stat.st_mtime_ns],
+        # The input by size and time, not path, so moving its folder keeps saved progress.
+        "input": [stat.st_size, stat.st_mtime_ns],
         "video": [metadata.num_frames, str(metadata.time_base), metadata.duration],
         "settings": {key: settings.pop(key) for key in LATENT_SETTINGS},
         # LTX plans only change when --max-detection-gap exceeds MAX_GAP, so changes within
@@ -144,7 +145,7 @@ def job_inputs(config: SessionConfig, source: Path, output: Path, metadata, spli
     }
     inputs = {
         "latents": latents,
-        "output": str(output.resolve()),
+        "output": output.name,
         "settings": settings,
         "basicvsrpp": (
             _model_identity(config.model_path("basicvsrpp")) if "basicvsrpp" in models else None
@@ -250,15 +251,16 @@ class ResumeJob:
 
 def saved_outputs(config: SessionConfig, output: Path) -> list[Path]:
     """Outputs whose saved work may continue a job writing ``output``: ``output`` itself or
-    one of its auto-renamed names, in the same folder and format."""
+    one of its auto-renamed names, in its folder (wherever that folder was when the work was
+    saved) and format."""
     found = []
     for directory in resume_directories(config.working_dir or output.parent, output):
         manifest = read_json(directory / "render" / "job.json")
         if manifest is None:
             continue
-        saved = Path(manifest["output"])
+        saved = output.parent / Path(manifest["output"]).name
         if (
-            saved.parent == output.parent.resolve() and saved.suffix.lower() == output.suffix.lower()
+            saved.suffix.lower() == output.suffix.lower()
             and resume_directory(config, saved).resolve() == directory.resolve()
         ):
             found.append(saved)

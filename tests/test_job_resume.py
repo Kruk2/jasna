@@ -291,6 +291,38 @@ def test_find_saved_output_before_file_conflict_even_after_auto_rename(job, rena
         assert find_resume_output(replace(config, ltx_seed=42), source, output, ()) is None
 
 
+@pytest.mark.parametrize("input_change", [None, "size", "mtime"])
+def test_saved_progress_follows_a_moved_folder_while_the_input_is_unchanged(job, tmp_path, input_change):
+    config, source, _output, metadata = job
+    folder = tmp_path / "videos"
+    folder.mkdir()
+    source = source.rename(folder / source.name)
+    checkpoint = ResumeJob(config, source, folder / "output.mp4", metadata, None)
+    checkpoint.prepare()
+    _save_work(checkpoint)
+    (checkpoint.directory / "segments").mkdir()
+    (checkpoint.directory / "segments" / "0000-raw.nut").write_bytes(b"restored")
+    folder = folder.rename(tmp_path / "moved")
+    source, output = folder / source.name, folder / "output.mp4"
+    stat = source.stat()
+    if input_change == "size":
+        source.write_bytes(b"another source")
+        os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    elif input_change == "mtime":
+        os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
+        found = find_resume_output(config, source, output, ())
+    moved = ResumeJob(config, source, output, metadata, None)
+    if input_change is None:
+        assert found == output
+        moved.prepare()
+        assert (moved.directory / "segments" / "0000-raw.nut").read_bytes() == b"restored"
+    else:
+        assert found is None
+        with pytest.raises(ResumeMismatchError):
+            moved.prepare()
+
+
 def test_resume_lookup_handles_brackets_and_only_follows_actual_auto_rename_names(job):
     config, source, output, metadata = job
     output = output.with_stem("[group] output")
