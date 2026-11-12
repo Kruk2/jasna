@@ -86,6 +86,12 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
   AMD。在 RTX 5090 上从 1080p 到 4K 约 5 FPS，所以长视频需要一些时间；准备约需一分钟。
 - **RTX Super Res**（`rtx-super-res`）：仅限 NVIDIA，非常快。还可以先去除噪点或模糊
   （`--upscale-rtx-denoise`、`--upscale-rtx-deblur`）。
+- **DLSS 5**（`dlss5`，仅命令行，需要 Windows 和 RTX 30 系列或更新的 GPU；RTX 30 较慢）：
+  NVIDIA DLSS 5 还会重绘光照和材质，所以颜色和皮肤可能改变。Jasna 不包含它：请把
+  DLSS 5 Visual Enhancer v3.0 的 `bin/runtime` 文件夹中的 `nvngx.dll`、`dxgi.dll`、
+  `renodx-dlss5.addon64`、`nvngx_dlss.dll` 和 `nvngx_dlssnr.dll` 复制到
+  `model_weights/dlss5`。`--upscale-dlss5-preset` 选择放大模型（`l` 和 `m` 重建更多纹理），
+  `--upscale-dlss5-style` 选择风格，`--upscale-dlss5-intensity`（0–2）控制重绘强度。
 
 ```bash
 jasna --input in.mp4 --output out.mp4 --restoration-model-name ltx --upscale span --upscale-height 2160

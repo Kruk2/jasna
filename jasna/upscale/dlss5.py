@@ -8,6 +8,7 @@ the worker's stdin/stdout as RGBA8 with optical-flow motion vectors, since a vid
 
 from __future__ import annotations
 
+import logging
 import struct
 import subprocess
 import sys
@@ -45,6 +46,11 @@ _TRUNCATED_STREAM_EXIT = 7
 _FLOW_WIDTH = 640
 _SCENE_CUT_DIFFERENCE = 0.24
 _LOG_LINES = 200
+# The bundled DLSS 5 runtime is a cross-generation build: RTX 50 and 40 run it, RTX 30 runs it slowly.
+_RTX_30 = (8, 6)
+_RTX_40 = (8, 9)
+
+logger = logging.getLogger(__name__)
 
 
 def dlss5_runtime_dir() -> Path:
@@ -56,8 +62,8 @@ def dlss5_unavailable_reason(device: torch.device, runtime_dir: Path) -> str | N
 
     if sys.platform != "win32":
         return "DLSS 5 upscaling runs on Windows only"
-    if not is_nvidia_device(device):
-        return "DLSS 5 upscaling needs an NVIDIA RTX GPU"
+    if not is_nvidia_device(device) or torch.cuda.get_device_capability(device) < _RTX_30:
+        return "DLSS 5 upscaling needs an NVIDIA RTX 30-series or newer GPU"
     missing = [name for name in DLSS5_RUNTIME_FILES if not (runtime_dir / name).is_file()]
     if missing:
         return f"DLSS 5 upscaling needs these runtime files in {runtime_dir}: {', '.join(missing)}"
@@ -130,6 +136,8 @@ class Dlss5FrameUpscaler:
         strength: float,
         runtime_dir: Path,
     ) -> None:
+        if torch.cuda.get_device_capability(device) < _RTX_40:
+            logger.warning("DLSS 5 on an RTX 30-series GPU is experimental and can be very slow")
         self._device = device
         self._output_size = output_size
         self._strength = strength
