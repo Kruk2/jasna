@@ -1017,7 +1017,7 @@ def _ensure_dlss5_runtime(config: SessionConfig) -> None:
     if answer is None:
         sys.exit(f"Error: {message} Run jasna in a terminal to download it ({size}).")
     if not answer:
-        sys.exit(f"Error: {message} Copy {', '.join(DLSS5_RUNTIME_FILES)} from its bin/runtime folder into {directory}.")
+        sys.exit(f"Error: {message} DLSS 5 upscaling needs this download.")
     from tqdm import tqdm
 
     with tqdm(total=DLSS5_RELEASE_SIZE, unit="B", unit_scale=True, desc="DLSS 5 download") as bar:

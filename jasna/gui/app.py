@@ -365,11 +365,13 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._queue_panel.set_on_jobs_changed(self._on_jobs_changed)
 
         from jasna.engine_paths import default_restoration_model_path
+        from jasna.gui.dlss5_runtime import Dlss5Runtime
         from jasna.gui.ltx_models import LtxModels
 
         self._ltx_models = LtxModels(
             default_restoration_model_path("ltx"), self._main_thread, self._on_ltx_models_changed
         )
+        self._dlss5_runtime = Dlss5Runtime(self._main_thread, self._update_start_button_state)
         self._settings_panel = SettingsPanel(self._workspace, self._preset_manager, ltx_models=self._ltx_models)
         self._settings_panel.configure(cursor="arrow")
         self._settings_panel.set_on_interactive_image_restore(self._open_interactive_image_restore)
@@ -521,10 +523,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._on_close()
 
     def _on_close(self):
-        if self._ltx_models.downloading:
+        if self._ltx_models.downloading or self._dlss5_runtime.downloading:
             from tkinter import messagebox
 
-            if not messagebox.askyesno(t("ltx_download_title"), t("ltx_download_close_confirm")):
+            title = t("dlss5_download_title") if self._dlss5_runtime.downloading else t("ltx_download_title")
+            if not messagebox.askyesno(title, t("ltx_download_close_confirm")):
                 return
         if self._video_player_dialog is not None:
             self._closing_after_player = True
@@ -703,10 +706,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         
     def _update_start_button_state(self):
         jobs = self._queue_panel.get_jobs()
-        downloading = self._ltx_models.downloading
+        downloading = self._ltx_models.downloading or self._dlss5_runtime.downloading
         can_start = bool(jobs) and not self._preview_gpu_busy and not downloading
         if can_start:
             self._control_bar.set_start_enabled(True)
+        elif self._dlss5_runtime.downloading:
+            self._control_bar.set_start_enabled(False, t("dlss5_downloading", percent=self._dlss5_runtime.percent))
         elif downloading:
             self._control_bar.set_start_enabled(False, t("ltx_downloading_short"))
         elif self._preview_gpu_busy:
@@ -758,6 +763,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             jobs, settings
         ):
             self._ltx_models.ensure(settings.ltx_model, settings.ltx_fast, on_ready=self._on_start)
+            return
+        if settings.upscale_model == "dlss5" and not self._dlss5_runtime.installed():
+            self._dlss5_runtime.ensure(on_ready=self._on_start)
             return
         if (
             not settings.ltx_trial

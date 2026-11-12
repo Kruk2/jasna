@@ -530,7 +530,7 @@ def test_cli_asks_before_downloading_the_dlss5_runtime(monkeypatch, tmp_path):
     with pytest.raises(SystemExit, match="Run jasna in a terminal"):
         main._ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    with pytest.raises(SystemExit, match="bin/runtime"):
+    with pytest.raises(SystemExit, match="needs this download"):
         main._ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
     assert "unofficial" in asked[0] and "467 MB" in asked[0]
 

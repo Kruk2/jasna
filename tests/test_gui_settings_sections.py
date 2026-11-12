@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import fields, replace
 
 import pytest
@@ -73,6 +74,9 @@ _NON_DEFAULT_SETTINGS = AppSettings(
     upscale_rtx_quality="ultra",
     upscale_rtx_denoise="low",
     upscale_rtx_deblur="medium",
+    upscale_dlss5_preset="k",
+    upscale_dlss5_style="cinematic",
+    upscale_dlss5_intensity=1.5,
     detection_model="rfdetr-v6-large",
     detection_score_threshold=0.5,
     max_detection_gap=3,
@@ -145,14 +149,16 @@ def test_frame_generation_is_off_and_locked_on_a_gpu_without_it(panel_factory) -
 
 
 @pytest.mark.parametrize(
-    ("vendor", "offered"),
+    ("vendor", "platform", "offered"),
     [
-        (AcceleratorVendor.NVIDIA, ["none", "span", "realplksr", "rtx-super-res"]),
-        (AcceleratorVendor.AMD, ["none", "span", "realplksr"]),
-        (AcceleratorVendor.CPU, ["none"]),
+        (AcceleratorVendor.NVIDIA, "win32", ["none", "span", "realplksr", "rtx-super-res", "dlss5"]),
+        (AcceleratorVendor.NVIDIA, "linux", ["none", "span", "realplksr", "rtx-super-res"]),
+        (AcceleratorVendor.AMD, "win32", ["none", "span", "realplksr"]),
+        (AcceleratorVendor.CPU, "win32", ["none"]),
     ],
 )
-def test_upscale_models_follow_the_gpu(panel_factory, vendor, offered) -> None:
+def test_upscale_models_follow_the_gpu(panel_factory, monkeypatch, vendor, platform, offered) -> None:
+    monkeypatch.setattr(sys, "platform", platform)
     panel = panel_factory()
     _apply(panel, replace(AppSettings(), upscale_model="rtx-super-res"))
 
@@ -163,8 +169,14 @@ def test_upscale_models_follow_the_gpu(panel_factory, vendor, offered) -> None:
     assert panel.get_settings().upscale_model == ("rtx-super-res" if "rtx-super-res" in offered else "none")
 
 
-@pytest.mark.parametrize(("model", "rtx_options_shown"), [("span", False), ("realplksr", False), ("rtx-super-res", True)])
-def test_upscale_options_show_for_the_chosen_model(panel_factory, show_window, model, rtx_options_shown) -> None:
+@pytest.mark.parametrize(
+    ("model", "rtx_options_shown", "dlss5_options_shown"),
+    [("span", False, False), ("realplksr", False, False), ("rtx-super-res", True, False), ("dlss5", False, True)],
+)
+def test_upscale_options_show_for_the_chosen_model(
+    panel_factory, show_window, monkeypatch, model, rtx_options_shown, dlss5_options_shown
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
     panel = panel_factory()
     panel.set_view("advanced")
     panel.show_tab("upscale")
@@ -179,6 +191,7 @@ def test_upscale_options_show_for_the_chosen_model(panel_factory, show_window, m
 
     assert visible("upscale_height") and visible("upscale_strength")
     assert visible("upscale_rtx_quality") is rtx_options_shown
+    assert visible("upscale_dlss5_preset") is visible("upscale_dlss5_intensity") is dlss5_options_shown
     _apply(panel, AppSettings())
     assert not visible("upscale_height")
 

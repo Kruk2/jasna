@@ -33,6 +33,9 @@ from jasna.session_config import (
     SD15_DEFAULT_VARIANTS,
     TVAI_DEFAULT_ARGS,
     TVAI_DEFAULT_FFMPEG_PATH,
+    UPSCALE_DLSS5_DEFAULT_INTENSITY,
+    UPSCALE_DLSS5_DEFAULT_PRESET,
+    UPSCALE_DLSS5_DEFAULT_STYLE,
     UPSCALE_RTX_DEFAULT_DEBLUR,
     UPSCALE_RTX_DEFAULT_DENOISE,
     UPSCALE_RTX_DEFAULT_QUALITY,
@@ -173,12 +176,15 @@ class AppSettings:
     rtx_deblur: str = RTX_DEFAULT_DEBLUR  # none, low, medium, high, ultra
 
     # Whole-video upscaling
-    upscale_model: str = "none"  # none, span, rtx-super-res
+    upscale_model: str = "none"  # none, span, realplksr, rtx-super-res, dlss5
     upscale_height: int = DEFAULT_UPSCALE_HEIGHT
     upscale_strength: float = DEFAULT_UPSCALE_STRENGTH
     upscale_rtx_quality: str = UPSCALE_RTX_DEFAULT_QUALITY
     upscale_rtx_denoise: str = UPSCALE_RTX_DEFAULT_DENOISE
     upscale_rtx_deblur: str = UPSCALE_RTX_DEFAULT_DEBLUR
+    upscale_dlss5_preset: str = UPSCALE_DLSS5_DEFAULT_PRESET
+    upscale_dlss5_style: str = UPSCALE_DLSS5_DEFAULT_STYLE
+    upscale_dlss5_intensity: float = UPSCALE_DLSS5_DEFAULT_INTENSITY
     
     # Detection
     detection_model: str = DEFAULT_DETECTION_MODEL_NAME  # RF-DETR, Lada YOLO, or ZeLeFans VR YOLO registry name

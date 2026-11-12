@@ -105,8 +105,8 @@ Videos that are already this tall are not upscaled.
   RTX 5090, so a long video takes a while; preparing it takes about a minute.
 - **RTX Super Res** (`rtx-super-res`): NVIDIA only, very fast. It can also
   remove noise or blur first (`--upscale-rtx-denoise`, `--upscale-rtx-deblur`).
-- **DLSS 5** (`dlss5`, command line only, Windows with an RTX 30-series or newer
-  GPU; RTX 30 is slow): NVIDIA DLSS 5 also reworks lighting and surfaces, so
+- **DLSS 5** (`dlss5`, Windows with an RTX 30-series or newer GPU; RTX 30 is
+  slow): NVIDIA DLSS 5 also reworks lighting and surfaces, so
   colors and skin can change. Jasna doesn't include it: the first time, Jasna
   offers to download the unofficial DLSS 5 Visual Enhancer v3.0 (467 MB) from
   GitHub and keeps its runtime in `model_weights/dlss5`. `--upscale-dlss5-preset` picks the upscaling model
