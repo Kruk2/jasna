@@ -538,3 +538,26 @@ def test_cli_asks_before_downloading_the_dlss5_runtime(monkeypatch, tmp_path):
         (tmp_path / name).touch()
     main._ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
     assert len(asked) == 1
+
+
+@pytest.mark.parametrize("model", sorted(UPSCALE_NETWORKS))
+def test_without_tensorrt_the_pytorch_network_upscales_in_as_many_passes_as_needed(model):
+    from jasna.upscale.network import NetworkFrameUpscaler
+
+    network = UPSCALE_NETWORKS[model]
+    if not (REPO / network.weights_path).exists():
+        pytest.skip(f"needs the {model} weights in model_weights")
+    torch.manual_seed(0)
+    frame = (torch.rand(3, 18, 32) * 255).to(torch.uint8)
+    output = (32 * network.scale**2, 18 * network.scale**2)
+    upscaler = NetworkFrameUpscaler(
+        network, torch.device("cpu"), source_size=(32, 18), output_size=output, fp16=False, strength=1.0
+    )
+
+    upscaled = upscaler(frame)
+
+    module = network.network()
+    with torch.no_grad():
+        reference = module(module(frame[None].float() / 255.0).clamp(0, 1)).clamp(0, 1).mul(255).round()[0]
+    assert tuple(upscaled.shape) == (3, output[1], output[0]) and upscaled.dtype == torch.uint8
+    assert (upscaled.float() - reference).abs().max().item() <= 1.0
