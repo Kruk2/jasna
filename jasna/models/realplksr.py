@@ -22,6 +22,22 @@ def _conv(weights: Mapping[str, torch.Tensor], name: str) -> nn.Conv2d:
     return conv
 
 
+def group_norm(features: torch.Tensor, norm: nn.GroupNorm) -> torch.Tensor:
+    """``norm(features)`` as one scale and shift per channel from fp32 group statistics: ROCm's
+    group norm kernel takes about 4x as long. ONNX exports keep the GroupNorm, which TensorRT fuses
+    (1.6x faster than this form there)."""
+    if torch.onnx.is_in_onnx_export():
+        return norm(features)
+    batch, channels = features.shape[:2]
+    groups = norm.num_groups
+    var, mean = torch.var_mean(features.reshape(batch, groups, -1).float(), dim=2, keepdim=True, correction=0)
+    scale = norm.weight.float().view(1, groups, -1) * torch.rsqrt(var + norm.eps)
+    shift = norm.bias.float().view(1, groups, -1) - mean * scale
+    return torch.addcmul(
+        shift.reshape(batch, channels, 1, 1).to(features.dtype), features, scale.reshape(batch, channels, 1, 1).to(features.dtype)
+    )
+
+
 class _Block(nn.Module):
     def __init__(self, weights: Mapping[str, torch.Tensor], name: str) -> None:
         super().__init__()
@@ -40,7 +56,7 @@ class _Block(nn.Module):
         mixed = self.mix_out(F.mish(self.mix_in(features)))
         mixed = torch.cat([self.large_kernel(mixed[:, : self.partial]), mixed[:, self.partial :]], 1)
         mixed = mixed * torch.sigmoid(self.attention(mixed))
-        return self.norm(self.refine(mixed)) + features
+        return group_norm(self.refine(mixed), self.norm) + features
 
 
 class RealPlksr(nn.Module):

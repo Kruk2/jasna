@@ -373,6 +373,40 @@ def _realplksr_weights(*, blocks: int, dim: int, scale: int) -> dict[str, torch.
     return weights
 
 
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16])
+def test_realplksr_group_norm_matches_torch_group_norm(dtype):
+    from jasna.models.realplksr import group_norm
+
+    generator = torch.Generator().manual_seed(0)
+    norm = torch.nn.GroupNorm(4, 64)
+    with torch.no_grad():
+        norm.weight.copy_(torch.randn(64, generator=generator))
+        norm.bias.copy_(torch.randn(64, generator=generator))
+    features = torch.randn(2, 64, 9, 13, generator=generator) * 3 + 1
+
+    expected = norm(features)
+    actual = group_norm(features.to(dtype), norm.to(dtype)).float()
+
+    assert torch.allclose(actual, expected, atol=1e-5 if dtype == torch.float32 else 2e-2)
+
+
+def test_realplksr_exports_its_group_norms_for_tensorrt_to_fuse():
+    import io
+
+    onnx = pytest.importorskip("onnx")
+    from jasna.models.realplksr import RealPlksr
+
+    exported = io.BytesIO()
+    with torch.no_grad():
+        torch.onnx.export(
+            RealPlksr(_realplksr_weights(blocks=2, dim=8, scale=2), scale=2), (torch.zeros(1, 3, 8, 12),), exported,
+            input_names=["image"], output_names=["upscaled"], opset_version=17, dynamo=False,
+        )
+
+    operators = {node.op_type for node in onnx.load_from_string(exported.getvalue()).graph.node}
+    assert "InstanceNormalization" in operators and "ReduceMean" not in operators
+
+
 def test_realplksr_adds_its_detail_to_a_nearest_neighbour_upscale():
     from jasna.models.realplksr import RealPlksr
 
