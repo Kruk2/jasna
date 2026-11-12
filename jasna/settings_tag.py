@@ -42,6 +42,19 @@ def _secondary_settings(config: SessionConfig) -> dict[str, object]:
     return {"name": name}
 
 
+def _upscale_settings(config: SessionConfig) -> dict[str, object] | None:
+    if config.upscale_model == "none":
+        return None
+    settings: dict[str, object] = {
+        "model": config.upscale_model, "height": config.upscale_height, "strength": config.upscale_strength,
+    }
+    if config.upscale_model == "rtx-super-res":
+        settings.update(
+            quality=config.upscale_rtx_quality, denoise=config.upscale_rtx_denoise, deblur=config.upscale_rtx_deblur
+        )
+    return settings
+
+
 def _segments_summary(segments: tuple[SegmentRange, ...]) -> dict[str, object]:
     """Per model: how many ranges and seconds, plus every LTX seed. Fixed size, so a job with
     hundreds of ranges keeps a short tag (the smart-render mux passes it on a command line)."""
@@ -128,6 +141,7 @@ def job_settings(
         "sharpen": config.sharpen_strength,
         "retarget_high_fps": config.retarget_high_fps,
         "frame_generation": config.frame_generation,
+        "upscale": _upscale_settings(config),
     }
     return settings
 

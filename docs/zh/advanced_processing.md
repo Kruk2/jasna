@@ -74,6 +74,26 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
 码率越多。如果结果变差，请同时调低 CQ。预览中不显示锐化。有[选定区间](segments.md)时，
 区间之间的部分会重新编码而不是复制，让锐化覆盖整个视频。
 
+## 放大整个视频
+
+**放大**标签页中的**放大视频**（`--upscale`）会把整个保存的视频放大并变清晰，而不只是
+修复区域。选择输出高度（`--upscale-height`：1080p、1440p 或 4K），宽度按画面比例变化。
+已经达到这个高度的视频不会放大。
+
+- **SPAN**（`span`）：快速的 AI 放大。支持 NVIDIA 和 AMD。在 NVIDIA 上，每种新的视频
+  尺寸会先准备一次，约需半分钟。
+- **RTX Super Res**（`rtx-super-res`）：仅限 NVIDIA，非常快。还可以先去除噪点或模糊
+  （`--upscale-rtx-denoise`、`--upscale-rtx-deblur`）。
+
+```bash
+jasna --input in.mp4 --output out.mp4 --restoration-model-name ltx --upscale span --upscale-height 2160
+```
+
+**强度**（`--upscale-strength`，0–1）调低后会混入普通缩放，画面更柔和自然。4K 需要更大的
+文件，所以 Jasna 会相应提高码率上限。BasicVSR++ 和 LTX 都可以使用。会处理整个视频，
+所以不能与[选定区间](segments.md)一起使用，并跳过**仅大马赛克用 LTX**。不支持流媒体。
+预览中不显示。
+
 ## 编码器质量与自定义设置
 
 **CQ**（`--cq`）设置质量。数值越低，质量越好，文件越大。Jasna 还会限制输出大小，

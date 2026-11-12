@@ -219,7 +219,7 @@ jasna --input input_folder --output output_folder
 - [调整显存和 GPU 占用](docs/zh/tuning.md)：片段大小、时间重叠、显存不足时
   怎么办。
 - [高级处理](docs/zh/advanced_processing.md)：降噪、60→30 FPS、色彩 LUT、
-  锐化、编码器质量、视频中保存的设置、队列完成后的操作。
+  锐化、放大整个视频、编码器质量、视频中保存的设置、队列完成后的操作。
 - [流媒体](docs/zh/streaming.md)：在浏览器或 Stash 中观看。
 - [云 GPU](docs/zh/cloud.md)：在租用的 GPU（RunPod、Vast）上运行 Jasna。
 - [CLI 参考](docs/zh/cli.md)：所有命令行选项。

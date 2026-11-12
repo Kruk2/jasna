@@ -2,6 +2,7 @@
 
 - `Apache-2.0.txt`: VALI, RF-DETR, OpenMMLab MMagic, and other Apache-2.0 components.
 - `BSD-3-Clause.txt`: PyAV.
+- `CC-BY-4.0.txt`: the NomosUni SPAN 2x upscaler weights.
 - `GPL-3.0.txt`: the GPLv3 FFmpeg libraries and command-line tools.
 - `LTX-2.x-Community-License.txt`: Lightricks LTX-2.5 code ported into
   `jasna/ltx/` and `jasna/models/ltx_vae/`, and the LTX restoration model weights.

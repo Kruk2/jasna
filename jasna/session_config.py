@@ -36,6 +36,9 @@ LtxVaeName = Literal["auto", "full", "half", "max"]
 """An LTX video encoder or decoder size; "auto" is the model's own default."""
 DecodeBackendName = Literal["auto", "vali", "pyav-hw", "pyav-sw"]
 FrameGenerationName = Literal["none", "2x"]
+UpscaleModelName = Literal["none", "rtx-super-res", "span"]
+"""Whole-frame upscaling before the encoder: NVIDIA RTX Super Res or the SPAN network."""
+UPSCALE_HEIGHTS = (1080, 1440, 2160)
 
 # Option defaults shared by the CLI (``jasna.main.build_parser``) and the GUI (``AppSettings``).
 DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
@@ -54,6 +57,11 @@ RTX_DEFAULT_SCALE = 4
 RTX_DEFAULT_QUALITY: RtxQualityName = "high"
 RTX_DEFAULT_DENOISE: RtxLevelName = "medium"
 RTX_DEFAULT_DEBLUR: RtxLevelName = "none"
+DEFAULT_UPSCALE_HEIGHT = 2160
+DEFAULT_UPSCALE_STRENGTH = 1.0
+UPSCALE_RTX_DEFAULT_QUALITY: RtxQualityName = "high"
+UPSCALE_RTX_DEFAULT_DENOISE: RtxLevelName = "none"
+UPSCALE_RTX_DEFAULT_DEBLUR: RtxLevelName = "none"
 SD15_DEFAULT_STEPS = 25
 SD15_DEFAULT_STRENGTH = 0.6
 SD15_DEFAULT_SEED = 0
@@ -102,6 +110,12 @@ class SessionConfig:
     lut_path: str | None
     retarget_high_fps: bool
     frame_generation: FrameGenerationName
+    upscale_model: UpscaleModelName
+    upscale_height: int
+    upscale_strength: float
+    upscale_rtx_quality: RtxQualityName
+    upscale_rtx_denoise: RtxLevelName
+    upscale_rtx_deblur: RtxLevelName
     disable_progress: bool
     working_dir: Path | None
     vr_projection: VrProjectionName
@@ -136,6 +150,10 @@ class SessionConfig:
             raise ValueError("Detection score threshold must be in [0, 1]")
         if not 0.0 <= self.sharpen_strength <= 1.0:
             raise ValueError("Sharpening must be in [0, 1]")
+        if self.upscale_height not in UPSCALE_HEIGHTS:
+            raise ValueError(f"Upscale height must be one of {', '.join(map(str, UPSCALE_HEIGHTS))}")
+        if not 0.0 <= self.upscale_strength <= 1.0:
+            raise ValueError("Upscale strength must be in [0, 1]")
 
 
 def ltx_unsupported_options(*, auto_split: bool, secondary_restoration: str, denoise_strength: str) -> tuple[str, ...]:

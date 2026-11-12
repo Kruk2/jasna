@@ -8,6 +8,7 @@ from jasna.accelerator import AcceleratorVendor
 from jasna.gui.models import AppSettings, PresetManager
 from jasna.gui.settings_sections.detection import DetectionSection
 from jasna.gui.settings_sections.encoding import EncodingSection
+from jasna.gui.settings_sections.frame_upscale import FrameUpscaleSection
 from jasna.gui.settings_sections.image_restoration import ImageRestorationSection
 from jasna.gui.settings_sections.post_export import PostExportSection
 from jasna.gui.settings_sections.processing import ProcessingSection, decode_backends
@@ -66,6 +67,12 @@ _NON_DEFAULT_SETTINGS = AppSettings(
     rtx_quality="ultra",
     rtx_denoise="none",
     rtx_deblur="low",
+    upscale_model="rtx-super-res",
+    upscale_height=1440,
+    upscale_strength=0.6,
+    upscale_rtx_quality="ultra",
+    upscale_rtx_denoise="low",
+    upscale_rtx_deblur="medium",
     detection_model="rfdetr-v6-large",
     detection_score_threshold=0.5,
     max_detection_gap=3,
@@ -109,6 +116,8 @@ _NON_DEFAULT_SETTINGS = AppSettings(
             ltx_vae_decoder="half",
             decode_backend="vali",
             encoder_cq=28,
+            upscale_model="span",
+            upscale_height=1080,
         ),
     ],
     ids=["standard", "ltx"],
@@ -133,6 +142,45 @@ def test_frame_generation_is_off_and_locked_on_a_gpu_without_it(panel_factory) -
     assert panel.get_settings().frame_generation == "none"
     panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=False, frame_generation=True)
     assert panel._widgets["frame_generation"].cget("state") == "normal"
+
+
+@pytest.mark.parametrize(
+    ("vendor", "offered"),
+    [
+        (AcceleratorVendor.NVIDIA, ["none", "span", "rtx-super-res"]),
+        (AcceleratorVendor.AMD, ["none", "span"]),
+        (AcceleratorVendor.CPU, ["none"]),
+    ],
+)
+def test_upscale_models_follow_the_gpu(panel_factory, vendor, offered) -> None:
+    panel = panel_factory()
+    _apply(panel, replace(AppSettings(), upscale_model="rtx-super-res"))
+
+    panel.set_gpu_support(vendor=vendor, blackwell=False, frame_generation=False)
+
+    menu = panel._widgets["upscale_model"]
+    assert list(menu.cget("values")) == [menu._value_to_label[value] for value in offered]
+    assert panel.get_settings().upscale_model == ("rtx-super-res" if "rtx-super-res" in offered else "none")
+
+
+@pytest.mark.parametrize(("model", "rtx_options_shown"), [("span", False), ("rtx-super-res", True)])
+def test_upscale_options_show_for_the_chosen_model(panel_factory, show_window, model, rtx_options_shown) -> None:
+    panel = panel_factory()
+    panel.set_view("advanced")
+    panel.show_tab("upscale")
+    panel.pack(fill="both", expand=True)
+    window = panel.winfo_toplevel()
+
+    def visible(key: str) -> bool:
+        show_window(window)
+        return bool(panel._widgets[key].winfo_ismapped())
+
+    _apply(panel, replace(AppSettings(), upscale_model=model))
+
+    assert visible("upscale_height") and visible("upscale_strength")
+    assert visible("upscale_rtx_quality") is rtx_options_shown
+    _apply(panel, AppSettings())
+    assert not visible("upscale_height")
 
 
 def test_sections_collect_every_setting_except_runtime_ones(panel_factory) -> None:
@@ -560,7 +608,7 @@ def test_simple_view_keeps_the_ltx_model_choice_and_hides_its_tuning(panel_facto
     [
         ("model", [RestorationModelSection, ProcessingSection]),
         ("detection", [DetectionSection]),
-        ("upscale", [SecondarySection]),
+        ("upscale", [FrameUpscaleSection, SecondarySection]),
         ("output", [EncodingSection, PostExportSection]),
         ("images", [ImageRestorationSection]),
     ],
@@ -584,7 +632,7 @@ def _offered_tabs(panel) -> list[str]:
 @pytest.mark.parametrize(
     ("view", "tabs"),
     [
-        ("simple", ["model", "output", "images"]),
+        ("simple", ["model", "upscale", "output", "images"]),
         ("advanced", ["model", "detection", "upscale", "output", "images"]),
     ],
 )

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from jasna.progressbar import ProgressCallback
     from jasna.restorer.restoration_pipeline import RestorationPipeline
     from jasna.segments import SegmentRange
+    from jasna.upscale import FrameUpscaler, Size
 
     DetectionModel = RfDetrMosaicDetectionModel | YoloMosaicDetectionModel
 
@@ -150,6 +151,66 @@ def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
     raise ValueError(f"Unsupported secondary restoration: {config.secondary_restoration}")
 
 
+def frame_upscale_size(config: SessionConfig, width: int, height: int) -> "Size | None":
+    """The size offline exports of a ``width`` x ``height`` video are upscaled to, or ``None``."""
+    from jasna.upscale import upscaled_size
+
+    if config.upscale_model == "none":
+        return None
+    return upscaled_size(width, height, config.upscale_height)
+
+
+def ensure_frame_upscale_engines(
+    config: SessionConfig,
+    source_size: "Size",
+    output_size: "Size",
+    *,
+    log_callback: Callable[[str], None] | None,
+) -> None:
+    """Compile the TensorRT engines the SPAN upscaler needs for this source size (NVIDIA)."""
+    from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
+    from jasna.upscale.span import span_input_sizes
+
+    if config.upscale_model != "span":
+        return
+    ensure_engines_compiled(
+        EngineCompilationRequest(
+            device=config.device,
+            fp16=bool(config.fp16),
+            span_input_sizes=list(span_input_sizes(source_size, output_size)),
+        ),
+        log_callback=log_callback,
+    )
+
+
+def build_frame_upscaler(
+    config: SessionConfig, device: "torch.device", source_size: "Size", output_size: "Size"
+) -> "FrameUpscaler":
+    if config.upscale_model == "rtx-super-res":
+        from jasna.upscale.rtx import RtxFrameUpscaler
+
+        return RtxFrameUpscaler(
+            device,
+            source_size=source_size,
+            output_size=output_size,
+            quality=config.upscale_rtx_quality,
+            denoise=config.upscale_rtx_denoise,
+            deblur=config.upscale_rtx_deblur,
+            strength=config.upscale_strength,
+        )
+    if config.upscale_model == "span":
+        from jasna.upscale.span import SpanFrameUpscaler
+
+        return SpanFrameUpscaler(
+            device,
+            source_size=source_size,
+            output_size=output_size,
+            fp16=bool(config.fp16),
+            strength=config.upscale_strength,
+        )
+    raise ValueError(f"Unsupported upscale model: {config.upscale_model}")
+
+
 def build_restoration_session(
     config: SessionConfig,
     *,
@@ -170,6 +231,8 @@ def build_restoration_session(
         raise ValueError(
             f"Secondary restoration '{config.secondary_restoration}' is not available in the AMD build yet"
         )
+    if is_amd_device(device) and config.upscale_model == "rtx-super-res":
+        raise ValueError(UPSCALE_RTX_NEEDS_NVIDIA)
     if config.restoration_model_name == "ltx" and ltx_unsupported_options(
         auto_split=config.ltx_auto_split_percent is not None,
         secondary_restoration=config.secondary_restoration,
@@ -245,6 +308,7 @@ def _build_basicvsrpp_pipeline(
 
 LTX_FAST_NEEDS_BLACKWELL = "The fast LTX model needs an RTX 50-series (Blackwell) GPU"
 FRAME_GENERATION_NEEDS_RTX_40 = "Frame generation needs an NVIDIA RTX 40-series or newer GPU"
+UPSCALE_RTX_NEEDS_NVIDIA = "RTX Super Res upscaling needs an NVIDIA GPU"
 
 
 def _ltx_model_files(
@@ -338,6 +402,9 @@ def splice_source(config: SessionConfig, source: Path, output: Path) -> SpliceSo
     if config.frame_generation != "none":
         # Copied parts keep the source frame rate, so they cannot sit next to doubled ones.
         raise SmartRenderCompatibilityError("Smart rendering cannot be combined with frame generation")
+    if config.upscale_model != "none":
+        # Copied parts keep the source size, so they cannot sit next to upscaled ones.
+        raise SmartRenderCompatibilityError("Smart rendering cannot be combined with upscaling")
     metadata = get_video_meta_data(str(source))
     codec = canonical_codec(metadata.codec_name)
     validate_smart_render(metadata, output_path=output, codec=codec, retarget_high_fps=config.retarget_high_fps)

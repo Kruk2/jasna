@@ -230,7 +230,7 @@ jasna --input input_folder --output output_folder
 - [VRAM と GPU 使用量の調整](docs/ja/tuning.md): クリップサイズ、
   オーバーラップ、VRAM が足りないときの対処。
 - [高度な処理](docs/ja/advanced_processing.md): ノイズ除去、60→30 FPS、
-  カラー LUT、シャープネス、エンコーダー品質、動画に保存される設定、
+  カラー LUT、シャープネス、動画全体の拡大、エンコーダー品質、動画に保存される設定、
   キュー完了後のアクション。
 - [ストリーミング](docs/ja/streaming.md): ブラウザーや Stash で見る。
 - [クラウド GPU](docs/ja/cloud.md): レンタル GPU（RunPod、Vast）で Jasna を使う。
