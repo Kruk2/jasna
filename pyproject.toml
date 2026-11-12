@@ -6,14 +6,17 @@ build-backend = "setuptools.build_meta"
 name = "jasna"
 version = "0.12.3"
 description = "Jasna"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
-  # Exact pin: the release VALI wheel is built against the same pyav-ffmpeg libraries
-  # this wheel bundles, so bump both together.
-  "av==18.1.0",
+  # Python 3.10 support was dropped by PyAV 18; its 16.1 wheel supports 3.10.
+  # Keep the release-tested PyAV/VALI pin for Python >=3.11.
+  "av==16.1.0; python_version < '3.11'",
+  "av==18.1.0; python_version >= '3.11'",
   "numpy>=1.26",
   "psutil",
-  "diffusers",
+  # Diffusers 0.41+ requires Python >=3.11.
+  "diffusers<0.41; python_version < '3.11'",
+  "diffusers; python_version >= '3.11'",
   "huggingface-hub",
   "safetensors>=0.6",
   "requests",
