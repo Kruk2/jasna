@@ -4,17 +4,26 @@ NVIDIA has no public DLSS 5 SDK, so Jasna drives the video worker of the communi
 Visual Enhancer: its ``nvngx.dll`` (an executable despite the name) hosts ReShade and the RenoDX
 DLSS 5 add-on, runs DLSS Super Resolution and then DLSS 5 neural rendering on Direct3D 12. The
 user copies that worker with its runtime files into ``model_weights/dlss5``. Frames travel over
-the worker's stdin/stdout as RGBA8 with optical-flow motion vectors, since a video has none."""
+the worker's stdin/stdout as RGBA8 with optical-flow motion vectors, since a video has none.
+Jasna does not ship or host any of it: the CLI offers to download the upstream release."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import shutil
+import ssl
 import struct
 import subprocess
 import sys
 import threading
+import urllib.request
+import zipfile
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
+
+import certifi
 
 import cv2
 import numpy as np
@@ -25,6 +34,13 @@ from jasna.engine_paths import model_weights_dir
 from jasna.upscale import Size, finish_frame
 
 DLSS5_RUNTIME_FILES = ("nvngx.dll", "dxgi.dll", "renodx-dlss5.addon64", "nvngx_dlss.dll", "nvngx_dlssnr.dll")
+DLSS5_RELEASE_PAGE = "https://github.com/Merserk/dlss5-visual-enhancer/releases/tag/v3.0"
+DLSS5_RELEASE_URL = (
+    "https://github.com/Merserk/dlss5-visual-enhancer/releases/download/v3.0/DLSS.5.Visual.Enhancer.v3.0.zip"
+)
+DLSS5_RELEASE_SIZE = 466_919_995
+DLSS5_RELEASE_SHA256 = "6f0590d81677484f4ecdfaa5c44fc2a0e1a3835d33eefc59d656e6c3bcf35f6a"
+_RELEASE_RUNTIME_FOLDER = "bin/runtime/"
 DLSS5_PRESETS = {"default": 0, "j": 10, "k": 11, "l": 12, "m": 13}
 DLSS5_STYLES = {"default": 0, "natural": 1, "cinematic": 2}
 # DLSS Super Resolution modes, smallest scale first: (scale, the worker's mode number).
@@ -68,6 +84,36 @@ def dlss5_unavailable_reason(device: torch.device, runtime_dir: Path) -> str | N
     if missing:
         return f"DLSS 5 upscaling needs these runtime files in {runtime_dir}: {', '.join(missing)}"
     return None
+
+
+def extract_dlss5_runtime(release: Path, runtime_dir: Path) -> None:
+    """Copy the worker and its runtime files out of the release archive into ``runtime_dir``."""
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(release) as archive:
+        for name in DLSS5_RUNTIME_FILES:
+            with archive.open(_RELEASE_RUNTIME_FOLDER + name) as source, (runtime_dir / name).open("wb") as target:
+                shutil.copyfileobj(source, target, 1 << 22)
+
+
+def download_dlss5_runtime(runtime_dir: Path, progress_callback: Callable[[int, int], None]) -> None:
+    """Download the DLSS 5 Visual Enhancer release, check its sha256 and extract the runtime."""
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    release = runtime_dir / "release.zip.part"
+    digest = hashlib.sha256()
+    received = 0
+    context = ssl.create_default_context(cafile=certifi.where())
+    with urllib.request.urlopen(DLSS5_RELEASE_URL, timeout=30, context=context) as response, release.open("wb") as out:
+        while chunk := response.read(1 << 22):
+            out.write(chunk)
+            digest.update(chunk)
+            received += len(chunk)
+            progress_callback(received, DLSS5_RELEASE_SIZE)
+    try:
+        if digest.hexdigest() != DLSS5_RELEASE_SHA256:
+            raise RuntimeError(f"The DLSS 5 download from {DLSS5_RELEASE_URL} does not match the expected release")
+        extract_dlss5_runtime(release, runtime_dir)
+    finally:
+        release.unlink()
 
 
 def _even(value: float) -> int:

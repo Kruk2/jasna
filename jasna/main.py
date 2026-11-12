@@ -993,6 +993,37 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
         download_files(directory, missing, lambda done, total: bar.update(done - bar.n), mirror_first=user_language() == "zh")
 
 
+def _ensure_dlss5_runtime(config: SessionConfig) -> None:
+    """Offer to download the DLSS 5 runtime, which Jasna does not ship, when the job needs it."""
+    if config.upscale_model != "dlss5" or sys.platform != "win32":
+        return
+    from jasna.upscale.dlss5 import (
+        DLSS5_RELEASE_PAGE,
+        DLSS5_RELEASE_SIZE,
+        DLSS5_RUNTIME_FILES,
+        download_dlss5_runtime,
+        dlss5_runtime_dir,
+    )
+
+    directory = dlss5_runtime_dir()
+    if all((directory / name).is_file() for name in DLSS5_RUNTIME_FILES):
+        return
+    size = f"{DLSS5_RELEASE_SIZE / 1e6:.0f} MB"
+    message = (
+        f"DLSS 5 is not part of Jasna. It runs an unofficial community runtime from {DLSS5_RELEASE_PAGE} "
+        f"(NVIDIA files modified to run outside games)."
+    )
+    answer = confirm_in_terminal(f"{message}\nDownload it ({size}) into {directory}? [y/N]: ")
+    if answer is None:
+        sys.exit(f"Error: {message} Run jasna in a terminal to download it ({size}).")
+    if not answer:
+        sys.exit(f"Error: {message} Copy {', '.join(DLSS5_RUNTIME_FILES)} from its bin/runtime folder into {directory}.")
+    from tqdm import tqdm
+
+    with tqdm(total=DLSS5_RELEASE_SIZE, unit="B", unit_scale=True, desc="DLSS 5 download") as bar:
+        download_dlss5_runtime(directory, lambda done, total: bar.update(done - bar.n))
+
+
 LTX_ONLY_ARG_DESTS = (
     "ltx_fast", "ltx_large_canvas", "ltx_overlap", "ltx_vae_encoder", "ltx_vae_decoder", "ltx_seed", "ltx_trial",
     "ltx_auto_split",
@@ -1289,6 +1320,7 @@ def _main() -> None:
         if segments_spec else None
     )
     _ensure_ltx_model(config, segment_job.splice_plan.segments if segment_job is not None else None)
+    _ensure_dlss5_runtime(config)
 
     from jasna.session_factory import build_job_pipeline, build_restoration_session, ltx_auto_split
 

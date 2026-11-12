@@ -36,7 +36,7 @@ CLI_HELP: dict[str, str] = {
         "about half a minute). realplksr: a slower AI upscaler that keeps more fine detail and cleans compression, "
         "NVIDIA and AMD. rtx-super-res: NVIDIA RTX Video Super Resolution, very fast, NVIDIA only. "
         "dlss5: NVIDIA DLSS 5, reworks lighting and surfaces while it upscales, slow, Windows with an RTX 30-series or newer GPU "
-        "only; put the DLSS 5 runtime files in model_weights/dlss5 first. "
+        "only; Jasna offers to download the unofficial DLSS 5 runtime (467 MB) the first time. "
         "Restores the whole video, so it can't be combined with --segments, --ltx-auto-split or --stream. "
         "(default: %(default)s)"
     ),

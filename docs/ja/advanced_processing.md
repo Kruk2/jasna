@@ -106,9 +106,9 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
   ブレを取ることもできます（`--upscale-rtx-denoise`、`--upscale-rtx-deblur`）。
 - **DLSS 5**（`dlss5`、コマンドラインのみ、Windows と RTX 30 シリーズ以降の GPU。
   RTX 30 は低速）：NVIDIA DLSS 5 は光や質感も描き直すため、色や肌が変わることが
-  あります。Jasna には含まれていません。DLSS 5 Visual Enhancer v3.0 の
-  `bin/runtime` フォルダーから `nvngx.dll`、`dxgi.dll`、`renodx-dlss5.addon64`、
-  `nvngx_dlss.dll`、`nvngx_dlssnr.dll` を `model_weights/dlss5` にコピーしてください。
+  あります。Jasna には含まれていません。初回に、非公式の DLSS 5 Visual Enhancer
+  v3.0（467 MB）を GitHub からダウンロードするか確認し、そのランタイムを
+  `model_weights/dlss5` に保存します。
   `--upscale-dlss5-preset` で拡大モデル（`l` と `m` は質感をより多く再現）、
   `--upscale-dlss5-style` で見た目、`--upscale-dlss5-intensity`（0〜2）で描き直しの
   強さを選びます。

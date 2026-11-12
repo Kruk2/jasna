@@ -476,3 +476,65 @@ def test_dlss5_upscales_frames_with_the_worker():
         pytest.skip("needs the DLSS 5 runtime in model_weights/dlss5")
     result = subprocess.run([sys.executable, "-c", DLSS5_GPU_SCRIPT], capture_output=True, text=True, check=True, cwd=REPO)
     assert result.stdout.split("\n")[-2] == "True torch.uint8 True"
+
+
+def _release_zip(path: Path) -> bytes:
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as archive:
+        for name in DLSS5_RUNTIME_FILES:
+            archive.writestr(f"bin/runtime/{name}", f"runtime {name}")
+        archive.writestr("bin/python/python.exe", "not needed")
+    return path.read_bytes()
+
+
+@pytest.mark.parametrize("matches", [True, False])
+def test_the_dlss5_download_installs_only_the_runtime_of_the_expected_release(monkeypatch, tmp_path, matches):
+    import hashlib
+    import io
+
+    from jasna.upscale import dlss5
+
+    release = _release_zip(tmp_path / "release.zip")
+    expected = hashlib.sha256(release if matches else b"another release").hexdigest()
+    monkeypatch.setattr(dlss5, "DLSS5_RELEASE_SHA256", expected)
+    monkeypatch.setattr(dlss5.urllib.request, "urlopen", lambda url, **kwargs: io.BytesIO(release))
+    runtime = tmp_path / "dlss5"
+    progress = []
+
+    if matches:
+        dlss5.download_dlss5_runtime(runtime, lambda done, total: progress.append(done))
+    else:
+        with pytest.raises(RuntimeError, match="does not match"):
+            dlss5.download_dlss5_runtime(runtime, lambda done, total: progress.append(done))
+
+    installed = sorted(path.name for path in runtime.iterdir())
+    assert installed == (sorted(DLSS5_RUNTIME_FILES) if matches else [])
+    assert progress[-1] == len(release)
+    if matches:
+        assert (runtime / "nvngx_dlssnr.dll").read_text() == "runtime nvngx_dlssnr.dll"
+
+
+def test_cli_asks_before_downloading_the_dlss5_runtime(monkeypatch, tmp_path):
+    from jasna import main
+    from jasna.upscale import dlss5
+
+    asked = []
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(dlss5, "dlss5_runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or "n")
+    main._ensure_dlss5_runtime(session_config(upscale_model="span"))
+    assert asked == []
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    with pytest.raises(SystemExit, match="Run jasna in a terminal"):
+        main._ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    with pytest.raises(SystemExit, match="bin/runtime"):
+        main._ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
+    assert "unofficial" in asked[0] and "467 MB" in asked[0]
+
+    for name in DLSS5_RUNTIME_FILES:
+        (tmp_path / name).touch()
+    main._ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
+    assert len(asked) == 1
