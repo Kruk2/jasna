@@ -34,8 +34,9 @@ class EngineCompilationRequest:
 
     unet4x: bool = False
 
-    span_input_sizes: list[tuple[int, int]] = field(default_factory=list)
-    """``(width, height)`` of each SPAN upscale pass that needs an engine."""
+    upscale_model: str = ""
+    upscale_input_sizes: list[tuple[int, int]] = field(default_factory=list)
+    """``(width, height)`` of each pass of the ``upscale_model`` network that needs an engine."""
 
     def to_json(self) -> str:
         return json.dumps(self.__dict__)
@@ -43,7 +44,7 @@ class EngineCompilationRequest:
     @staticmethod
     def from_json(s: str) -> EngineCompilationRequest:
         fields = json.loads(s)
-        fields["span_input_sizes"] = [tuple(size) for size in fields.get("span_input_sizes", [])]
+        fields["upscale_input_sizes"] = [tuple(size) for size in fields.get("upscale_input_sizes", [])]
         return EngineCompilationRequest(**fields)
 
 
@@ -115,7 +116,7 @@ class _MissingEngines(typing.NamedTuple):
     basicvsrpp: bool
     detection: bool
     unet4x: bool
-    span_input_sizes: tuple[tuple[int, int], ...] = ()
+    upscale_input_sizes: tuple[tuple[int, int], ...] = ()
 
 
 def _missing_engines(req: EngineCompilationRequest, *, nvidia: bool) -> _MissingEngines:
@@ -130,14 +131,15 @@ def _missing_engines(req: EngineCompilationRequest, *, nvidia: bool) -> _Missing
             req.device,
         ),
         unet4x=nvidia and req.unet4x and not _unet4x_engine_exists(req.fp16),
-        span_input_sizes=_missing_span_engines(req) if nvidia else (),
+        upscale_input_sizes=_missing_upscale_engines(req) if nvidia and req.upscale_model else (),
     )
 
 
-def _missing_span_engines(req: EngineCompilationRequest) -> tuple[tuple[int, int], ...]:
-    from jasna.upscale.span import missing_span_engines
+def _missing_upscale_engines(req: EngineCompilationRequest) -> tuple[tuple[int, int], ...]:
+    from jasna.upscale.network import UPSCALE_NETWORKS, missing_network_engines
 
-    return missing_span_engines(tuple(req.span_input_sizes), fp16=req.fp16)
+    network = UPSCALE_NETWORKS[req.upscale_model]
+    return missing_network_engines(network, tuple(req.upscale_input_sizes), fp16=req.fp16)
 
 
 def ensure_engines_compiled(
@@ -265,11 +267,11 @@ def _subprocess_compile(req: EngineCompilationRequest) -> None:
         compile_unet4x_engine(device, fp16=req.fp16)
         print("Unet4x engine compiled.")
 
-    for width, height in missing.span_input_sizes:
-        from jasna.upscale.span import compile_span_engine
-        print(f"Compiling SPAN upscale engine for {width}x{height}...")
-        compile_span_engine((width, height), device, fp16=req.fp16)
-        print("SPAN upscale engine compiled.")
+    for width, height in missing.upscale_input_sizes:
+        from jasna.upscale.network import UPSCALE_NETWORKS, compile_network_engine
+        print(f"Compiling {req.upscale_model} upscale engine for {width}x{height}...")
+        compile_network_engine(UPSCALE_NETWORKS[req.upscale_model], (width, height), device, fp16=req.fp16)
+        print("Upscale engine compiled.")
 
 
 if __name__ == "__main__":

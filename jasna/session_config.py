@@ -36,8 +36,9 @@ LtxVaeName = Literal["auto", "full", "half", "max"]
 """An LTX video encoder or decoder size; "auto" is the model's own default."""
 DecodeBackendName = Literal["auto", "vali", "pyav-hw", "pyav-sw"]
 FrameGenerationName = Literal["none", "2x"]
-UpscaleModelName = Literal["none", "rtx-super-res", "span"]
-"""Whole-frame upscaling before the encoder: NVIDIA RTX Super Res or the SPAN network."""
+UpscaleModelName = Literal["none", "rtx-super-res", "span", "realplksr"]
+"""Whole-frame upscaling before the encoder: NVIDIA RTX Super Res, the fast SPAN network or the
+slower, more detailed RealPLKSR network."""
 UPSCALE_HEIGHTS = (1080, 1440, 2160)
 
 # Option defaults shared by the CLI (``jasna.main.build_parser``) and the GUI (``AppSettings``).

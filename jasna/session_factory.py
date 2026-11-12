@@ -167,17 +167,19 @@ def ensure_frame_upscale_engines(
     *,
     log_callback: Callable[[str], None] | None,
 ) -> None:
-    """Compile the TensorRT engines the SPAN upscaler needs for this source size (NVIDIA)."""
+    """Compile the TensorRT engines a network upscaler needs for this source size (NVIDIA)."""
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
-    from jasna.upscale.span import span_input_sizes
+    from jasna.upscale.network import UPSCALE_NETWORKS, network_input_sizes
 
-    if config.upscale_model != "span":
+    network = UPSCALE_NETWORKS.get(config.upscale_model)
+    if network is None:
         return
     ensure_engines_compiled(
         EngineCompilationRequest(
             device=config.device,
             fp16=bool(config.fp16),
-            span_input_sizes=list(span_input_sizes(source_size, output_size)),
+            upscale_model=config.upscale_model,
+            upscale_input_sizes=list(network_input_sizes(network, source_size, output_size)),
         ),
         log_callback=log_callback,
     )
@@ -198,10 +200,11 @@ def build_frame_upscaler(
             deblur=config.upscale_rtx_deblur,
             strength=config.upscale_strength,
         )
-    if config.upscale_model == "span":
-        from jasna.upscale.span import SpanFrameUpscaler
+    from jasna.upscale.network import UPSCALE_NETWORKS, NetworkFrameUpscaler
 
-        return SpanFrameUpscaler(
+    if config.upscale_model in UPSCALE_NETWORKS:
+        return NetworkFrameUpscaler(
+            UPSCALE_NETWORKS[config.upscale_model],
             device,
             source_size=source_size,
             output_size=output_size,

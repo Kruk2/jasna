@@ -33,7 +33,8 @@ CLI_HELP: dict[str, str] = {
     "upscale": (
         "Upscale the whole video before saving it, so the output is bigger and sharper. "
         "span: a fast AI upscaler, works on NVIDIA and AMD (NVIDIA prepares it for each new video size once, "
-        "about half a minute). rtx-super-res: NVIDIA RTX Video Super Resolution, very fast, NVIDIA only. "
+        "about half a minute). realplksr: a slower AI upscaler that keeps more fine detail and cleans compression, "
+        "NVIDIA and AMD. rtx-super-res: NVIDIA RTX Video Super Resolution, very fast, NVIDIA only. "
         "Restores the whole video, so it can't be combined with --segments, --ltx-auto-split or --stream. "
         "(default: %(default)s)"
     ),

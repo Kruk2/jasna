@@ -58,6 +58,20 @@ Modified: `scripts/fuse_span_weights.py` folds each training-time convolution
 chain of the upstream checkpoint into the single convolution it computes at
 inference. The result computes the same picture.
 
+## NomosWebPhoto RealPLKSR 4x upscaler
+
+- Jasna model name: `realplksr` (whole-video upscaling)
+- File: `realplksr-nomoswebphoto-4x.safetensors`
+- Upstream: [`4xNomosWebPhoto_RealPLKSR`](https://github.com/Phhofm/models/releases/tag/4xNomosWebPhoto_RealPLKSR)
+  by Philip Hofmann
+- Upstream SHA-256: `a9db66c9b674c6a5025b6ef3bee71a57c33b8605d8a2de0980470f89002efbbe`
+- SHA-256: `9be0228f98156a100d6636d99b373ed2785b999723f9adc4cca504329ab157f2`
+- Architecture: RealPLKSR (Lee et al., PLKSR; neosr `realplksr` variant)
+- License: CC-BY-4.0 (`assets/licenses/CC-BY-4.0.txt`)
+- Copyright: Philip Hofmann
+
+The upstream checkpoint's weights are stored unchanged as safetensors.
+
 ## Jasna RF-DETR v6
 
 - Jasna model name: `rfdetr-v6`
