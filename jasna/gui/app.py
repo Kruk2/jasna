@@ -1122,6 +1122,8 @@ def run_gui():
         format='%(message)s',
         handlers=[logging.StreamHandler()]  # Temporary console output
     )
+    from jasna.media.ffmpeg_log import log_ffmpeg_errors
+    log_ffmpeg_errors()
 
     scaling.activate_static_dpi(_MIN_WINDOW_SIZE)
 
