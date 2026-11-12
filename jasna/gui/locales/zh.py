@@ -16,6 +16,8 @@ ZH = {
     "startup_clean": "请从干净的终端或桌面会话启动 Jasna。",
     "startup_integrity": "部分程序文件缺失或已被修改。",
     "startup_extract": "请重新解压完整的发行包。",
+    "startup_interrupted": "另一个程序在 Jasna 启动时把它停止了，通常是杀毒软件。",
+    "startup_antivirus": "请在杀毒软件中把 Jasna 文件夹添加为例外，然后重试。",
     "startup_stopped": "Jasna 在窗口打开前已停止。",
     "startup_terminal": "请从终端运行 Jasna 查看错误。",
     "startup_close": "关闭",

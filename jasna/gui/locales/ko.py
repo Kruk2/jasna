@@ -16,6 +16,8 @@ KO = {
     "startup_clean": "깨끗한 터미널이나 데스크톱 세션에서 실행하세요.",
     "startup_integrity": "일부 프로그램 파일이 없거나 변경되었습니다.",
     "startup_extract": "완전한 릴리스 파일을 다시 압축 해제하세요.",
+    "startup_interrupted": "백신 같은 다른 프로그램이 Jasna 시작을 중지했습니다.",
+    "startup_antivirus": "백신 프로그램에서 Jasna 폴더를 예외로 추가한 뒤 다시 실행하세요.",
     "startup_stopped": "창이 열리기 전에 Jasna가 종료되었습니다.",
     "startup_terminal": "터미널에서 Jasna를 실행해 오류를 확인하세요.",
     "startup_close": "닫기",
