@@ -16,6 +16,8 @@ EN = {
     "startup_clean": "Start Jasna from a clean terminal or desktop session.",
     "startup_integrity": "Some application files are missing or have changed.",
     "startup_extract": "Extract a fresh copy of the complete release.",
+    "startup_interrupted": "Another program stopped Jasna while it was starting, often an antivirus.",
+    "startup_antivirus": "Add the Jasna folder as an exception in your antivirus and try again.",
     "startup_stopped": "Jasna stopped before its window opened.",
     "startup_terminal": "Run Jasna from a terminal to see the error.",
     "startup_close": "Close",

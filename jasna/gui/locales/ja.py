@@ -16,6 +16,8 @@ JA = {
     "startup_clean": "クリーンなターミナルやデスクトップから起動してください。",
     "startup_integrity": "プログラムファイルが不足しているか変更されています。",
     "startup_extract": "完全なリリースをもう一度展開してください。",
+    "startup_interrupted": "ウイルス対策ソフトなど別のプログラムが Jasna の起動を止めました。",
+    "startup_antivirus": "ウイルス対策ソフトで Jasna フォルダーを除外に追加して、もう一度起動してください。",
     "startup_stopped": "画面を開く前に Jasna が停止しました。",
     "startup_terminal": "ターミナルから起動してエラーを確認してください。",
     "startup_close": "閉じる",
