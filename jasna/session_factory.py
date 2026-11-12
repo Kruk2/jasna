@@ -188,6 +188,19 @@ def ensure_frame_upscale_engines(
 def build_frame_upscaler(
     config: SessionConfig, device: "torch.device", source_size: "Size", output_size: "Size"
 ) -> "FrameUpscaler":
+    if config.upscale_model == "dlss5":
+        from jasna.upscale.dlss5 import Dlss5FrameUpscaler, dlss5_runtime_dir
+
+        return Dlss5FrameUpscaler(
+            device,
+            source_size=source_size,
+            output_size=output_size,
+            preset=config.upscale_dlss5_preset,
+            style=config.upscale_dlss5_style,
+            intensity=config.upscale_dlss5_intensity,
+            strength=config.upscale_strength,
+            runtime_dir=dlss5_runtime_dir(),
+        )
     if config.upscale_model == "rtx-super-res":
         from jasna.upscale.rtx import RtxFrameUpscaler
 
@@ -236,6 +249,12 @@ def build_restoration_session(
         )
     if is_amd_device(device) and config.upscale_model == "rtx-super-res":
         raise ValueError(UPSCALE_RTX_NEEDS_NVIDIA)
+    if config.upscale_model == "dlss5":
+        from jasna.upscale.dlss5 import dlss5_runtime_dir, dlss5_unavailable_reason
+
+        reason = dlss5_unavailable_reason(device, dlss5_runtime_dir())
+        if reason:
+            raise ValueError(reason)
     if config.restoration_model_name == "ltx" and ltx_unsupported_options(
         auto_split=config.ltx_auto_split_percent is not None,
         secondary_restoration=config.secondary_restoration,

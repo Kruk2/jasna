@@ -53,11 +53,16 @@ from jasna.session_config import (
     TVAI_DEFAULT_MODEL,
     TVAI_DEFAULT_SCALE,
     TVAI_DEFAULT_WORKERS,
+    UPSCALE_DLSS5_DEFAULT_INTENSITY,
+    UPSCALE_DLSS5_DEFAULT_PRESET,
+    UPSCALE_DLSS5_DEFAULT_STYLE,
     UPSCALE_HEIGHTS,
     UPSCALE_RTX_DEFAULT_DEBLUR,
     UPSCALE_RTX_DEFAULT_DENOISE,
     UPSCALE_RTX_DEFAULT_QUALITY,
     DecodeBackendName,
+    Dlss5PresetName,
+    Dlss5StyleName,
     LtxModelName,
     LtxVaeName,
     RestorationModelName,
@@ -164,6 +169,9 @@ def _session_config_from_args(
         upscale_rtx_quality=args.upscale_rtx_quality,
         upscale_rtx_denoise=args.upscale_rtx_denoise,
         upscale_rtx_deblur=args.upscale_rtx_deblur,
+        upscale_dlss5_preset=args.upscale_dlss5_preset,
+        upscale_dlss5_style=args.upscale_dlss5_style,
+        upscale_dlss5_intensity=float(args.upscale_dlss5_intensity),
         fmp4=bool(args.fmp4),
         disable_progress=bool(args.no_progress),
         working_dir=Path(args.working_directory) if args.working_directory else None,
@@ -477,6 +485,26 @@ def build_parser() -> argparse.ArgumentParser:
         default=UPSCALE_RTX_DEFAULT_DEBLUR,
         choices=list(get_args(RtxLevelName)),
         help=CLI_HELP["upscale_rtx_deblur"],
+    )
+    upscale.add_argument(
+        "--upscale-dlss5-preset",
+        type=str,
+        default=UPSCALE_DLSS5_DEFAULT_PRESET,
+        choices=list(get_args(Dlss5PresetName)),
+        help=CLI_HELP["upscale_dlss5_preset"],
+    )
+    upscale.add_argument(
+        "--upscale-dlss5-style",
+        type=str,
+        default=UPSCALE_DLSS5_DEFAULT_STYLE,
+        choices=list(get_args(Dlss5StyleName)),
+        help=CLI_HELP["upscale_dlss5_style"],
+    )
+    upscale.add_argument(
+        "--upscale-dlss5-intensity",
+        type=float,
+        default=UPSCALE_DLSS5_DEFAULT_INTENSITY,
+        help=CLI_HELP["upscale_dlss5_intensity"],
     )
 
     tvai = parser.add_argument_group("Topaz Video")

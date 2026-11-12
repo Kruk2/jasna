@@ -52,6 +52,11 @@ def _upscale_settings(config: SessionConfig) -> dict[str, object] | None:
         settings.update(
             quality=config.upscale_rtx_quality, denoise=config.upscale_rtx_denoise, deblur=config.upscale_rtx_deblur
         )
+    if config.upscale_model == "dlss5":
+        settings.update(
+            preset=config.upscale_dlss5_preset, style=config.upscale_dlss5_style,
+            intensity=config.upscale_dlss5_intensity,
+        )
     return settings
 
 

@@ -36,9 +36,12 @@ LtxVaeName = Literal["auto", "full", "half", "max"]
 """An LTX video encoder or decoder size; "auto" is the model's own default."""
 DecodeBackendName = Literal["auto", "vali", "pyav-hw", "pyav-sw"]
 FrameGenerationName = Literal["none", "2x"]
-UpscaleModelName = Literal["none", "rtx-super-res", "span", "realplksr"]
-"""Whole-frame upscaling before the encoder: NVIDIA RTX Super Res, the fast SPAN network or the
-slower, more detailed RealPLKSR network."""
+UpscaleModelName = Literal["none", "rtx-super-res", "span", "realplksr", "dlss5"]
+"""Whole-frame upscaling before the encoder: NVIDIA RTX Super Res, the fast SPAN network, the
+slower, more detailed RealPLKSR network, or DLSS 5 (a user-supplied runtime, Windows only)."""
+Dlss5PresetName = Literal["default", "j", "k", "l", "m"]
+"""The DLSS Super Resolution model; L and M rebuild more fine texture than the others."""
+Dlss5StyleName = Literal["default", "natural", "cinematic"]
 UPSCALE_HEIGHTS = (1080, 1440, 2160)
 
 # Option defaults shared by the CLI (``jasna.main.build_parser``) and the GUI (``AppSettings``).
@@ -63,6 +66,9 @@ DEFAULT_UPSCALE_STRENGTH = 1.0
 UPSCALE_RTX_DEFAULT_QUALITY: RtxQualityName = "high"
 UPSCALE_RTX_DEFAULT_DENOISE: RtxLevelName = "none"
 UPSCALE_RTX_DEFAULT_DEBLUR: RtxLevelName = "none"
+UPSCALE_DLSS5_DEFAULT_PRESET: Dlss5PresetName = "m"
+UPSCALE_DLSS5_DEFAULT_STYLE: Dlss5StyleName = "default"
+UPSCALE_DLSS5_DEFAULT_INTENSITY = 1.0
 SD15_DEFAULT_STEPS = 25
 SD15_DEFAULT_STRENGTH = 0.6
 SD15_DEFAULT_SEED = 0
@@ -117,6 +123,9 @@ class SessionConfig:
     upscale_rtx_quality: RtxQualityName
     upscale_rtx_denoise: RtxLevelName
     upscale_rtx_deblur: RtxLevelName
+    upscale_dlss5_preset: Dlss5PresetName
+    upscale_dlss5_style: Dlss5StyleName
+    upscale_dlss5_intensity: float
     disable_progress: bool
     working_dir: Path | None
     vr_projection: VrProjectionName
@@ -155,6 +164,8 @@ class SessionConfig:
             raise ValueError(f"Upscale height must be one of {', '.join(map(str, UPSCALE_HEIGHTS))}")
         if not 0.0 <= self.upscale_strength <= 1.0:
             raise ValueError("Upscale strength must be in [0, 1]")
+        if not 0.0 <= self.upscale_dlss5_intensity <= 2.0:
+            raise ValueError("DLSS 5 intensity must be in [0, 2]")
 
 
 def ltx_unsupported_options(*, auto_split: bool, secondary_restoration: str, denoise_strength: str) -> tuple[str, ...]:

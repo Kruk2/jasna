@@ -1,9 +1,11 @@
 import importlib.util
+import struct
 import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 import torch
 from torch.nn import functional as F
@@ -15,6 +17,14 @@ from jasna.models.span import SPAN_BLOCKS, Span
 from jasna.session_factory import UPSCALE_RTX_NEEDS_NVIDIA, build_restoration_session, splice_source
 from jasna.settings_tag import job_settings
 from jasna.upscale import FrameUpscaleWriter, finish_frame, upscaled_metadata, upscaled_size
+from jasna.upscale.dlss5 import (
+    DLSS5_RUNTIME_FILES,
+    MotionGuide,
+    dlss5_mode,
+    dlss5_runtime_dir,
+    dlss5_unavailable_reason,
+    render_size_from_setup,
+)
 from jasna.upscale.network import UPSCALE_NETWORKS, network_engine_path, network_input_sizes
 from jasna.vr180 import VrModeResolution
 
@@ -192,6 +202,8 @@ def test_an_amd_session_refuses_rtx_upscaling():
         ({"upscale_model": "rtx-super-res", "upscale_rtx_quality": "ultra", "upscale_rtx_denoise": "low"},
          {"model": "rtx-super-res", "height": 2160, "strength": 1.0,
           "quality": "ultra", "denoise": "low", "deblur": "none"}),
+        ({"upscale_model": "dlss5", "upscale_dlss5_style": "cinematic", "upscale_dlss5_intensity": 0.5},
+         {"model": "dlss5", "height": 2160, "strength": 1.0, "preset": "m", "style": "cinematic", "intensity": 0.5}),
     ],
 )
 def test_the_settings_tag_records_the_upscaling(overrides, recorded):
@@ -201,6 +213,82 @@ def test_the_settings_tag_records_the_upscaling(overrides, recorded):
     )
 
     assert settings["output"]["upscale"] == recorded
+
+
+@pytest.mark.parametrize(
+    ("source", "output", "expected"),
+    [
+        ((1920, 1080), (3840, 2160), ((3840, 2160), 0)),
+        ((1920, 1080), (2560, 1440), ((2880, 1620), 2)),
+        ((1280, 720), (1920, 1080), ((1920, 1080), 2)),
+        ((1280, 720), (3840, 2160), ((3840, 2160), 3)),
+        ((854, 480), (3840, 2160), ((2562, 1440), 3)),
+    ],
+)
+def test_dlss5_takes_the_smallest_mode_that_reaches_the_output_height(source, output, expected):
+    assert dlss5_mode(source, output) == expected
+
+
+def _setup_reply(*, magic=0x34505553, ok=1, result=1, render=(1920, 1080), output=(3840, 2160), preset=13) -> bytes:
+    return struct.pack("<12I", magic, ok, result, *render, *output, 0, 0, 0, 0, preset)
+
+
+@pytest.mark.parametrize(
+    ("reply", "error"),
+    [
+        (_setup_reply(magic=0), "version-4"),
+        (_setup_reply(ok=0, result=0xBAD00005), "0xBAD00005"),
+        (_setup_reply(output=(2880, 1620)), "different"),
+        (_setup_reply(preset=12), "different"),
+    ],
+)
+def test_a_dlss5_worker_that_did_not_set_up_as_asked_is_refused(reply, error):
+    with pytest.raises(RuntimeError, match=error):
+        render_size_from_setup(reply, (3840, 2160), "m")
+
+
+def test_the_dlss5_worker_reports_its_render_size():
+    assert render_size_from_setup(_setup_reply(render=(1918, 1080)), (3840, 2160), "m") == (1918, 1080)
+
+
+def _texture(width: int, height: int) -> np.ndarray:
+    smooth = F.interpolate(torch.rand(1, 1, height // 8, width // 8, generator=torch.Generator().manual_seed(0)),
+                           size=(height, width), mode="bicubic")
+    return (smooth[0, 0].clamp(0, 1) * 255).to(torch.uint8).numpy()
+
+
+def test_dlss5_motion_points_to_where_each_pixel_was_and_resets_at_cuts():
+    guide = MotionGuide()
+    texture = _texture(400, 240)
+    moved_right = np.roll(texture, 4, axis=1)
+
+    first = guide.next(texture)
+    flow = guide.next(moved_right)
+    cut = guide.next(255 - moved_right)
+
+    assert first is None and cut is None
+    assert flow[40:-40, 40:-40, 0].mean() == pytest.approx(-4.0, abs=0.5)
+    assert abs(flow[40:-40, 40:-40, 1].mean()) < 0.5
+
+
+@pytest.mark.usefixtures("nvidia_vendor")
+def test_dlss5_names_the_runtime_files_it_is_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
+    for name in DLSS5_RUNTIME_FILES[:3]:
+        (tmp_path / name).touch()
+
+    reason = dlss5_unavailable_reason(torch.device("cuda", 0), tmp_path)
+
+    assert reason.endswith(", ".join(DLSS5_RUNTIME_FILES[3:]))
+    for name in DLSS5_RUNTIME_FILES[3:]:
+        (tmp_path / name).touch()
+    assert dlss5_unavailable_reason(torch.device("cuda", 0), tmp_path) is None
+
+
+def test_dlss5_runs_on_windows_only(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    assert dlss5_unavailable_reason(torch.device("cuda", 0), tmp_path) == "DLSS 5 upscaling runs on Windows only"
 
 
 def _training_span_state(generator: torch.Generator) -> dict[str, torch.Tensor]:
@@ -351,3 +439,28 @@ def test_rtx_upscaling_runs_from_a_side_stream():
     # A subprocess, since test_rtx_superres_restorer installs a fake nvvfx module.
     result = subprocess.run([sys.executable, "-c", RTX_GPU_SCRIPT], capture_output=True, text=True, check=True)
     assert result.stdout.split("\n")[-2] == "(3, 540, 960) torch.uint8 True"
+
+
+DLSS5_GPU_SCRIPT = """
+import torch
+from jasna.upscale.dlss5 import Dlss5FrameUpscaler, dlss5_runtime_dir
+
+device = torch.device("cuda")
+torch.manual_seed(0)
+frames = [(torch.rand(3, 270, 480, device=device) * 255).to(torch.uint8) for _ in range(3)]
+upscaler = Dlss5FrameUpscaler(
+    device, source_size=(480, 270), output_size=(1280, 720), preset="m", style="default", intensity=1.0,
+    strength=1.0, runtime_dir=dlss5_runtime_dir(),
+)
+outputs = [upscaler(frame) for frame in frames]
+upscaler.close()
+print([tuple(output.shape) for output in outputs] == [(3, 720, 1280)] * 3, outputs[0].dtype, outputs[0].is_contiguous())
+"""
+
+
+@pytest.mark.skipif(sys.platform != "win32" or not torch.cuda.is_available(), reason="needs Windows and CUDA")
+def test_dlss5_upscales_frames_with_the_worker():
+    if dlss5_unavailable_reason(torch.device("cuda", 0), dlss5_runtime_dir()):
+        pytest.skip("needs the DLSS 5 runtime in model_weights/dlss5")
+    result = subprocess.run([sys.executable, "-c", DLSS5_GPU_SCRIPT], capture_output=True, text=True, check=True, cwd=REPO)
+    assert result.stdout.split("\n")[-2] == "True torch.uint8 True"
