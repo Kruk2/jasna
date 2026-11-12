@@ -18,3 +18,13 @@ def test_psnr_is_over_the_reference_latent_range():
     reference = torch.tensor([0.0, 2.0, 1.0, 1.0])
     assert bench.psnr(reference, reference) == float("inf")
     assert bench.psnr(reference + 0.1, reference) == pytest.approx(10 * torch.log10(torch.tensor(4 / 0.01)).item(), rel=1e-4)
+
+
+def test_head_options_take_their_block_count():
+    assert bench.head_blocks(["cl3d", "kitchen6", "compile"], "kitchen") == 6
+    assert bench.head_blocks(["cl3d", "fp16head2"], "kitchen") is None
+
+
+def test_a_head_option_without_a_block_count_is_rejected():
+    with pytest.raises(ValueError, match="kitchen"):
+        bench.variant_encoder("kitchen+cl3d", vae=None, device=None)

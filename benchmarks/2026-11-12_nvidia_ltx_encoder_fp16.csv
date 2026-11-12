@@ -1,0 +1,144 @@
+date,gpu,code,measure,canvas,variant,layer,run,value,unit,tflops,activation_peak_gib,rel_l2_vs_bf16,max_abs_vs_bf16,rel_l2_vs_fp32,peak_vram_mib,load
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,gemm 8192^3,,bf16,,,230.6,TFLOPS,,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,gemm 8192^3,,"fp16, fp32 accumulate",,,226.1,TFLOPS,,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,gemm 8192^3,,"fp16, fp16 accumulate",,,364.1,TFLOPS,,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,gemm 8192^3,,fp8 e4m3,,,449.2,TFLOPS,,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,gemm 8192^3,,int8,,,686.9,TOPS,,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,S610 encode pass (143 windows at 512),512,bf16 (before),,1,67.9,s,,,,,,3382.3,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"S610 encode pass, per window",512,bf16 (before),,1,0.39,s/window,,,,,,,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,S610 encode pass (143 windows at 512),512,kitchen6 (after),,2,54.5,s,,,,,,2619.6,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"S610 encode pass, per window",512,kitchen6 (after),,2,0.30,s/window,,,,,,,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,S610 encode pass (143 windows at 512),512,bf16 (before),,3,66.7,s,,,,,,3382.3,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"S610 encode pass, per window",512,bf16 (before),,3,0.40,s/window,,,,,,,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,S610 encode pass (143 windows at 512),512,kitchen6 (after),,4,53.2,s,,,,,,2617.3,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"S610 encode pass, per window",512,kitchen6 (after),,4,0.30,s/window,,,,,,,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,S610 encode pass (143 windows at 512),512,bf16 (before),,5,67.5,s,,,,,,3382.3,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"S610 encode pass, per window",512,bf16 (before),,5,0.40,s/window,,,,,,,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,S610 encode pass (143 windows at 512),512,kitchen6 (after),,6,56.1,s,,,,,,2619.6,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"S610 encode pass, per window",512,kitchen6 (after),,6,0.30,s/window,,,,,,,outside-load(cpu) 6.4 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,bf16 (before),,1,0.3604,s/window,,2.55,0.00e+00,0.0,7.08e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,bf16 (before),,2,0.3586,s/window,,2.55,0.00e+00,0.0,7.08e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,bf16 (before),,3,0.3589,s/window,,2.55,0.00e+00,0.0,7.08e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,bf16 (before),,4,0.3609,s/window,,2.55,0.00e+00,0.0,7.08e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,bf16 (before),,5,0.3647,s/window,,2.55,0.00e+00,0.0,7.08e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,bf16 (before),,6,0.3581,s/window,,2.55,0.00e+00,0.0,7.08e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,bf16 (before),,7,0.3663,s/window,,2.55,0.00e+00,0.0,7.08e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,"kitchen6 (after, as loaded)",,1,0.2711,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,"kitchen6 (after, as loaded)",,2,0.2708,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,"kitchen6 (after, as loaded)",,3,0.2758,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,"kitchen6 (after, as loaded)",,4,0.2747,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,"kitchen6 (after, as loaded)",,5,0.2765,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,"kitchen6 (after, as loaded)",,6,0.2743,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,"kitchen6 (after, as loaded)",,7,0.2775,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen1,,1,0.3423,s/window,,1.63,7.33e-03,0.1211,5.35e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen1,,2,0.3496,s/window,,1.63,7.33e-03,0.1211,5.35e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen1,,3,0.3444,s/window,,1.63,7.33e-03,0.1211,5.35e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen1,,4,0.3429,s/window,,1.63,7.33e-03,0.1211,5.35e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen1,,5,0.3419,s/window,,1.63,7.33e-03,0.1211,5.35e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen1,,6,0.3418,s/window,,1.63,7.33e-03,0.1211,5.35e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen1,,7,0.3474,s/window,,1.63,7.33e-03,0.1211,5.35e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen3,,1,0.3142,s/window,,1.63,7.40e-03,0.125,5.28e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen3,,2,0.3169,s/window,,1.63,7.40e-03,0.125,5.28e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen3,,3,0.3142,s/window,,1.63,7.40e-03,0.125,5.28e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen3,,4,0.3171,s/window,,1.63,7.40e-03,0.125,5.28e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen3,,5,0.3179,s/window,,1.63,7.40e-03,0.125,5.28e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen3,,6,0.3123,s/window,,1.63,7.40e-03,0.125,5.28e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen3,,7,0.316,s/window,,1.63,7.40e-03,0.125,5.28e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen6,,1,0.2715,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen6,,2,0.2822,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen6,,3,0.2736,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen6,,4,0.2778,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen6,,5,0.2775,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen6,,6,0.277,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,kitchen6,,7,0.2777,s/window,,1.63,7.70e-03,0.125,5.54e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,fp16head6 (cuDNN fp16),,1,0.3635,s/window,,2.55,6.68e-03,0.1016,3.96e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,fp16head6 (cuDNN fp16),,2,0.3637,s/window,,2.55,6.68e-03,0.1016,3.96e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,fp16head6 (cuDNN fp16),,3,0.365,s/window,,2.55,6.68e-03,0.1016,3.96e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,fp16head6 (cuDNN fp16),,4,0.368,s/window,,2.55,6.68e-03,0.1016,3.96e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,fp16head6 (cuDNN fp16),,5,0.366,s/window,,2.55,6.68e-03,0.1016,3.96e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,fp16head6 (cuDNN fp16),,6,0.3618,s/window,,2.55,6.68e-03,0.1016,3.96e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",512,fp16head6 (cuDNN fp16),,7,0.3626,s/window,,2.55,6.68e-03,0.1016,3.96e-03,,outside-load(cpu) 5.3 cores
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,bf16 (before),,1,0.8021,s/window,,5.74,0.00e+00,0.0,6.99e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,bf16 (before),,2,0.7995,s/window,,5.74,0.00e+00,0.0,6.99e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,bf16 (before),,3,0.8004,s/window,,5.74,0.00e+00,0.0,6.99e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,bf16 (before),,4,0.802,s/window,,5.74,0.00e+00,0.0,6.99e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,bf16 (before),,5,0.8045,s/window,,5.74,0.00e+00,0.0,6.99e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,"kitchen6 (after, as loaded)",,1,0.6045,s/window,,3.65,7.58e-03,0.1211,5.55e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,"kitchen6 (after, as loaded)",,2,0.6078,s/window,,3.65,7.58e-03,0.1211,5.55e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,"kitchen6 (after, as loaded)",,3,0.6077,s/window,,3.65,7.58e-03,0.1211,5.55e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,"kitchen6 (after, as loaded)",,4,0.6079,s/window,,3.65,7.58e-03,0.1211,5.55e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,"kitchen6 (after, as loaded)",,5,0.6076,s/window,,3.65,7.58e-03,0.1211,5.55e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,kitchen6,,1,0.6029,s/window,,3.65,7.58e-03,0.1211,5.55e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,kitchen6,,2,0.6068,s/window,,3.65,7.58e-03,0.1211,5.55e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,kitchen6,,3,0.6065,s/window,,3.65,7.58e-03,0.1211,5.55e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,kitchen6,,4,0.6083,s/window,,3.65,7.58e-03,0.1211,5.55e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,kitchen6,,5,0.611,s/window,,3.65,7.58e-03,0.1211,5.55e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,kitchen5,,1,0.6067,s/window,,3.65,7.47e-03,0.1211,5.43e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,kitchen5,,2,0.6067,s/window,,3.65,7.47e-03,0.1211,5.43e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,kitchen5,,3,0.6066,s/window,,3.65,7.47e-03,0.1211,5.43e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,kitchen5,,4,0.6087,s/window,,3.65,7.47e-03,0.1211,5.43e-03,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"encoder, one 121-frame S610 window",768,kitchen5,,5,0.6094,s/window,,3.65,7.47e-03,0.1211,5.43e-03,,no record
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,fp32,,1,0.8708,s/window,,6.06,,,,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,fp32,,2,0.8736,s/window,,6.06,,,,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,fp32,,3,0.8747,s/window,,6.06,,,,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,fp32,,4,0.8690,s/window,,6.06,,,,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,fp32,,5,0.8701,s/window,,6.06,,,,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,fp32,,6,0.8683,s/window,,6.06,,,,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,fp32,,7,0.8816,s/window,,6.06,,,,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,eager+cl3d+compile,,1,0.3561,s/window,,2.55,,,7.08e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,eager+cl3d+compile,,2,0.3581,s/window,,2.55,,,7.08e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,eager+cl3d+compile,,3,0.3580,s/window,,2.55,,,7.08e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,eager+cl3d+compile,,4,0.3591,s/window,,2.55,,,7.08e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,eager+cl3d+compile,,5,0.3604,s/window,,2.55,,,7.08e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,eager+cl3d+compile,,6,0.3598,s/window,,2.55,,,7.08e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,eager+cl3d+compile,,7,0.3662,s/window,,2.55,,,7.08e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,shipped,,1,0.2583,s/window,,1.8,,,7.07e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,shipped,,2,0.2638,s/window,,1.8,,,7.07e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,shipped,,3,0.2697,s/window,,1.8,,,7.07e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,shipped,,4,0.2682,s/window,,1.8,,,7.07e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,shipped,,5,0.2691,s/window,,1.8,,,7.07e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,shipped,,6,0.2711,s/window,,1.8,,,7.07e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,shipped,,7,0.2659,s/window,,1.8,,,7.07e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,kitchen6+cl3d+compile,,1,0.2654,s/window,,1.63,,,5.54e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,kitchen6+cl3d+compile,,2,0.2704,s/window,,1.63,,,5.54e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,kitchen6+cl3d+compile,,3,0.2671,s/window,,1.63,,,5.54e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,kitchen6+cl3d+compile,,4,0.2650,s/window,,1.63,,,5.54e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,kitchen6+cl3d+compile,,5,0.2682,s/window,,1.63,,,5.54e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,kitchen6+cl3d+compile,,6,0.2685,s/window,,1.63,,,5.54e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,"benchmark_ltx_encode.py, one 121-frame S610 window",512,kitchen6+cl3d+compile,,7,0.2673,s/window,,1.63,,,5.54e-03,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,gemm 8192^3 (benchmark_ltx_encode.py --peaks),,bf16,,,233.4,TFLOPS,,,,,,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,gemm 8192^3 (benchmark_ltx_encode.py --peaks),,"fp16, fp32 accumulate",,,228.7,TFLOPS,,,,,,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,57129620 + kitchen fp16 encoder head,gemm 8192^3 (benchmark_ltx_encode.py --peaks),,"fp16, fp16 accumulate",,,355.2,TFLOPS,,,,,,,"outside-load(cpu,gpu) 3.2 cores"
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN bf16,conv_in 48->128 x1,,4.412,ms,149.1,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN fp16,conv_in 48->128 x1,,4.419,ms,148.8,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,kitchen fp16,conv_in 48->128 x1,,2.33,ms,282.3,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN bf16,res0 128->128 x8,,8.021,ms,218.7,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN fp16,res0 128->128 x8,,8.059,ms,217.7,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,kitchen fp16,res0 128->128 x8,,4.924,ms,356.2,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN bf16,down1_space 128->64 x1,,4.078,ms,215.0,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN fp16,down1_space 128->64 x1,,4.106,ms,213.6,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,kitchen fp16,down1_space 128->64 x1,,4.297,ms,204.1,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN bf16,res2 256->256 x12,,7.789,ms,225.2,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN fp16,res2 256->256 x12,,11.559,ms,151.7,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,kitchen fp16,res2 256->256 x12,,5.065,ms,346.3,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN bf16,down3_time 256->256 x1,,9.517,ms,185.8,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN fp16,down3_time 256->256 x1,,9.082,ms,194.7,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,kitchen fp16,down3_time 256->256 x1,,4.433,ms,399.0,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN bf16,res4 512->512 x8,,16.605,ms,213.0,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN fp16,res4 512->512 x8,,15.046,ms,235.1,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,kitchen fp16,res4 512->512 x8,,9.536,ms,370.9,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN bf16,down5_all 512->128 x1,,3.85,ms,233.4,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN fp16,down5_all 512->128 x1,,3.849,ms,233.5,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,kitchen fp16,down5_all 512->128 x1,,2.417,ms,371.9,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN bf16,res6 1024->1024 x4,,7.651,ms,234.9,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN fp16,res6 1024->1024 x4,,7.705,ms,233.3,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,kitchen fp16,res6 1024->1024 x4,,7.694,ms,233.6,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN bf16,down7_all 1024->128 x1,,1.113,ms,208.4,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN fp16,down7_all 1024->128 x1,,1.103,ms,210.3,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,kitchen fp16,down7_all 1024->128 x1,,1.264,ms,183.4,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN bf16,res8 1024->1024 x4,,1.243,ms,186.6,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN fp16,res8 1024->1024 x4,,1.243,ms,186.6,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,kitchen fp16,res8 1024->1024 x4,,1.245,ms,186.2,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN bf16,conv_out 1024->136 x1,,0.337,ms,91.4,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,cuDNN fp16,conv_out 1024->136 x1,,0.337,ms,91.4,,,,,,no record
+2026-11-12,RTX 5090,a453bc84 + kitchen fp16 encoder head,"conv3d 3x3x3, random data, channels-last",512,kitchen fp16,conv_out 1024->136 x1,,0.343,ms,89.8,,,,,,no record

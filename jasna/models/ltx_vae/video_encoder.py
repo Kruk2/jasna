@@ -18,10 +18,25 @@ ENCODER_COMPILE_MODE = "default"
 FP16_DOWN_BLOCKS = 7
 """With the real weights the activations up to ``down_blocks[7]`` stay below ~1e3; the
 low-resolution tail after them reaches ~2e5, past fp16's range."""
-KITCHEN_DOWN_BLOCKS = 1
+AMD_KITCHEN_DOWN_BLOCKS = 1
 """On AMD comfy-kitchen's fp16 conv3d beats MIOpen only on the 128-channel full-resolution layers
 (``conv_in`` and ``down_blocks[0]``), and needs no workspace there, where MIOpen's first-run solver
 search asks for ~13 GiB at 512 px. MIOpen's bf16 conv3d is faster on every later shape."""
+NVIDIA_KITCHEN_DOWN_BLOCKS = {
+    (12, 0): 6,  # RTX 50
+}
+"""Per CUDA capability, how many down blocks (with ``conv_in``) run in fp16 on kitchen's conv3d.
+It accumulates in fp16, which an RTX 5090 runs about 1.6x faster than bf16 (fp32 accumulation):
+~350 vs ~220 TFLOPS per conv (cuDNN's bf16 convs already sit at its bf16 GEMM
+rate), 0.36 -> 0.27 s per 512 window, a third less activation memory, and latents as close to an
+fp32 encoder's as bf16's. ``down_blocks[6]`` (1024 channels) is the first shape kitchen declines; later
+blocks leave fp16's range (``FP16_DOWN_BLOCKS``). GPUs not listed keep the bf16 cuDNN head
+until measured (``scripts/benchmark_ltx_encode.py``)."""
+
+
+def nvidia_kitchen_down_blocks(architecture: tuple[int, int]) -> int:
+    """Down blocks of the fp16 kitchen head on an NVIDIA GPU of ``architecture``; 0 keeps bf16."""
+    return NVIDIA_KITCHEN_DOWN_BLOCKS.get(architecture, 0)
 
 
 class CausalConv3d(nn.Module):

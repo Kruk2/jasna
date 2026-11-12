@@ -13,11 +13,17 @@ import torch
 from torch import nn
 
 from jasna.accelerator import KernelBackend, kernel_backend
+from jasna.ltx.kernel_policy import gpu_architecture
 from jasna.ltx.model_files import open_tensors
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.tiling import TileSizeConfig
 from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, decoder_kernels, use_kernels
-from jasna.models.ltx_vae.video_encoder import KITCHEN_DOWN_BLOCKS, VideoEncoder, compile_video_encoder
+from jasna.models.ltx_vae.video_encoder import (
+    AMD_KITCHEN_DOWN_BLOCKS,
+    VideoEncoder,
+    compile_video_encoder,
+    nvidia_kitchen_down_blocks,
+)
 from jasna.tensor_utils import half_dtype
 
 _VAE_CLASS_NAME = "CausalDiffusionVAE"
@@ -193,7 +199,8 @@ def _with_res_layers(blocks: list, state: Iterable[str]) -> list:
 
 def load_video_encoder(vae_path: Path, device: torch.device, encoder_path: Path | None = None) -> VideoEncoder:
     """Eval ``VideoEncoder`` in ``half_dtype(device)`` (before SM 8.0 fp16 with an fp32 tail; on
-    AMD the full-resolution head in fp16 on comfy-kitchen's conv3d); call it on
+    AMD and the NVIDIA GPUs in ``NVIDIA_KITCHEN_DOWN_BLOCKS`` a head in fp16 on comfy-kitchen's
+    conv3d); call it on
     ``(B, 3, 1+8k, H, W)`` pixels in [-1, 1] for bf16 latents. ``encoder_path`` holds a distilled
     encoder's tensors in place of the VAE's own; its residual blocks set each stage's depth."""
     checkpoint, encoder = {}, None
@@ -214,12 +221,15 @@ def load_video_encoder(vae_path: Path, device: torch.device, encoder_path: Path 
         if dtype == torch.float16:
             encoder.to_fp16_with_float32_tail()
         elif backend.is_amd:
-            encoder.to_fp16_head(KITCHEN_DOWN_BLOCKS)
+            encoder.to_fp16_head(AMD_KITCHEN_DOWN_BLOCKS)
+            encoder.run_fp16_convs_on_kitchen()
+        elif backend is KernelBackend.NVIDIA and (head := nvidia_kitchen_down_blocks(gpu_architecture(device))):
+            encoder.to_fp16_head(head)
             encoder.run_fp16_convs_on_kitchen()
         # Without Triton the encoder runs eagerly: there MIOpen and ROCm's copies run the tail faster
         # in NCDHW (1.39 -> 1.28 s per 512 window on an R9700); kitchen's head needs channels-last.
         eager_amd = backend is KernelBackend.AMD_PREBUILT
-        for layer in (encoder.conv_in, *encoder.down_blocks[:KITCHEN_DOWN_BLOCKS]) if eager_amd else (encoder,):
+        for layer in (encoder.conv_in, *encoder.down_blocks[:AMD_KITCHEN_DOWN_BLOCKS]) if eager_amd else (encoder,):
             layer.to(memory_format=torch.channels_last_3d)
         if eager_amd:
             encoder.release_cache_between_stages()
