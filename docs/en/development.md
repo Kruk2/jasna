@@ -254,8 +254,15 @@ $P scripts/benchmark_releases.py --release v0.9.0=/path/to/jasna --source HEAD=.
 $P scripts/benchmark_ltx_denoise.py --model undistilled --csv out.csv    # LTX denoise, trial weights
 $P scripts/benchmark_ltx_decode.py --variants shipped,kitchen,eager      # LTX VAE decode
 $P scripts/benchmark_ltx_encode.py --variants fp32,eager,shipped        # LTX VAE encode, real weights
+$P scripts/benchmark_ltx_encode.py --peaks --variants fp32,eager+cl3d+compile,kitchen3+cl3d+compile,kitchen6+cl3d+compile
 $P scripts/benchmark_na3d.py                                             # Triton NA kernel
 ```
+
+The second encode line decides a GPU's entry in `NVIDIA_KITCHEN_DOWN_BLOCKS`
+(`jasna/models/ltx_vae/video_encoder.py`): list the GPU's CUDA capability with
+the fastest `kitchenN` when it beats the bf16 encoder (`eager+cl3d+compile`)
+with latents no further from `fp32`. It needs only
+`model_weights/ltx-restore/vae.safetensors`.
 
 `scripts/bench_memory.py` is the RAM/VRAM sampler the others share.
 

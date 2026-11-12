@@ -138,3 +138,28 @@ def test_compiled_fp16_encoder_with_float32_tail_survives_large_activations(monk
 
     assert compiled.dtype == torch.bfloat16
     torch.testing.assert_close(compiled.float(), reference.float(), atol=5e-2, rtol=5e-2)
+
+
+def test_compiled_encoder_with_a_kitchen_fp16_head_matches_float32(monkeypatch):
+    pytest.importorskip("comfy_kitchen")
+    # every conv has a multiple of 8 channels, so kitchen's CUDA kernel takes them all
+    config = {"encoder": {"in_channels": 3, "out_channels": 16, "patch_size": 4, "dims": 3, "norm_layer": "pixel_norm",
+                          "latent_log_var": "constant", "spatial_padding_mode": "zeros",
+                          "blocks": [["res_x", {"num_layers": 1}], ["compress_space_res", {"multiplier": 2}],
+                                     ["compress_time_res", {"multiplier": 2}], ["compress_all_res", {"multiplier": 2}],
+                                     ["res_x", {"num_layers": 1}]]}}
+    torch.manual_seed(0)
+    encoder = video_encoder.VideoEncoder(**encoder_kwargs(config)).cuda().eval()
+    pixels = torch.rand(1, 3, 17, 64, 96, device="cuda") * 2 - 1
+    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
+    with torch.inference_mode():
+        reference = encoder(pixels)
+        encoder.bfloat16().to_fp16_head(3).run_fp16_convs_on_kitchen()  # an fp16 head before a bf16 tail
+        encoder.to(memory_format=torch.channels_last_3d)
+        monkeypatch.setattr(video_encoder, "_encode_cropped",
+                            compile_static(video_encoder.encode_cropped, mode="default", device=torch.device("cuda"),
+                                           dtype=torch.bfloat16))
+        compiled = encoder(pixels.bfloat16())
+
+    assert compiled.dtype == torch.bfloat16
+    torch.testing.assert_close(compiled.float(), reference.float(), atol=5e-2, rtol=5e-2)

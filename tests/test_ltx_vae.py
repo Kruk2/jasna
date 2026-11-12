@@ -240,25 +240,25 @@ def test_load_video_encoder_before_sm80_compiles_fp16_with_a_float32_tail(tmp_pa
     assert compiled == [torch.float16]
 
 
-def _amd_encoder_checkpoint(tmp_path):
-    source = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)))
+def _encoder_checkpoint(tmp_path, config=TINY_ENCODER_CONFIG):
+    source = VideoEncoder(**encoder_kwargs(_vae_config(config, LTX25_DECODER_CONFIG)))
     path = tmp_path / "vae.safetensors"
     save_file({f"encoder.{k}" if not k.startswith("per_channel") else k: v.bfloat16()
                for k, v in source.state_dict().items()},
-              str(path), metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, {})})})
+              str(path), metadata={"config": json.dumps({"vae": _vae_config(config, {})})})
     return path
 
 
 @pytest.mark.parametrize("triton", (True, False))
 def test_an_eager_amd_encoder_keeps_only_the_kitchen_head_channels_last(tmp_path, monkeypatch, triton):
-    path = _amd_encoder_checkpoint(tmp_path)
+    path = _encoder_checkpoint(tmp_path)
     backend = KernelBackend.AMD_TRITON if triton else KernelBackend.AMD_PREBUILT
     monkeypatch.setattr(loader, "kernel_backend", lambda device: backend)
     monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
 
-    head = video_encoder.KITCHEN_DOWN_BLOCKS
+    head = video_encoder.AMD_KITCHEN_DOWN_BLOCKS
     def channels_last(layer):
         return next(layer.parameters()).is_contiguous(memory_format=torch.channels_last_3d)
     assert [channels_last(layer) for layer in (encoder.conv_in, *encoder.down_blocks, encoder.conv_out)] == (
@@ -294,30 +294,58 @@ def test_releasing_the_cache_between_stages_lowers_the_reserved_peak():
     assert releasing < keeping
 
 
-def test_load_video_encoder_on_amd_runs_the_full_resolution_head_on_kitchen(tmp_path, monkeypatch):
-    path = _amd_encoder_checkpoint(tmp_path)
+@pytest.mark.parametrize(("backend", "architecture", "head"), (
+    (KernelBackend.AMD_TRITON, "gfx1201", video_encoder.AMD_KITCHEN_DOWN_BLOCKS),
+    (KernelBackend.NVIDIA, (12, 0), video_encoder.nvidia_kitchen_down_blocks((12, 0))),
+))
+def test_load_video_encoder_runs_the_high_resolution_head_on_kitchen(tmp_path, monkeypatch, backend, architecture,
+                                                                     head):
+    config = {**TINY_ENCODER_CONFIG, "blocks": [["res_x", {"num_layers": 1}]] * (head + 2)}
+    path = _encoder_checkpoint(tmp_path, config)
     compiled = []
-    monkeypatch.setattr(loader, "kernel_backend", lambda device: KernelBackend.AMD_TRITON)
+    monkeypatch.setattr(loader, "kernel_backend", lambda device: backend)
+    monkeypatch.setattr(loader, "gpu_architecture", lambda device: architecture)
     monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
     monkeypatch.setattr(video_encoder, "compile_static",
                         lambda fn, mode, device, dtype: compiled.append(dtype) or fn)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
 
-    head = video_encoder.KITCHEN_DOWN_BLOCKS
     assert [next(block.parameters()).dtype for block in encoder.down_blocks] == (
-        [torch.float16] * head + [torch.bfloat16] * (len(encoder.down_blocks) - head))
+        [torch.float16] * head + [torch.bfloat16] * 2)
     assert encoder.conv_in.conv.weight.dtype == torch.float16
     assert encoder.conv_out.conv.weight.dtype == torch.bfloat16
     assert all(conv.kitchen for conv in encoder.modules() if isinstance(conv, video_encoder.CausalConv3d))
     assert compiled == [torch.bfloat16]
 
 
-def test_kitchen_conv3d_matches_the_causal_conv_and_fuses_the_residual():
+def test_an_nvidia_gpu_without_a_measured_kitchen_head_keeps_the_bf16_encoder(tmp_path, monkeypatch):
+    path = _encoder_checkpoint(tmp_path)
+    monkeypatch.setattr(loader, "kernel_backend", lambda device: KernelBackend.NVIDIA)
+    monkeypatch.setattr(loader, "gpu_architecture", lambda device: (8, 9))
+    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
+
+    encoder = load_video_encoder(path, torch.device("cpu"))
+
+    assert all(p.dtype == torch.bfloat16 for p in encoder.parameters())
+    assert all(p.is_contiguous(memory_format=torch.channels_last_3d) for p in encoder.parameters() if p.dim() == 5)
+
+
+def test_every_nvidia_kitchen_head_stays_within_the_fp16_safe_blocks():
+    heads = [video_encoder.nvidia_kitchen_down_blocks(architecture)
+             for architecture in video_encoder.NVIDIA_KITCHEN_DOWN_BLOCKS]
+
+    assert heads and all(0 < head <= video_encoder.FP16_DOWN_BLOCKS for head in heads)
+    assert video_encoder.nvidia_kitchen_down_blocks((8, 6)) == 0
+
+
+@pytest.mark.parametrize("device", (
+    "cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU"))))
+def test_kitchen_conv3d_matches_the_causal_conv_and_fuses_the_residual(device):
     pytest.importorskip("comfy_kitchen")
     torch.manual_seed(0)
-    block = video_encoder.ResnetBlock3D(16).half()
-    x = torch.randn(1, 16, 5, 6, 7).half()
+    block = video_encoder.ResnetBlock3D(16).half().to(device)
+    x = torch.randn(1, 16, 5, 6, 7).half().to(device)
     with torch.inference_mode():
         reference = block(x).float()
         for conv in (block.conv1, block.conv2):
