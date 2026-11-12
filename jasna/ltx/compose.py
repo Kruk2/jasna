@@ -8,18 +8,22 @@ other tracks' masks and takes that share of its feathered area from them.
 
 from __future__ import annotations
 
+import ctypes
 import functools
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
 
+from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.ltx.camera import CropFrame
 from jasna.ltx.plan import Polygon
-from jasna.tracking.blending import dilate_ellipse
+from jasna.media.cuda_kernel import Kernel, grid_size, has_precompiled_kernels
+from jasna.tracking.blending import dilate_ellipse, ellipse_row_reach
 from jasna.vr_projection import RegionProjector
 
 COLOUR_MATCH_STRENGTH = 0.75
@@ -78,18 +82,21 @@ def canvas_to_source(
         change = canvas.float() - projector.project_region(source, crop.crop_box, canvas.shape[-1])
         restored = source[:, y1:y2, x1:x2].float() + projector.source_region_from_patch(change, crop.crop_box)
         return restored.round_().clamp_(0, 255)
+    return _resampled_crop(canvas, crop).round_().clamp_(0, 255)
+
+
+def _resampled_crop(canvas: torch.Tensor, crop: CropFrame) -> torch.Tensor:
+    """The canvas content resampled to the crop box, float ``[3, h, w]`` before rounding."""
     top, _, left, _ = crop.pad
     resize_h, resize_w = crop.resize_hw
     content = canvas[:, top : top + resize_h, left : left + resize_w].float()
     x1, y1, x2, y2 = crop.crop_box
     height, width = y2 - y1, x2 - x1
     if max(height, width) > max(resize_h, resize_w):
-        out = F.interpolate(content[None], size=(height, width), mode="bicubic", align_corners=False)[0]
-    else:
-        rows = _area_weights(height, resize_h, canvas.device)
-        cols = _area_weights(width, resize_w, canvas.device)
-        out = torch.einsum("hy,cyx,wx->chw", rows, content, cols)
-    return out.round_().clamp_(0, 255)
+        return F.interpolate(content[None], size=(height, width), mode="bicubic", align_corners=False)[0]
+    rows = _area_weights(height, resize_h, canvas.device)
+    cols = _area_weights(width, resize_w, canvas.device)
+    return torch.einsum("hy,cyx,wx->chw", rows, content, cols)
 
 
 @functools.cache
@@ -191,14 +198,23 @@ def polygon_box(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tup
     return x1, y1, x2, y2
 
 
-def polygon_mask(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tuple[int, int], device: torch.device) -> torch.Tensor:
-    """Bool ``[h, w]`` union of ``polygons`` inside the region at ``offset`` (x, y); only their
-    ``polygon_box`` is filled on the host and uploaded."""
+def polygon_patch(
+    polygons: Sequence[Polygon], shape: tuple[int, int], offset: tuple[int, int]
+) -> tuple[tuple[int, int, int, int], np.ndarray]:
+    """The ``polygon_box`` of ``polygons`` inside the region at ``offset`` (x, y) and their union
+    filled on the host over it, uint8 0 or 255."""
     x1, y1, x2, y2 = polygon_box(polygons, shape, offset)
     patch = np.zeros((y2 - y1, x2 - x1), dtype=np.uint8)
     for contour in _contours(polygons, (offset[0] + x1, offset[1] + y1)):
         # One fillPoly call per polygon: a single call uses the even-odd rule and punches holes where polygons overlap.
         cv2.fillPoly(patch, [contour], 255)
+    return (x1, y1, x2, y2), patch
+
+
+def polygon_mask(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tuple[int, int], device: torch.device) -> torch.Tensor:
+    """Bool ``[h, w]`` union of ``polygons`` inside the region at ``offset`` (x, y); only their
+    ``polygon_box`` is filled on the host and uploaded."""
+    (x1, y1, x2, y2), patch = polygon_patch(polygons, shape, offset)
     mask = torch.zeros(shape, dtype=torch.bool, device=device)
     # Non-blocking: the driver stages a small pageable source before returning, without waiting for queued kernels.
     mask[y1:y2, x1:x2] = torch.from_numpy(patch).to(device, non_blocking=True) > 0
@@ -238,10 +254,25 @@ def composite_frame(
     live = [c for c in candidates if c.weight > 0.0 and c.presence > 0.0]
     if not live:
         return source
+    if projector is None and _fits_compose_kernels(source, live, feather):
+        return composite_on_kernels(source, live, feather=feather)
+    return composite_on_torch(source, live, feather=feather, projector=projector)
+
+
+def _compositing_region(source: torch.Tensor, live: Sequence[Candidate], feather: int) -> tuple[int, int, int, int]:
+    """(x0, y0, x3, y3): every live crop grown by the feather reach, inside the frame."""
     _, height, width = source.shape
-    reach = 2 * feather + 1
     x1s, y1s, x2s, y2s = zip(*(c.crop.crop_box for c in live))
-    x0, y0, x3, y3 = _grown((min(x1s), min(y1s), max(x2s), max(y2s)), reach, (height, width))
+    return _grown((min(x1s), min(y1s), max(x2s), max(y2s)), 2 * feather + 1, (height, width))
+
+
+def composite_on_torch(
+    source: torch.Tensor, live: Sequence[Candidate], *, feather: int, projector: RegionProjector | None
+) -> torch.Tensor:
+    """The composite of ``live`` candidates (weight and presence above 0) in Torch ops: the
+    reference, and the path of every frame the compose kernels do not take."""
+    reach = 2 * feather + 1
+    x0, y0, x3, y3 = _compositing_region(source, live, feather)
     shape = (y3 - y0, x3 - x0)
     device = source.device
     tracks = {c.track: c for c in live}
@@ -256,12 +287,8 @@ def composite_frame(
     layers = []
     for candidate in live:
         roi = rois[candidate.track]
-        x1, y1, x2, y2 = candidate.crop.crop_box
-        x1, y1, x2, y2 = x1 - x0, y1 - y0, x2 - x0, y2 - y0
-        # Alpha is 0 outside the crop and outside the track's feathered box, so a layer paints only their overlap.
-        fx1, fy1, fx2, fy2 = _grown(boxes[candidate.track], reach, shape)
-        px1, py1 = max(x1, fx1), max(y1, fy1)
-        px2, py2 = max(min(x2, fx2), px1), max(min(y2, fy2), py1)
+        x1, y1, x2, y2 = _region_box(candidate.crop.crop_box, (x0, y0))
+        px1, py1, px2, py2 = _paint_box((x1, y1, x2, y2), _grown(boxes[candidate.track], reach, shape))
         ramp = crop_edge_ramp((x1, y1, x2, y2), shape, feather, (px1, py1, px2, py2), device)
         covered = ramp > 0.0
         restored_crop = canvas_to_source(candidate.canvas, candidate.crop, source, projector)
@@ -301,4 +328,173 @@ def composite_frame(
     blended = accumulator + region[:, by1:by2, bx1:bx2] * (1.0 - total)
     out = source.clone()
     out[:, y0 + by1 : y0 + by2, x0 + bx1 : x0 + bx2] = blended.round_().clamp_(0, 255).to(torch.uint8)
+    return out
+
+
+def _region_box(box: tuple[int, int, int, int], origin: tuple[int, int]) -> tuple[int, int, int, int]:
+    x0, y0 = origin
+    x1, y1, x2, y2 = box
+    return x1 - x0, y1 - y0, x2 - x0, y2 - y0
+
+
+def _paint_box(crop: tuple[int, int, int, int], feathered: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    """The overlap of a layer's crop and its track's feathered box, where its alpha can be above 0."""
+    x1, y1, x2, y2 = crop
+    fx1, fy1, fx2, fy2 = feathered
+    px1, py1 = max(x1, fx1), max(y1, fy1)
+    return px1, py1, max(min(x2, fx2), px1), max(min(y2, fy2), py1)
+
+
+COMPOSE_KERNEL_VENDORS = (AcceleratorVendor.NVIDIA,)
+"""Vendors whose frames composite on ``ltx_compose`` kernels (where ``has_precompiled_kernels``).
+AMD's build is bit-identical too but keeps the Torch path: there the window decoder bounds the
+compose pass, and the kernels gained ~1 % on an RX 7900 XTX."""
+_KERNEL_MODULE = "ltx_compose"
+_HEADER_SLOTS, _TRACK_SLOTS, _LAYER_SLOTS = 20, 12, 16
+_MEDIAN_BINS = 511
+_TILE = 32
+_THREADS = (32, 8, 1)
+_DEVICE_ALIGNMENT = 512
+_MAX_KERNEL_FEATHER = 254
+
+
+class _ComposeKernels(NamedTuple):
+    histograms: Kernel
+    offsets: Kernel
+    blend: Kernel
+
+
+@functools.cache
+def _compose_kernels() -> _ComposeKernels:
+    table = (ctypes.c_void_p,)
+    return _ComposeKernels(
+        Kernel(_KERNEL_MODULE, "colour_ring_histograms", table),
+        Kernel(_KERNEL_MODULE, "colour_offsets", table),
+        Kernel(_KERNEL_MODULE, "blend_layers", table),
+    )
+
+
+@functools.cache
+def _dilate_kernel(radius: int) -> Kernel:
+    """Per feather radius: its shared memory holds ``TILE + 2*radius`` rows of column distances."""
+    return Kernel(
+        _KERNEL_MODULE, "dilate_feather_masks", (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int),
+        shared_memory_bytes=(_TILE + 2 * radius) * (_TILE + 1),
+    )
+
+
+def _fits_compose_kernels(source: torch.Tensor, live: Sequence[Candidate], feather: int) -> bool:
+    """Whether ``composite_on_kernels`` takes a frame: a GPU of ``COMPOSE_KERNEL_VENDORS`` with the
+    precompiled kernels, a frame with unit column stride, tracks at full
+    presence, and a feather the Torch path can reflect-pad (also at the region edge) and the
+    kernel's byte distances can hold."""
+    x0, y0, x3, y3 = _compositing_region(source, live, feather)
+    return (
+        vendor_for_device(source.device) in COMPOSE_KERNEL_VENDORS
+        and has_precompiled_kernels(source.device)
+        and source.stride(-1) == 1
+        and all(c.presence == 1.0 for c in live)
+        and feather <= _MAX_KERNEL_FEATHER
+        and min(y3 - y0, x3 - x0) > 2 * feather + 1
+    )
+
+
+def _aligned(size: int) -> int:
+    return -(-size // _DEVICE_ALIGNMENT) * _DEVICE_ALIGNMENT
+
+
+def _float_view(workspace: torch.Tensor, offset: int, shape: tuple[int, int]) -> torch.Tensor:
+    return workspace[offset : offset + 4 * shape[0] * shape[1]].view(torch.float32).view(shape)
+
+
+def composite_on_kernels(source: torch.Tensor, live: Sequence[Candidate], *, feather: int) -> torch.Tensor:
+    """``composite_on_torch`` for plain crops of tracks at full presence, bit-identical: the
+    dilation, colour match and blend run as four ``ltx_compose`` kernels over one workspace whose
+    geometry table, zeroed histograms and mask patches arrive in one upload; the feather blur
+    stays the Torch path's two matrix products. A frame's compositing is bound by launches, each
+    waiting behind the window decoder's queued kernels (~150 Torch launches become ~18)."""
+    device = source.device
+    x0, y0, x3, y3 = _compositing_region(source, live, feather)
+    origin, shape = (x0, y0), (y3 - y0, x3 - x0)
+    height, width = shape
+    patches = {c.track: polygon_patch(c.polygons, shape, origin) for c in live}
+    reach = 2 * feather + 1
+    track_ids = list(patches)
+    feather_boxes = [_grown(patches[track][0], reach, shape) for track in track_ids]
+    crops = [_region_box(c.crop.crop_box, origin) for c in live]
+    paints = [_paint_box(crop, feather_boxes[track_ids.index(c.track)]) for c, crop in zip(live, crops)]
+    blend = (
+        min(p[0] for p in paints), min(p[1] for p in paints), max(p[2] for p in paints), max(p[3] for p in paints)
+    )
+    resampled = [_resampled_crop(c.canvas, c.crop) for c in live]
+    out = source.clone()
+
+    table_slots = _HEADER_SLOTS + _TRACK_SLOTS * len(track_ids) + _LAYER_SLOTS * len(live)
+    histogram_bytes = 4 * 3 * _MEDIAN_BINS * len(live)
+    upload = [_aligned(8 * table_slots), _aligned(histogram_bytes)] + [_aligned(patches[t][1].nbytes) for t in track_ids]
+    feather_shapes = [(y2 - y1, x2 - x1) for x1, y1, x2, y2 in feather_boxes]
+    written = (
+        [_aligned(4 * 3 * len(live))]
+        + [_aligned(4 * h * (w + 2 * feather)) for h, w in feather_shapes]
+        + [_aligned(4 * h * w) for h, w in feather_shapes]
+    )
+    starts = np.cumsum([0] + upload + written).tolist()
+    workspace = torch.empty(starts[-1], dtype=torch.uint8, device=device)
+    base = workspace.data_ptr()
+    histogram_at, patch_at = starts[1], starts[2 : 2 + len(track_ids)]
+    offsets_at = starts[2 + len(track_ids)]
+    dilated_at = starts[3 + len(track_ids) : 3 + 2 * len(track_ids)]
+    alpha_at = starts[3 + 2 * len(track_ids) : 3 + 3 * len(track_ids)]
+
+    host = np.zeros(starts[len(upload)], dtype=np.uint8)
+    table = host[: 8 * table_slots].view(np.int64)
+    inverse = np.float32(1.0) / np.float32(max(feather, 1))
+    table[:_HEADER_SLOTS] = (
+        len(track_ids), len(live), origin[0], origin[1], height, width,
+        source.data_ptr(), source.stride(0), source.stride(1),
+        out.data_ptr(), out.stride(0), out.stride(1),
+        inverse.view(np.int32), base + histogram_at, base + offsets_at, 0, *blend,
+    )
+    for index, track in enumerate(track_ids):
+        box, patch = patches[track]
+        slots = _HEADER_SLOTS + _TRACK_SLOTS * index
+        table[slots : slots + 11] = (
+            base + patch_at[index], *box, *feather_boxes[index], base + alpha_at[index], base + dilated_at[index]
+        )
+        host[patch_at[index] : patch_at[index] + patch.nbytes] = patch.reshape(-1)
+    for index, (candidate, crop, paint, crop_pixels) in enumerate(zip(live, crops, paints, resampled)):
+        slots = _HEADER_SLOTS + _TRACK_SLOTS * len(track_ids) + _LAYER_SLOTS * index
+        table[slots : slots + 14] = (
+            track_ids.index(candidate.track), *crop, *paint, crop_pixels.data_ptr(), *crop_pixels.stride(),
+            np.float32(candidate.weight).view(np.int32),
+        )
+    # Non-blocking: the driver stages a small pageable source before returning, without waiting for queued kernels.
+    workspace[: len(host)].copy_(torch.from_numpy(host), non_blocking=True)
+
+    kernels = _compose_kernels()
+    stream = torch.cuda.current_stream(device).cuda_stream
+    _dilate_kernel(feather).launch(
+        (
+            grid_size(max(w for _, w in feather_shapes), _TILE),
+            grid_size(max(h for h, _ in feather_shapes), _TILE),
+            len(track_ids),
+        ),
+        _THREADS, (base, ellipse_row_reach(feather, device).data_ptr(), feather), stream,
+    )
+    for index, (h, w) in enumerate(feather_shapes):
+        dilated = _float_view(workspace, dilated_at[index], (h, w + 2 * feather))
+        rows = dilated @ _blur_band(feather, w, device)
+        columns = F.pad(rows[None, None], (0, 0, feather, feather), mode="reflect")[0, 0]
+        torch.mm(_blur_band(feather, h, device).T, columns, out=_float_view(workspace, alpha_at[index], (h, w)))
+    crop_shapes = [(y2 - y1, x2 - x1) for x1, y1, x2, y2 in crops]
+    kernels.histograms.launch(
+        (grid_size(max(w for _, w in crop_shapes), _TILE), grid_size(max(h for h, _ in crop_shapes), _TILE), len(live)),
+        _THREADS, (base,), stream,
+    )
+    kernels.offsets.launch((len(live), 1, 1), (32, 1, 1), (base,), stream)
+    blend_width, blend_height = blend[2] - blend[0], blend[3] - blend[1]
+    if blend_width and blend_height:
+        kernels.blend.launch(
+            (grid_size(blend_width, _TILE), grid_size(blend_height, _TILE), 1), _THREADS, (base,), stream
+        )
     return out
