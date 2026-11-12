@@ -168,11 +168,11 @@ class SecondarySection:
 
         gap = dict(fill="x", pady=(0, 8))
         self._tvai_rows = [
-            Row(tvai_path_row, gap, "advanced"),
-            Row(tvai_path_input_row, gap, "advanced"),
+            Row(tvai_path_row, gap, "simple"),
+            Row(tvai_path_input_row, gap, "simple"),
             Row(tvai_model_row, gap, "expert"),
-            Row(tvai_scale_row, gap, "advanced"),
-            Row(tvai_denoise_row, gap, "advanced"),
+            Row(tvai_scale_row, gap, "simple"),
+            Row(tvai_denoise_row, gap, "simple"),
             Row(tvai_workers_row, dict(fill="x"), "expert"),
         ]
 
@@ -281,9 +281,9 @@ class SecondarySection:
         self._widgets["rtx_scale"].configure(state="disabled" if self._ltx_only else state)
 
     def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
-        """Upscaling is not offered in the simple view; the TVAI model and worker count are expert settings."""
+        """The TVAI model and worker count are expert settings."""
         layout_rows(self._tvai_rows, level, standard=standard, ltx=ltx)
-        return level != "simple"
+        return True
 
     def set_gpu_support(self, vendor: AcceleratorVendor) -> None:
         self._vendor = vendor
