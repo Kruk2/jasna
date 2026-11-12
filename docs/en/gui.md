@@ -61,9 +61,9 @@ models slowly, and it warns you at startup.
 ## Simple, Advanced and Expert
 
 The switch under the preset bar picks how much you see, in the same tabs.
-**Simple** shows the main choices: restoration model, file conflict, codec,
-quality and what to do when the queue is done. **Advanced** shows more
-settings and adds the Detection and Upscale tabs. **Expert** adds speed and
+**Simple** shows the main choices: restoration model, upscaling, file
+conflict, codec, quality and what to do when the queue is done. **Advanced**
+shows more settings and adds the Detection tab. **Expert** adds speed and
 troubleshooting options most people never need. Settings you can't see still
 apply, and Jasna remembers your choice.
 

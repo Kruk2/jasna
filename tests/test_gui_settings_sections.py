@@ -622,6 +622,18 @@ def test_advanced_view_shows_only_the_chosen_tab(panel_factory, tab, expected) -
     assert [type(section) for section in panel._sections if _shown(section.frame)] == expected
 
 
+def test_simple_view_shows_restored_areas_with_the_tvai_path(panel_factory) -> None:
+    panel = panel_factory()
+    panel.set_view("simple")
+    panel.show_tab("upscale")
+
+    panel._secondary_section._engine_radios["tvai"].invoke()
+
+    assert [type(section) for section in panel._sections if _shown(section.frame)] == [FrameUpscaleSection, SecondarySection]
+    assert _shown(panel._widgets["tvai_ffmpeg_path"].master)
+    assert not _shown(panel._widgets["tvai_model"].master)
+
+
 def _offered_tabs(panel) -> list[str]:
     from jasna.gui.locales import t
 
