@@ -19,7 +19,7 @@ jobs:
       - name: Verify build metadata
         run: |
           python -m pip install --upgrade pip build
-          python -m build --wheel --no-isolation
+          python -m build --wheel
       - name: Check Python version and conditional dependencies
         run: |
           python - <<'PY'
