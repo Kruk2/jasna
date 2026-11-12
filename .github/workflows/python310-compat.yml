@@ -1,0 +1,36 @@
+name: Python 3.10 compatibility
+
+on:
+  pull_request:
+  push:
+    branches:
+      - compat/python310-autodl
+
+jobs:
+  py310-source-and-metadata:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Check Python 3.10 source syntax
+        run: python -m compileall -q jasna
+      - name: Verify build metadata
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --no-isolation
+      - name: Check Python version and conditional dependencies
+        run: |
+          python - <<'PY'
+          import glob
+          import zipfile
+          from email.parser import Parser
+          with zipfile.ZipFile(glob.glob("dist/*.whl")[0]) as wheel:
+              name = next(n for n in wheel.namelist() if n.endswith(".dist-info/METADATA"))
+              metadata = Parser().parsestr(wheel.read(name).decode())
+          assert metadata["Requires-Python"] == ">=3.10"
+          requirements = metadata.get_all("Requires-Dist", [])
+          assert any("av==16.1.0" in r and "3.11" in r for r in requirements), requirements
+          print("Python 3.10 wheel metadata OK")
+          PY
