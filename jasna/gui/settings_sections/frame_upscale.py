@@ -1,5 +1,8 @@
 """Whole-video upscaling settings section."""
 
+import sys
+from typing import get_args
+
 import customtkinter as ctk
 
 from jasna.accelerator import AcceleratorVendor
@@ -13,15 +16,17 @@ from jasna.gui.settings_sections.widgets import (
     layout_rows,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.session_config import UPSCALE_HEIGHTS
+from jasna.session_config import UPSCALE_HEIGHTS, Dlss5PresetName, Dlss5StyleName
 
 _RTX_LEVELS = ("low", "medium", "high", "ultra")
 
 
 def offered_upscale_models(vendor: AcceleratorVendor) -> tuple[str, ...]:
-    """The AI networks run on NVIDIA and AMD; RTX Super Res only on NVIDIA."""
+    """The AI networks run on NVIDIA and AMD; RTX Super Res only on NVIDIA, DLSS 5 only on
+    NVIDIA under Windows."""
     if vendor is AcceleratorVendor.NVIDIA:
-        return ("none", "span", "realplksr", "rtx-super-res")
+        dlss5 = ("dlss5",) if sys.platform == "win32" else ()
+        return ("none", "span", "realplksr", "rtx-super-res", *dlss5)
     if vendor is AcceleratorVendor.AMD:
         return ("none", "span", "realplksr")
     return ("none",)
@@ -60,6 +65,7 @@ class FrameUpscaleSection:
                 "span": t("upscale_span"),
                 "realplksr": t("upscale_realplksr"),
                 "rtx-super-res": t("upscale_rtx"),
+                "dlss5": t("upscale_dlss5"),
             },
             self._on_model_changed,
             width=220,
@@ -102,11 +108,41 @@ class FrameUpscaleSection:
             rtx_rows.append(row)
         self._rtx_rows = tuple(rtx_rows)
 
+        dlss5_preset_row = ctk.CTkFrame(card, fg_color="transparent")
+        add_setting_label(dlss5_preset_row, "upscale_dlss5_preset")
+        self._widgets["upscale_dlss5_preset"] = _menu(
+            dlss5_preset_row,
+            {preset: t("dlss5_preset_default") if preset == "default" else preset.upper()
+             for preset in get_args(Dlss5PresetName)},
+            lambda _value: self._on_modified(),
+            width=140,
+        )
+        dlss5_style_row = ctk.CTkFrame(card, fg_color="transparent")
+        add_setting_label(dlss5_style_row, "upscale_dlss5_style")
+        self._widgets["upscale_dlss5_style"] = _menu(
+            dlss5_style_row,
+            {style: t(f"dlss5_style_{style}") for style in get_args(Dlss5StyleName)},
+            lambda _value: self._on_modified(),
+            width=140,
+        )
+        dlss5_intensity_row = ctk.CTkFrame(card, fg_color="transparent")
+        add_setting_label(dlss5_intensity_row, "upscale_dlss5_intensity")
+        self._widgets["upscale_dlss5_intensity_val"] = create_slider_value_label(dlss5_intensity_row, Colors.BG_CARD)
+        self._widgets["upscale_dlss5_intensity_val"].pack(side="right")
+        self._widgets["upscale_dlss5_intensity"] = ctk.CTkSlider(
+            dlss5_intensity_row, from_=0.0, to=2.0, number_of_steps=40,
+            fg_color=Colors.BG_PANEL, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
+            width=SLIDER_WIDTH, command=self._on_dlss5_intensity_changed,
+        )
+        self._widgets["upscale_dlss5_intensity"].pack(side="right", padx=(0, 8))
+        self._dlss5_rows = (dlss5_preset_row, dlss5_style_row, dlss5_intensity_row)
+
         gap = dict(fill="x", pady=(0, 8))
         self._card_rows = [
             Row(height_row, gap, "simple"),
             Row(strength_row, gap, "advanced"),
             *(Row(row, gap, "advanced") for row in rtx_rows),
+            *(Row(row, gap, "advanced") for row in self._dlss5_rows),
         ]
         self._rows = [
             Row(heading, dict(fill="x", pady=(Sizing.PADDING_SMALL, Sizing.PADDING_SMALL)), "simple"),
@@ -121,12 +157,19 @@ class FrameUpscaleSection:
         self._widgets["upscale_strength_val"].configure(text=f"{value:.2f}")
         self._on_modified()
 
+    def _on_dlss5_intensity_changed(self, value: float) -> None:
+        self._widgets["upscale_dlss5_intensity_val"].configure(text=f"{value:.2f}")
+        self._on_modified()
+
     def _layout_card(self) -> None:
         model = self._widgets["upscale_model"].get_value()
         if model == "none":
             self._card.pack_forget()
             return
-        hidden = () if model == "rtx-super-res" else self._rtx_rows
+        hidden = (
+            *(() if model == "rtx-super-res" else self._rtx_rows),
+            *(() if model == "dlss5" else self._dlss5_rows),
+        )
         layout_rows(self._card_rows, self._level, standard=True, ltx=True, hidden=hidden)
         self._card.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
@@ -155,6 +198,10 @@ class FrameUpscaleSection:
         self._widgets["upscale_rtx_quality"].set_value(preset.upscale_rtx_quality)
         self._widgets["upscale_rtx_denoise"].set_value(preset.upscale_rtx_denoise)
         self._widgets["upscale_rtx_deblur"].set_value(preset.upscale_rtx_deblur)
+        self._widgets["upscale_dlss5_preset"].set_value(preset.upscale_dlss5_preset)
+        self._widgets["upscale_dlss5_style"].set_value(preset.upscale_dlss5_style)
+        self._widgets["upscale_dlss5_intensity"].set(preset.upscale_dlss5_intensity)
+        self._widgets["upscale_dlss5_intensity_val"].configure(text=f"{preset.upscale_dlss5_intensity:.2f}")
         self._layout_card()
 
     def collect(self) -> dict:
@@ -165,4 +212,7 @@ class FrameUpscaleSection:
             "upscale_rtx_quality": self._widgets["upscale_rtx_quality"].get_value(),
             "upscale_rtx_denoise": self._widgets["upscale_rtx_denoise"].get_value(),
             "upscale_rtx_deblur": self._widgets["upscale_rtx_deblur"].get_value(),
+            "upscale_dlss5_preset": self._widgets["upscale_dlss5_preset"].get_value(),
+            "upscale_dlss5_style": self._widgets["upscale_dlss5_style"].get_value(),
+            "upscale_dlss5_intensity": round(float(self._widgets["upscale_dlss5_intensity"].get()), 2),
         }

@@ -104,7 +104,7 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
   かかります。準備には約1分かかります。
 - **RTX Super Res**（`rtx-super-res`）：NVIDIA のみ、とても高速。先にノイズや
   ブレを取ることもできます（`--upscale-rtx-denoise`、`--upscale-rtx-deblur`）。
-- **DLSS 5**（`dlss5`、コマンドラインのみ、Windows と RTX 30 シリーズ以降の GPU。
+- **DLSS 5**（`dlss5`、Windows と RTX 30 シリーズ以降の GPU。
   RTX 30 は低速）：NVIDIA DLSS 5 は光や質感も描き直すため、色や肌が変わることが
   あります。Jasna には含まれていません。初回に、非公式の DLSS 5 Visual Enhancer
   v3.0（467 MB）を GitHub からダウンロードするか確認し、そのランタイムを
