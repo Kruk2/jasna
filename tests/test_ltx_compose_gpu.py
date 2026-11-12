@@ -214,12 +214,25 @@ def _random_candidates(rng: np.random.Generator, height: int, width: int, device
     return candidates
 
 
+@pytest.fixture
+def compositing_caches_released():
+    """Compositing keeps its Gaussian bands and resampling weights on the GPU. Left there after
+    full-size frames they pin reserved memory, which the tests that measure it would see."""
+    yield
+    from jasna.ltx import compose
+    from jasna.tracking import blending
+
+    for cached in (compose._gaussian_band, compose._gaussian, compose._area_weights, blending.ellipse_row_reach):
+        cached.cache_clear()
+    torch.cuda.empty_cache()
+
+
 @pytest.mark.skipif(
     not torch.cuda.is_available() or not has_precompiled_kernels(torch.device("cuda")),
     reason="needs a GPU the precompiled kernels support",
 )
 @pytest.mark.parametrize("height, width", [(360, 640), (1080, 1920), (2160, 3840)])
-def test_composite_on_the_compose_kernels_is_bit_identical_to_torch(height, width):
+def test_composite_on_the_compose_kernels_is_bit_identical_to_torch(height, width, compositing_caches_released):
     from jasna.ltx.compose import composite_on_kernels, composite_on_torch
     from jasna.ltx.plan import feather_pixels
 
