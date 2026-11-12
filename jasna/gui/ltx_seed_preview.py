@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import queue
 import shutil
-import tempfile
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -26,6 +25,7 @@ from jasna.gui.queues import replace_pending
 from jasna.gui.video_session import SessionCache, build_video_session, video_session_key
 from jasna.media.probe import VideoMetadata
 from jasna.media.splice import KeyframeIndex, segment_render_span
+from jasna.os_utils import make_scratch_folder
 from jasna.segments import SegmentRange, SegmentRestoration
 
 DECODE_HEADROOM_BYTES = 2 << 30
@@ -114,7 +114,7 @@ class SeedRenderer:
         self.path = Path(path)
         self.metadata = metadata
         self.index = index
-        self._temp = Path(tempfile.mkdtemp(prefix=".jasna-seeds-", dir=work_dir))
+        self._temp = make_scratch_folder(Path(work_dir), ".jasna-seeds-")
         self._sessions = SessionCache(on_close=self._drop_runtime)
         self._prepared: dict[tuple, object] = {}
         self._transformer = None
