@@ -14,8 +14,8 @@ dependencies = [
   "av==18.1.0; python_version >= '3.11'",
   "numpy>=1.26",
   "psutil",
-  # Diffusers 0.41+ requires Python >=3.11.
-  "diffusers<0.41; python_version < '3.11'",
+  # Diffusers 0.42+ requires Python >=3.11; 0.41.0 still supports 3.10.
+  "diffusers<0.42; python_version < '3.11'",
   "diffusers; python_version >= '3.11'",
   "huggingface-hub",
   "safetensors>=0.6",
