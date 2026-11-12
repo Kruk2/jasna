@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Hashable, Mapping
 
 from jasna.gui.models import AppSettings
-from jasna.session_config import SessionConfig, ltx_unsupported_options
+from jasna.session_config import (
+    UPSCALE_DLSS5_DEFAULT_INTENSITY,
+    UPSCALE_DLSS5_DEFAULT_PRESET,
+    UPSCALE_DLSS5_DEFAULT_STYLE,
+    SessionConfig,
+    ltx_unsupported_options,
+)
 from jasna.session_factory import RestorationSession
 
 if TYPE_CHECKING:
@@ -122,6 +128,9 @@ def video_session_config(
         upscale_rtx_quality=settings.upscale_rtx_quality,
         upscale_rtx_denoise=settings.upscale_rtx_denoise,
         upscale_rtx_deblur=settings.upscale_rtx_deblur,
+        upscale_dlss5_preset=UPSCALE_DLSS5_DEFAULT_PRESET,
+        upscale_dlss5_style=UPSCALE_DLSS5_DEFAULT_STYLE,
+        upscale_dlss5_intensity=UPSCALE_DLSS5_DEFAULT_INTENSITY,
         fmp4=bool(settings.fmp4),
         disable_progress=True,
         working_dir=Path(settings.working_directory) if settings.working_directory else None,

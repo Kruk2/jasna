@@ -35,6 +35,8 @@ CLI_HELP: dict[str, str] = {
         "span: a fast AI upscaler, works on NVIDIA and AMD (NVIDIA prepares it for each new video size once, "
         "about half a minute). realplksr: a slower AI upscaler that keeps more fine detail and cleans compression, "
         "NVIDIA and AMD. rtx-super-res: NVIDIA RTX Video Super Resolution, very fast, NVIDIA only. "
+        "dlss5: NVIDIA DLSS 5, reworks lighting and surfaces while it upscales, slow, Windows with an RTX GPU "
+        "only; put the DLSS 5 runtime files in model_weights/dlss5 first. "
         "Restores the whole video, so it can't be combined with --segments, --ltx-auto-split or --stream. "
         "(default: %(default)s)"
     ),
@@ -49,6 +51,13 @@ CLI_HELP: dict[str, str] = {
     "upscale_rtx_quality": "--upscale rtx-super-res: upscale quality; higher is sharper and slower. (default: %(default)s)",
     "upscale_rtx_denoise": "--upscale rtx-super-res: remove noise before upscaling, none to disable. (default: %(default)s)",
     "upscale_rtx_deblur": "--upscale rtx-super-res: remove blur before upscaling, none to disable. (default: %(default)s)",
+    "upscale_dlss5_preset": (
+        "--upscale dlss5: the DLSS upscaling model; l and m rebuild more fine texture. (default: %(default)s)"
+    ),
+    "upscale_dlss5_style": "--upscale dlss5: the look of the rendered result. (default: %(default)s)",
+    "upscale_dlss5_intensity": (
+        "--upscale dlss5: how strongly DLSS 5 reworks lighting and surfaces, 0-2. (default: %(default)s)"
+    ),
     "restoration_model_path": (
         "Restoration model file (basicvsrpp) or folder (ltx). Default: the model in model_weights/."
     ),
