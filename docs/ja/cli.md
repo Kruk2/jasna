@@ -97,6 +97,17 @@ $env:TEMP = 'Z:\Temp'
 | `--tvai-workers` | `2` | 並列で動かす TVAI ffmpeg ワーカー数。 |
 | `--tvai-denoise` | オフ | Topaz モデルの前にノイズを除去します。遅くなり、VRAM を多く使います。 |
 
+## 動画全体を拡大
+
+| オプション | デフォルト | 説明 |
+| ------ | ------- | ----- |
+| `--upscale` | `none` | `span`（NVIDIA・AMD）または `rtx-super-res`（NVIDIA）。詳しくは[高度な処理](advanced_processing.md)。 |
+| `--upscale-height` | `2160` | `1080`、`1440`、`2160`。すでにこの高さ以上の動画は拡大しません。 |
+| `--upscale-strength` | `1.0` | 0〜1。下げると普通の拡大が混ざります。 |
+| `--upscale-rtx-quality` | `high` | `low`、`medium`、`high`、`ultra`。 |
+| `--upscale-rtx-denoise` | `none` | `none`、`low`、`medium`、`high`、`ultra`。 |
+| `--upscale-rtx-deblur` | `none` | `none`、`low`、`medium`、`high`、`ultra`。 |
+
 ## SD 1.5 画像復元
 
 静止画は自動的にここへルーティングされます。`--restoration-model-name` は動画専用です。

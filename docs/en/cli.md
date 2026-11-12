@@ -97,6 +97,17 @@ The `--ltx-*` options need `--restoration-model-name ltx-basic`, `ltx`, `ltx-4st
 | `--tvai-workers` | `2` | Parallel TVAI ffmpeg workers. |
 | `--tvai-denoise` | off | Remove noise before the Topaz model runs. Slower, uses more VRAM. |
 
+## Upscale whole video
+
+| Option | Default | Notes |
+| ------ | ------- | ----- |
+| `--upscale` | `none` | `span` (NVIDIA or AMD) or `rtx-super-res` (NVIDIA). See [Advanced processing](advanced_processing.md#upscale-the-whole-video). |
+| `--upscale-height` | `2160` | `1080`, `1440` or `2160`. Videos already this tall are not upscaled. |
+| `--upscale-strength` | `1.0` | 0–1. Lower mixes in a plain resize. |
+| `--upscale-rtx-quality` | `high` | `low`, `medium`, `high`, `ultra`. |
+| `--upscale-rtx-denoise` | `none` | `none`, `low`, `medium`, `high`, `ultra`. |
+| `--upscale-rtx-deblur` | `none` | `none`, `low`, `medium`, `high`, `ultra`. |
+
 ## SD 1.5 image restoration
 
 Still images route here automatically; `--restoration-model-name` is video-only.

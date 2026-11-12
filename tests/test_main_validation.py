@@ -168,6 +168,12 @@ LTX_NEEDED = "needs --restoration-model-name ltx-basic, ltx, ltx-4step, ltx-8ste
         (["--restoration-model-name", "ltx", "--ltx-auto-split", "12", "--frame-generation", "2x"], (),
          "--frame-generation cannot be combined with --ltx-auto-split"),
         (["--frame-generation", "4x"], (), "argument --frame-generation: invalid choice"),
+        (["--stream", "--upscale", "span"], (), "--upscale is only supported for offline exports"),
+        (["--segments", "10-20", "--upscale", "rtx-super-res"], (), "--upscale cannot be combined with --segments"),
+        (["--restoration-model-name", "ltx", "--ltx-auto-split", "12", "--upscale", "span"], (),
+         "--upscale cannot be combined with --ltx-auto-split"),
+        (["--upscale", "span", "--upscale-height", "720"], (), "argument --upscale-height: invalid choice"),
+        (["--upscale", "span", "--upscale-strength", "1.5"], (), "Upscale strength must be in"),
         (["--codec", "vp9"], (), "argument --codec: invalid choice: 'vp9'"),
         (["--codec", "av1", "--encoder-settings", "profile=main"], (), "for codec av1.*profile"),
         (["--batch-size", "0"], (), "Batch size must be > 0"),
@@ -316,6 +322,20 @@ def test_frame_generation_reaches_the_pipeline_with_retargeting(tmp_path):
         ).call_args.kwargs["config"]
 
     assert (config.frame_generation, config.retarget_high_fps) == ("2x", True)
+
+
+def test_upscale_options_reach_the_pipeline(tmp_path):
+    config = run_cli(
+        cli_args(
+            tmp_path, "--upscale", "rtx-super-res", "--upscale-height", "1440", "--upscale-strength", "0.5",
+            "--upscale-rtx-quality", "ultra", "--upscale-rtx-denoise", "low", "--upscale-rtx-deblur", "medium",
+        )
+    ).call_args.kwargs["config"]
+
+    assert (
+        config.upscale_model, config.upscale_height, config.upscale_strength,
+        config.upscale_rtx_quality, config.upscale_rtx_denoise, config.upscale_rtx_deblur,
+    ) == ("rtx-super-res", 1440, 0.5, "ultra", "low", "medium")
 
 
 def test_frame_generation_on_an_older_gpu_is_a_usage_error(tmp_path, capsys):

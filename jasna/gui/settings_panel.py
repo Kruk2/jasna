@@ -22,6 +22,7 @@ from jasna.gui.locales import t
 from jasna.gui.ltx_models import LtxModels
 from jasna.gui.settings_sections.detection import TEMPORAL_FILTER_SLIDER_MAX, DetectionSection
 from jasna.gui.settings_sections.encoding import EncodingSection
+from jasna.gui.settings_sections.frame_upscale import FrameUpscaleSection
 from jasna.gui.settings_sections.image_restoration import ImageRestorationSection
 from jasna.gui.settings_sections.post_export import PostExportSection
 from jasna.gui.settings_sections.processing import ProcessingSection
@@ -306,6 +307,7 @@ class SettingsPanel(ctk.CTkFrame):
         )
         detection_section = DetectionSection(self._scroll, self._widgets, self._mark_modified)
         self._secondary_section = SecondarySection(self._scroll, self._widgets)
+        self._frame_upscale_section = FrameUpscaleSection(self._scroll, self._widgets, self._mark_modified)
         image_section = ImageRestorationSection(
             self._scroll,
             self._widgets,
@@ -318,7 +320,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._tab_sections = {
             "model": [self._model_section, self._processing_section],
             "detection": [detection_section],
-            "upscale": [self._secondary_section],
+            "upscale": [self._frame_upscale_section, self._secondary_section],
             "output": [self._encoding_section, post_export_section],
             "images": [image_section],
         }
@@ -345,6 +347,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._model_section.set_gpu_support(vendor=vendor, blackwell=blackwell)
         self._processing_section.set_gpu_support(vendor)
         self._secondary_section.set_gpu_support(vendor)
+        self._frame_upscale_section.set_gpu_support(vendor)
         self._encoding_section.set_frame_generation_support(frame_generation)
         self._update_modified_indicator()
 

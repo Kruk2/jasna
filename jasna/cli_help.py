@@ -30,6 +30,24 @@ CLI_HELP: dict[str, str] = {
         "With --retarget-high-fps, 60 FPS is halved first and then doubled back. "
         "(default: %(default)s)"
     ),
+    "upscale": (
+        "Upscale the whole video before saving it, so the output is bigger and sharper. "
+        "span: a fast AI upscaler, works on NVIDIA and AMD (NVIDIA prepares it for each new video size once, "
+        "about half a minute). rtx-super-res: NVIDIA RTX Video Super Resolution, very fast, NVIDIA only. "
+        "Restores the whole video, so it can't be combined with --segments, --ltx-auto-split or --stream. "
+        "(default: %(default)s)"
+    ),
+    "upscale_height": (
+        "Output height for --upscale; the width keeps the aspect ratio. Videos already this tall are not "
+        "upscaled. (default: %(default)s)"
+    ),
+    "upscale_strength": (
+        "How much of the AI upscale to keep, 0-1. Lower mixes in a plain resize for a softer, more natural "
+        "look. (default: %(default)s)"
+    ),
+    "upscale_rtx_quality": "--upscale rtx-super-res: upscale quality; higher is sharper and slower. (default: %(default)s)",
+    "upscale_rtx_denoise": "--upscale rtx-super-res: remove noise before upscaling, none to disable. (default: %(default)s)",
+    "upscale_rtx_deblur": "--upscale rtx-super-res: remove blur before upscaling, none to disable. (default: %(default)s)",
     "restoration_model_path": (
         "Restoration model file (basicvsrpp) or folder (ltx). Default: the model in model_weights/."
     ),

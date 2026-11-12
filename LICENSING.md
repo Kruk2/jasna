@@ -60,7 +60,8 @@ component.
 
 Every bundled or downloadable model has separate artifact-specific terms and
 a SHA-256 entry in `assets/THIRD_PARTY_MODELS.md`. Jasna-trained RF-DETR
-detectors are licensed under Apache-2.0. Lada models retain AGPL-3.0. Encrypted
+detectors are licensed under Apache-2.0. Lada models retain AGPL-3.0. The
+NomosUni SPAN upscaler weights are CC-BY-4.0 (Philip Hofmann). Encrypted
 supporter models are proprietary and may be used only under their stated
 supporter-model terms.
 

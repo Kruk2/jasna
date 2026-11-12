@@ -91,6 +91,28 @@ lower CQ. The preview does not show sharpening. With
 [selected ranges](segments.md), the parts between them are encoded again
 instead of copied, so sharpening covers the whole video.
 
+## Upscale the whole video
+
+**Upscale Video** in the **Upscale** tab (`--upscale`) makes the whole saved
+video bigger and sharper, not only the restored areas. Pick the output height
+(`--upscale-height`: 1080p, 1440p or 4K); the width keeps the picture's shape.
+Videos that are already this tall are not upscaled.
+
+- **SPAN** (`span`): a fast AI upscaler. NVIDIA and AMD. On NVIDIA it is
+  prepared once for each new video size, which takes about half a minute.
+- **RTX Super Res** (`rtx-super-res`): NVIDIA only, very fast. It can also
+  remove noise or blur first (`--upscale-rtx-denoise`, `--upscale-rtx-deblur`).
+
+```bash
+jasna --input in.mp4 --output out.mp4 --restoration-model-name ltx --upscale span --upscale-height 2160
+```
+
+**Strength** (`--upscale-strength`, 0–1) mixes in a plain resize for a softer,
+more natural look. 4K needs a bigger file, so Jasna raises its bitrate limit
+to match. Works with BasicVSR++ and LTX. The whole video is restored, so it is
+not available with [selected ranges](segments.md), and **LTX only for big
+mosaics** is skipped. Not available with streaming. The preview does not show it.
+
 ## Encoder quality and custom settings
 
 **CQ** (`--cq`) sets the quality. Lower means better quality and a bigger

@@ -22,6 +22,10 @@ class SecondarySection:
         self._ltx_only = False
 
         self.frame = inner = ctk.CTkFrame(parent, fg_color="transparent")
+        ctk.CTkLabel(
+            inner, text=t("upscale_restored_areas_heading"), text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_HEADING, "bold"), anchor="w",
+        ).pack(fill="x", pady=(Sizing.PADDING_SMALL, Sizing.PADDING_SMALL))
 
         # Engine selection (radio-like)
         self._widgets["secondary_var"] = ctk.StringVar(value="none")

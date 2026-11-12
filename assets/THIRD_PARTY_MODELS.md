@@ -42,6 +42,22 @@ This checkpoint is redistributed unmodified.
 These files are not part of release packages yet; hashes for the fine-tuned
 files are added when they are.
 
+## NomosUni SPAN 2x upscaler
+
+- Jasna model name: `span` (whole-video upscaling)
+- File: `span-nomosuni-2x.safetensors`
+- Upstream: `2x-NomosUni_span_multijpg_ldl` by Philip Hofmann (Helaman), listed on
+  [OpenModelDB](https://openmodeldb.info/models/2x-NomosUni-span-multijpg-ldl)
+- Upstream SHA-256: `bc5fa00b9ee304301a616163275e34421bb507586176db4387239fa3a87e6bb6`
+- SHA-256: `7eb740e61a69ea6b4ad45d88d79c712c8df7787da4f51839efe364bf2ba6e890`
+- Architecture: SPAN (Wan et al., [hongyuanyu/SPAN](https://github.com/hongyuanyu/SPAN), Apache-2.0)
+- License: CC-BY-4.0 (`assets/licenses/CC-BY-4.0.txt`)
+- Copyright: Philip Hofmann
+
+Modified: `scripts/fuse_span_weights.py` folds each training-time convolution
+chain of the upstream checkpoint into the single convolution it computes at
+inference. The result computes the same picture.
+
 ## Jasna RF-DETR v6
 
 - Jasna model name: `rfdetr-v6`

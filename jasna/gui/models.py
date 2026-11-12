@@ -17,6 +17,8 @@ from jasna.session_config import (
     DEFAULT_MAX_DETECTION_GAP,
     DEFAULT_MIN_DETECTION_DURATION,
     DEFAULT_TEMPORAL_OVERLAP,
+    DEFAULT_UPSCALE_HEIGHT,
+    DEFAULT_UPSCALE_STRENGTH,
     LTX_AUTO_DEFAULT_PERCENT,
     LTX_DEFAULT_MODEL,
     LTX_DEFAULT_OVERLAP,
@@ -31,6 +33,9 @@ from jasna.session_config import (
     SD15_DEFAULT_VARIANTS,
     TVAI_DEFAULT_ARGS,
     TVAI_DEFAULT_FFMPEG_PATH,
+    UPSCALE_RTX_DEFAULT_DEBLUR,
+    UPSCALE_RTX_DEFAULT_DENOISE,
+    UPSCALE_RTX_DEFAULT_QUALITY,
     TVAI_DEFAULT_MODEL,
     TVAI_DEFAULT_SCALE,
     TVAI_DEFAULT_WORKERS,
@@ -166,6 +171,14 @@ class AppSettings:
     rtx_quality: str = RTX_DEFAULT_QUALITY  # low, medium, high, ultra
     rtx_denoise: str = RTX_DEFAULT_DENOISE  # none, low, medium, high, ultra
     rtx_deblur: str = RTX_DEFAULT_DEBLUR  # none, low, medium, high, ultra
+
+    # Whole-video upscaling
+    upscale_model: str = "none"  # none, span, rtx-super-res
+    upscale_height: int = DEFAULT_UPSCALE_HEIGHT
+    upscale_strength: float = DEFAULT_UPSCALE_STRENGTH
+    upscale_rtx_quality: str = UPSCALE_RTX_DEFAULT_QUALITY
+    upscale_rtx_denoise: str = UPSCALE_RTX_DEFAULT_DENOISE
+    upscale_rtx_deblur: str = UPSCALE_RTX_DEFAULT_DEBLUR
     
     # Detection
     detection_model: str = DEFAULT_DETECTION_MODEL_NAME  # RF-DETR, Lada YOLO, or ZeLeFans VR YOLO registry name

@@ -38,7 +38,9 @@ from jasna.progressbar import JobProgress, ProgressCallback, Progressbar
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange, job_models, job_restoration, resolve_restorations
 from jasna.session_config import RestorationModelName, SessionConfig
+from jasna.session_factory import build_frame_upscaler, ensure_frame_upscale_engines, frame_upscale_size
 from jasna.settings_tag import job_settings, settings_comment
+from jasna.upscale import FrameUpscaleWriter, upscaled_metadata
 from jasna.vr180 import resolve_vr_mode, stereo_detector
 from jasna.vr_projection import build_vr_projector
 
@@ -251,14 +253,34 @@ class Pipeline:
             raise error
 
     def _frame_writer(self, writer: _OfflineFrameWriter, metadata):
-        """``writer``, behind 2x frame generation when the job asks for it; the effect takes
-        its GPU memory from here until the writer closes."""
-        if self.config.frame_generation == "none":
-            return writer
-        from jasna.frame_generation import FrameGenerationWriter, RtxFrameGeneration
+        """``writer``, behind 2x frame generation and then upscaling when the job asks for
+        them; their models take GPU memory from here until the writer closes."""
+        source_size = (int(metadata.video_width), int(metadata.video_height))
+        upscale_size = frame_upscale_size(self.config, *source_size)
+        if self.config.frame_generation != "none":
+            from jasna.frame_generation import FrameGenerationWriter, RtxFrameGeneration
 
-        generate = RtxFrameGeneration(self.device, int(metadata.video_width), int(metadata.video_height))
-        return FrameGenerationWriter(writer, generate)
+            writer = FrameGenerationWriter(writer, RtxFrameGeneration(self.device, *(upscale_size or source_size)))
+        if upscale_size is not None:
+            upscaler = build_frame_upscaler(self.config, self.device, source_size, upscale_size)
+            writer = FrameUpscaleWriter(writer, upscaler)
+        return writer
+
+    def _prepare_upscale(self, metadata) -> None:
+        source_size = (int(metadata.video_width), int(metadata.video_height))
+        upscale_size = frame_upscale_size(self.config, *source_size)
+        if upscale_size is None:
+            if self.config.upscale_model != "none":
+                log.info(
+                    "Not upscaling: the video is already %d px tall (target %d px)",
+                    source_size[1], self.config.upscale_height,
+                )
+            return
+        log.info(
+            "Upscaling %dx%d to %dx%d with %s",
+            *source_size, *upscale_size, self.config.upscale_model,
+        )
+        ensure_frame_upscale_engines(self.config, source_size, upscale_size, log_callback=log.info)
 
     def _log_memory_at_end(self) -> None:
         free, total = torch.cuda.mem_get_info(self.device)
@@ -324,10 +346,11 @@ class Pipeline:
                 "Fragmented MP4 has no effect on %s output; it is already playable while it grows",
                 self.output_video.suffix,
             )
+        upscale_size = frame_upscale_size(self.config, int(metadata.video_width), int(metadata.video_height))
         return VideoEncoder(
             str(self.output_video),
             device=self.device,
-            metadata=metadata,
+            metadata=metadata if upscale_size is None else upscaled_metadata(metadata, upscale_size),
             codec=self.codec,
             encoder_settings=self.encoder_settings,
             lut_path=self.lut_path,
@@ -713,6 +736,7 @@ class Pipeline:
         self.validate_metadata(metadata)
         require_encodable_size(vendor_for_device(self.device), self.codec, metadata.video_width, metadata.video_height)
         self.configure_vr(metadata)
+        self._prepare_upscale(metadata)
         if (
             self.segments or self.restoration_model_name == "ltx"
             or (resume_directory(self.config, self.output_video) / "render").exists()

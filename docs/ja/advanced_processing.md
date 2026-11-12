@@ -90,6 +90,28 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
 [選択した区間](segments.md)がある場合、シャープネスが動画全体にかかるよう、
 区間の間の部分もコピーせずにエンコードし直します。
 
+## 動画全体を拡大
+
+**拡大**タブの**動画を拡大**（`--upscale`）は、修復した部分だけでなく、保存する
+動画全体を大きく、くっきりさせます。出力の高さ（`--upscale-height`：1080p、
+1440p、4K）を選びます。幅は画面の比率に合わせます。すでにこの高さ以上の動画は
+拡大しません。
+
+- **SPAN**（`span`）：高速な AI 拡大。NVIDIA と AMD。NVIDIA では新しい動画サイズ
+  ごとに一度だけ準備します（約30秒）。
+- **RTX Super Res**（`rtx-super-res`）：NVIDIA のみ、とても高速。先にノイズや
+  ブレを取ることもできます（`--upscale-rtx-denoise`、`--upscale-rtx-deblur`）。
+
+```bash
+jasna --input in.mp4 --output out.mp4 --restoration-model-name ltx --upscale span --upscale-height 2160
+```
+
+**強さ**（`--upscale-strength`、0〜1）を下げると普通の拡大が混ざり、柔らかく
+自然な見た目になります。4K はファイルが大きくなるので、Jasna はビットレートの
+上限もそれに合わせて上げます。BasicVSR++ と LTX の両方で使えます。動画全体を
+処理するため、[選択した区間](segments.md)とは併用できず、**大きなモザイクだけ LTX**
+は使われません。ストリーミングでは使えません。プレビューには表示されません。
+
 ## エンコーダー品質とカスタム設定
 
 **CQ**（`--cq`）は品質を決めます。低いほど高品質で、ファイルは大きくなります。

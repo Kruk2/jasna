@@ -6,7 +6,7 @@ import logging
 import subprocess
 import sys
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from jasna._frozen import is_frozen
@@ -34,12 +34,17 @@ class EngineCompilationRequest:
 
     unet4x: bool = False
 
+    span_input_sizes: list[tuple[int, int]] = field(default_factory=list)
+    """``(width, height)`` of each SPAN upscale pass that needs an engine."""
+
     def to_json(self) -> str:
         return json.dumps(self.__dict__)
 
     @staticmethod
     def from_json(s: str) -> EngineCompilationRequest:
-        return EngineCompilationRequest(**json.loads(s))
+        fields = json.loads(s)
+        fields["span_input_sizes"] = [tuple(size) for size in fields.get("span_input_sizes", [])]
+        return EngineCompilationRequest(**fields)
 
 
 @dataclass
@@ -110,6 +115,7 @@ class _MissingEngines(typing.NamedTuple):
     basicvsrpp: bool
     detection: bool
     unet4x: bool
+    span_input_sizes: tuple[tuple[int, int], ...] = ()
 
 
 def _missing_engines(req: EngineCompilationRequest, *, nvidia: bool) -> _MissingEngines:
@@ -124,7 +130,14 @@ def _missing_engines(req: EngineCompilationRequest, *, nvidia: bool) -> _Missing
             req.device,
         ),
         unet4x=nvidia and req.unet4x and not _unet4x_engine_exists(req.fp16),
+        span_input_sizes=_missing_span_engines(req) if nvidia else (),
     )
+
+
+def _missing_span_engines(req: EngineCompilationRequest) -> tuple[tuple[int, int], ...]:
+    from jasna.upscale.span import missing_span_engines
+
+    return missing_span_engines(tuple(req.span_input_sizes), fp16=req.fp16)
 
 
 def ensure_engines_compiled(
@@ -251,6 +264,12 @@ def _subprocess_compile(req: EngineCompilationRequest) -> None:
         print("Compiling Unet4x engine...")
         compile_unet4x_engine(device, fp16=req.fp16)
         print("Unet4x engine compiled.")
+
+    for width, height in missing.span_input_sizes:
+        from jasna.upscale.span import compile_span_engine
+        print(f"Compiling SPAN upscale engine for {width}x{height}...")
+        compile_span_engine((width, height), device, fp16=req.fp16)
+        print("SPAN upscale engine compiled.")
 
 
 if __name__ == "__main__":

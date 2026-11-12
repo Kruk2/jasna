@@ -94,6 +94,17 @@ $env:TEMP = 'Z:\Temp'
 | `--tvai-workers` | `2` | 并行的 TVAI ffmpeg 工作进程数。 |
 | `--tvai-denoise` | 关闭 | 在 Topaz 模型运行前去除噪点。更慢，占用更多显存。 |
 
+## 放大整个视频
+
+| 选项 | 默认值 | 说明 |
+| ------ | ------- | ----- |
+| `--upscale` | `none` | `span`（NVIDIA 或 AMD）或 `rtx-super-res`（NVIDIA）。见[高级处理](advanced_processing.md)。 |
+| `--upscale-height` | `2160` | `1080`、`1440` 或 `2160`。已经达到这个高度的视频不会放大。 |
+| `--upscale-strength` | `1.0` | 0–1。调低后会混入普通缩放。 |
+| `--upscale-rtx-quality` | `high` | `low`、`medium`、`high`、`ultra`。 |
+| `--upscale-rtx-denoise` | `none` | `none`、`low`、`medium`、`high`、`ultra`。 |
+| `--upscale-rtx-deblur` | `none` | `none`、`low`、`medium`、`high`、`ultra`。 |
+
 ## SD 1.5 图片修复
 
 静态图片会自动使用这里的设置；`--restoration-model-name` 仅用于视频。

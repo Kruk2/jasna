@@ -34,6 +34,8 @@ from jasna.session_config import (
     DEFAULT_MAX_DETECTION_GAP,
     DEFAULT_MIN_DETECTION_DURATION,
     DEFAULT_TEMPORAL_OVERLAP,
+    DEFAULT_UPSCALE_HEIGHT,
+    DEFAULT_UPSCALE_STRENGTH,
     LTX_DEFAULT_MODEL,
     LTX_DEFAULT_OVERLAP,
     LTX_DEFAULT_SEED,
@@ -51,11 +53,18 @@ from jasna.session_config import (
     TVAI_DEFAULT_MODEL,
     TVAI_DEFAULT_SCALE,
     TVAI_DEFAULT_WORKERS,
+    UPSCALE_HEIGHTS,
+    UPSCALE_RTX_DEFAULT_DEBLUR,
+    UPSCALE_RTX_DEFAULT_DENOISE,
+    UPSCALE_RTX_DEFAULT_QUALITY,
     DecodeBackendName,
     LtxModelName,
     LtxVaeName,
     RestorationModelName,
+    RtxLevelName,
+    RtxQualityName,
     SessionConfig,
+    UpscaleModelName,
     ltx_unsupported_options,
 )
 
@@ -149,6 +158,12 @@ def _session_config_from_args(
         sharpen_strength=float(args.sharpen),
         retarget_high_fps=bool(args.retarget_high_fps),
         frame_generation=args.frame_generation,
+        upscale_model=args.upscale,
+        upscale_height=int(args.upscale_height),
+        upscale_strength=float(args.upscale_strength),
+        upscale_rtx_quality=args.upscale_rtx_quality,
+        upscale_rtx_denoise=args.upscale_rtx_denoise,
+        upscale_rtx_deblur=args.upscale_rtx_deblur,
         fmp4=bool(args.fmp4),
         disable_progress=bool(args.no_progress),
         working_dir=Path(args.working_directory) if args.working_directory else None,
@@ -419,6 +434,49 @@ def build_parser() -> argparse.ArgumentParser:
         default=RTX_DEFAULT_DEBLUR,
         choices=["none", "low", "medium", "high", "ultra"],
         help="RTX Super Res deblur level, none to disable (default: %(default)s)",
+    )
+
+    upscale = parser.add_argument_group("Upscale whole video")
+    upscale.add_argument(
+        "--upscale",
+        type=str,
+        default="none",
+        choices=list(get_args(UpscaleModelName)),
+        help=CLI_HELP["upscale"],
+    )
+    upscale.add_argument(
+        "--upscale-height",
+        type=int,
+        default=DEFAULT_UPSCALE_HEIGHT,
+        choices=list(UPSCALE_HEIGHTS),
+        help=CLI_HELP["upscale_height"],
+    )
+    upscale.add_argument(
+        "--upscale-strength",
+        type=float,
+        default=DEFAULT_UPSCALE_STRENGTH,
+        help=CLI_HELP["upscale_strength"],
+    )
+    upscale.add_argument(
+        "--upscale-rtx-quality",
+        type=str,
+        default=UPSCALE_RTX_DEFAULT_QUALITY,
+        choices=list(get_args(RtxQualityName)),
+        help=CLI_HELP["upscale_rtx_quality"],
+    )
+    upscale.add_argument(
+        "--upscale-rtx-denoise",
+        type=str,
+        default=UPSCALE_RTX_DEFAULT_DENOISE,
+        choices=list(get_args(RtxLevelName)),
+        help=CLI_HELP["upscale_rtx_denoise"],
+    )
+    upscale.add_argument(
+        "--upscale-rtx-deblur",
+        type=str,
+        default=UPSCALE_RTX_DEFAULT_DEBLUR,
+        choices=list(get_args(RtxLevelName)),
+        help=CLI_HELP["upscale_rtx_deblur"],
     )
 
     tvai = parser.add_argument_group("Topaz Video")
@@ -1039,6 +1097,8 @@ def _main() -> None:
         parser.error("--fmp4 is only supported for offline exports")
     if is_streaming and args.frame_generation != "none":
         parser.error("--frame-generation is only supported for offline exports")
+    if is_streaming and args.upscale != "none":
+        parser.error("--upscale is only supported for offline exports")
     from jasna.post_export_action import run_post_export_action_safely, validate_post_export_action
     with _usage_errors(parser):
         validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
@@ -1082,6 +1142,8 @@ def _main() -> None:
             parser.error("--fmp4 cannot be combined with --ltx-auto-split")
         if args.frame_generation != "none":
             parser.error("--frame-generation cannot be combined with --ltx-auto-split")
+        if args.upscale != "none":
+            parser.error("--upscale cannot be combined with --ltx-auto-split")
     if segments_spec:
         if is_streaming:
             parser.error("--segments cannot be combined with --stream")
@@ -1093,6 +1155,8 @@ def _main() -> None:
             parser.error("--fmp4 cannot be combined with --segments")
         if args.frame_generation != "none":
             parser.error("--frame-generation cannot be combined with --segments")
+        if args.upscale != "none":
+            parser.error("--upscale cannot be combined with --segments")
     if is_streaming and input_is_dir:
         parser.error("--stream does not support folder input")
     if is_streaming and input_is_image:
