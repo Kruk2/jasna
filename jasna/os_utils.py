@@ -3,6 +3,7 @@ import logging
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -642,6 +643,30 @@ def get_user_config_dir(app_name: str) -> Path:
     if xdg:
         return Path(xdg) / app_name
     return Path.home() / ".config" / app_name
+
+
+def make_scratch_folder(parent: Path, prefix: str) -> Path:
+    """Make a new ``prefix…`` folder in ``parent`` after removing the ones crashed runs left there.
+    A plain mkdir inherits the parent's permissions; tempfile's owner-only folders cannot be
+    deleted from Explorer on Windows."""
+    for leftover in parent.glob(f"{prefix}*"):
+        if leftover.is_dir():
+            try:
+                shutil.rmtree(leftover)
+            except OSError as error:
+                logger.warning("Could not remove leftover folder %s: %s", leftover, error)
+    folder = parent / f"{prefix}{secrets.token_hex(4)}"
+    folder.mkdir()
+    return folder
+
+
+@contextmanager
+def scratch_folder(parent: Path, prefix: str):
+    folder = make_scratch_folder(parent, prefix)
+    try:
+        yield folder
+    finally:
+        shutil.rmtree(folder)
 
 
 @contextmanager

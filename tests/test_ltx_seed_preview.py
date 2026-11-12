@@ -114,9 +114,11 @@ def test_cancel_stops_a_running_seed_without_a_result(monkeypatch, tmp_path) -> 
     assert renderer.closed and stopped.is_set()
 
 
-def test_seed_renderer_deletes_its_temp_dir_on_close(tmp_path) -> None:
+def test_seed_renderer_replaces_crashed_temp_dirs_and_deletes_its_own_on_close(tmp_path) -> None:
+    (tmp_path / ".jasna-seeds-crashed").mkdir()
     renderer = ltx_seed_preview.SeedRenderer(tmp_path / "video.mp4", METADATA, SimpleNamespace(), tmp_path)
     (temp,) = tmp_path.glob(".jasna-seeds-*")
+    assert temp.name != ".jasna-seeds-crashed"
 
     renderer.close()
 

@@ -17,7 +17,6 @@ that directory to resume; previews and speed tests use temporary directories.
 from __future__ import annotations
 
 import logging
-import tempfile
 import threading
 import time
 from collections import Counter
@@ -35,7 +34,7 @@ from tqdm import tqdm
 
 from jasna.accelerator import device_free_bytes
 from jasna.job_resume import write_json
-from jasna.os_utils import atomic_write
+from jasna.os_utils import atomic_write, scratch_folder
 from jasna.ltx import speed
 from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
 from jasna.ltx.compose import Candidate, composite_frame, crop_to_canvas
@@ -1355,11 +1354,11 @@ def restore_spans(
             (LtxSegment(*WHOLE_VIDEO_PTS, 0),),
             _DiscardedFrames,
         )
-        with tempfile.TemporaryDirectory(dir=work_dir, prefix=".ltx-") as temp:
+        with scratch_folder(work_dir, ".ltx-") as temp:
             _restore_spans(
                 [speed_test],
                 replace(render, detector=_SpeedTestMosaics()),
-                Path(temp),
+                temp,
                 progress=progress.speed_test(),
                 cancel=cancel,
             )

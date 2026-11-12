@@ -665,3 +665,80 @@ def test_confirm_in_terminal(monkeypatch, isatty, answer, expected):
     monkeypatch.setattr(os_utils.sys.stdin, "isatty", lambda: isatty)
     monkeypatch.setattr("builtins.input", answer)
     assert os_utils.confirm_in_terminal("Continue? [y/N]: ") is expected
+
+
+def test_scratch_folder_is_removed_after_its_body_and_when_the_body_raises(tmp_path):
+    with os_utils.scratch_folder(tmp_path, ".ltx-") as folder:
+        (folder / "latents.npy").write_bytes(b"x")
+        assert folder.parent == tmp_path and folder.name.startswith(".ltx-")
+    with pytest.raises(RuntimeError, match="crashed"):
+        with os_utils.scratch_folder(tmp_path, ".ltx-"):
+            raise RuntimeError("crashed")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_scratch_folder_removes_leftovers_with_its_prefix_only(tmp_path):
+    (tmp_path / ".ltx-crashed").mkdir()
+    (tmp_path / ".ltx-crashed" / "plans.npz").write_bytes(b"x")
+    (tmp_path / ".jasna-seeds-other").mkdir()
+    (tmp_path / "video.ltx-notes.txt").write_text("keep")
+
+    folder = os_utils.make_scratch_folder(tmp_path, ".ltx-")
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == sorted(
+        [folder.name, ".jasna-seeds-other", "video.ltx-notes.txt"]
+    )
+
+
+def test_a_leftover_that_cannot_be_removed_logs_a_warning_and_a_folder_is_still_made(monkeypatch, tmp_path, caplog):
+    (tmp_path / ".ltx-locked").mkdir()
+
+    def locked(path):
+        raise PermissionError(f"in use: {path}")
+
+    monkeypatch.setattr(os_utils.shutil, "rmtree", locked)
+
+    folder = os_utils.make_scratch_folder(tmp_path, ".ltx-")
+
+    assert folder.is_dir() and (tmp_path / ".ltx-locked").is_dir()
+    assert any(record.levelname == "WARNING" and ".ltx-locked" in record.getMessage() for record in caplog.records)
+
+
+def _dacl_is_protected(path: Path) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    advapi32.GetNamedSecurityInfoW.argtypes = [
+        wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p),
+    ]
+    advapi32.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi32.GetSecurityDescriptorControl.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(wintypes.WORD), ctypes.POINTER(wintypes.DWORD),
+    ]
+    file_object, dacl_information, dacl_protected = 1, 4, 0x1000
+    descriptor = ctypes.c_void_p()
+    assert advapi32.GetNamedSecurityInfoW(
+        str(path), file_object, dacl_information, None, None, None, None, ctypes.byref(descriptor)
+    ) == 0
+    control, revision = wintypes.WORD(), wintypes.DWORD()
+    try:
+        assert advapi32.GetSecurityDescriptorControl(descriptor, ctypes.byref(control), ctypes.byref(revision))
+    finally:
+        ctypes.windll.kernel32.LocalFree(descriptor)
+    return bool(control.value & dacl_protected)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows folder permissions")
+def test_scratch_folder_inherits_the_parent_permissions_on_windows(tmp_path):
+    with os_utils.scratch_folder(tmp_path, ".ltx-") as folder:
+        assert not _dacl_is_protected(folder)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX folder modes")
+def test_scratch_folder_has_the_default_folder_mode(tmp_path):
+    (tmp_path / "plain").mkdir()
+    with os_utils.scratch_folder(tmp_path, ".ltx-") as folder:
+        assert folder.stat().st_mode == (tmp_path / "plain").stat().st_mode

@@ -1187,6 +1187,15 @@ def test_a_run_without_a_speed_profile_runs_a_speed_test_first(fakes, tmp_path):
     )
 
 
+def test_the_speed_test_folder_replaces_crashed_ones_and_is_removed_after(fakes, tmp_path):
+    (tmp_path / "speed.json").unlink()
+    (tmp_path / ".ltx-crashed").mkdir()
+    _run_spans(tmp_path, [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)])
+
+    assert _Transformer.seeds == [[0], [7]]
+    assert list(tmp_path.glob(".ltx-*")) == []
+
+
 def test_a_fresh_encode_pass_counts_frames_and_warms_up_after_its_first_batch(fakes, monkeypatch, tmp_path):
     monkeypatch.setattr(
         restore.Progress, "bar",
