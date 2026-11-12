@@ -1,0 +1,13 @@
+date,gpu,commit,run,clip,model,vae,compose_path,compose_s,decode_s_per_window,output_md5,note
+2026-11-12,RTX 5090,a453bc84 + compose kernels,1,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,torch,112.9,0.59,5c803fa25ed98a8dcd746502ff2e2d35,interleaved A B B A A B; about 5 CPU cores busy outside the run
+2026-11-12,RTX 5090,a453bc84 + compose kernels,2,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,kernels,94.3,0.58,5c803fa25ed98a8dcd746502ff2e2d35,
+2026-11-12,RTX 5090,a453bc84 + compose kernels,3,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,kernels,93.6,0.57,5c803fa25ed98a8dcd746502ff2e2d35,
+2026-11-12,RTX 5090,a453bc84 + compose kernels,4,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,torch,106.9,0.59,5c803fa25ed98a8dcd746502ff2e2d35,
+2026-11-12,RTX 5090,a453bc84 + compose kernels,5,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,torch,106.6,0.59,5c803fa25ed98a8dcd746502ff2e2d35,
+2026-11-12,RTX 5090,a453bc84 + compose kernels,6,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,kernels,95.1,0.59,5c803fa25ed98a8dcd746502ff2e2d35,
+2026-11-12,RTX 5090,a453bc84 + compose kernels,exactness,S610 2160p 6056 frames,ltx (distilled2 int8),full/full,torch,280.0,0.60,27d05152e5a2bd4447d5aaeecb85f5b6,waits for every frame to hash it; not a timing run
+2026-11-12,RTX 5090,a453bc84 + compose kernels,exactness,S610 2160p 6056 frames,ltx (distilled2 int8),full/full,kernels,271.6,0.60,27d05152e5a2bd4447d5aaeecb85f5b6,waits for every frame to hash it; per-frame hashes match the torch run
+2026-11-12,Radeon RX 7900 XTX,57129620 + compose kernels,1,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,torch,236.2,1.61,4c9715482dcd3d6ab05ac3d8347166e2,rented cloud instance (Linux); placeholder decoder weights
+2026-11-12,Radeon RX 7900 XTX,57129620 + compose kernels,2,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,kernels,232.8,1.60,4c9715482dcd3d6ab05ac3d8347166e2,rented cloud instance (Linux); placeholder decoder weights
+2026-11-12,Radeon RX 7900 XTX,57129620 + compose kernels,exactness,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,torch,234.6,1.62,4c9715482dcd3d6ab05ac3d8347166e2,waits for every frame to hash it
+2026-11-12,Radeon RX 7900 XTX,57129620 + compose kernels,exactness,S610 1080p 6056 frames,ltx (distilled2 int8) trial,full/full,kernels,231.9,1.60,4c9715482dcd3d6ab05ac3d8347166e2,waits for every frame to hash it; per-frame hashes match the torch run

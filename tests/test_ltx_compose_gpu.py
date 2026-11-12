@@ -1,11 +1,14 @@
-"""The histogram median of the LTX colour match on the GPU against torch.quantile."""
+"""The LTX compose pass on the GPU: the colour-match histogram median against torch.quantile, the
+frame loop's streams and the compose kernels against the Torch path."""
 
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 import pytest
 import torch
 
 from jasna.ltx.compose import masked_median
+from jasna.media.cuda_kernel import has_precompiled_kernels
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
@@ -180,3 +183,55 @@ def test_area_weights_are_bit_identical_on_the_gpu_and_the_cpu(out_size, in_size
     on_gpu = _area_weights(out_size, in_size, torch.device("cuda"))
     assert on_gpu.is_cuda
     assert torch.equal(on_gpu.cpu(), _area_weights(out_size, in_size, torch.device("cpu")))
+
+
+def _random_polygon(rng: np.random.Generator, box: tuple[int, int, int, int]) -> np.ndarray:
+    x1, y1, x2, y2 = box
+    angles = np.sort(rng.uniform(0, 2 * np.pi, rng.integers(3, 12)))
+    radii = rng.uniform(0.3, 1.0, len(angles))
+    centre, half = np.array([(x1 + x2) / 2, (y1 + y2) / 2]), np.array([(x2 - x1) / 2, (y2 - y1) / 2])
+    return (centre + half * radii[:, None] * np.stack([np.cos(angles), np.sin(angles)], 1)).astype(np.float32)
+
+
+def _random_candidates(rng: np.random.Generator, height: int, width: int, device: torch.device):
+    """Up to three tracks, each with one or two windows: crops cut by the frame edge, canvases that
+    shrink and enlarge onto their crops, crossfade weights and tracks without polygons."""
+    from jasna.ltx.camera import letterbox
+    from jasna.ltx.compose import Candidate
+
+    candidates = []
+    for track in range(rng.integers(1, 4)):
+        side = int(rng.integers(40, min(height, width) // 2))
+        x1 = max(int(rng.integers(-side // 3, width - side + side // 3)), 0)
+        y1 = max(int(rng.integers(-side // 3, height - side + side // 3)), 0)
+        box = (x1, y1, min(x1 + side + int(rng.integers(-20, 20)), width), min(y1 + side, height))
+        polygons = [] if rng.random() < 0.1 else [_random_polygon(rng, box) for _ in range(rng.integers(1, 3))]
+        for _ in range(rng.integers(1, 3)):
+            canvas_side = int(rng.choice([64, 512]))
+            canvas = torch.from_numpy(rng.integers(0, 256, (3, canvas_side, canvas_side), dtype=np.uint8)).to(device)
+            weight = float(np.float32(rng.choice([1.0, rng.uniform(0.01, 1.0)])))
+            candidates.append(Candidate(canvas, letterbox(box, canvas_side), weight, track, polygons, 1.0))
+    return candidates
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available() or not has_precompiled_kernels(torch.device("cuda")),
+    reason="needs a GPU the precompiled kernels support",
+)
+@pytest.mark.parametrize("height, width", [(360, 640), (1080, 1920), (2160, 3840)])
+def test_composite_on_the_compose_kernels_is_bit_identical_to_torch(height, width):
+    from jasna.ltx.compose import composite_on_kernels, composite_on_torch
+    from jasna.ltx.plan import feather_pixels
+
+    device = torch.device("cuda")
+    rng = np.random.default_rng(height)
+    feather = feather_pixels(height)
+    frames = [
+        (torch.from_numpy(rng.integers(0, 256, (3, height, width), dtype=np.uint8)).to(device),
+         _random_candidates(rng, height, width, device))
+        for _ in range(40)
+    ]
+    on_kernels = [composite_on_kernels(source, live, feather=feather) for source, live in frames]
+    on_torch = [composite_on_torch(source, live, feather=feather, projector=None) for source, live in frames]
+    assert all(torch.equal(k, t) for k, t in zip(on_kernels, on_torch, strict=True))
+    assert sum(not torch.equal(k, source) for k, (source, _) in zip(on_kernels, frames)) > 30

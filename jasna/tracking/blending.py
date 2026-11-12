@@ -81,7 +81,7 @@ def _ellipse_structuring_element(radius: int) -> np.ndarray:
 
 
 @functools.cache
-def _ellipse_row_reach(radius: int, device: torch.device) -> torch.Tensor:
+def ellipse_row_reach(radius: int, device: torch.device) -> torch.Tensor:
     """Per horizontal distance ``0..radius``, the farthest row offset whose ellipse row still
     spans it; one more entry, far below zero, for anything farther."""
     widths = [radius - int(np.flatnonzero(row)[0]) for row in _ellipse_structuring_element(radius)]
@@ -101,7 +101,7 @@ def dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
     left = torch.where(mask, cols, -2 * width - radius).cummax(-1).values
     right = torch.where(mask, cols, 3 * width + radius).flip(-1).cummin(-1).values.flip(-1)
     distance = torch.minimum(cols - left, right - cols).clamp_(max=radius + 1)
-    reach = _ellipse_row_reach(radius, mask.device)[distance].transpose(-1, -2).contiguous()
+    reach = ellipse_row_reach(radius, mask.device)[distance].transpose(-1, -2).contiguous()
     rows = torch.arange(height, dtype=torch.int32, device=mask.device)
     from_above = (reach + rows).cummax(-1).values - rows
     from_below = (reach - rows).flip(-1).cummax(-1).values.flip(-1) + rows
