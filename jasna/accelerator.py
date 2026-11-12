@@ -3,7 +3,17 @@ from __future__ import annotations
 from collections.abc import MutableMapping
 from contextlib import nullcontext
 import ctypes
-from enum import StrEnum
+try:
+    from enum import StrEnum
+except ImportError:  # Python 3.10
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        """Subset of Python 3.11's StrEnum used by accelerator enums."""
+
+        def __str__(self) -> str:
+            return str(self.value)
+
 import functools
 import logging
 import os
