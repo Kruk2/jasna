@@ -274,6 +274,7 @@ def test_dlss5_motion_points_to_where_each_pixel_was_and_resets_at_cuts():
 @pytest.mark.usefixtures("nvidia_vendor")
 def test_dlss5_names_the_runtime_files_it_is_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 9))
     for name in DLSS5_RUNTIME_FILES[:3]:
         (tmp_path / name).touch()
 
@@ -283,6 +284,17 @@ def test_dlss5_names_the_runtime_files_it_is_missing(monkeypatch, tmp_path):
     for name in DLSS5_RUNTIME_FILES[3:]:
         (tmp_path / name).touch()
     assert dlss5_unavailable_reason(torch.device("cuda", 0), tmp_path) is None
+
+
+@pytest.mark.usefixtures("nvidia_vendor")
+@pytest.mark.parametrize(("capability", "refused"), [((7, 5), True), ((8, 0), True), ((8, 6), False), ((12, 0), False)])
+def test_dlss5_needs_an_rtx_30_or_newer_gpu(monkeypatch, tmp_path, capability, refused):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: capability)
+
+    reason = dlss5_unavailable_reason(torch.device("cuda", 0), tmp_path)
+
+    assert reason.startswith("DLSS 5 upscaling needs an NVIDIA RTX 30-series") is refused
 
 
 def test_dlss5_runs_on_windows_only(monkeypatch, tmp_path):
