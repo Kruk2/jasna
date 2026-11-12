@@ -322,7 +322,7 @@ def test_load_video_encoder_runs_the_high_resolution_head_on_kitchen(tmp_path, m
 def test_an_nvidia_gpu_without_a_measured_kitchen_head_keeps_the_bf16_encoder(tmp_path, monkeypatch):
     path = _encoder_checkpoint(tmp_path)
     monkeypatch.setattr(loader, "kernel_backend", lambda device: KernelBackend.NVIDIA)
-    monkeypatch.setattr(loader, "gpu_architecture", lambda device: (8, 9))
+    monkeypatch.setattr(loader, "gpu_architecture", lambda device: (8, 0))
     monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
@@ -336,7 +336,7 @@ def test_every_nvidia_kitchen_head_stays_within_the_fp16_safe_blocks():
              for architecture in video_encoder.NVIDIA_KITCHEN_DOWN_BLOCKS]
 
     assert heads and all(0 < head <= video_encoder.FP16_DOWN_BLOCKS for head in heads)
-    assert video_encoder.nvidia_kitchen_down_blocks((8, 6)) == 0
+    assert video_encoder.nvidia_kitchen_down_blocks((8, 0)) == 0
 
 
 @pytest.mark.parametrize("device", (

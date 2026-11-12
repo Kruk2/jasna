@@ -24,12 +24,15 @@ AMD_KITCHEN_DOWN_BLOCKS = 1
 search asks for ~13 GiB at 512 px. MIOpen's bf16 conv3d is faster on every later shape."""
 NVIDIA_KITCHEN_DOWN_BLOCKS = {
     (12, 0): 6,  # RTX 50
+    (8, 9): 6,  # RTX 40
+    (8, 6): 6,  # RTX 30
 }
 """Per CUDA capability, how many down blocks (with ``conv_in``) run in fp16 on kitchen's conv3d.
-It accumulates in fp16, which an RTX 5090 runs about 1.6x faster than bf16 (fp32 accumulation):
-~350 vs ~220 TFLOPS per conv (cuDNN's bf16 convs already sit at its bf16 GEMM
-rate), 0.36 -> 0.27 s per 512 window, a third less activation memory, and latents as close to an
-fp32 encoder's as bf16's. ``down_blocks[6]`` (1024 channels) is the first shape kitchen declines; later
+It accumulates in fp16, which the measured RTX 5090, 4090 and 3090 run 1.5-1.65x faster than bf16
+(fp32 accumulation), while cuDNN's bf16 convs already sit at the bf16 GEMM rate: a 512 window
+takes 26-30 % less time (RTX 5090: 0.36 -> 0.27 s) with a third less activation memory, and the
+latents stay within a few percent of bf16's distance from an fp32 encoder's.
+``down_blocks[6]`` (1024 channels) is the first shape kitchen declines; later
 blocks leave fp16's range (``FP16_DOWN_BLOCKS``). GPUs not listed keep the bf16 cuDNN head
 until measured (``scripts/benchmark_ltx_encode.py``)."""
 
