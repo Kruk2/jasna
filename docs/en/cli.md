@@ -101,7 +101,7 @@ The `--ltx-*` options need `--restoration-model-name ltx-basic`, `ltx`, `ltx-4st
 
 | Option | Default | Notes |
 | ------ | ------- | ----- |
-| `--upscale` | `none` | `span` (fast, NVIDIA or AMD), `realplksr` (more detail, slower, NVIDIA or AMD), `rtx-super-res` (NVIDIA) or `dlss5` (Windows, RTX 30 or newer, runtime not included). See [Advanced processing](advanced_processing.md#upscale-the-whole-video). |
+| `--upscale` | `none` | `span` (fast, NVIDIA or AMD), `realplksr` (more detail, slower, NVIDIA or AMD), `rtx-super-res` (NVIDIA) or `dlss5` (Windows, RTX 30 or newer, runtime downloaded on first use). See [Advanced processing](advanced_processing.md#upscale-the-whole-video). |
 | `--upscale-height` | `2160` | `1080`, `1440` or `2160`. Videos already this tall are not upscaled. |
 | `--upscale-strength` | `1.0` | 0–1. Lower mixes in a plain resize. |
 | `--upscale-rtx-quality` | `high` | `low`, `medium`, `high`, `ultra`. |

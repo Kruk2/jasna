@@ -107,10 +107,9 @@ Videos that are already this tall are not upscaled.
   remove noise or blur first (`--upscale-rtx-denoise`, `--upscale-rtx-deblur`).
 - **DLSS 5** (`dlss5`, command line only, Windows with an RTX 30-series or newer
   GPU; RTX 30 is slow): NVIDIA DLSS 5 also reworks lighting and surfaces, so
-  colors and skin can change. Jasna doesn't include it: copy `nvngx.dll`,
-  `dxgi.dll`, `renodx-dlss5.addon64`, `nvngx_dlss.dll` and `nvngx_dlssnr.dll`
-  from the `bin/runtime` folder of DLSS 5 Visual Enhancer v3.0 into
-  `model_weights/dlss5`. `--upscale-dlss5-preset` picks the upscaling model
+  colors and skin can change. Jasna doesn't include it: the first time, Jasna
+  offers to download the unofficial DLSS 5 Visual Enhancer v3.0 (467 MB) from
+  GitHub and keeps its runtime in `model_weights/dlss5`. `--upscale-dlss5-preset` picks the upscaling model
   (`l` and `m` rebuild more texture), `--upscale-dlss5-style` the look and
   `--upscale-dlss5-intensity` (0–2) how strong the rework is.
 
