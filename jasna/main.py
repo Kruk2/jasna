@@ -778,6 +778,8 @@ def _check_system(args: argparse.Namespace) -> None:
 def _configure_logging(level: int) -> None:
     logging.basicConfig(format="%(asctime)s %(name)s %(levelname)s: %(message)s", datefmt="%H:%M:%S")
     logging.getLogger().setLevel(level)
+    from jasna.media.ffmpeg_log import log_ffmpeg_errors
+    log_ffmpeg_errors()
 
 
 def _configure_runtime(args: argparse.Namespace) -> None:
