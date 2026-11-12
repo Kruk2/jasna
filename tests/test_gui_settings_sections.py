@@ -147,8 +147,8 @@ def test_frame_generation_is_off_and_locked_on_a_gpu_without_it(panel_factory) -
 @pytest.mark.parametrize(
     ("vendor", "offered"),
     [
-        (AcceleratorVendor.NVIDIA, ["none", "span", "rtx-super-res"]),
-        (AcceleratorVendor.AMD, ["none", "span"]),
+        (AcceleratorVendor.NVIDIA, ["none", "span", "realplksr", "rtx-super-res"]),
+        (AcceleratorVendor.AMD, ["none", "span", "realplksr"]),
         (AcceleratorVendor.CPU, ["none"]),
     ],
 )
@@ -163,7 +163,7 @@ def test_upscale_models_follow_the_gpu(panel_factory, vendor, offered) -> None:
     assert panel.get_settings().upscale_model == ("rtx-super-res" if "rtx-super-res" in offered else "none")
 
 
-@pytest.mark.parametrize(("model", "rtx_options_shown"), [("span", False), ("rtx-super-res", True)])
+@pytest.mark.parametrize(("model", "rtx_options_shown"), [("span", False), ("realplksr", False), ("rtx-super-res", True)])
 def test_upscale_options_show_for_the_chosen_model(panel_factory, show_window, model, rtx_options_shown) -> None:
     panel = panel_factory()
     panel.set_view("advanced")

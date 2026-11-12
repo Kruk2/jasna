@@ -15,7 +15,7 @@ from jasna.models.span import SPAN_BLOCKS, Span
 from jasna.session_factory import UPSCALE_RTX_NEEDS_NVIDIA, build_restoration_session, splice_source
 from jasna.settings_tag import job_settings
 from jasna.upscale import FrameUpscaleWriter, finish_frame, upscaled_metadata, upscaled_size
-from jasna.upscale.span import span_engine_path, span_input_sizes
+from jasna.upscale.network import UPSCALE_NETWORKS, network_engine_path, network_input_sizes
 from jasna.vr180 import VrModeResolution
 
 REPO = Path(__file__).resolve().parents[1]
@@ -43,24 +43,37 @@ def test_the_encoder_sees_the_upscaled_size_and_a_bitrate_grown_with_the_pixels(
 
 
 @pytest.mark.parametrize(
-    ("source_height", "output_height", "passes"),
-    [(1080, 2160, 1), (720, 1080, 1), (720, 1440, 1), (720, 2160, 2), (480, 2160, 2)],
+    ("model", "source_height", "output_height", "passes"),
+    [
+        ("span", 1080, 2160, 1), ("span", 720, 1080, 1), ("span", 720, 1440, 1), ("span", 720, 2160, 2),
+        ("span", 480, 2160, 2), ("realplksr", 1080, 2160, 1), ("realplksr", 480, 2160, 1), ("realplksr", 270, 2160, 2),
+    ],
 )
-def test_span_runs_twice_only_beyond_2x(source_height, output_height, passes):
-    sizes = span_input_sizes((source_height * 16 // 9, source_height), (output_height * 16 // 9, output_height))
+def test_a_network_runs_twice_only_when_one_pass_leaves_the_frame_much_smaller(
+    model, source_height, output_height, passes
+):
+    network = UPSCALE_NETWORKS[model]
+    source, output = (source_height * 16 // 9, source_height), (output_height * 16 // 9, output_height)
 
-    assert [height for _, height in sizes] == [source_height * 2**index for index in range(passes)]
+    sizes = network_input_sizes(network, source, output)
 
-
-def test_each_span_input_size_and_precision_has_its_own_engine():
-    paths = {span_engine_path(size, fp16=fp16).name for size in ((1920, 1080), (1280, 720)) for fp16 in (True, False)}
-
-    assert len(paths) == 4
-    assert all("span-nomosuni-2x" in name and name.endswith(".engine") for name in paths)
+    assert [height for _, height in sizes] == [source_height * network.scale**index for index in range(passes)]
 
 
-def test_span_engine_sizes_survive_the_compiler_subprocess_request():
-    request = EngineCompilationRequest(device="cuda:0", fp16=True, span_input_sizes=[(1920, 1080), (3840, 2160)])
+def test_each_network_input_size_and_precision_has_its_own_engine():
+    paths = {
+        network_engine_path(network, size, fp16=fp16).name
+        for network in UPSCALE_NETWORKS.values() for size in ((1920, 1080), (1280, 720)) for fp16 in (True, False)
+    }
+
+    assert len(paths) == 4 * len(UPSCALE_NETWORKS)
+    assert all(name.endswith(".engine") for name in paths)
+
+
+def test_upscale_engine_sizes_survive_the_compiler_subprocess_request():
+    request = EngineCompilationRequest(
+        device="cuda:0", fp16=True, upscale_model="span", upscale_input_sizes=[(1920, 1080), (3840, 2160)]
+    )
 
     assert EngineCompilationRequest.from_json(request.to_json()) == request
 
@@ -239,43 +252,77 @@ def test_folded_span_weights_compute_what_the_training_convolutions_compute_away
     assert network(torch.rand(1, 3, 6, 10)).shape == (1, 3, 12, 20)
 
 
-SPAN_GPU_SCRIPT = """
-import torch
-from pathlib import Path
-from jasna.models.span import load_span
-from jasna.upscale.span import SPAN_WEIGHTS_PATH, SpanFrameUpscaler, compile_span_engine, span_engine_path
+def _realplksr_weights(*, blocks: int, dim: int, scale: int) -> dict[str, torch.Tensor]:
+    generator = torch.Generator().manual_seed(0)
+    weights = {}
 
+    def conv(name, out_channels, in_channels, kernel):
+        weights[f"{name}.weight"] = torch.randn(out_channels, in_channels, kernel, kernel, generator=generator) * 0.1
+        weights[f"{name}.bias"] = torch.randn(out_channels, generator=generator) * 0.1
+
+    conv("feats.0", dim, 3, 3)
+    for index in range(1, blocks + 1):
+        conv(f"feats.{index}.channel_mixer.0", dim * 2, dim, 3)
+        conv(f"feats.{index}.channel_mixer.2", dim, dim * 2, 3)
+        conv(f"feats.{index}.lk.conv", dim // 4, dim // 4, 5)
+        conv(f"feats.{index}.attn.f.0", dim, dim, 3)
+        conv(f"feats.{index}.refine", dim, dim, 1)
+        weights[f"feats.{index}.norm.weight"] = torch.ones(dim)
+        weights[f"feats.{index}.norm.bias"] = torch.zeros(dim)
+    conv(f"feats.{blocks + 2}", 3 * scale**2, dim, 3)
+    return weights
+
+
+def test_realplksr_adds_its_detail_to_a_nearest_neighbour_upscale():
+    from jasna.models.realplksr import RealPlksr
+
+    weights = _realplksr_weights(blocks=2, dim=8, scale=4)
+    weights["feats.4.weight"].zero_()
+    weights["feats.4.bias"].zero_()
+    image = torch.rand(1, 3, 5, 7, generator=torch.Generator().manual_seed(1))
+
+    upscaled = RealPlksr(weights, scale=4)(image)
+
+    assert torch.equal(upscaled, F.interpolate(image, scale_factor=4, mode="nearest"))
+
+
+NETWORK_GPU_SCRIPT = """
+import sys
+import torch
+from jasna.upscale.network import UPSCALE_NETWORKS, NetworkFrameUpscaler, compile_network_engine, network_engine_path
+
+network = UPSCALE_NETWORKS[sys.argv[1]]
 device = torch.device("cuda")
 torch.manual_seed(0)
 frame = (torch.rand(3, 36, 64) * 255).to(torch.uint8).to(device)
-engine = span_engine_path((64, 36), fp16=True)
-compile_span_engine((64, 36), device, fp16=True)
+output = (64 * network.scale, 36 * network.scale)
+engine = network_engine_path(network, (64, 36), fp16=True)
+compile_network_engine(network, (64, 36), device, fp16=True)
 try:
-    upscaler = SpanFrameUpscaler(device, source_size=(64, 36), output_size=(128, 72), fp16=True, strength=1.0)
+    upscaler = NetworkFrameUpscaler(network, device, source_size=(64, 36), output_size=output, fp16=True, strength=1.0)
     with torch.cuda.stream(torch.cuda.Stream(device, priority=-1)):
         tensorrt = upscaler(frame)
     torch.cuda.synchronize()
     upscaler.close()
 finally:
     engine.unlink()
-network = load_span(SPAN_WEIGHTS_PATH, scale=2).to(device)
-reference = network(frame[None].float() / 255.0).clamp(0, 1).mul(255).round()[0]
-print(tuple(tensorrt.shape), tensorrt.dtype, (tensorrt.float() - reference).abs().mean().item() < 1.0)
+reference = network.network().to(device)(frame[None].float() / 255.0).clamp(0, 1).mul(255).round()[0]
+error = (tensorrt.float() - reference).abs().mean().item()
+print(tuple(tensorrt.shape) == (3, output[1], output[0]), tensorrt.dtype, error < 1.0)
 """
 
 
 @pytest.mark.skipif(
     not torch.cuda.is_available() or importlib.util.find_spec("tensorrt") is None, reason="needs CUDA and TensorRT"
 )
-def test_the_span_tensorrt_engine_matches_the_pytorch_network():
-    from jasna.upscale.span import SPAN_WEIGHTS_PATH
-
-    if not (REPO / SPAN_WEIGHTS_PATH).exists():
-        pytest.skip("needs the SPAN weights in model_weights")
+@pytest.mark.parametrize("model", sorted(UPSCALE_NETWORKS))
+def test_the_tensorrt_engine_matches_the_pytorch_network(model):
+    if not (REPO / UPSCALE_NETWORKS[model].weights_path).exists():
+        pytest.skip(f"needs the {model} weights in model_weights")
     result = subprocess.run(
-        [sys.executable, "-c", SPAN_GPU_SCRIPT], capture_output=True, text=True, check=True, cwd=REPO
+        [sys.executable, "-c", NETWORK_GPU_SCRIPT, model], capture_output=True, text=True, check=True, cwd=REPO
     )
-    assert result.stdout.split("\n")[-2] == "(3, 72, 128) torch.uint8 True"
+    assert result.stdout.split("\n")[-2] == "True torch.uint8 True"
 
 
 RTX_GPU_SCRIPT = """

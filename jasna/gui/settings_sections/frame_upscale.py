@@ -19,11 +19,11 @@ _RTX_LEVELS = ("low", "medium", "high", "ultra")
 
 
 def offered_upscale_models(vendor: AcceleratorVendor) -> tuple[str, ...]:
-    """SPAN runs on NVIDIA and AMD; RTX Super Res only on NVIDIA."""
+    """The AI networks run on NVIDIA and AMD; RTX Super Res only on NVIDIA."""
     if vendor is AcceleratorVendor.NVIDIA:
-        return ("none", "span", "rtx-super-res")
+        return ("none", "span", "realplksr", "rtx-super-res")
     if vendor is AcceleratorVendor.AMD:
-        return ("none", "span")
+        return ("none", "span", "realplksr")
     return ("none",)
 
 
@@ -55,7 +55,12 @@ class FrameUpscaleSection:
         add_setting_label(model_row, "upscale_model")
         self._widgets["upscale_model"] = _menu(
             model_row,
-            {"none": t("upscale_off"), "span": t("upscale_span"), "rtx-super-res": t("upscale_rtx")},
+            {
+                "none": t("upscale_off"),
+                "span": t("upscale_span"),
+                "realplksr": t("upscale_realplksr"),
+                "rtx-super-res": t("upscale_rtx"),
+            },
             self._on_model_changed,
             width=220,
         )

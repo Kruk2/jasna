@@ -101,7 +101,7 @@ $env:TEMP = 'Z:\Temp'
 
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
-| `--upscale` | `none` | `span`（NVIDIA・AMD）または `rtx-super-res`（NVIDIA）。詳しくは[高度な処理](advanced_processing.md)。 |
+| `--upscale` | `none` | `span`（高速、NVIDIA・AMD）、`realplksr`（高精細・低速、NVIDIA・AMD）、または `rtx-super-res`（NVIDIA）。詳しくは[高度な処理](advanced_processing.md)。 |
 | `--upscale-height` | `2160` | `1080`、`1440`、`2160`。すでにこの高さ以上の動画は拡大しません。 |
 | `--upscale-strength` | `1.0` | 0〜1。下げると普通の拡大が混ざります。 |
 | `--upscale-rtx-quality` | `high` | `low`、`medium`、`high`、`ultra`。 |

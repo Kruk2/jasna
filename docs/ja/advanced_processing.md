@@ -99,6 +99,9 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
 
 - **SPAN**（`span`）：高速な AI 拡大。NVIDIA と AMD。NVIDIA では新しい動画サイズ
   ごとに一度だけ準備します（約30秒）。
+- **RealPLKSR**（`realplksr`）：低速ですが、細部をより残し、圧縮ノイズも取る AI 拡大。
+  NVIDIA と AMD。RTX 5090 で 1080p から 4K へ約 5 FPS なので、長い動画は時間が
+  かかります。準備には約1分かかります。
 - **RTX Super Res**（`rtx-super-res`）：NVIDIA のみ、とても高速。先にノイズや
   ブレを取ることもできます（`--upscale-rtx-denoise`、`--upscale-rtx-deblur`）。
 

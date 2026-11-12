@@ -82,6 +82,8 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
 
 - **SPAN**（`span`）：快速的 AI 放大。支持 NVIDIA 和 AMD。在 NVIDIA 上，每种新的视频
   尺寸会先准备一次，约需半分钟。
+- **RealPLKSR**（`realplksr`）：较慢的 AI 放大，保留更多细节并清除压缩痕迹。支持 NVIDIA 和
+  AMD。在 RTX 5090 上从 1080p 到 4K 约 5 FPS，所以长视频需要一些时间；准备约需一分钟。
 - **RTX Super Res**（`rtx-super-res`）：仅限 NVIDIA，非常快。还可以先去除噪点或模糊
   （`--upscale-rtx-denoise`、`--upscale-rtx-deblur`）。
 

@@ -100,6 +100,9 @@ Videos that are already this tall are not upscaled.
 
 - **SPAN** (`span`): a fast AI upscaler. NVIDIA and AMD. On NVIDIA it is
   prepared once for each new video size, which takes about half a minute.
+- **RealPLKSR** (`realplksr`): a slower AI upscaler that keeps more fine detail
+  and cleans compression. NVIDIA and AMD. About 5 FPS from 1080p to 4K on an
+  RTX 5090, so a long video takes a while; preparing it takes about a minute.
 - **RTX Super Res** (`rtx-super-res`): NVIDIA only, very fast. It can also
   remove noise or blur first (`--upscale-rtx-denoise`, `--upscale-rtx-deblur`).
 

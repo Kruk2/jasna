@@ -6,8 +6,8 @@ is licensed under the GNU Affero General Public License version 3.0. The full
 license is in LICENSE.
 
 Jasna incorporates or distributes work from Lada, OpenMMLab MMagic,
-Lightricks LTX-2.5, Roboflow RF-DETR, SPAN, Philip Hofmann's NomosUni SPAN
-model, Comfy Org comfy-kitchen, SageAttention,
+Lightricks LTX-2.5, Roboflow RF-DETR, SPAN, PLKSR, Philip Hofmann's NomosUni
+SPAN and NomosWebPhoto RealPLKSR models, Comfy Org comfy-kitchen, SageAttention,
 PyAV, VALI, FFmpeg, VideoLAN, Python, and other projects.
 Their copyright, attribution, source, and license information is retained in:
 
