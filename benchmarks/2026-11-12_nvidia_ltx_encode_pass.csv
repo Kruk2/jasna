@@ -1,0 +1,71 @@
+date,gpu,code,measure,canvas,variant,layer,run,value,unit,tflops,rel_l2_vs_fp32,latents,load
+2026-11-12,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,before (main),,final-1,failed,s,,,,other CPU load 4.82 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,after,,final-2,47.65,s,,,01ba2b6a4c084d98,other CPU load 4.82 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,before (main),,final-3,56.16,s,,,185af39dfa0c4ab5,other CPU load 4.82 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,after,,final-4,45.24,s,,,01ba2b6a4c084d98,other CPU load 4.82 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,before (main),,final-5,55.17,s,,,185af39dfa0c4ab5,other CPU load 4.82 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,after,,final-6,45.44,s,,,01ba2b6a4c084d98,other CPU load 4.82 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,"after, main's encoder head",,final-7,47.63,s,,,185af39dfa0c4ab5,other CPU load 4.82 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,before (main),,finalc-1,55.62,s,,,185af39dfa0c4ab5,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,after,,finalc-2,47.29,s,,,01ba2b6a4c084d98,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,before (main),,finalc-3,52.58,s,,,185af39dfa0c4ab5,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,after,,finalc-4,43.07,s,,,01ba2b6a4c084d98,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,before (main),,finalc-5,54.80,s,,,60e1da93fca37816,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,S610 encode pass (143 windows at 512),512,after,,finalc-6,43.17,s,,,01ba2b6a4c084d98,other CPU load 3.25 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"S610 encode pass, 10 runs back to back",512,after,,stress-1,45.27,s,,,01ba2b6a4c084d98,other CPU load 3.70 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"S610 encode pass, 10 runs back to back",512,after,,stress-2,44.89,s,,,01ba2b6a4c084d98,other CPU load 3.70 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"S610 encode pass, 10 runs back to back",512,after,,stress-3,44.98,s,,,01ba2b6a4c084d98,other CPU load 3.70 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"S610 encode pass, 10 runs back to back",512,after,,stress-4,44.80,s,,,01ba2b6a4c084d98,other CPU load 3.70 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"S610 encode pass, 10 runs back to back",512,after,,stress-5,50.03,s,,,01ba2b6a4c084d98,other CPU load 3.70 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"S610 encode pass, 10 runs back to back",512,after,,stress-6,50.97,s,,,01ba2b6a4c084d98,other CPU load 3.70 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"S610 encode pass, 10 runs back to back",512,after,,stress-7,46.27,s,,,01ba2b6a4c084d98,other CPU load 3.70 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"S610 encode pass, 10 runs back to back",512,after,,stress-8,45.03,s,,,01ba2b6a4c084d98,other CPU load 3.70 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"S610 encode pass, 10 runs back to back",512,after,,stress-9,44.77,s,,,01ba2b6a4c084d98,other CPU load 3.70 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"S610 encode pass, 10 runs back to back",512,after,,stress-10,43.70,s,,,01ba2b6a4c084d98,other CPU load 3.70 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"encoder, one window, bf16 pixels (six S610 windows)",512,encoder as on main,,median,0.2672,s/window,,1.3795e-02,,other CPU load 2.20 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"encoder, one window, bf16 pixels (six S610 windows)",512,encoder with Triton convs,,median,0.2546,s/window,,1.3110e-02,,other CPU load 2.20 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"encoder, one window, bf16 pixels (S610 centre)",768,encoder as on main,,median,0.6033,s/window,,6.9458e-03,,other CPU load 2.20 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"encoder, one window, bf16 pixels (S610 centre)",768,encoder with Triton convs,,median,0.5685,s/window,,6.7496e-03,,other CPU load 2.20 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,kitchen + padded copy,res0,median,6.471,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,cuDNN bf16,res0,median,8.668,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,Triton,res0,median,5.012,ms,350.0,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,kitchen + padded copy,down1,median,5.94,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,cuDNN bf16,down1,median,4.713,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,Triton,down1,median,3.003,ms,292.0,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,kitchen + padded copy,res2,median,5.402,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,cuDNN bf16,res2,median,7.901,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,Triton,res2,median,4.912,ms,357.1,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,kitchen + padded copy,down3,median,5.426,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,cuDNN bf16,down3,median,7.928,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,Triton,down3,median,5.01,ms,353.0,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,kitchen + padded copy,res4,median,10.153,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,cuDNN bf16,res4,median,15.131,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,Triton,res4,median,9.835,ms,359.6,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,kitchen + padded copy,down5,median,3.307,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,cuDNN bf16,down5,median,4.176,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,Triton,down5,median,2.534,ms,354.7,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,kitchen + padded copy,res6,median,inf,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,cuDNN bf16,res6,median,7.697,ms,,,,other CPU load 3.13 cores
+2026-11-12,RTX 5090,268011ea + encode-pass change,"head conv, random data",512,Triton,res6,median,5.01,ms,358.8,,,other CPU load 3.13 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,"encoder as the pass loads it, S610 centre crop, bf16 pixels",512,"before (main), fp32",,median of 7,0.9696,s/window,,,,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,"encoder as the pass loads it, S610 centre crop, bf16 pixels",512,"before (main), shipped",,median of 7,0.2727,s/window,,7.0682e-03,,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,"encoder as the pass loads it, S610 centre crop, bf16 pixels",768,"before (main), fp32",,median of 7,2.0091,s/window,,,,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,"encoder as the pass loads it, S610 centre crop, bf16 pixels",768,"before (main), shipped",,median of 7,0.6144,s/window,,6.9457e-03,,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,"encoder as the pass loads it, S610 centre crop, bf16 pixels",512,"after, fp32",,median of 7,0.892,s/window,,,,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,"encoder as the pass loads it, S610 centre crop, bf16 pixels",512,"after, shipped",,median of 7,0.2571,s/window,,6.8416e-03,,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,"encoder as the pass loads it, S610 centre crop, bf16 pixels",768,"after, fp32",,median of 7,2.1679,s/window,,,,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,"encoder as the pass loads it, S610 centre crop, bf16 pixels",768,"after, shipped",,median of 7,0.6116,s/window,,6.7496e-03,,other CPU load 3.25 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,kitchen head (main),,median,0.2703,s/window,,6.6000e-03,,other CPU load 3.19 cores
+2026-11-13,RTX 5090,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,table entry,,median,0.2585,s/window,,6.5360e-03,,other CPU load 3.19 cores
+2026-11-13,RTX 5060,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,kitchen head (main),,median,1.261,s/window,,6.7100e-03,,no record (rented)
+2026-11-13,RTX 5060,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,table entry,,median,1.197,s/window,,6.6730e-03,,no record (rented)
+2026-11-13,RTX 4090,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,kitchen head (main),,median,0.3572,s/window,,8.1490e-03,,no record (rented)
+2026-11-13,RTX 4090,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,table entry,,median,0.3373,s/window,,8.1060e-03,,no record (rented)
+2026-11-13,RTX 4070,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,kitchen head (main),,median,0.885,s/window,,8.1380e-03,,no record (rented)
+2026-11-13,RTX 4070,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,table entry,,median,0.852,s/window,,8.1120e-03,,no record (rented)
+2026-11-13,RTX 4060,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,kitchen head (main),,median,1.863,s/window,,8.2500e-03,,no record (rented)
+2026-11-13,RTX 4060,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,table entry,,median,1.793,s/window,,8.2330e-03,,no record (rented)
+2026-11-13,RTX 3090,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,kitchen head (main),,median,0.7735,s/window,,8.1370e-03,,no record (rented)
+2026-11-13,RTX 3090,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,table entry,,median,0.7376,s/window,,8.1830e-03,,no record (rented)
+2026-11-13,RTX 3060,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,kitchen head (main),,median,2.035,s/window,,8.1370e-03,,no record (rented)
+2026-11-13,RTX 3060,268011ea + encode-pass change,"encoder, one test_clip1 window, bf16 pixels",512,table entry,,median,1.944,s/window,,8.1830e-03,,no record (rented)
