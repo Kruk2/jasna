@@ -32,7 +32,7 @@ def test_masked_median_equals_quantile_without_a_host_sync():
             assert torch.equal(median, expected)
 
 
-def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(monkeypatch):
+def test_compose_span_reads_and_decodes_on_threads_of_their_own_below_the_frame_loop_priority(monkeypatch):
     import contextlib
     import threading
     from types import SimpleNamespace
@@ -41,10 +41,10 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
     from jasna.ltx.camera import CropFrame
     from jasna.ltx.plan import TrackPlan, Window
 
-    device = torch.device("cuda")
+    device = torch.device("cuda:0")
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
     plan = TrackPlan(0, 0, ((),) * 6, (1.0,) * 6, (Window(0, 0, 0, 6, (crop,) * 6, 0),), 3)
-    decodes, writes = [], []
+    reads, decodes, writes = [], [], []
 
     def decode(decoder, latent, seed, canvas, budget, device):
         decodes.append((threading.current_thread() is threading.main_thread(), torch.cuda.current_stream().priority))
@@ -61,6 +61,7 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
             pass
 
     def frames():
+        reads.append(threading.current_thread() is threading.main_thread())
         yield torch.zeros(6, 3, 4, 4, dtype=torch.uint8, device=device), list(range(6))
 
     monkeypatch.setattr(restore, "_decode_window", decode)
@@ -76,6 +77,7 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
         span, [[plan]], None, [SimpleNamespace(get=lambda index: index)], frame_h=64, batch_size=6,
         budget=lambda canvas: 0, device=device, bar=bar, cancel=threading.Event(), super_res=None, projector=None,
     )
+    assert reads == [False]
     assert decodes == [(False, 0)]
     assert len(writes) == 6 and all(priority < 0 for priority in writes)
 
@@ -127,8 +129,8 @@ def test_frames_take_decoded_windows_without_waiting_for_the_gpu(monkeypatch, ro
     try:
         composer = restore._SegmentComposer(
             [plan], None, SimpleNamespace(get=lambda index: torch.zeros(1)), seed=0, feather=1,
-            budget=lambda canvas: budget, device=device, bar=bar, decodes=decodes, stream=torch.cuda.Stream(device),
-            super_res=None, projector=None,
+            budget=lambda canvas: budget, device=device, bar=bar, decodes=decodes, latent_reads=decodes,
+            stream=torch.cuda.Stream(device), super_res=None, projector=None,
         )
         composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))
         torch.cuda.set_sync_debug_mode("error")
@@ -140,6 +142,55 @@ def test_frames_take_decoded_windows_without_waiting_for_the_gpu(monkeypatch, ro
     finally:
         decodes.shutdown()
     assert canvases == ["cuda"] * 6
+
+
+@pytest.mark.parametrize(("held", "windows_read"), [("cpu", 3), ("cuda", 6)], ids=["host-memory windows", "gpu windows"])
+def test_composer_decodes_further_ahead_once_windows_wait_on_the_gpu(monkeypatch, held, windows_read):
+    import contextlib
+    from concurrent.futures import Future
+    from types import SimpleNamespace
+
+    from jasna.ltx import restore
+    from jasna.ltx.camera import CropFrame
+    from jasna.ltx.plan import TrackPlan, Window
+
+    device = torch.device("cuda")
+    monkeypatch.setattr(restore, "DECODE_AHEAD", 2)
+    monkeypatch.setattr(restore, "GPU_DECODE_AHEAD", 5)
+    monkeypatch.setattr(
+        restore, "_decode_window",
+        lambda decoder, latent, seed, canvas, budget, device: torch.zeros(13, 3, 4, 4, dtype=torch.uint8, device=held),
+    )
+    monkeypatch.setattr(restore, "composite_frame", lambda source, candidates, *, feather, projector: source)
+    crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
+    plans = [
+        TrackPlan(index, 0, ((),) * 103, (1.0,) * 103, (Window(index, index, start, 13, (crop,) * 13, index),), 10)
+        for index, start in enumerate(range(0, 100, 10))
+    ]
+    read = []
+
+    class LatentReads:
+        def submit(self, read_latent, index):
+            read.append(index)
+            latent = Future()
+            latent.set_result(read_latent(index))
+            return latent
+
+    bar = SimpleNamespace(
+        update=lambda n: None, window=lambda canvas: contextlib.nullcontext(), waiting=contextlib.nullcontext,
+        windows_done=lambda canvas, count: None,
+    )
+    decodes = ThreadPoolExecutor(max_workers=1)
+    try:
+        composer = restore._SegmentComposer(
+            plans, None, SimpleNamespace(get=lambda index: index), seed=0, feather=1, budget=lambda canvas: 0,
+            device=device, bar=bar, decodes=decodes, latent_reads=LatentReads(), stream=torch.cuda.Stream(device),
+            super_res=None, projector=None,
+        )
+        composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))
+    finally:
+        decodes.shutdown()
+    assert read == list(range(windows_read))
 
 
 def test_composite_frame_queues_its_work_without_waiting_for_the_gpu():

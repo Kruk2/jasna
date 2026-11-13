@@ -361,7 +361,8 @@ def _composer(monkeypatch, decode, composite, starts=(0, 3)):
     decodes = ThreadPoolExecutor(max_workers=1)
     composer = restore._SegmentComposer(
         [plan], None, SimpleNamespace(get=lambda index: index), seed=0, feather=1, budget=lambda canvas: 0,
-        device=torch.device("cpu"), bar=_Bar(), decodes=decodes, stream=None, super_res=None, projector=None,
+        device=torch.device("cpu"), bar=_Bar(), decodes=decodes, latent_reads=decodes, stream=None, super_res=None,
+        projector=None,
     )
     return composer, decodes
 
@@ -460,16 +461,34 @@ def test_free_vram_budget_keeps_the_exact_figure_where_rounding_could_drop_a_fit
     assert restore.free_vram_budget(torch.device("cuda"))(512) == 4000 * mib
 
 
-def test_each_window_decode_returns_the_cache_before_reading_its_budget(monkeypatch):
-    events = []
-    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: events.append("empty_cache"))
+@pytest.mark.parametrize(
+    ("free_before", "decoded_with", "cached_after"),
+    [
+        (5 << 30, 6 << 30, 0),
+        (restore.GPU_WINDOWS_MIN_FREE_BYTES - 1, restore.GPU_WINDOWS_MIN_FREE_BYTES - 1 + (1 << 30), 0),
+        (restore.GPU_WINDOWS_MIN_FREE_BYTES, restore.GPU_WINDOWS_MIN_FREE_BYTES, 1 << 30),
+    ],
+    ids=["tight budget", "just under the roomy budget", "roomy budget"],
+)
+def test_a_window_decode_returns_cached_memory_only_where_it_could_change_the_decode(
+    monkeypatch, free_before, decoded_with, cached_after
+):
+    memory = {"free": free_before, "cached": 1 << 30}
+
+    def empty_cache():
+        memory["free"] += memory["cached"]
+        memory["cached"] = 0
+
+    budgets = []
+    monkeypatch.setattr(torch.cuda, "empty_cache", empty_cache)
     monkeypatch.setattr(
-        restore, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.zeros(1, 3, 2, 4, 4)
+        restore,
+        "decode_latent",
+        lambda decoder, latent, free_bytes, generator: budgets.append(free_bytes) or torch.zeros(1, 3, 2, 4, 4),
     )
-    budget = lambda canvas: events.append("budget") or 5 << 30
-    for _ in range(2):
-        restore._decode_window(object(), torch.zeros(1), 7, 512, budget, torch.device("cpu"))
-    assert events == ["empty_cache", "budget"] * 2
+    restore._decode_window(object(), torch.zeros(1), 7, 512, lambda canvas: memory["free"], torch.device("cpu"))
+    assert budgets == [decoded_with]
+    assert memory["cached"] == cached_after
 
 
 def test_large_canvas_needs_twelve_gib_free():

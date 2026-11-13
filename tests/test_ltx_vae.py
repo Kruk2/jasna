@@ -547,6 +547,17 @@ def test_ltx25_tiling_needs_minimum_budget():
     assert (roomy.frames.tile_size, roomy.height.tile_size, roomy.width.tile_size) == (128, 512, 512)
 
 
+@pytest.mark.parametrize("canvas", [512, 768])
+def test_a_roomy_decode_budget_already_picks_the_layout_of_unlimited_memory(canvas):
+    from jasna.ltx.restore import GPU_WINDOWS_MIN_FREE_BYTES
+
+    decoder = _meta_ltx25_decoder()
+    layout = lambda free_bytes: decoder.recommended_tiling_config(
+        height=canvas, width=canvas, num_frames=121, free_bytes=free_bytes
+    )
+    assert layout(GPU_WINDOWS_MIN_FREE_BYTES) == layout(1 << 50)
+
+
 def test_ltx25_tiling_fits_when_free_bytes_already_excludes_the_resident_decoder():
     decoder = _meta_ltx25_decoder()
     rtx_3070_ti_free_after_decoder_load = 3_465_125_888
