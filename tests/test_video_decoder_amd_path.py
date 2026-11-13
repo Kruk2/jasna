@@ -48,7 +48,7 @@ def test_prefetcher_decodes_on_its_own_thread_and_records_the_consumer_stream(mo
             producer_threads.append(threading.current_thread().name)
             yield _Batch(i), [i]
 
-    prefetcher = module._BatchPrefetcher(batches(), torch.device("cpu"))
+    prefetcher = module.BatchPrefetcher(batches(), torch.device("cuda:0"))
     received = list(prefetcher)
     prefetcher.close()
 
@@ -66,7 +66,7 @@ def test_prefetcher_reraises_the_decode_error_in_the_consumer(monkeypatch):
         yield _Batch(0), [0]
         raise module.VideoDecodeError("corrupt")
 
-    prefetcher = module._BatchPrefetcher(batches(), torch.device("cpu"))
+    prefetcher = module.BatchPrefetcher(batches(), torch.device("cuda:0"))
     iterator = iter(prefetcher)
     next(iterator)
     with pytest.raises(module.VideoDecodeError, match="corrupt"):
@@ -87,7 +87,7 @@ def test_prefetcher_close_stops_decoding_and_closes_the_source(monkeypatch):
         finally:
             closed.set()
 
-    prefetcher = module._BatchPrefetcher(batches(), torch.device("cpu"))
+    prefetcher = module.BatchPrefetcher(batches(), torch.device("cuda:0"))
     next(iter(prefetcher))
     prefetcher.close()
 

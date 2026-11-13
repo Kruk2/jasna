@@ -119,12 +119,12 @@ def _vali_seek_seconds(seek_ts: float, start_pts: int, time_base: Fraction) -> f
     return math.floor((seek_ts + float(start_pts * time_base)) * 1_000_000) / 1_000_000
 
 
-class _BatchPrefetcher:
+class BatchPrefetcher:
     """Runs a batch generator on its own thread so decoding overlaps the consumer.
 
-    Batches come from the producer's private stream, fully synchronized before hand-off.
-    Each one is recorded on the consumer's current stream, so its block is not reused for a
-    later batch while work the consumer queued may still read it (issue #252).
+    Batches are fully synchronized before hand-off (every decode path waits for its conversion
+    on the host). A device batch is recorded on the consumer's current stream, so its block is
+    not reused for a later batch while work the consumer queued may still read it (issue #252).
     """
 
     def __init__(self, batches: Iterator[tuple[torch.Tensor, list[int]]], device: torch.device):
@@ -164,7 +164,8 @@ class _BatchPrefetcher:
             if isinstance(item, BaseException):
                 raise item
             batch, pts = item
-            batch.record_stream(current_stream(self._device))
+            if self._device.type != "cpu":
+                batch.record_stream(current_stream(self._device))
             yield batch, pts
 
     def close(self) -> None:
@@ -355,7 +356,7 @@ class VideoReader:
         self.vendor = vendor_for_device(device)
         self._decoder_ctx = None
         self._vali_source: _ValiFrameSource | None = None
-        self._prefetcher: _BatchPrefetcher | None = None
+        self._prefetcher: BatchPrefetcher | None = None
         self._software_only = False
 
     def __enter__(self):
@@ -606,7 +607,7 @@ class VideoReader:
         # AMD decodes on the CPU (AMF downloads every surface), so decode on a
         # thread of its own instead of between the consumer's batches.
         self._close_prefetcher()
-        prefetcher = _BatchPrefetcher(self._decoded_batches(seek_ts), self.device)
+        prefetcher = BatchPrefetcher(self._decoded_batches(seek_ts), self.device)
         self._prefetcher = prefetcher
         try:
             yield from prefetcher

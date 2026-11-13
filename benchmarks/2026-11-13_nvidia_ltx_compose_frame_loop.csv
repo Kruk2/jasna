@@ -1,0 +1,12 @@
+date,gpu,commit,run,clip,model,vae,side,compose_s,decode_s_per_window,output_md5,note
+2026-11-13,RTX 5090,268011ea + compose frame loop,1,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,A main,97.4,0.57,5c803fa25ed98a8dcd746502ff2e2d35,interleaved A B B A A B; about 2 CPU cores busy outside the run; no other GPU job
+2026-11-13,RTX 5090,268011ea + compose frame loop,2,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,B change,87.1,0.55,5c803fa25ed98a8dcd746502ff2e2d35,
+2026-11-13,RTX 5090,268011ea + compose frame loop,3,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,B change,85.8,0.55,5c803fa25ed98a8dcd746502ff2e2d35,
+2026-11-13,RTX 5090,268011ea + compose frame loop,4,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,A main,92.7,0.57,5c803fa25ed98a8dcd746502ff2e2d35,
+2026-11-13,RTX 5090,268011ea + compose frame loop,5,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,A main,92.6,0.57,5c803fa25ed98a8dcd746502ff2e2d35,
+2026-11-13,RTX 5090,268011ea + compose frame loop,6,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,B change,85.6,0.55,5c803fa25ed98a8dcd746502ff2e2d35,
+2026-11-13,RTX 5090,268011ea + compose frame loop,exactness,S610 2160p 6056 frames,ltx (distilled2 int8),full/full,A main,259.1,0.60,27d05152e5a2bd4447d5aaeecb85f5b6,waits for every frame to hash it; not a timing run
+2026-11-13,RTX 5090,268011ea + compose frame loop,exactness,S610 2160p 6056 frames,ltx (distilled2 int8),full/full,B change,252.2,0.56,27d05152e5a2bd4447d5aaeecb85f5b6,waits for every frame to hash it; per-frame hashes match the A run
+2026-11-13,RTX 5090,268011ea + compose frame loop,whole job,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,A main,90.6,0.57,8f190278f11f35b276f065d6fd3da2b8,scan to compose; compose line of the whole job; no other GPU job
+2026-11-13,RTX 5090,268011ea + compose frame loop,whole job,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,B change,83.1,0.55,8f190278f11f35b276f065d6fd3da2b8,scan to compose; same session as the A job
+2026-11-13,RTX 5090,268011ea + compose frame loop,whole job,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,B change,83.2,0.55,8f190278f11f35b276f065d6fd3da2b8,scan to compose; same session as the A job
