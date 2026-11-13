@@ -32,6 +32,7 @@ def typed_license_code(text: str) -> str:
 
 class LicenseCheckStopped(Exception):
     """A license check that every later paid-model job would also fail; ``code`` names the reason
-    (expired, offline, devices_full, token_not_found, already_converted, unofficial_key, no_activation, offline_check)."""
+    (expired, offline, devices_full, token_not_found, already_converted, unofficial_key, no_activation, offline_check,
+    pc_refresh, pc_changed, pc_unreadable)."""
 
     code: str

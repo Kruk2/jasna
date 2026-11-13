@@ -135,6 +135,41 @@ def test_activation_worker_runs_io_and_errors_off_the_main_thread(lease_api):
     assert thread.ident != threading.get_ident()
 
 
+def test_the_pc_license_refresh_runs_off_the_main_thread_and_only_logs_a_failure(lease_api, monkeypatch, caplog):
+    import logging
+
+    from jasna.gui.activation_worker import start_pc_license_refresh
+    from jasna.protection import lease
+
+    ran = []
+
+    def refresh():
+        ran.append(threading.get_ident())
+        raise OSError("config volume unavailable")
+
+    monkeypatch.setattr(lease, "refresh_pc_grant_quietly", refresh)
+    with caplog.at_level(logging.WARNING):
+        thread = start_pc_license_refresh()
+        thread.join(timeout=3)
+    assert ran == [thread.ident] and thread.ident != threading.get_ident()
+    assert "config volume unavailable" in caplog.text
+
+
+def test_cli_processing_refreshes_the_pc_license_in_the_background(monkeypatch, lease_api, tmp_path):
+    from jasna import main
+    from jasna.protection import lease
+
+    refreshed = threading.Event()
+    monkeypatch.setattr(lease, "refresh_pc_grant_quietly", refreshed.set)
+    photo = tmp_path / "photo.png"
+    photo.touch()
+    monkeypatch.setattr(sys, "argv", ["jasna", "--input", str(photo), "--output", str(tmp_path / "out.png")])
+    monkeypatch.setattr(main, "_check_system", Mock(side_effect=RuntimeError("stopped before GPU setup")))
+    with pytest.raises(RuntimeError, match="stopped before GPU setup"):
+        main.main()
+    assert refreshed.wait(timeout=10)
+
+
 def test_gui_activation_keeps_exact_ltx_entitlements(lease_api, monkeypatch, tmp_path):
     from jasna.gui import ltx_models
     from jasna.ltx import model_files

@@ -144,6 +144,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.after_idle(self._warn_if_windhawk_loaded)
         self.after_idle(self._warn_if_installed_on_hard_disk)
         self.after_idle(self._start_update_check)
+        self.after_idle(activation_worker.start_pc_license_refresh)
 
         if not skip_wizard:
             if self._preset_manager.get_system_check_passed_version() != __version__:
