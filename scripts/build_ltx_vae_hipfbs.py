@@ -4,14 +4,14 @@ Compiled ahead of time, bf16 (the GEMMs summing in fp16 on ``diffusion_hip.FP16_
 ``na_triton._na3d_fwd_kernel`` (head dim 64) once per window size of the
 shipped DiffVAE decoder with that size's ``na_geometry`` config on each architecture, ``diffusion_triton``'s
 residual MLP (gate/up and down, every ``FUSED_MLP_DIMS`` width), attention projection, context inject and slab
-Q/K/V kernels at the shipped shapes (Q/K/V also at the 512-wide deterministic stages), and the eager encoder's
-channels-first copy (``layout_triton``). Every AMD GPU launches these through ``na_hip``, ``diffusion_hip`` and ``layout_hip``.
+Q/K/V kernels at the shipped shapes (Q/K/V also at the 512-wide deterministic stages). Every AMD GPU launches
+these through ``na_hip`` and ``diffusion_hip``.
 
 Usage (Linux, ROCm Torch + Triton, ROCm's clang-offload-bundler):
     python scripts/build_ltx_vae_hipfbs.py
 
 Writes ``jasna/media/ltx_na3d_*.hipfb``, ``ltx_swiglu_*.hipfb``, ``ltx_proj_residual_*.hipfb``,
-``ltx_context_add_*.hipfb``, ``ltx_slab_qkv_*.hipfb``, ``ltx_channels_first_*.hipfb`` and the launch table
+``ltx_context_add_*.hipfb``, ``ltx_slab_qkv_*.hipfb`` and the launch table
 ``jasna/models/ltx_vae/hip_launch.py`` (the grids come from the launchers).
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ from triton_hipfb import REPO, build
 
 from jasna.models.ltx_vae import diffusion_hip as aot
 from jasna.models.ltx_vae import transformer as T
-from jasna.models.ltx_vae import layout_hip, na_hip
+from jasna.models.ltx_vae import na_hip
 from jasna.models.ltx_vae.diffusion_triton import (
     _context_add_kernel,
     _proj_residual_kernel,
@@ -28,7 +28,6 @@ from jasna.models.ltx_vae.diffusion_triton import (
     _swiglu_down_kernel,
     _swiglu_gate_up_kernel,
 )
-from jasna.models.ltx_vae.layout_triton import _channels_first_kernel
 from jasna.models.ltx_vae.na_geometry import config_for
 from jasna.models.ltx_vae.na_triton import _na3d_fwd_kernel
 
@@ -88,10 +87,6 @@ def _kernel_specs(architecture: str):
              "FP16_ACCUMULATE": fp16_accumulate},
             aot.QKV_WARPS, 1, _GRID,
         )
-    specs[layout_hip.MODULE] = (
-        _channels_first_kernel, layout_hip.ARGUMENTS, {"BLOCK_S": layout_hip.BLOCK_S, "BLOCK_C": layout_hip.BLOCK_C},
-        layout_hip.WARPS, 1, _GRID,
-    )
     return specs
 
 

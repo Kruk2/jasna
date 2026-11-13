@@ -19,7 +19,6 @@ from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.tiling import TileSizeConfig
 from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, decoder_kernels, use_kernels
 from jasna.models.ltx_vae.video_encoder import (
-    AMD_KITCHEN_DOWN_BLOCKS,
     VideoEncoder,
     compile_video_encoder,
     encoder_head,
@@ -227,12 +226,8 @@ def load_video_encoder(vae_path: Path, device: torch.device, encoder_path: Path 
             encoder.run_fp16_convs_on_kitchen()
             if head.triton_convs:
                 encoder.run_fp16_convs_on_triton(head.triton_convs)
-        # Without Triton the encoder runs eagerly: there MIOpen and ROCm's copies run the tail faster
-        # in NCDHW (1.39 -> 1.28 s per 512 window on an R9700); kitchen's head needs channels-last.
-        eager_amd = backend is KernelBackend.AMD_PREBUILT
-        for layer in (encoder.conv_in, *encoder.down_blocks[:AMD_KITCHEN_DOWN_BLOCKS]) if eager_amd else (encoder,):
-            layer.to(memory_format=torch.channels_last_3d)
-        if eager_amd:
+        encoder.to(memory_format=torch.channels_last_3d)
+        if backend is KernelBackend.AMD_PREBUILT:
             encoder.release_cache_between_stages()
         _clear_tensors(bf16_contiguous_weights, encoder)
         compile_video_encoder(device, dtype)

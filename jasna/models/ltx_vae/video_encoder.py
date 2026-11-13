@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from jasna.accelerator import KernelBackend, kernel_backend
 from jasna.ltx.kernel_policy import is_amd
 from jasna.models.ltx_vae.ops import PerChannelStatistics, PixelNorm, patchify
 from jasna.models.ltx_vae.tiling import SpatioTemporalScaleFactors
@@ -274,13 +275,12 @@ class VideoEncoder(nn.Module):
                 module.triton_launch = launches.get((module.conv.in_channels, module.conv.out_channels))
 
     def release_cache_between_stages(self) -> None:
-        """Empty PyTorch's allocator cache before each stage of an eager encode. Every eager layer
-        allocates its activations anew, ~1.1 GiB apiece at 768 px but a few frames or pixels apart
-        in size, and a 768 window finds only the smaller blocks a 512 one left, so the cache grows
-        past the live peak (an R9700 reserved up to 14.7 GiB for a 7 GiB peak; 8.3 GiB with this),
-        and the driver spills what the card lacks into system memory instead of failing (#707).
-        Costs ~4 % of the encode; emptying it before every residual block too saves another
-        ~0.7 GiB for ~11 %."""
+        """Empty PyTorch's allocator cache before each stage of an uncompiled encode (AMD without
+        Triton). Every layer allocates its activations anew, ~1.1 GiB apiece at 768 px but a few
+        frames or pixels apart in size, and a 768 window finds only the smaller blocks a 512 one
+        left, so the cache grows past the live peak (an R9700 reserved up to 14.7 GiB for a 7 GiB
+        peak; 8.3 GiB with this), and the driver spills what the card lacks into system memory
+        instead of failing (#707). Costs ~3 % of the encode."""
         self.releases_cache_between_stages = True
 
     def to_fp16_with_float32_tail(self) -> "VideoEncoder":
@@ -310,14 +310,10 @@ def _weight_dtype(layer: nn.Module) -> torch.dtype:
 
 def _layer_input(sample: torch.Tensor, layer: nn.Module) -> torch.Tensor:
     """``sample`` in ``layer``'s weight dtype, and contiguous (in the same copy) for a layer whose
-    conv weights are, as in an eager AMD encoder's tail."""
+    conv weights are."""
     weight = next(layer.parameters())
     if weight.is_contiguous(memory_format=torch.channels_last_3d):
         return sample.to(weight.dtype)
-    if sample.is_cuda and sample.dtype == torch.float16 and weight.dtype == torch.bfloat16:
-        from jasna.models.ltx_vae.layout_hip import channels_first_bf16
-
-        return channels_first_bf16(sample)
     return sample.to(dtype=weight.dtype, memory_format=torch.contiguous_format)
 
 
@@ -352,7 +348,14 @@ _encode_cropped = encode_cropped
 
 def compile_video_encoder(device: torch.device, dtype: torch.dtype) -> None:
     """Compile the encoder's layers (computing in ``dtype``) with static shapes (one graph per
-    window shape); CUDA inputs use it from then on."""
+    window shape), or on AMD without Triton fuse them with prebuilt kernels (``encoder_hip``);
+    CUDA inputs use it from then on."""
     global _encode_cropped
-    if _encode_cropped is encode_cropped:
+    if _encode_cropped is not encode_cropped:
+        return
+    if kernel_backend(device) is KernelBackend.AMD_PREBUILT:
+        from jasna.models.ltx_vae.encoder_hip import encode_prebuilt
+
+        _encode_cropped = encode_prebuilt
+    else:
         _encode_cropped = compile_static(encode_cropped, mode=ENCODER_COMPILE_MODE, device=device, dtype=dtype)
