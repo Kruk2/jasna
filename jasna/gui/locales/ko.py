@@ -29,7 +29,6 @@ KO = {
 
         # Header
         "btn_help": "도움말",
-        "btn_about": "정보",
         "btn_system_check": "시스템 점검",
         "btn_video_player": "비디오 플레이어",
 
@@ -290,7 +289,7 @@ KO = {
         "option_close_to_tray_unavailable": "여기서는 사용할 수 없습니다: 트레이 아이콘에 종료 메뉴가 없습니다.",
         "option_check_for_updates": "업데이트 확인",
         "option_check_for_updates_hint": "Jasna가 하루에 한 번 정도 새 버전을 확인하고, 새 버전이 있으면 상단에 작은 알림을 표시합니다. 개인 데이터는 보내지 않습니다.",
-        "update_available": "업데이트: v{version}",
+        "update_available": "새 버전 v{version}",
         "tip_update_available": "Jasna 새 버전이 나왔습니다. 클릭하면 다운로드 페이지가 열립니다.",
         "tray_open": "Jasna 열기",
         "tray_quit": "종료",
@@ -677,10 +676,6 @@ KO = {
         "engine_name_yolo": "YOLO (감지)",
         "engine_name_basicvsrpp": "BasicVSR++ (복원)",
         # About dialog
-        "dialog_about_title": "Jasna 정보",
-        "dialog_about_version": "버전 {version}",
-        "dialog_about_description": "모자이크 복원 도구",
-        "dialog_about_credit": "Lada에서 영감을 받음",
         "btn_close": "닫기",
 
         # Language change dialog

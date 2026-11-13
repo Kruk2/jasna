@@ -4,6 +4,7 @@ import webbrowser
 import pytest
 
 from jasna import update_check
+from jasna.gui import activation_worker
 from jasna.gui.components import OptionsDialog
 from jasna.gui.tray import TraySupport
 from jasna.user_settings import read_settings, update_settings
@@ -80,3 +81,24 @@ def test_the_options_dialog_has_the_update_check_on_by_default(tk_root, user_con
     reopened = OptionsDialog(tk_root, TRAY, changes.append)
     assert reopened.switches["check_for_updates"].get() == 0
     reopened.destroy()
+
+
+@pytest.mark.parametrize("license_info", [(False, None), (True, "online")])
+@pytest.mark.parametrize("lang", ["en", "zh", "ja", "ko", "th"])
+def test_the_whole_header_fits_the_default_window_with_a_new_release_shown(
+    lang, license_info, gui_language, make_jasna_app, settle_activation, show_window, monkeypatch
+):
+    gui_language(lang)
+    monkeypatch.setattr(update_check, "fetch_latest_release", lambda: "99.0.0")
+    monkeypatch.setattr(activation_worker, "read_license_info", lambda: license_info)
+
+    app = make_jasna_app()
+    settle_activation(app)
+    app._status_pill.set_status("PROCESSING", "#ffffff")
+    show_window(app)
+
+    window_right = app.winfo_rootx() + app.winfo_width()
+    status_right = app._status_pill.winfo_rootx() + app._status_pill.winfo_width()
+    assert chip_shown(app)
+    assert app._update_chip.winfo_rootx() + app._update_chip.winfo_width() <= window_right
+    assert status_right < app._lang_dropdown.master.winfo_rootx()

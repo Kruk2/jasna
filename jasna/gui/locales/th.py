@@ -29,7 +29,6 @@ TH = {
 
         # Header
         "btn_help": "ช่วยเหลือ",
-        "btn_about": "เกี่ยวกับ",
         "btn_system_check": "ตรวจสอบระบบ",
         "btn_video_player": "เครื่องเล่นวิดีโอ",
 
@@ -290,7 +289,7 @@ TH = {
         "option_close_to_tray_unavailable": "ใช้ไม่ได้ที่นี่: ไอคอนในถาดไม่มีเมนูสำหรับออก",
         "option_check_for_updates": "ตรวจหาอัปเดต",
         "option_check_for_updates_hint": "Jasna จะตรวจหาเวอร์ชันใหม่ประมาณวันละครั้ง และแสดงข้อความเล็กๆ ที่ส่วนหัว โดยไม่ส่งข้อมูลส่วนตัวใดๆ",
-        "update_available": "อัปเดต: v{version}",
+        "update_available": "เวอร์ชันใหม่ v{version}",
         "tip_update_available": "Jasna มีเวอร์ชันใหม่แล้ว คลิกเพื่อเปิดหน้าดาวน์โหลด",
         "tray_open": "เปิด Jasna",
         "tray_quit": "ออก",
@@ -677,10 +676,6 @@ TH = {
         "engine_name_yolo": "YOLO (ตรวจจับ)",
         "engine_name_basicvsrpp": "BasicVSR++ (ฟื้นฟู)",
         # About dialog
-        "dialog_about_title": "เกี่ยวกับ Jasna",
-        "dialog_about_version": "เวอร์ชัน {version}",
-        "dialog_about_description": "เครื่องมือฟื้นฟูโมเสก",
-        "dialog_about_credit": "แรงบันดาลใจจาก Lada",
         "btn_close": "ปิด",
 
         # Language change dialog

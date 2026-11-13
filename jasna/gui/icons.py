@@ -141,6 +141,24 @@ def render_icon(name: str, size: int, color: str) -> Image.Image:
             ],
             fill=color,
         )
+    elif name == "download":
+        draw.line(
+            [(point(9), point(2)), (point(9), point(11))],
+            fill=color,
+            width=line_width,
+        )
+        draw.line(
+            [(point(5), point(7.5)), (point(9), point(11.5)), (point(13), point(7.5))],
+            fill=color,
+            width=line_width,
+            joint="curve",
+        )
+        draw.line(
+            [(point(3), point(12)), (point(3), point(15.5)), (point(15), point(15.5)), (point(15), point(12))],
+            fill=color,
+            width=line_width,
+            joint="curve",
+        )
     else:
         raise ValueError(f"Unknown GUI icon: {name}")
 

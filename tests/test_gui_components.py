@@ -12,7 +12,6 @@ from jasna.gui.components import StatusPill, grab_modal
 from jasna.gui.job_list_item import JobListItem
 from jasna.gui.control_bar import ControlBar, status_text
 from jasna.gui.locales import t
-from jasna.gui.locales.th import TH
 from jasna.progressbar import StageProgress
 
 
@@ -197,24 +196,6 @@ def test_status_pill_sizes_to_localized_content(tk_root, monkeypatch) -> None:
 
     assert max(widths) < 180
     assert pill._label.cget("text") == translations["status_processing"].upper()
-
-
-@pytest.fixture
-def thai_header(monkeypatch):
-    monkeypatch.setattr(app_module, "t", TH.__getitem__)
-    monkeypatch.setattr(components, "t", TH.__getitem__)
-
-
-def test_header_keeps_about_button_visible_at_default_width(thai_header, jasna_app, show_window) -> None:
-    jasna_app._status_pill.set_status("PROCESSING", "#ffffff")
-    show_window(jasna_app)
-
-    window_right = jasna_app.winfo_rootx() + jasna_app.winfo_width()
-    about_right = jasna_app._about_btn.winfo_rootx() + jasna_app._about_btn.winfo_width()
-    status_right = jasna_app._status_pill.winfo_rootx() + jasna_app._status_pill.winfo_width()
-    assert jasna_app._about_btn.winfo_width() > 1
-    assert about_right <= window_right
-    assert status_right < jasna_app._lang_dropdown.master.winfo_rootx()
 
 
 def test_grab_modal_grabs_a_new_dialog_and_restores_it_on_focus(tk_root) -> None:
