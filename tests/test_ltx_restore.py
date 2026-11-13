@@ -181,13 +181,17 @@ def _new_dir(tmp_path):
     return Path(tempfile.mkdtemp(dir=tmp_path))
 
 
+def _runtime(files=FILES):
+    return inference.ModelRuntime(files, torch.device("cpu"), threading.Event())
+
+
 def _run_spans(tmp_path, spans):
     restore.restore_spans(
         spans,
         _render(tmp_path),
         work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
         progress=restore.Progress(0, disable=True, report=None),
-        cancel=threading.Event(),
+        cancel=threading.Event(), runtime=_runtime(),
     )
 
 
@@ -336,6 +340,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         progress=restore.Progress(12, disable=True, report=None),
         cancel=threading.Event(),
         max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None, frame_numbers=TEN_PTS_PER_FRAME,
+        runtime=_runtime(),
     )
     assert budgets == [(3 << 30) + (123 << 20)]
     assert _Transformer.seeds == [[5]]
@@ -878,6 +883,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
         progress=restore.Progress(0, disable=True, report=None),
         cancel=threading.Event(),
         max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None, frame_numbers=TEN_PTS_PER_FRAME,
+        runtime=_runtime(),
     )
     assert list(json.loads((tmp_path / "speed.json").read_text())) == [
         restore.speed.profile_key("Test GPU", "t", "free VRAM")
@@ -939,7 +945,7 @@ def test_restore_spans_shows_each_pass_before_its_model_loads(fakes, monkeypatch
         _render(tmp_path),
         work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
         progress=restore.Progress(12, disable=True, report=lambda *args: reports.append(args)),
-        cancel=threading.Event(),
+        cancel=threading.Event(), runtime=_runtime(),
     )
     assert shown_at_load == [("encoder", "encode"), ("transformer", "denoise"), ("decoder", "compose")]
 
@@ -1163,6 +1169,7 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), lambda: writer)],
         render, work_dir=tmp_path, resume_dir=_new_dir(tmp_path), progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(),
+        runtime=_runtime(files),
     )
     assert writer.closed
     assert [op for op, _, _ in requests] == [
@@ -1205,7 +1212,7 @@ def test_encrypted_worker_starts_on_its_own_thread_while_the_scan_runs(fakes, mo
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), _Writer)],
         replace(_render(tmp_path), files=files), work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
-        progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(),
+        progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(), runtime=_runtime(files),
     )
     assert requests[0] == ("prepare_transformer", False)
     assert requests[1:3] == [("load_encoder", True), ("encode", False)]
@@ -1279,7 +1286,7 @@ def test_a_run_without_a_speed_profile_runs_a_speed_test_first(fakes, tmp_path):
         _render(tmp_path),
         work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
         progress=restore.Progress(12, disable=True, report=lambda *args: reports.append(args)),
-        cancel=threading.Event(),
+        cancel=threading.Event(), runtime=_runtime(),
     )
     assert _Transformer.seeds == [[0], [7]]
     assert len(writer.frames) == 12
@@ -1309,6 +1316,7 @@ def test_a_fresh_encode_pass_counts_frames_and_warms_up_after_its_first_batch(fa
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)],
         _render(tmp_path), work_dir=tmp_path, resume_dir=_new_dir(tmp_path), progress=progress, cancel=threading.Event(),
+        runtime=_runtime(),
     )
     timing = progress.timings["encode"]
     assert (timing.units, timing.warm_frames) == (12, 8)
@@ -1336,7 +1344,7 @@ def test_a_run_with_a_speed_profile_skips_the_speed_test(fakes, tmp_path):
 def _resume_spans(tmp_path, spans):
     restore.restore_spans(
         spans, _render(tmp_path), work_dir=tmp_path, resume_dir=tmp_path / "saved",
-        progress=restore.Progress(50, disable=True, report=None), cancel=threading.Event(),
+        progress=restore.Progress(50, disable=True, report=None), cancel=threading.Event(), runtime=_runtime(),
     )
 
 
@@ -1441,21 +1449,20 @@ def _save_whole_video_768_plan(resume_dir: Path) -> None:
 
 
 def test_whole_video_canvas_without_saved_work_follows_the_free_vram(fakes, tmp_path):
-    assert restore.whole_video_large_canvas(True, torch.device("cpu"), tmp_path / "saved") is False
+    assert restore.whole_video_large_canvas(True, 9 << 30, tmp_path / "saved") is False
 
 
 def test_resume_replays_the_saved_whole_video_canvas_decision(fakes, monkeypatch, tmp_path):
     _save_whole_video_768_plan(tmp_path / "saved")
-    monkeypatch.setattr(restore, "device_free_bytes", lambda device: 16 << 30)
     monkeypatch.setattr(restore, "large_canvas_fits", lambda *_a: pytest.fail("canvas decision repeated"))
 
-    assert restore.whole_video_large_canvas(False, torch.device("cpu"), tmp_path / "saved") is True
+    assert restore.whole_video_large_canvas(False, 16 << 30, tmp_path / "saved") is True
 
 
 def test_resume_of_saved_768_px_windows_fails_plainly_when_vram_is_short(fakes, tmp_path):
     _save_whole_video_768_plan(tmp_path / "saved")
     with pytest.raises(RuntimeError, match="768 px"):
-        restore.whole_video_large_canvas(True, torch.device("cpu"), tmp_path / "saved")
+        restore.whole_video_large_canvas(True, 9 << 30, tmp_path / "saved")
 
 
 def test_resuming_only_the_remaining_span_uses_its_original_latents(fakes, monkeypatch, tmp_path):

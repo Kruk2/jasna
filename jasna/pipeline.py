@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 import psutil
 import torch
 
-from jasna.accelerator import device_used_bytes, vendor_for_device
-from jasna.job_resume import ResumeJob, resume_directory
+from jasna.accelerator import device_free_bytes, device_used_bytes, vendor_for_device
+from jasna.job_resume import ResumeJob, resume_directory, saved_ltx_work
 from jasna.media.container_utils import MOV_SUFFIXES
 from jasna.media.encoder_settings import require_encodable_size
 from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
@@ -45,6 +45,7 @@ from jasna.vr180 import resolve_vr_mode, stereo_detector
 from jasna.vr_projection import build_vr_projector
 
 if TYPE_CHECKING:
+    from jasna.ltx.inference import ModelRuntime
     from jasna.ltx.restore import FrameWriter, LtxRender, LtxSpan
     from jasna.session_factory import RestorationSession
 
@@ -178,6 +179,8 @@ class Pipeline:
         self.vr_projector = None
         self.job_detection_model = self.detection_model
         self._cancel_event = threading.Event()
+        self._ltx_runtime: ModelRuntime | None = None
+        self._free_bytes_before_ltx = 0
         self.completed = False
 
     @property
@@ -403,7 +406,7 @@ class Pipeline:
 
         frame_rate = self._resolve_frame_rate(metadata)
         resume_dir = self.resume.directory / "ltx"
-        large_canvas = whole_video_large_canvas(self.ltx_large_canvas, self.device, resume_dir)
+        large_canvas = whole_video_large_canvas(self.ltx_large_canvas, self._free_bytes_before_ltx, resume_dir)
         settings = self._job_settings(frozenset({"ltx"}), ltx_large_canvas=large_canvas)
         encoder = self._video_encoder(metadata, frame_rate, settings)
         try:
@@ -443,6 +446,7 @@ class Pipeline:
                 super_res=self.ltx_super_res,
                 vr_projector=self.vr_projector,
                 frame_numbers=FrameNumbers.of_video(metadata),
+                runtime=self._ltx_runtime,
             )
         except Cancelled:
             log.info("LTX restoration cancelled")
@@ -542,6 +546,7 @@ class Pipeline:
                 resume_dir=self.resume.directory / "ltx",
                 progress=self._ltx_progress(frames, progress_callback),
                 cancel=self._cancel_event,
+                runtime=self._ltx_runtime,
             )
         except Cancelled:
             log.info("LTX restoration cancelled")
@@ -732,6 +737,31 @@ class Pipeline:
             log.info("Peak GPU memory (whole card, incl. other apps) — %.1f MiB", gpu_memory.stop() / (1024 ** 2))
 
     def _run_job(self) -> None:
+        self._open_ltx_runtime()
+        try:
+            self._run_restorations()
+        finally:
+            if self._ltx_runtime is not None:
+                self._ltx_runtime.close()
+                self._ltx_runtime = None
+
+    def _open_ltx_runtime(self) -> None:
+        """The LTX models of a job with LTX work. Their worker starts now, beside the job's setup
+        and scan, when ``worker_starts_with_job`` says so; the VRAM free before that start
+        decides the 768 px canvas."""
+        from jasna.ltx.inference import ModelRuntime, worker_starts_with_job
+
+        models = job_models(self.restoration_model_name, self.segments)
+        if "ltx" not in models:
+            return
+        self._free_bytes_before_ltx = device_free_bytes(self.device)
+        self._ltx_runtime = ModelRuntime(self.ltx_files, self.device, self._cancel_event)
+        if worker_starts_with_job(
+            models, protected=self._ltx_runtime.protected, resuming=saved_ltx_work(self.config, self.output_video)
+        ):
+            self._ltx_runtime.start_ahead()
+
+    def _run_restorations(self) -> None:
         metadata = get_video_meta_data(str(self.input_video))
         self.validate_metadata(metadata)
         require_encodable_size(vendor_for_device(self.device), self.codec, metadata.video_width, metadata.video_height)

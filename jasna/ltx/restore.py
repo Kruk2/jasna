@@ -1047,13 +1047,12 @@ def large_canvas_fits(requested: bool, free_bytes: int) -> bool:
     return requested
 
 
-def whole_video_large_canvas(requested: bool, device: torch.device, resume_dir: Path) -> bool:
+def whole_video_large_canvas(requested: bool, free: int, resume_dir: Path) -> bool:
     """The 768 px decision of a whole-video run: saved work keeps the one it was made with,
-    else the VRAM free now decides."""
+    else ``free``, the VRAM free before the job's LTX worker started, decides."""
     saved = _read_plans(_plans_file(_pts_key(*WHOLE_VIDEO_PTS), resume_dir))
     if saved is None:
-        return large_canvas_fits(requested, device_free_bytes(device))
-    free = device_free_bytes(device)
+        return large_canvas_fits(requested, free)
     if saved.large_canvas and free < LARGE_CANVAS_MIN_FREE_BYTES:
         raise RuntimeError(
             f"The saved LTX work for this video uses 768 px windows, which need "
@@ -1416,10 +1415,11 @@ def _profile_key(render: LtxRender) -> str:
 
 def restore_spans(
     spans: Sequence[LtxSpan], render: LtxRender, *, work_dir: Path, resume_dir: Path, progress: Progress,
-    cancel: threading.Event,
+    cancel: threading.Event, runtime: ModelRuntime,
 ) -> None:
-    """Restore every segment of ``spans`` and write each span's frames to a writer of its own
-    (closed once the span is written); plans and latents are kept in ``resume_dir`` to resume.
+    """Restore every segment of ``spans`` with the models of ``runtime`` (the caller closes it)
+    and write each span's frames to a writer of its own (closed once the span is written);
+    plans and latents are kept in ``resume_dir`` to resume.
     Without a speed profile for this GPU and model, a speed test runs first in a temporary
     directory under ``work_dir``: the first frames of the first span with two made-up mosaics,
     restored and thrown away, so the run's time left is known once its scan has planned it."""
@@ -1437,46 +1437,47 @@ def restore_spans(
                 temp,
                 progress=progress.speed_test(),
                 cancel=cancel,
+                runtime=runtime,
             )
     resume_dir.mkdir(parents=True, exist_ok=True)
-    _restore_spans(spans, render, resume_dir, progress=progress, cancel=cancel)
+    _restore_spans(spans, render, resume_dir, progress=progress, cancel=cancel, runtime=runtime)
 
 
 def _restore_spans(
-    spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event
+    spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event,
+    runtime: ModelRuntime,
 ) -> None:
     profile_key = _profile_key(render)
     progress.expect(speed.load_rates(render.speed_profile, profile_key))
     torch.cuda.reset_peak_memory_stats(render.device)
     blocks = None
     resuming = any(directory.glob("*.plans.npz"))
-    with ModelRuntime(render.files, render.device, cancel) as runtime:
-        prepared = prepare_spans(spans, render, directory, progress=progress, cancel=cancel, runtime=runtime)
-        finals = final_stores(prepared, directory)
-        windows = sum(p.windows for p in prepared)
-        pending_tracks = any(
-            not store.has_track(plan)
-            for p, stores in zip(prepared, finals) for plans, store in zip(p.plans, stores) for plan in plans
-        )
-        if pending_tracks:
-            progress.begin("denoise")
-            transformer = runtime.load_transformer()
-            blocks = (transformer.blocks.resident, transformer.blocks.count)
-            try:
-                denoise_spans(prepared, finals, transformer, keep_references=False, progress=progress, cancel=cancel)
-            finally:
-                del transformer
-                runtime.unload_transformer()
-        elif windows:
-            progress.skip_saved("denoise")
-        progress.begin("compose")
-        decoder = runtime.load_decoder() if windows else None
+    prepared = prepare_spans(spans, render, directory, progress=progress, cancel=cancel, runtime=runtime)
+    finals = final_stores(prepared, directory)
+    windows = sum(p.windows for p in prepared)
+    pending_tracks = any(
+        not store.has_track(plan)
+        for p, stores in zip(prepared, finals) for plans, store in zip(p.plans, stores) for plan in plans
+    )
+    if pending_tracks:
+        progress.begin("denoise")
+        transformer = runtime.load_transformer()
+        blocks = (transformer.blocks.resident, transformer.blocks.count)
         try:
-            compose_spans(prepared, finals, decoder, render, progress=progress, cancel=cancel)
+            denoise_spans(prepared, finals, transformer, keep_references=False, progress=progress, cancel=cancel)
         finally:
-            del decoder
-            runtime.unload_decoder()
-        peak_vram_bytes = runtime.peak_vram_bytes()
+            del transformer
+            runtime.unload_transformer()
+    elif windows:
+        progress.skip_saved("denoise")
+    progress.begin("compose")
+    decoder = runtime.load_decoder() if windows else None
+    try:
+        compose_spans(prepared, finals, decoder, render, progress=progress, cancel=cancel)
+    finally:
+        del decoder
+        runtime.unload_decoder()
+    peak_vram_bytes = runtime.peak_vram_bytes()
     for line in progress.summary(profile_key, peak_vram_bytes, blocks):
         logger.info(line)
     if windows and not resuming:
@@ -1507,6 +1508,7 @@ def restore_video(
     super_res: LtxSuperRes | None,
     vr_projector: RegionProjector | None,
     frame_numbers: FrameNumbers,
+    runtime: ModelRuntime,
 ) -> None:
     """Restore every mosaic of the video ``frames`` yields as one segment. ``large_canvas``
     is ``whole_video_large_canvas``'s decision; the decode tiles follow the free VRAM."""
@@ -1536,4 +1538,5 @@ def restore_video(
         progress=progress,
         cancel=cancel,
         resume_dir=resume_dir,
+        runtime=runtime,
     )

@@ -70,6 +70,11 @@ def _has_render_work(render: Path) -> bool:
     return _has_ltx_work(render) or any(render.glob("segments/*-raw.nut"))
 
 
+def saved_ltx_work(config: SessionConfig, output: Path) -> bool:
+    """Whether the checkpoint of ``output`` holds LTX plans or latents."""
+    return _has_ltx_work(resume_directory(config, output) / "render")
+
+
 def has_saved_work(root: Path) -> bool:
     """Whether the checkpoint ``root`` holds finished work: an auto split, track plans,
     latents or fragments. A checkpoint without any is replaced without asking."""
