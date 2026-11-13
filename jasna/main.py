@@ -1146,6 +1146,10 @@ def _main() -> None:
         _print_activation_status(parser)
         return
 
+    if not args.benchmark:
+        from jasna.gui.activation_worker import start_pc_license_refresh
+
+        start_pc_license_refresh()
     if args.benchmark:
         from jasna.benchmark import run_benchmark_cli
         run_benchmark_cli(args)

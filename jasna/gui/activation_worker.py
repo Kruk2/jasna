@@ -1,5 +1,6 @@
 """Activation, config access and the update check, kept off the Tk thread."""
 
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -8,6 +9,7 @@ from typing import TypeVar
 from jasna import update_check
 from jasna.license_api import protection_available, require_protection, typed_license_code
 
+logger = logging.getLogger(__name__)
 Result = TypeVar("Result")
 
 
@@ -51,6 +53,24 @@ def license_status_key(mode: str | None) -> str:
 
 def start_license_info(on_done) -> threading.Thread:
     return _start(read_license_info, on_done)
+
+
+def refresh_pc_license() -> None:
+    """Binds a saved offline activation to this PC once, so LTX later works without internet. Quiet: a failure only
+    logs, and the first LTX job tries again and says what to do."""
+    if not protection_available():
+        return
+    from jasna.protection import lease
+
+    lease.refresh_pc_grant_quietly()
+
+
+def start_pc_license_refresh() -> threading.Thread:
+    def done(_result, error):
+        if error is not None:
+            logger.warning("Could not refresh the license for this PC: %s", error)
+
+    return _start(refresh_pc_license, done)
 
 
 def read_unofficial_notice_due() -> bool:
