@@ -19,7 +19,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.ltx.camera import CropFrame
 from jasna.ltx.plan import Polygon
 from jasna.media.cuda_kernel import Kernel, grid_size, has_precompiled_kernels
@@ -345,10 +344,6 @@ def _paint_box(crop: tuple[int, int, int, int], feathered: tuple[int, int, int, 
     return px1, py1, max(min(x2, fx2), px1), max(min(y2, fy2), py1)
 
 
-COMPOSE_KERNEL_VENDORS = (AcceleratorVendor.NVIDIA,)
-"""Vendors whose frames composite on ``ltx_compose`` kernels (where ``has_precompiled_kernels``).
-AMD's build is bit-identical too but keeps the Torch path: there the window decoder bounds the
-compose pass, and the kernels gained ~1 % on an RX 7900 XTX."""
 _KERNEL_MODULE = "ltx_compose"
 _HEADER_SLOTS, _TRACK_SLOTS, _LAYER_SLOTS = 20, 12, 16
 _MEDIAN_BINS = 511
@@ -384,14 +379,13 @@ def _dilate_kernel(radius: int) -> Kernel:
 
 
 def _fits_compose_kernels(source: torch.Tensor, live: Sequence[Candidate], feather: int) -> bool:
-    """Whether ``composite_on_kernels`` takes a frame: a GPU of ``COMPOSE_KERNEL_VENDORS`` with the
-    precompiled kernels, a frame with unit column stride, tracks at full
+    """Whether ``composite_on_kernels`` takes a frame: a GPU with the precompiled kernels (NVIDIA,
+    or AMD of ``HIP_KERNEL_ARCHITECTURES``), a frame with unit column stride, tracks at full
     presence, and a feather the Torch path can reflect-pad (also at the region edge) and the
     kernel's byte distances can hold."""
     x0, y0, x3, y3 = _compositing_region(source, live, feather)
     return (
-        vendor_for_device(source.device) in COMPOSE_KERNEL_VENDORS
-        and has_precompiled_kernels(source.device)
+        has_precompiled_kernels(source.device)
         and source.stride(-1) == 1
         and all(c.presence == 1.0 for c in live)
         and feather <= _MAX_KERNEL_FEATHER
