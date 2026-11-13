@@ -157,16 +157,17 @@ def user_config_dir(monkeypatch, tmp_path):
 def make_jasna_app(monkeypatch, tmp_path, user_config_dir):
     """Build real main windows after their startup work, on a machine reporting a Blackwell
     NVIDIA GPU and an SSD install, with settings under ``tmp_path / "config"`` and restoration
-    models (LTX included) under ``tmp_path / "models"``. Windows the test left open are
-    destroyed afterwards."""
+    models (LTX included) under ``tmp_path / "models"``. The release service does not answer
+    the update check. Windows the test left open are destroyed afterwards."""
     import threading
     from tkinter import TclError
 
-    from jasna import engine_paths, os_utils
+    from jasna import engine_paths, os_utils, update_check
     from jasna.accelerator import AcceleratorVendor
     from jasna.gui import app as app_module
 
     monkeypatch.setattr(app_module, "_warm_up_cuda", lambda: (AcceleratorVendor.NVIDIA, True, True))
+    monkeypatch.setattr(update_check, "fetch_latest_release", lambda: None)
     monkeypatch.setattr(os_utils, "install_on_hard_disk", lambda: False)
     monkeypatch.setattr(os_utils, "windows_module_loaded", lambda _name: False)
     monkeypatch.setattr(engine_paths, "default_restoration_model_path", lambda name: tmp_path / "models" / name)

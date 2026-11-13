@@ -8,11 +8,12 @@ import sys
 import threading
 import time
 import tkinter as tk
+import webbrowser
 
 from tkinterdnd2 import TkinterDnD
 
 from jasna import __version__
-from jasna import os_utils, startup_timing
+from jasna import os_utils, startup_timing, update_check
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui.branding import (
     HEADER_LOGO_SIZE,
@@ -22,7 +23,7 @@ from jasna.gui.branding import (
 from jasna.gui import scaling
 from jasna.gui import activation_worker
 from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
-from jasna.gui.components import StatusPill, KofiButton, UnifansButton, XianyuButton, XianyuQrDialog, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, CloseWhileProcessingDialog, Tooltip, TrayOptionsDialog, grab_modal
+from jasna.gui.components import StatusPill, KofiButton, UnifansButton, XianyuButton, XianyuQrDialog, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, CloseWhileProcessingDialog, Tooltip, OptionsDialog, grab_modal
 from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
@@ -142,6 +143,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.after_idle(self._start_cuda_warmup)
         self.after_idle(self._warn_if_windhawk_loaded)
         self.after_idle(self._warn_if_installed_on_hard_disk)
+        self.after_idle(self._start_update_check)
 
         if not skip_wizard:
             if self._preset_manager.get_system_check_passed_version() != __version__:
@@ -203,6 +205,17 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         )
         version.pack(side="left", pady=(4, 0))
 
+        self._update_chip = ctk.CTkButton(
+            left,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
+            fg_color="transparent",
+            hover_color=Colors.BG_CARD,
+            text_color=Colors.STATUS_COMPLETED,
+            width=0,
+            height=24,
+        )
+        Tooltip(self._update_chip, t("tip_update_available"))
+
         # Status pill, left-aligned next to the version (the right side holds the
         # license/support chips, which used to overlap a centered pill).
         self._status_pill = StatusPill(left)
@@ -221,7 +234,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             hover_color=Colors.BG_CARD,
             width=28,
             height=28,
-            command=self._show_tray_options,
+            command=self._show_options,
         )
         self._options_btn.pack(side="left", padx=(0, 8))
         Tooltip(self._options_btn, t("dialog_options_title"))
@@ -546,8 +559,31 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._main_thread.close()
             self.destroy()
         
-    def _show_tray_options(self):
-        TrayOptionsDialog(self, tray.tray_support())
+    def _show_options(self):
+        OptionsDialog(self, tray.tray_support(), self._on_update_check_changed)
+
+    def _start_update_check(self):
+        activation_worker.start_update_check(
+            lambda version, error: self._main_thread.post(lambda: self._update_check_ready(version, error))
+        )
+
+    def _update_check_ready(self, version, error):
+        if error is not None:
+            logger.warning("Could not check for a new version: %s", error)
+        if version is None or not read_settings().get(update_check.ENABLED_SETTING, True):
+            self._update_chip.pack_forget()
+            return
+        self._update_chip.configure(
+            text=t("update_available", version=version),
+            command=lambda: webbrowser.open(update_check.release_page_url(version)),
+        )
+        self._update_chip.pack(side="left", padx=(8, 0), before=self._status_pill)
+
+    def _on_update_check_changed(self, enabled: bool):
+        if enabled:
+            self._start_update_check()
+        else:
+            self._update_chip.pack_forget()
 
     def _on_unmap(self, event):
         if event.widget is self and self.state() == "iconic" and read_settings().get("minimize_to_tray", False):
@@ -1019,7 +1055,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         # For a full implementation, each panel should listen to locale changes
         
     def _show_help(self):
-        import webbrowser
         webbrowser.open("https://github.com/Kruk2/jasna")
         
     def _show_about(self):
