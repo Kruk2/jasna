@@ -10,6 +10,7 @@ import webbrowser
 from jasna.gui import scaling
 from jasna.gui.branding import create_xianyu_qr_image
 from jasna.gui.icons import CompactSwitch
+from jasna.gui.xianyu_qr import bundled_xianyu_qr, download_xianyu_qr_in_background
 from jasna.user_settings import read_settings, update_settings
 from jasna.gui import activation_worker
 from jasna.gui.queues import MainThreadCalls
@@ -226,6 +227,7 @@ class XianyuQrDialog(ctk.CTkToplevel):
 
     def __init__(self, master, unofficial_notice: bool = False):
         super().__init__(master)
+        self._main_thread = MainThreadCalls(self, 100)
         self.title(t("unofficial_notice_title" if unofficial_notice else "xianyu_dialog_title"))
         self.configure(fg_color=Colors.BG_MAIN)
         self.resizable(False, False)
@@ -242,8 +244,9 @@ class XianyuQrDialog(ctk.CTkToplevel):
                 wraplength=360,
                 justify="left",
             ).pack(pady=(0, 12))
-        self.qr_label = ctk.CTkLabel(content, text="", image=create_xianyu_qr_image())
+        self.qr_label = ctk.CTkLabel(content, text="", image=create_xianyu_qr_image(bundled_xianyu_qr()))
         self.qr_label.pack(pady=(0, 12))
+        download_xianyu_qr_in_background(lambda image: self._main_thread.post(lambda: self._show_qr(image)))
         ctk.CTkLabel(
             content,
             text=t("xianyu_scan_hint"),
@@ -267,9 +270,13 @@ class XianyuQrDialog(ctk.CTkToplevel):
         self._previous_grab = self.grab_current()
         grab_modal(self)
 
+    def _show_qr(self, image) -> None:
+        self.qr_label.configure(image=create_xianyu_qr_image(image))
+
     def destroy(self):
         """Hand the grab back to the modal window that opened it, such as the license window."""
         previous = self._previous_grab
+        self._main_thread.close()
         super().destroy()
         if previous is not None and previous.winfo_exists():
             previous.grab_set()

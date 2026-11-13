@@ -66,6 +66,19 @@ def _open_tcl_standard_channels_on_nul() -> None:
             kernel32.SetStdHandle(kind, handle)
 
 
+@pytest.fixture(autouse=True)
+def offline_xianyu_qr(monkeypatch):
+    """Keep the Xianyu QR dialog on its bundled code instead of downloading GitHub's."""
+    import urllib.error
+
+    from jasna.gui import xianyu_qr
+
+    def unreachable(*args, **kwargs):
+        raise urllib.error.URLError("tests run offline")
+
+    monkeypatch.setattr(xianyu_qr, "urlopen", unreachable)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def rocm_cuda_initialized():
     """Initialize ROCm torch before a test fakes ``torch.version.cuda``: torch's lazy CUDA
