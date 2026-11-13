@@ -76,7 +76,9 @@ def _relative_error(actual: torch.Tensor, expected: torch.Tensor) -> float:
 def test_native_prompt_key_value_matches_the_python_heads_and_dtype(block):
     weights, forward, (tolerance, _) = block
     _x, cond, _prompt, _rope = _inputs(weights, min(CANVAS_SIDES), seed=3)
-    context = torch.randn(1, 1024, weights["scale_shift_table"].shape[1], device=DEVICE).to(torch.bfloat16)
+    generator = torch.Generator(device=DEVICE).manual_seed(3)
+    context = torch.randn(1, 1024, weights["scale_shift_table"].shape[1], generator=generator, device=DEVICE)
+    context = context.to(torch.bfloat16)
     expected = T.prompt_key_value(weights, cond, context)
     linears = [tensor for name in T.LINEAR_NAMES for tensor in native._linear_tensors(weights, name)]
     actual = forward.block.prompt_key_value(
