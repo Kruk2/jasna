@@ -157,12 +157,12 @@ def follow_camera(
     target_x = gaussian_smooth((raw[:, 0] + raw[:, 2]) / 2.0, SMOOTH_SIGMA_FRAMES)
     target_y = gaussian_smooth((raw[:, 1] + raw[:, 3]) / 2.0, SMOOTH_SIGMA_FRAMES)
     lefts = _eased_offsets(
-        target_x - widths / 2,
+        _offsets_inside_frame(target_x, widths, frame_w),
         [_feasible_interval(x1, x2, int(w), frame_w, margin) for (x1, _, x2, _), w in zip(support, widths)],
         widths / PLAN_CANVAS,
     )
     tops = _eased_offsets(
-        target_y - heights / 2,
+        _offsets_inside_frame(target_y, heights, frame_h),
         [_feasible_interval(y1, y2, int(h), frame_h, margin) for (_, y1, _, y2), h in zip(support, heights)],
         heights / PLAN_CANVAS,
     )
@@ -172,11 +172,18 @@ def follow_camera(
     ]
 
 
+def _offsets_inside_frame(centres: np.ndarray, sizes: np.ndarray, extent: int) -> np.ndarray:
+    """Offsets of crops centred on ``centres``, held at the frame border where they would cross it."""
+    return np.clip(centres - sizes / 2, 0, extent - sizes)
+
+
 def _eased_offsets(targets: np.ndarray, bounds: Sequence[tuple[int, int]], max_step: np.ndarray) -> list[int]:
     """Crop offsets near ``targets`` within each frame's ``(min, max)`` bounds. The push
     a bound gives the crop eases in and out by ``max_step`` per frame, because LTX keeps
-    its motion smooth and a one-frame jerk of the crop shifts that frame's restoration;
-    only pushes that grow faster than that still move the crop at once."""
+    its motion smooth and a one-frame jerk of the crop shifts that frame's restoration.
+    ``targets`` lie inside the frame, so only the mosaic box pushes: the frame border
+    never jumps, and easing its long push would hold the crop against the box for
+    hundreds of frames, where it copies every step of the detected box edge."""
     minimum, maximum = np.asarray(bounds, dtype=np.float64).T
     targets = np.round(targets)
     push_up = _rate_limited_floor(np.maximum(minimum - targets, 0.0), max_step)
