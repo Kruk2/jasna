@@ -1,6 +1,7 @@
 """Build the LTX VAE decoder's Triton kernels into committed AMD .hipfb bundles.
 
-Compiled ahead of time, bf16: ``na_triton._na3d_fwd_kernel`` (head dim 64) once per window size of the
+Compiled ahead of time, bf16 (the GEMMs summing in fp16 on ``diffusion_hip.FP16_ACCUMULATE_ARCHITECTURES``):
+``na_triton._na3d_fwd_kernel`` (head dim 64) once per window size of the
 shipped DiffVAE decoder with that size's ``na_geometry`` config on each architecture, ``diffusion_triton``'s
 residual MLP (gate/up and down, every ``FUSED_MLP_DIMS`` width), attention projection, context inject and slab
 Q/K/V kernels at the shipped shapes (Q/K/V also at the 512-wide deterministic stages), and the eager encoder's
@@ -39,13 +40,15 @@ def _kernel_specs(architecture: str):
     """stem -> (kernel, arguments, constants, num_warps, num_stages, grid) on ``architecture``; the launchers
     compute the grids."""
     specs = {}
+    fp16_accumulate = aot.accumulates_in_fp16(architecture)
+    gate_up_arguments, down_arguments = aot.swiglu_arguments(architecture)
     for window in na_hip.WINDOWS:
         config = config_for(window, architecture)
         tile_t, tile_h, tile_w = config.tile
         constants = {
             "KERNEL_T": window[0], "KERNEL_H": window[1], "KERNEL_W": window[2], "HEAD_DIM": na_hip.HEAD_DIM,
             "TILE_T": tile_t, "TILE_H": tile_h, "TILE_W": tile_w, "BLOCK_N": config.block_n,
-            "BOX_ROWS": config.box_rows,
+            "BOX_ROWS": config.box_rows, "FP16_ACCUMULATE": False,
         }
         specs[na_hip.module_name(window)] = (
             _na3d_fwd_kernel, na_hip.KERNEL_ARGUMENTS, constants, config.num_warps, config.num_stages, _GRID,
@@ -55,13 +58,14 @@ def _kernel_specs(architecture: str):
         (rows, cols, k, warps, stages), (down_rows, down_cols, down_k, down_warps, down_stages) = aot.SWIGLU_LAUNCH[dim]
         gate_up, down = aot.swiglu_modules(dim)
         specs[gate_up] = (
-            _swiglu_gate_up_kernel, aot.GATE_UP_ARGUMENTS,
-            {"DIM": dim, "HIDDEN": hidden, "BLOCK_ROWS": rows, "BLOCK_HIDDEN": cols, "BLOCK_K": k}, warps, stages, _GRID,
+            _swiglu_gate_up_kernel, gate_up_arguments,
+            {"DIM": dim, "HIDDEN": hidden, "BLOCK_ROWS": rows, "BLOCK_HIDDEN": cols, "BLOCK_K": k,
+             "FP16_ACCUMULATE": fp16_accumulate}, warps, stages, _GRID,
         )
         specs[down] = (
-            _swiglu_down_kernel, aot.DOWN_ARGUMENTS,
-            {"DIM": dim, "HIDDEN": hidden, "BLOCK_ROWS": down_rows, "BLOCK_COLS": down_cols, "BLOCK_K": down_k},
-            down_warps, down_stages, _GRID,
+            _swiglu_down_kernel, down_arguments,
+            {"DIM": dim, "HIDDEN": hidden, "BLOCK_ROWS": down_rows, "BLOCK_COLS": down_cols, "BLOCK_K": down_k,
+             "FP16_ACCUMULATE": fp16_accumulate}, down_warps, down_stages, _GRID,
         )
     rows, cols, k, warps, stages = aot.PROJ_RESIDUAL_LAUNCH
     specs[aot.PROJ_RESIDUAL_MODULE] = (
@@ -73,13 +77,15 @@ def _kernel_specs(architecture: str):
     specs[aot.CONTEXT_ADD_MODULE] = (
         _context_add_kernel, aot.CONTEXT_ADD_ARGUMENTS,
         {"IN_DIM": T.DIFFUSION_CONTEXT_DIM, "DIM": T.DIFFUSION_DIM, "STRIDE_T": stride_t, "STRIDE_H": stride_h,
-         "STRIDE_W": stride_w, "BLOCK_ROWS": rows, "BLOCK_COLS": cols, "BLOCK_K": k}, warps, stages, _GRID,
+         "STRIDE_W": stride_w, "BLOCK_ROWS": rows, "BLOCK_COLS": cols, "BLOCK_K": k,
+         "FP16_ACCUMULATE": fp16_accumulate}, warps, stages, _GRID,
     )
     for dim in T.FUSED_QKV_DIMS:
         specs[aot.qkv_module(dim)] = (
             _slab_qkv_kernel, aot.QKV_ARGUMENTS,
             {"DIM": dim, "HEAD_DIM": T.DIFFUSION_HEAD_DIM, "PAIRS_T": T.DIFFUSION_ROPE_PAIRS[0],
-             "PAIRS_H": T.DIFFUSION_ROPE_PAIRS[1], "BLOCK_ROWS": aot.QKV_BLOCK_ROWS, "MODULATE": dim == T.DIFFUSION_DIM},
+             "PAIRS_H": T.DIFFUSION_ROPE_PAIRS[1], "BLOCK_ROWS": aot.QKV_BLOCK_ROWS, "MODULATE": dim == T.DIFFUSION_DIM,
+             "FP16_ACCUMULATE": fp16_accumulate},
             aot.QKV_WARPS, 1, _GRID,
         )
     specs[layout_hip.MODULE] = (

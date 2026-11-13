@@ -2,6 +2,7 @@
 build ``diffusion_hip``) against the torch code they replace, and their routing. Needs a GPU and Triton; the
 ahead-of-time tests an AMD GPU (the bundles are built for RDNA)."""
 
+import copy
 import importlib.util
 
 import pytest
@@ -208,27 +209,37 @@ def test_the_deterministic_blocks_take_the_fused_mlp(dim):
     torch.testing.assert_close(actual, expected, atol=6e-2, rtol=2e-2)
 
 
-def _nvidia_launches():
+def _nvidia_launches(fp16_accumulate: bool):
+    """Every NVIDIA launch entry's configs with fp32 or fp16 accumulation: each config must work both ways."""
     from jasna.models.ltx_vae import diffusion_triton
 
-    return [*diffusion_triton.NVIDIA_LAUNCH.values(), diffusion_triton.NVIDIA_DEFAULT_LAUNCH]
+    entries = [*diffusion_triton.NVIDIA_LAUNCH.values(), diffusion_triton.NVIDIA_DEFAULT_LAUNCH]
+    return [entry._replace(fp16_accumulate=fp16_accumulate) for entry in entries]
 
 
-@nvidia_only
-@pytest.mark.parametrize("launch", _nvidia_launches())
-@pytest.mark.parametrize("dim", T.FUSED_MLP_DIMS)
-def test_every_nvidia_launch_config_computes_the_torch_mlp(monkeypatch, launch, dim):
-    from jasna.models.ltx_vae import diffusion_triton
-
+def _mlp_operands(dim: int):
     generator = torch.Generator(device="cuda").manual_seed(0)
     hidden = T._swiglu_hidden_dim(dim)
 
     def randn(*shape, scale=1.0):
         return (torch.randn(shape, device="cuda", generator=generator) * scale).to(torch.bfloat16)
 
-    x = randn(300, dim, scale=2.0)
-    weights = (randn(dim), randn(dim, scale=0.2), randn(dim, scale=0.2), randn(hidden, dim, scale=dim**-0.5),
-               randn(hidden, dim, scale=dim**-0.5), randn(dim, hidden, scale=hidden**-0.5))
+    return randn(300, dim, scale=2.0), (randn(dim), randn(dim, scale=0.2), randn(dim, scale=0.2),
+                                        randn(hidden, dim, scale=dim**-0.5), randn(hidden, dim, scale=dim**-0.5),
+                                        randn(dim, hidden, scale=hidden**-0.5))
+
+
+def _mean_distance(actual: torch.Tensor, reference: torch.Tensor) -> float:
+    return (actual.float() - reference.float()).abs().mean().item()
+
+
+@nvidia_only
+@pytest.mark.parametrize("launch", _nvidia_launches(False) + _nvidia_launches(True))
+@pytest.mark.parametrize("dim", T.FUSED_MLP_DIMS)
+def test_every_nvidia_launch_config_computes_the_torch_mlp(monkeypatch, launch, dim):
+    from jasna.models.ltx_vae import diffusion_triton
+
+    x, weights = _mlp_operands(dim)
     expected = _reference(x, *weights)
     monkeypatch.setattr(diffusion_triton, "nvidia_launch", lambda device: launch)
 
@@ -238,20 +249,49 @@ def test_every_nvidia_launch_config_computes_the_torch_mlp(monkeypatch, launch, 
 
 
 @nvidia_only
-@pytest.mark.parametrize("launch", _nvidia_launches())
-def test_every_nvidia_launch_config_computes_the_torch_projection(monkeypatch, launch):
+@pytest.mark.parametrize("launch", _nvidia_launches(True))
+@pytest.mark.parametrize("dim", T.FUSED_MLP_DIMS)
+def test_an_fp16_accumulating_mlp_is_as_close_to_an_fp32_mlp_as_the_bf16_torch_mlp(monkeypatch, launch, dim):
     from jasna.models.ltx_vae import diffusion_triton
 
+    x, weights = _mlp_operands(dim)
+    fp32 = _reference(x.float(), *(weight.float() for weight in weights))
+    bf16 = _reference(x, *weights)
+    monkeypatch.setattr(diffusion_triton, "nvidia_launch", lambda device: launch)
+
+    diffusion_triton.residual_swiglu_(x, *weights)
+
+    assert _mean_distance(x, fp32) <= 1.02 * _mean_distance(bf16, fp32)
+
+
+def _projection_operands():
     generator = torch.Generator(device="cuda").manual_seed(0)
     x = torch.randn(1, 3, 5, 40, 256, device="cuda", generator=generator).bfloat16()
     out = torch.randn(1, 3, 5, 9, 256, device="cuda", generator=generator).bfloat16()
     weight = (torch.randn(256, 256, device="cuda", generator=generator) / 16).bfloat16()
     bias = torch.randn(256, device="cuda", generator=generator).bfloat16()
+    return x, out, weight, bias
+
+
+def _projected(x, out, weight, bias):
     expected = x.clone()
     expected[:, :, :, 20:29] += torch.nn.functional.linear(out, weight, bias)
+    return expected
+
+
+@nvidia_only
+@pytest.mark.parametrize("launch", _nvidia_launches(False) + _nvidia_launches(True))
+@pytest.mark.parametrize("out_dtype", (torch.bfloat16, torch.float16))
+def test_every_nvidia_launch_config_computes_the_torch_projection_of_the_rounded_attention_output(
+    monkeypatch, launch, out_dtype
+):
+    from jasna.models.ltx_vae import diffusion_triton
+
+    x, out, weight, bias = _projection_operands()
+    expected = _projected(x, out, weight, bias)
     monkeypatch.setattr(diffusion_triton, "nvidia_launch", lambda device: launch)
 
-    diffusion_triton.proj_residual_(x, out, weight, bias, 20)
+    diffusion_triton.proj_residual_(x, out.to(out_dtype), weight, bias, 20)
 
     torch.testing.assert_close(x, expected, atol=0, rtol=0)
 
@@ -279,7 +319,7 @@ def test_the_fused_context_inject_adds_what_the_torch_inject_adds(drop_leading_f
 
 
 @nvidia_only
-@pytest.mark.parametrize("launch", _nvidia_launches())
+@pytest.mark.parametrize("launch", _nvidia_launches(False))
 def test_every_nvidia_launch_config_computes_the_torch_context_inject(monkeypatch, launch):
     from jasna.models.ltx_vae import diffusion_triton
 
@@ -291,6 +331,46 @@ def test_every_nvidia_launch_config_computes_the_torch_context_inject(monkeypatc
                                            drop_leading_frame=True)
 
     torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+
+
+@nvidia_only
+@pytest.mark.parametrize("launch", _nvidia_launches(True))
+def test_an_fp16_accumulating_context_inject_is_as_close_to_an_fp32_one_as_the_bf16_torch_inject(
+    monkeypatch, launch
+):
+    from jasna.models.ltx_vae import diffusion_triton
+
+    x, stage4, upsample, context_proj = _context(True)
+    with torch.inference_mode():
+        fp32 = T.inject_deferred_context(x.float(), stage4.float(), copy.deepcopy(upsample).float(),
+                                         copy.deepcopy(context_proj).float(), None, drop_leading_frame=True)
+        bf16 = T.inject_deferred_context(x.clone(), stage4, upsample, context_proj, None, drop_leading_frame=True)
+        monkeypatch.setattr(diffusion_triton, "nvidia_launch", lambda device: launch)
+        actual = T.inject_deferred_context(x.clone(), stage4, upsample, context_proj, diffusion_triton.context_add_,
+                                           drop_leading_frame=True)
+
+    assert _mean_distance(actual, fp32) <= 1.02 * _mean_distance(bf16, fp32)
+
+
+def _in_fp32(part):
+    return copy.deepcopy(part).float() if isinstance(part, torch.nn.Module) or (
+        isinstance(part, torch.Tensor) and part.is_floating_point()) else part
+
+
+@nvidia_only
+@pytest.mark.parametrize("launch", _nvidia_launches(True))
+def test_an_fp16_accumulating_slab_qkv_is_as_close_to_an_fp32_slab_as_the_bf16_torch_slab(monkeypatch, launch):
+    from jasna.models.ltx_vae import diffusion_triton
+
+    slab = _slab()
+    with torch.inference_mode():
+        fp32 = T._attn_on_w_slab(*map(_in_fp32, slab))
+        bf16 = T._attn_on_w_slab(*slab)
+        monkeypatch.setattr(diffusion_triton, "nvidia_launch", lambda device: launch)
+        slab[0].kernels = T.DecoderKernels(slab_qkv=diffusion_triton.slab_qkv)
+        actual = T._attn_on_w_slab(*slab)
+
+    assert _mean_distance(actual, fp32) <= 1.02 * _mean_distance(bf16, fp32)
 
 
 def test_the_2048_wide_stage_keeps_the_torch_mlp():
