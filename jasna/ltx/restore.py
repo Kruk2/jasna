@@ -17,6 +17,7 @@ that directory to resume; previews and speed tests use temporary directories.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from collections import Counter
@@ -95,7 +96,10 @@ at 512 px, ~210 MB at 768) still leave every later decode the 14.75 GiB that dec
 window in one tile, so no tile layout changes, and each frame skips uploading its canvases."""
 ENCODE_AHEAD = 2
 """Filled windows an encode pass keeps encoding or queued while its frame loop fills the next
-ones; each keeps its host pixels (~95 MB at 512 px) until it is encoded."""
+ones; each keeps its pixels (~95 MB at 512 px) until it is encoded."""
+ENCODE_GPU_RESERVE_BYTES = 10 << 30
+"""VRAM an encode pass leaves free beside the window pixels it keeps on the GPU: the encoder's
+activations (up to ~5.7 GiB for a bf16 768 px window, an eager AMD one reserves up to ~8.3 GiB)."""
 WHOLE_VIDEO_PTS = (-(1 << 63), (1 << 63) - 1)
 SPEED_TEST_FRAMES = WINDOW_FRAMES + WINDOW_HOP
 """Two windows per track: the speed profile leaves out each canvas's cold first window."""
@@ -611,16 +615,35 @@ def _vae_pixels(window_pixels: torch.Tensor, device: torch.device) -> torch.Tens
     return window_pixels.to(device).float().div_(127.5).sub_(1.0).to(half_dtype(device)).unsqueeze(0)
 
 
-class _WindowBuffers:
-    """Host ``[3, WINDOW_FRAMES, canvas, canvas]`` uint8 pixels for the open windows, reused once
-    a window is encoded, so no window stacks its frames or faults in fresh pages."""
+def encode_gpu_window_bytes(device: torch.device) -> int:
+    """Bytes of window pixels an encode pass keeps on ``device``: what the GPU has free beyond
+    ``ENCODE_GPU_RESERVE_BYTES``, none on the CPU."""
+    if device.type != "cuda":
+        return 0
+    return max(0, device_free_bytes(device) - ENCODE_GPU_RESERVE_BYTES)
 
-    def __init__(self) -> None:
+
+class _WindowBuffers:
+    """``[3, WINDOW_FRAMES, canvas, canvas]`` uint8 pixels for the open windows, reused once a
+    window is encoded, so no window stacks its frames or faults in fresh pages. The first ones up
+    to ``gpu_bytes`` live on ``device``, where the frame loop queues its crops without waiting for
+    each to reach host memory behind the encoder's kernels; the rest live in host memory."""
+
+    def __init__(self, device: torch.device, gpu_bytes: int) -> None:
+        self._device = device
+        self._gpu_bytes_left = gpu_bytes
         self._free: dict[int, list[torch.Tensor]] = {}
 
     def take(self, canvas: int) -> torch.Tensor:
         free = self._free.setdefault(canvas, [])
-        return free.pop() if free else torch.empty((3, WINDOW_FRAMES, canvas, canvas), dtype=torch.uint8)
+        if free:
+            return free.pop()
+        shape = (3, WINDOW_FRAMES, canvas, canvas)
+        size = math.prod(shape)
+        if size <= self._gpu_bytes_left:
+            self._gpu_bytes_left -= size
+            return torch.empty(shape, dtype=torch.uint8, device=self._device)
+        return torch.empty(shape, dtype=torch.uint8)
 
     def give_back(self, canvas: int, pixels: torch.Tensor) -> None:
         self._free[canvas].append(pixels)
@@ -635,7 +658,10 @@ def _copy_canvas(window_pixels: torch.Tensor, position: int, real_frames: int, c
 class _WindowEncodes:
     """Encodes filled windows on a thread of its own (on CUDA on a stream of its own), so the frame
     loop decodes and crops the next windows while the encoder runs; once ``ENCODE_AHEAD`` windows
-    wait, ``submit`` first finishes the oldest. A window's buffer goes back once it is encoded."""
+    wait, ``submit`` first finishes the oldest. Pixels on the GPU are read once the frame loop's
+    stream has cropped them. A window's buffer goes back once its latent is in host memory; the
+    latent then goes to its store on a thread of its own, so the encoder never waits for the disk
+    (each write ends with an fsync, ~30 ms on a hard disk)."""
 
     def __init__(self, encoder, buffers: _WindowBuffers, device: torch.device, bar: _StageBar) -> None:
         self._encoder = encoder
@@ -643,21 +669,34 @@ class _WindowEncodes:
         self._device = device
         self._bar = bar
         self._thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxEncode")
+        self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxLatentWrite")
         self._stream = torch.cuda.Stream(device) if device.type == "cuda" else None
         self._queued: list[tuple[Future[None], int, torch.Tensor]] = []
+        self._writes: list[Future[None]] = []
 
     def submit(self, store: LatentStore, index: int, canvas: int, window_pixels: torch.Tensor) -> None:
         while len(self._queued) >= ENCODE_AHEAD:
             self._finish_oldest()
-        self._queued.append((self._thread.submit(self._encode, store, index, canvas, window_pixels), canvas, window_pixels))
+        cropped = None
+        if window_pixels.is_cuda:
+            cropped = torch.cuda.Event()
+            cropped.record()
+        encode = self._thread.submit(self._encode, store, index, canvas, window_pixels, cropped)
+        self._queued.append((encode, canvas, window_pixels))
 
-    def _encode(self, store: LatentStore, index: int, canvas: int, window_pixels: torch.Tensor) -> None:
+    def _encode(
+        self, store: LatentStore, index: int, canvas: int, window_pixels: torch.Tensor, cropped: torch.cuda.Event | None
+    ) -> None:
         with torch.cuda.stream(self._stream), self._bar.window(canvas), torch.inference_mode():
+            if cropped is not None:
+                self._stream.wait_event(cropped)
+                window_pixels.record_stream(self._stream)
             pixels = (
-                window_pixels.unsqueeze(0)
+                window_pixels.unsqueeze(0).cpu()
                 if isinstance(self._encoder, WorkerEncoder) else _vae_pixels(window_pixels, self._device)
             )
-            store.put(index, self._encoder(pixels))
+            latent = self._encoder(pixels).cpu()
+        self._writes.append(self._writer.submit(store.put, index, latent))
 
     def _finish_oldest(self) -> None:
         future, canvas, window_pixels = self._queued.pop(0)
@@ -668,9 +707,12 @@ class _WindowEncodes:
     def finish(self) -> None:
         while self._queued:
             self._finish_oldest()
+        for write in self._writes:
+            write.result()
 
     def close(self) -> None:
         self._thread.shutdown(cancel_futures=True)
+        self._writer.shutdown()
 
 
 class _SegmentEncoder:
@@ -722,7 +764,7 @@ def encode_span(
     projector: RegionProjector | None,
 ) -> None:
     """VAE-encode every planned window's reference crops into its segment's store."""
-    buffers = _WindowBuffers()
+    buffers = _WindowBuffers(device, encode_gpu_window_bytes(device))
     encodes = _WindowEncodes(encoder, buffers, device, bar)
     try:
         encoders = [_SegmentEncoder(p, store, buffers, encodes, projector) for p, store in zip(plans, stores)]

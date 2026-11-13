@@ -942,16 +942,19 @@ def test_restore_spans_frees_the_decoder_and_its_cached_memory_after_compose(fak
     assert decoders and released[-1] is True
 
 
-_CUDA = pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA"))
+_NEEDS_CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
 
-@pytest.mark.parametrize("device", ["cpu", _CUDA])
-def test_segment_encoder_feeds_each_window_its_crops_padded_with_the_last(device):
+@pytest.mark.parametrize(
+    ("device", "gpu_bytes"),
+    [("cpu", 0), pytest.param("cuda", 0, marks=_NEEDS_CUDA), pytest.param("cuda", 1 << 30, marks=_NEEDS_CUDA)],
+)
+def test_segment_encoder_feeds_each_window_its_crops_padded_with_the_last(device, gpu_bytes):
     crop = CropFrame(crop_box=(0, 0, 8, 8), resize_hw=(8, 8), pad=(0, 0, 0, 0))
     windows = (Window(0, 0, 1, 3, (crop,) * 3, 0), Window(1, 0, 2, 2, (crop,) * 2, 1), Window(2, 0, 4, 1, (crop,), 2))
     encoded = {}
     store = SimpleNamespace(put=lambda index, latent: encoded.__setitem__(index, latent.cpu()))
-    buffers = restore._WindowBuffers()
+    buffers = restore._WindowBuffers(torch.device(device), gpu_bytes)
     encodes = restore._WindowEncodes(lambda pixels: pixels, buffers, torch.device(device), _Bar())
     encoder = restore._SegmentEncoder([SimpleNamespace(windows=windows)], store, buffers, encodes, None)
     try:
@@ -977,7 +980,7 @@ def _two_window_encoder(encode, directory):
     windows = (Window(0, 0, 0, 2, (crop,) * 2, 0), Window(1, 0, 2, 2, (crop,) * 2, 1))
     plan = restore.TrackPlan(0, 0, ((),) * 4, (1.0,) * 4, windows, 2)
     store = restore.LatentStore(directory, "reference")
-    buffers = restore._WindowBuffers()
+    buffers = restore._WindowBuffers(torch.device("cpu"), 0)
     encodes = restore._WindowEncodes(encode, buffers, torch.device("cpu"), _Bar())
     return restore._SegmentEncoder([plan], store, buffers, encodes, None), encodes, store
 
@@ -1018,13 +1021,95 @@ def test_a_failed_window_encode_fails_the_encode_pass(tmp_path):
     assert [store.has(index) for index in (0, 1)] == [False, False]
 
 
+def _encode_two_windows(encode, store):
+    crop = CropFrame(crop_box=(0, 0, 8, 8), resize_hw=(8, 8), pad=(0, 0, 0, 0))
+    windows = (Window(0, 0, 0, 1, (crop,), 0), Window(1, 0, 1, 1, (crop,), 1))
+    buffers = restore._WindowBuffers(torch.device("cpu"), 0)
+    encodes = restore._WindowEncodes(encode, buffers, torch.device("cpu"), _Bar())
+    segment = restore._SegmentEncoder([SimpleNamespace(windows=windows)], store, buffers, encodes, None)
+    try:
+        for value in range(2):
+            segment.frame(torch.full((3, 16, 16), value, dtype=torch.uint8))
+        encodes.finish()
+    finally:
+        encodes.close()
+
+
+def test_the_encoder_runs_the_next_window_while_a_latent_is_written():
+    second_encoded = threading.Event()
+    calls = []
+    waited = []
+
+    def encode(pixels):
+        calls.append(pixels)
+        if len(calls) == 2:
+            second_encoded.set()
+        return pixels
+
+    def put(index, latent):
+        if index == 0:
+            waited.append(second_encoded.wait(timeout=5))
+
+    _encode_two_windows(encode, SimpleNamespace(put=put))
+    assert waited == [True]
+
+
+def test_a_failed_latent_write_fails_the_encode_pass():
+    def put(index, latent):
+        raise OSError("disk full")
+
+    with pytest.raises(OSError, match="disk full"):
+        _encode_two_windows(lambda pixels: pixels, SimpleNamespace(put=put))
+
+
 def test_window_buffers_reuse_an_encoded_windows_buffer():
-    buffers = restore._WindowBuffers()
+    buffers = restore._WindowBuffers(torch.device("cpu"), 0)
     first = buffers.take(8)
     assert first.shape == (3, restore.WINDOW_FRAMES, 8, 8) and not first.is_pinned()
     buffers.give_back(8, first)
     assert buffers.take(8) is first
     assert buffers.take(8) is not first
+
+
+@_NEEDS_CUDA
+def test_window_buffers_stay_on_the_gpu_up_to_their_budget():
+    window_bytes = 3 * restore.WINDOW_FRAMES * 8 * 8
+    buffers = restore._WindowBuffers(torch.device("cuda"), 2 * window_bytes + window_bytes // 2)
+    taken = [buffers.take(8) for _ in range(3)]
+    assert [buffer.device.type for buffer in taken] == ["cuda", "cuda", "cpu"]
+    buffers.give_back(8, taken[0])
+    assert buffers.take(8) is taken[0]
+
+
+@pytest.mark.parametrize(("device", "free_gib", "expected_gib"), [("cuda", 32, 22), ("cuda", 8, 0), ("cpu", 32, 0)])
+def test_encode_keeps_window_pixels_on_the_gpu_beyond_a_reserve(monkeypatch, device, free_gib, expected_gib):
+    monkeypatch.setattr(restore, "device_free_bytes", lambda device: free_gib << 30)
+    assert restore.encode_gpu_window_bytes(torch.device(device)) == expected_gib << 30
+
+
+@_NEEDS_CUDA
+def test_worker_encoder_gets_host_pixels_of_a_gpu_window(tmp_path):
+    sent = []
+
+    class Runtime:
+        def request(self, op, params, tensors):
+            sent.append(tensors[0])
+            return {}, [torch.zeros(1)]
+
+    crop = CropFrame(crop_box=(0, 0, 8, 8), resize_hw=(8, 8), pad=(0, 0, 0, 0))
+    store = restore.LatentStore(tmp_path, "reference")
+    buffers = restore._WindowBuffers(torch.device("cuda"), 1 << 30)
+    encodes = restore._WindowEncodes(inference.WorkerEncoder(Runtime()), buffers, torch.device("cuda"), _Bar())
+    plans = [SimpleNamespace(windows=(Window(0, 0, 0, 2, (crop,) * 2, 0),))]
+    segment = restore._SegmentEncoder(plans, store, buffers, encodes, None)
+    try:
+        for value in (5, 7):
+            segment.frame(torch.full((3, 16, 16), value, dtype=torch.uint8, device="cuda"))
+        encodes.finish()
+    finally:
+        encodes.close()
+    expected = torch.tensor([5] + [7] * (restore.WINDOW_FRAMES - 1), dtype=torch.uint8).view(1, 1, -1, 1, 1)
+    assert sent[0].device.type == "cpu" and torch.equal(sent[0], expected.expand(1, 3, -1, 8, 8))
 
 
 def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp_path):
