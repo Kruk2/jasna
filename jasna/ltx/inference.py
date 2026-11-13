@@ -76,6 +76,15 @@ class WorkerDecoder:
         return tensors[0]
 
 
+def worker_starts_with_job(models: frozenset[str], *, protected: bool, resuming: bool) -> bool:
+    """Whether a job starts its LTX worker (license grant, transformer file, encoder) when the job
+    starts, beside its setup and scan, instead of at the scan: only for protected
+    weights (trial and plaintext run in this process), only when LTX is the job's only model
+    (BasicVSR++ ranges run first, and the worker would hold GPU memory beside them), and not
+    when resuming (saved work may need no encoder)."""
+    return protected and models == {"ltx"} and not resuming
+
+
 class ModelRuntime:
     """One lazy worker reused across LTX passes; plaintext development and trial stay local."""
 
@@ -87,8 +96,26 @@ class ModelRuntime:
         self._client = None
         self._encoder = None
         self._transformer = None
+        self._transformer_opening = False
         self._decoder = None
         self._transformer_source: TransformerSource | None = None
+        self._ahead: Future[None] | None = None
+
+    def start_ahead(self) -> None:
+        """Start the worker on a thread of its own: it takes its license grant, opens the
+        transformer file and loads the encoder while this process does other work. Every later
+        call waits for that start, and its failure raises there."""
+        starting = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxWorkerStart")
+        self._ahead = starting.submit(self._load_ahead)
+        starting.shutdown(wait=False)
+
+    def _load_ahead(self) -> None:
+        self._prepare_transformer()
+        self._load_encoder()
+
+    def _wait_ahead(self) -> None:
+        if self._ahead is not None:
+            self._ahead.result()
 
     def request(self, op: str, params: dict, tensors: list[torch.Tensor], advance=None):
         if self._client is None:
@@ -110,10 +137,14 @@ class ModelRuntime:
         except WorkerCancelled:
             from jasna.ltx.restore import Cancelled
 
-            self.close()
+            self._stop()
             raise Cancelled() from None
 
     def load_encoder(self):
+        self._wait_ahead()
+        return self._load_encoder()
+
+    def _load_encoder(self):
         if self._encoder is None:
             if self.protected:
                 self.request("load_encoder", {}, [])
@@ -134,19 +165,27 @@ class ModelRuntime:
         """Open the transformer file and read its host-side part (in the worker when protected) while
         the GPU is still busy (scan, encode); nothing of the transformer reaches the GPU before
         ``load_transformer``. Locally it also loads the GPU libraries the later passes call first."""
+        self._wait_ahead()
+        self._prepare_transformer()
+
+    def _prepare_transformer(self) -> None:
         if self._transformer is not None:
             return
         if self.protected:
-            self.request("prepare_transformer", {}, [])
+            if not self._transformer_opening:
+                self.request("prepare_transformer", {}, [])
+                self._transformer_opening = True
         elif self._transformer_source is None:
             load_gpu_libraries_ahead(self.device, torch.bfloat16)
             self._transformer_source = TransformerSource(self.files.transformer)
 
     def load_transformer(self):
+        self._wait_ahead()
         if self._transformer is None:
             if self.protected:
                 info, _ = self.request("load_transformer", {"free_bytes": device_free_bytes(self.device)}, [])
                 self._transformer = WorkerTransformer(self, info)
+                self._transformer_opening = False
             else:
                 source, self._transformer_source = self._transformer_source, None
                 self._transformer = LtxTransformer(source or TransformerSource(self.files.transformer), self.device,
@@ -164,6 +203,7 @@ class ModelRuntime:
                 torch.cuda.empty_cache()
 
     def load_decoder(self):
+        self._wait_ahead()
         if self._decoder is None:
             if self.protected:
                 self.request("load_decoder", {}, [])
@@ -181,8 +221,17 @@ class ModelRuntime:
                 torch.cuda.empty_cache()
 
     def close(self) -> None:
+        """Waits for a start begun by ``start_ahead`` first; its failure is only logged, since
+        nothing needs that worker any more."""
+        ahead, self._ahead = self._ahead, None
+        if ahead is not None and (error := ahead.exception()) is not None:
+            logger.debug("LTX worker started ahead of a job that ended first failed: %r", error)
+        self._stop()
+
+    def _stop(self) -> None:
         if self.protected:
             self._encoder = self._transformer = self._decoder = None
+            self._transformer_opening = False
             if self._client is not None:
                 self._client.close()
                 self._client = None

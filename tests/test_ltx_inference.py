@@ -84,6 +84,48 @@ def test_protected_runtime_never_loads_models_in_parent(monkeypatch):
     assert requests[7][1] == {"seed": 43, "free_bytes": 123}
 
 
+@pytest.mark.parametrize("models,protected,resuming,expected", [
+    (frozenset({"ltx"}), True, False, True),
+    (frozenset({"ltx"}), False, False, False),
+    (frozenset({"ltx"}), True, True, False),
+    (frozenset({"ltx", "basicvsrpp"}), True, False, False),
+    (frozenset({"basicvsrpp"}), True, False, False),
+])
+def test_only_a_fresh_protected_ltx_only_job_starts_its_worker_with_the_job(models, protected, resuming, expected):
+    assert inference.worker_starts_with_job(models, protected=protected, resuming=resuming) is expected
+
+
+def test_a_runtime_started_ahead_loads_the_encoder_before_the_encode_pass_asks_for_it(monkeypatch):
+    runtime = inference.ModelRuntime(_files(".enc"), torch.device("cpu"), threading.Event())
+    requests, encoder_loaded = [], threading.Event()
+
+    def request(op, params, tensors, advance=None):
+        requests.append((op, threading.current_thread() is threading.main_thread()))
+        if op == "load_encoder":
+            encoder_loaded.set()
+        return {}, []
+
+    monkeypatch.setattr(runtime, "request", request)
+    runtime.start_ahead()
+    assert encoder_loaded.wait(5)
+    runtime.prepare_transformer()
+    assert isinstance(runtime.load_encoder(), inference.WorkerEncoder)
+    assert requests == [("prepare_transformer", False), ("load_encoder", False)]
+
+
+def test_a_failed_start_ahead_fails_the_pass_that_waits_for_it_and_closing_only_logs_it(monkeypatch):
+    runtime = inference.ModelRuntime(_files(".enc"), torch.device("cpu"), threading.Event())
+
+    def request(op, params, tensors, advance=None):
+        raise RuntimeError("LTX worker could not start")
+
+    monkeypatch.setattr(runtime, "request", request)
+    runtime.start_ahead()
+    with pytest.raises(RuntimeError, match="could not start"):
+        runtime.load_encoder()
+    runtime.close()
+
+
 def test_runtime_construction_and_unused_close_do_not_start_worker(monkeypatch):
     runtime = inference.ModelRuntime(_files(".enc"), torch.device("cpu"), threading.Event())
     monkeypatch.setattr(runtime, "request", lambda *_args: pytest.fail("unused worker started"))

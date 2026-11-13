@@ -604,3 +604,13 @@ def test_changed_plan_keeps_latents_and_redoes_fragments(job):
     changed.prepare()
     assert (checkpoint.directory / "ltx" / "000000.0-1-0.reference.pt").exists()
     assert not fragment.exists()
+
+
+def test_saved_ltx_work_finds_saved_track_plans_of_the_output(tmp_path):
+    config = session_config()
+    output = tmp_path / "out.mp4"
+    assert not job_resume.saved_ltx_work(config, output)
+    ltx = job_resume.resume_directory(config, output) / "render" / "ltx"
+    ltx.mkdir(parents=True)
+    (ltx / "0-1.plans.npz").touch()
+    assert job_resume.saved_ltx_work(config, output)

@@ -11,6 +11,7 @@ import torch
 from factories import make_pipeline, video_metadata
 from jasna.accelerator import AcceleratorVendor
 from jasna.job_resume import ResumeJob
+from jasna.ltx.model_files import LtxModelFiles
 from jasna.media.splice import KeyframeIndex, SmartRenderCompatibilityError, SplicePlan, SpliceSpan
 from jasna.pipeline import Pipeline
 from jasna.segments import SegmentRange, SegmentRestoration
@@ -23,13 +24,17 @@ FOUR_SPANS = (
     SpliceSpan("copy", 120, 180),
     SpliceSpan("render", 180, 240, ((195, 210),)),
 )
+TRIAL_FILES = LtxModelFiles.placeholder("distilled2", fast=False)
 ONE_RENDER = (SpliceSpan("copy", 0, 60), SpliceSpan("render", 60, 120, ((75, 90),)), SpliceSpan("copy", 120, 240))
 
 
 @pytest.fixture(autouse=True)
 def _cpu_gpu_memory():
     """The pipelines here run on the CPU, which has no GPU memory to sample."""
-    with patch("jasna.pipeline.device_used_bytes", return_value=0):
+    with (
+        patch("jasna.pipeline.device_used_bytes", return_value=0),
+        patch("jasna.pipeline.device_free_bytes", return_value=0),
+    ):
         yield
 
 
@@ -304,7 +309,7 @@ def test_reencoded_span_writes_every_decoded_frame_and_closes_its_writer(tmp_pat
 )
 def test_run_routes_by_the_job_model_and_segments(tmp_path, model, segments, expected) -> None:
     pipeline = make_pipeline(
-        restoration_model_name=model, segments=segments,
+        restoration_model_name=model, segments=segments, ltx_files=TRIAL_FILES,
         input_video=tmp_path / "input.mp4", output_video=tmp_path / "output.mp4",
     )
     pipeline.input_video.touch()
@@ -375,7 +380,9 @@ def test_ltx_smart_resume_keeps_completed_fragments_and_retries_partial_span(tmp
 def test_pipeline_keeps_ltx_checkpoint_until_success(tmp_path, cancelled):
     source = tmp_path / "in.mp4"
     source.touch()
-    pipeline = make_pipeline(input_video=source, output_video=tmp_path / "out.mp4", restoration_model_name="ltx")
+    pipeline = make_pipeline(
+        input_video=source, output_video=tmp_path / "out.mp4", restoration_model_name="ltx", ltx_files=TRIAL_FILES
+    )
     if cancelled:
         pipeline.cancel()
     with (
