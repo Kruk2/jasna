@@ -109,6 +109,22 @@ The fused kernels per call, before and after (launch configs retuned for fp16 su
 - A single MLP kernel that keeps the hidden activation on the chip reached 211 TFLOPS but lost to the two retuned
   kernels (14.8 against 13.7 ms per stage-5 block).
 
+## Other GPUs
+
+`scripts/benchmark_ltx_decoder_kernels.py --verify 7` on rented Linux instances (nothing else on the GPU, decode budget
+16 GiB, 11 on the 5060 Ti): each kernel's launch swept with fp32 and with fp16 sums on a real decode's calls, then the
+card's entry before this change, and each swept entry, decoded 3 real 512 windows in 7 alternating rounds against an
+fp32 decoder with the same noise. The RTX 4090 and RTX 3090 entries take the swept fp16 ones.
+
+| GPU | before (s/window) | fp16 sums, swept | vs fp32 before | vs fp32 after |
+|---|---|---|---|---|
+| RTX 4090 | 0.655 | 0.559 (-15 %) | 63.37 dB, 0.0943 | 63.37 dB, 0.0944 |
+| RTX 3090 | 1.565 | 1.358 (-13 %) | 63.37 dB, 0.0943 | 63.37 dB, 0.0943 |
+| RTX 5060 Ti | | 1.708 | | 63.38 dB, 0.0941 |
+
+The 5060 Ti runs the RTX 5090's entry (one entry per CUDA capability): 1.783 s/window, 4 % slower than its own sweep;
+its best launches with fp32 sums take 2.152 s/window.
+
 ## Setup
 
 - RTX 5090 (32 GB), Windows 11, Core i9-13900K. Python 3.13, torch 2.12.1+cu130, Triton 3.7.1. Source tree.
@@ -118,5 +134,5 @@ The fused kernels per call, before and after (launch configs retuned for fp16 su
 
 ## Limits
 
-One GPU. GPUs without fp16 sums in their entry decode bit-identically to before: the 5090 with its previous entry gave
+GPUs without fp16 sums in their entry decode bit-identically to before: the 5090 with its previous entry gave
 the same pixels as main on three real 512 windows and a 768 window. One clip; 768 timed on random latents only.
