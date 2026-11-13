@@ -51,3 +51,35 @@ def test_kitchen_resnet_block_matches_miopen():
 
     assert kitchen.is_contiguous(memory_format=torch.channels_last_3d)
     torch.testing.assert_close(kitchen.float(), reference, atol=2e-2, rtol=2e-2)
+
+
+SHIPPED_ENCODER_BLOCKS = [
+    ["res_x", {"num_layers": 2}], ["compress_space_res", {"multiplier": 2}], ["res_x", {"num_layers": 2}],
+    ["compress_time_res", {"multiplier": 2}], ["res_x", {"num_layers": 2}], ["compress_all_res", {"multiplier": 2}],
+    ["res_x", {"num_layers": 2}], ["compress_all_res", {"multiplier": 1}], ["res_x", {"num_layers": 2}],
+]
+
+
+@pytest.mark.parametrize("size", [(17, 64, 96), (9, 96, 64)])
+def test_the_prebuilt_encoder_is_as_close_to_fp32_as_the_eager_one(size):
+    import copy
+
+    from jasna.models.ltx_vae import encoder_hip
+
+    torch.manual_seed(0)
+    exact = video_encoder.VideoEncoder(3, 128, SHIPPED_ENCODER_BLOCKS, 4).cuda().eval()
+    encoder = copy.deepcopy(exact).bfloat16()
+    encoder.to_fp16_head(video_encoder.AMD_KITCHEN_DOWN_BLOCKS)
+    encoder.run_fp16_convs_on_kitchen()
+    encoder.to(memory_format=torch.channels_last_3d)
+    pixels = torch.rand(1, 3, *size, device="cuda") * 2 - 1
+    with torch.inference_mode():
+        reference = video_encoder.encode_cropped(exact, pixels)
+        eager = video_encoder.encode_cropped(encoder, pixels.half()).float()
+        prebuilt = encoder_hip.encode_prebuilt(encoder, pixels.half()).float()
+
+    def distance(latent):
+        return ((latent - reference).norm() / reference.norm()).item()
+
+    assert prebuilt.shape == reference.shape
+    assert distance(prebuilt) < 1.1 * distance(eager)

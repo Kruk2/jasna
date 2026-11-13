@@ -174,7 +174,7 @@ def test_every_runtime_triton_kernel_module_ships_its_source():
     import jasna.models
     from jasna._frozen import LTX_TRACED_MODULES
 
-    amd_build_only = {"jasna.models.ltx_vae.layout_triton"}
+    amd_build_only = {"jasna.models.ltx_vae.encoder_triton"}
     kernel_modules = set()
     for package in (jasna.ltx, jasna.models):
         for info in pkgutil.walk_packages(package.__path__, package.__name__ + "."):
