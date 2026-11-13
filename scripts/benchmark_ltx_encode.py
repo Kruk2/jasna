@@ -16,10 +16,10 @@ A variant is ``+``-joined options, each on a freshly loaded encoder:
     fp16headN fp16 ``conv_in`` and first N down blocks (``to_fp16_head``), fp16 input
     kitchenN  fp16headN with those convs on comfy-kitchen's fp16-accumulate ``fp16_conv3d``
 
-``eager+cl3d+compile`` is the bf16 cuDNN encoder; ``shipped`` is that or a ``kitchenN`` one, per
-``video_encoder.NVIDIA_KITCHEN_DOWN_BLOCKS``. ``--peaks`` first prints the GPU's bf16 and fp16 GEMM
+``eager+cl3d+compile`` is the bf16 cuDNN encoder; ``shipped`` is that or the GPU's fp16 head (kitchen and
+Triton convs) per ``video_encoder.ENCODER_HEADS``. ``--peaks`` first prints the GPU's bf16 and fp16 GEMM
 rates (fp16 with fp32 and with fp16 accumulation), ``--profile`` a torch.profiler kernel table for
-the first variant. To measure a GPU for ``NVIDIA_KITCHEN_DOWN_BLOCKS``:
+the first variant. To measure a GPU for ``ENCODER_HEADS`` (then ``benchmark_ltx_encoder_convs.py``):
     --peaks --variants fp32,eager+cl3d+compile,kitchen1+cl3d+compile,kitchen3+cl3d+compile,kitchen6+cl3d+compile
 
 Usage:
@@ -96,12 +96,12 @@ def variant_encoder(variant: str, vae: Path, device: torch.device) -> tuple[call
             encoder.to(torch.float32 if "fp32" in options else torch.bfloat16)
         if fp16_head is not None or kitchen_head is not None:
             encoder.to_fp16_head(fp16_head if fp16_head is not None else kitchen_head)
+        for conv in encoder.modules():
+            if isinstance(conv, CausalConv3d):
+                conv.kitchen = False
+                conv.triton_launch = None
         if kitchen_head is not None:
             encoder.run_fp16_convs_on_kitchen()
-        else:
-            for conv in encoder.modules():
-                if isinstance(conv, CausalConv3d):
-                    conv.kitchen = False
         encoder.to(memory_format=memory_format)
         fn = functools.partial(encode_cropped, encoder)
         if "compile" in options:

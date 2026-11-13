@@ -2,12 +2,13 @@
 
 import logging
 import math
-from typing import Any
+from typing import Any, NamedTuple
 
 import torch
 import torch.nn.functional as F
 from torch import nn
 
+from jasna.ltx.kernel_policy import is_amd
 from jasna.models.ltx_vae.ops import PerChannelStatistics, PixelNorm, patchify
 from jasna.models.ltx_vae.tiling import SpatioTemporalScaleFactors
 from jasna.tensor_utils import compile_static
@@ -22,28 +23,83 @@ AMD_KITCHEN_DOWN_BLOCKS = 1
 """On AMD comfy-kitchen's fp16 conv3d beats MIOpen only on the 128-channel full-resolution layers
 (``conv_in`` and ``down_blocks[0]``), and needs no workspace there, where MIOpen's first-run solver
 search asks for ~13 GiB at 512 px. MIOpen's bf16 conv3d is faster on every later shape."""
-NVIDIA_KITCHEN_DOWN_BLOCKS = {
-    (12, 0): 6,  # RTX 50
-    (8, 9): 6,  # RTX 40
-    (8, 6): 6,  # RTX 30
+
+
+class ConvLaunch(NamedTuple):
+    """A ``conv_triton`` program's tile: output voxels, output channels, input channels per step,
+    warps, pipeline stages, how many voxel tiles share a sweep over the output channels, and whether
+    each step's fp16 sum is added up in fp32 (``promoted``)."""
+
+    block_voxels: int
+    block_out: int
+    block_in: int
+    warps: int
+    stages: int
+    group: int
+    promoted: bool = False
+
+    def arguments(self) -> list[int]:
+        """The launch as ``jasna::causal_conv3d`` takes it."""
+        return [int(value) for value in self]
+
+
+class EncoderHead(NamedTuple):
+    down_blocks: int
+    """Down blocks that run in fp16 with ``conv_in``."""
+    triton_convs: dict[tuple[int, int], ConvLaunch]
+    """(in, out) channels of the head's convs that run on ``conv_triton``, with their launch;
+    the other fp16 convs run on kitchen's conv3d."""
+
+
+AMD_ENCODER_HEAD = EncoderHead(AMD_KITCHEN_DOWN_BLOCKS, {})
+"""The head of every AMD GPU without an ``ENCODER_HEADS`` entry."""
+ENCODER_HEADS = {
+    (12, 0): EncoderHead(7, {  # RTX 50, tuned on an RTX 5090
+        (128, 128): ConvLaunch(256, 128, 64, 8, 3, 1),
+        (128, 64): ConvLaunch(256, 64, 64, 8, 3, 8),
+        (256, 256): ConvLaunch(256, 128, 64, 8, 3, 8),
+        (512, 512): ConvLaunch(256, 128, 64, 8, 3, 8),
+        (512, 128): ConvLaunch(256, 128, 64, 8, 3, 1),
+        (1024, 1024): ConvLaunch(256, 128, 64, 8, 3, 8),
+    }),
+    (8, 9): EncoderHead(6, {  # RTX 40, tuned on an RTX 4090
+        (128, 128): ConvLaunch(256, 128, 64, 8, 3, 8),
+        (128, 64): ConvLaunch(256, 64, 64, 8, 3, 1),
+        (256, 256): ConvLaunch(256, 128, 64, 8, 3, 8),
+        (512, 128): ConvLaunch(256, 128, 64, 8, 3, 8),
+    }),
+    (8, 6): EncoderHead(6, {  # RTX 30, tuned on an RTX 3090
+        (128, 128): ConvLaunch(256, 128, 64, 8, 3, 8),
+        (128, 64): ConvLaunch(256, 64, 32, 4, 3, 8),
+        (512, 128): ConvLaunch(256, 128, 64, 8, 3, 8),
+    }),
 }
-"""Per CUDA capability, how many down blocks (with ``conv_in``) run in fp16 on kitchen's conv3d.
-It accumulates in fp16, which the measured RTX 5090, 4090 and 3090 run 1.5-1.65x faster than bf16
-(fp32 accumulation), while cuDNN's bf16 convs already sit at the bf16 GEMM rate: a 512 window
-takes 26-30 % less time (RTX 5090: 0.36 -> 0.27 s) with a third less activation memory, and the
-latents stay within a few percent of bf16's distance from an fp32 encoder's.
-``down_blocks[6]`` (1024 channels) is the first shape kitchen declines; later
-blocks leave fp16's range (``FP16_DOWN_BLOCKS``). GPUs not listed keep the bf16 cuDNN head
-until measured (``scripts/benchmark_ltx_encode.py``)."""
+"""Per GPU architecture (CUDA capability, gfx name on AMD), the encoder's fp16 head. On NVIDIA its
+convs accumulate in fp16, which the measured RTX 5090, 4090 and 3090 run 1.5-1.65x faster than bf16
+(fp32 accumulation), while cuDNN's bf16 convs already sit at the bf16 GEMM rate: a 512 window takes
+26-30 % less time (RTX 5090: 0.36 -> 0.27 s) with a third less activation memory, and the latents
+stay within a few percent of bf16's distance from an fp32 encoder's. Kitchen declines
+``down_blocks[6]`` (1024 channels), which ``conv_triton`` takes, and ``conv_triton`` beats kitchen
+plus its padded copy on most other head convs (``triton_convs``, by ``benchmark_ltx_encoder_convs.py``).
+Per 512 window against the kitchen head alone: RTX 5090 -5 %, 5060 -5 %; 4090 -5 %, 4070 -4 %,
+4060 -4 %; 3090 -5 %, 3060 -5 %, each within 1 % of the kitchen head's distance from an fp32
+encoder at 512 and 768 and no further on average. RTX 40 and 30 keep ``down_blocks[6]`` in bf16:
+their fp16 sums over its 27 x 1024 products put the latents ~5 % further from fp32 (RTX 50: <1 %).
+On the RTX 5060 the (512, 512) convs are ~3 % faster on kitchen; on the 5090 they cost nothing on
+Triton and keep the latents ~1 % closer to fp32, so both keep them. Later blocks leave fp16's range
+(``FP16_DOWN_BLOCKS``). NVIDIA GPUs not listed keep the bf16 cuDNN encoder until measured
+(``scripts/benchmark_ltx_encode.py``, ``scripts/benchmark_ltx_encoder_convs.py``); an AMD entry with
+Triton convs needs ``conv_triton`` built ahead of time for AMD releases, as the decoder's kernels are."""
 
 
-def nvidia_kitchen_down_blocks(architecture: tuple[int, int]) -> int:
-    """Down blocks of the fp16 kitchen head on an NVIDIA GPU of ``architecture``; 0 keeps bf16."""
-    return NVIDIA_KITCHEN_DOWN_BLOCKS.get(architecture, 0)
+def encoder_head(architecture: tuple[int, int] | str) -> EncoderHead | None:
+    """The fp16 head of a GPU of ``architecture``; None keeps the bf16 encoder."""
+    return ENCODER_HEADS.get(architecture, AMD_ENCODER_HEAD if is_amd(architecture) else None)
 
 
 class CausalConv3d(nn.Module):
-    """3x3x3 conv; time is padded causally by repeating the first frame."""
+    """3x3x3 conv; time is padded causally by repeating the first frame. In fp16 it can run on
+    comfy-kitchen's conv3d (``kitchen``) or on ``conv_triton`` (``triton_launch``, which wins)."""
 
     time_kernel_size = 3
 
@@ -51,6 +107,7 @@ class CausalConv3d(nn.Module):
         super().__init__()
         self.conv = nn.Conv3d(in_channels, out_channels, 3, padding=(0, 1, 1), padding_mode="zeros")
         self.kitchen = False
+        self.triton_launch: ConvLaunch | None = None
 
     def _causal_frames(self, x: torch.Tensor) -> torch.Tensor:
         # Views of x keep its memory format: a contiguous ``repeat`` beside a channels-last x makes
@@ -58,23 +115,28 @@ class CausalConv3d(nn.Module):
         first_frame = x[:, :, :1, :, :]
         return torch.concatenate((first_frame,) * (self.time_kernel_size - 1) + (x,), dim=2)
 
-    def _runs_on_kitchen(self) -> bool:
-        return self.kitchen and self.conv.weight.dtype == torch.float16
-
-    def _kitchen_forward(self, x: torch.Tensor, residual: torch.Tensor | None) -> torch.Tensor:
-        padded = F.pad(self._causal_frames(x), (1, 1, 1, 1)).contiguous(memory_format=torch.channels_last_3d)
-        return torch.ops.comfy_kitchen.fp16_conv3d(padded, self.conv.weight, self.conv.bias, residual, [1, 1, 1])
+    def _fp16_kernel_forward(self, x: torch.Tensor, residual: torch.Tensor | None) -> torch.Tensor | None:
+        """The conv (plus ``residual``) on its fp16 kernel, None for a layer on the torch conv."""
+        if self.conv.weight.dtype != torch.float16:
+            return None
+        if self.triton_launch is not None:
+            if residual is not None:
+                residual = residual.contiguous(memory_format=torch.channels_last_3d)
+            return torch.ops.jasna.causal_conv3d(x.contiguous(memory_format=torch.channels_last_3d), self.conv.weight,
+                                                 self.conv.bias, residual, self.triton_launch.arguments())
+        if self.kitchen:
+            padded = F.pad(self._causal_frames(x), (1, 1, 1, 1)).contiguous(memory_format=torch.channels_last_3d)
+            return torch.ops.comfy_kitchen.fp16_conv3d(padded, self.conv.weight, self.conv.bias, residual, [1, 1, 1])
+        return None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self._runs_on_kitchen():
-            return self._kitchen_forward(x, None)
-        return self.conv(self._causal_frames(x))
+        out = self._fp16_kernel_forward(x, None)
+        return self.conv(self._causal_frames(x)) if out is None else out
 
     def add_to(self, residual: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-        """``residual + self(x)``; kitchen adds the residual in the conv's epilogue."""
-        if self._runs_on_kitchen():
-            return self._kitchen_forward(x, residual)
-        return residual + self(x)
+        """``residual + self(x)``; the fp16 kernels add the residual in the conv's epilogue."""
+        out = self._fp16_kernel_forward(x, residual)
+        return residual + self(x) if out is None else out
 
 
 class ResnetBlock3D(nn.Module):
@@ -201,6 +263,15 @@ class VideoEncoder(nn.Module):
         for module in self.modules():
             if isinstance(module, CausalConv3d):
                 module.kitchen = True
+
+    def run_fp16_convs_on_triton(self, launches: dict[tuple[int, int], ConvLaunch]) -> None:
+        """Run the fp16 layers' convs whose (in, out) channels ``launches`` lists through
+        ``conv_triton`` (an opaque op too) with that launch."""
+        from jasna.models.ltx_vae import conv_triton  # noqa: F401  (registers jasna::causal_conv3d)
+
+        for module in self.modules():
+            if isinstance(module, CausalConv3d) and module.conv.weight.dtype == torch.float16:
+                module.triton_launch = launches.get((module.conv.in_channels, module.conv.out_channels))
 
     def release_cache_between_stages(self) -> None:
         """Empty PyTorch's allocator cache before each stage of an eager encode. Every eager layer

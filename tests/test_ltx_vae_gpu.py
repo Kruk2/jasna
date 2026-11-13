@@ -6,7 +6,7 @@ import importlib.util
 import pytest
 import torch
 
-from jasna.models.ltx_vae import na_triton, video_encoder
+from jasna.models.ltx_vae import conv_triton, na_triton, video_encoder
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.eager_na import na3d
 from jasna.models.ltx_vae.loader import encoder_kwargs
@@ -136,6 +136,55 @@ def test_compiled_fp16_encoder_with_float32_tail_survives_large_activations(monk
                                            dtype=torch.float16))
         compiled = encoder(pixels.half())
 
+    assert compiled.dtype == torch.bfloat16
+    torch.testing.assert_close(compiled.float(), reference.float(), atol=5e-2, rtol=5e-2)
+
+
+@pytest.mark.parametrize(("batch", "frames", "residual"), [(1, 5, False), (1, 5, True), (2, 3, True)])
+@pytest.mark.parametrize(("channels", "out_channels", "launch"), [
+    (64, 64, video_encoder.ConvLaunch(64, 64, 32, 4, 2, 1)),
+    (128, 32, video_encoder.ConvLaunch(128, 32, 64, 4, 3, 8)),
+    (64, 128, video_encoder.ConvLaunch(128, 128, 32, 4, 4, 8)),
+    (128, 64, video_encoder.ConvLaunch(64, 64, 32, 4, 3, 8, promoted=True)),
+])
+def test_triton_causal_conv3d_matches_the_torch_conv(batch, frames, residual, channels, out_channels, launch):
+    torch.manual_seed(0)
+    conv = video_encoder.CausalConv3d(channels, out_channels).cuda().to(memory_format=torch.channels_last_3d)
+    x = torch.randn(batch, channels, frames, 9, 11, device="cuda").half().contiguous(memory_format=torch.channels_last_3d)
+    skip = torch.randn(batch, out_channels, frames, 9, 11, device="cuda").half().contiguous(
+        memory_format=torch.channels_last_3d) if residual else None
+    with torch.inference_mode():
+        reference = conv(x.float()) + (skip.float() if residual else 0)
+        conv.half()
+        out = conv_triton.causal_conv3d(x, conv.conv.weight, conv.conv.bias, skip, launch.arguments())
+
+    assert out.dtype == torch.float16 and out.is_contiguous(memory_format=torch.channels_last_3d)
+    torch.testing.assert_close(out.float(), reference, atol=2e-2, rtol=2e-2)
+
+
+def test_compiled_encoder_with_a_triton_fp16_head_matches_float32(monkeypatch):
+    # every head conv but conv_in has 64 channels in and out, so conv_triton takes them; conv_in stays on kitchen
+    pytest.importorskip("comfy_kitchen")
+    config = {"encoder": {"in_channels": 3, "out_channels": 64, "patch_size": 4, "dims": 3, "norm_layer": "pixel_norm",
+                          "latent_log_var": "constant", "spatial_padding_mode": "zeros",
+                          "blocks": [["res_x", {"num_layers": 2}], ["res_x", {"num_layers": 1}],
+                                     ["compress_all_res", {"multiplier": 2}], ["res_x", {"num_layers": 1}]]}}
+    torch.manual_seed(0)
+    encoder = video_encoder.VideoEncoder(**encoder_kwargs(config)).cuda().eval()
+    pixels = torch.rand(1, 3, 17, 64, 96, device="cuda") * 2 - 1
+    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
+    with torch.inference_mode():
+        reference = encoder(pixels)
+        encoder.bfloat16().to_fp16_head(2).run_fp16_convs_on_kitchen()
+        encoder.run_fp16_convs_on_triton({(64, 64): video_encoder.ConvLaunch(64, 64, 32, 4, 2, 1)})
+        encoder.to(memory_format=torch.channels_last_3d)
+        monkeypatch.setattr(video_encoder, "_encode_cropped",
+                            compile_static(video_encoder.encode_cropped, mode="default", device=torch.device("cuda"),
+                                           dtype=torch.bfloat16))
+        compiled = encoder(pixels.bfloat16())
+
+    assert [conv.triton_launch is not None for conv in encoder.modules()
+            if isinstance(conv, video_encoder.CausalConv3d)] == [False] + [True] * 6 + [False] * 4
     assert compiled.dtype == torch.bfloat16
     torch.testing.assert_close(compiled.float(), reference.float(), atol=5e-2, rtol=5e-2)
 

@@ -22,7 +22,7 @@ from jasna.models.ltx_vae.video_encoder import (
     AMD_KITCHEN_DOWN_BLOCKS,
     VideoEncoder,
     compile_video_encoder,
-    nvidia_kitchen_down_blocks,
+    encoder_head,
 )
 from jasna.tensor_utils import half_dtype
 
@@ -199,8 +199,8 @@ def _with_res_layers(blocks: list, state: Iterable[str]) -> list:
 
 def load_video_encoder(vae_path: Path, device: torch.device, encoder_path: Path | None = None) -> VideoEncoder:
     """Eval ``VideoEncoder`` in ``half_dtype(device)`` (before SM 8.0 fp16 with an fp32 tail; on
-    AMD and the NVIDIA GPUs in ``NVIDIA_KITCHEN_DOWN_BLOCKS`` a head in fp16 on comfy-kitchen's
-    conv3d); call it on
+    AMD and the NVIDIA GPUs in ``ENCODER_HEADS`` a head in fp16 on comfy-kitchen's and
+    ``conv_triton``'s conv3d); call it on
     ``(B, 3, 1+8k, H, W)`` pixels in [-1, 1] for bf16 latents. ``encoder_path`` holds a distilled
     encoder's tensors in place of the VAE's own; its residual blocks set each stage's depth."""
     checkpoint, encoder = {}, None
@@ -220,12 +220,13 @@ def load_video_encoder(vae_path: Path, device: torch.device, encoder_path: Path 
         bf16_contiguous_weights = list(encoder.state_dict().values())
         if dtype == torch.float16:
             encoder.to_fp16_with_float32_tail()
-        elif backend.is_amd:
-            encoder.to_fp16_head(AMD_KITCHEN_DOWN_BLOCKS)
+        elif (backend.is_amd or backend is KernelBackend.NVIDIA) and (
+            head := encoder_head(gpu_architecture(device))
+        ) is not None:
+            encoder.to_fp16_head(head.down_blocks)
             encoder.run_fp16_convs_on_kitchen()
-        elif backend is KernelBackend.NVIDIA and (head := nvidia_kitchen_down_blocks(gpu_architecture(device))):
-            encoder.to_fp16_head(head)
-            encoder.run_fp16_convs_on_kitchen()
+            if head.triton_convs:
+                encoder.run_fp16_convs_on_triton(head.triton_convs)
         # Without Triton the encoder runs eagerly: there MIOpen and ROCm's copies run the tail faster
         # in NCDHW (1.39 -> 1.28 s per 512 window on an R9700); kitchen's head needs channels-last.
         eager_amd = backend is KernelBackend.AMD_PREBUILT
