@@ -1,7 +1,7 @@
 import pytest
 
 from jasna.gui import tray
-from jasna.gui.components import TrayOptionsDialog
+from jasna.gui.components import OptionsDialog
 from jasna.user_settings import read_settings, update_settings
 from jasna.gui.tray import TraySupport
 
@@ -31,12 +31,12 @@ def fake_tray(monkeypatch):
 
 
 def test_options_dialog_saves_switches_and_shows_them_again(tk_root, user_config_dir):
-    dialog = TrayOptionsDialog(tk_root, TraySupport(available=True, has_menu=True))
+    dialog = OptionsDialog(tk_root, TraySupport(available=True, has_menu=True), lambda enabled: None)
     dialog.switches["minimize_to_tray"]._toggle()
     dialog.destroy()
 
     assert read_settings() == {"minimize_to_tray": True}
-    reopened = TrayOptionsDialog(tk_root, TraySupport(available=True, has_menu=True))
+    reopened = OptionsDialog(tk_root, TraySupport(available=True, has_menu=True), lambda enabled: None)
     assert reopened.switches["minimize_to_tray"].get() == 1
     assert reopened.switches["close_to_tray"].get() == 0
     reopened.destroy()
@@ -51,7 +51,7 @@ def test_options_dialog_saves_switches_and_shows_them_again(tk_root, user_config
     ],
 )
 def test_options_dialog_disables_what_the_desktop_cannot_do(tk_root, user_config_dir, support, minimize_state, close_state):
-    dialog = TrayOptionsDialog(tk_root, support)
+    dialog = OptionsDialog(tk_root, support, lambda enabled: None)
 
     assert dialog.switches["minimize_to_tray"].cget("state") == minimize_state
     assert dialog.switches["close_to_tray"].cget("state") == close_state

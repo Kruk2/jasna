@@ -1,9 +1,11 @@
-"""Activation and config access, kept off the Tk thread."""
+"""Activation, config access and the update check, kept off the Tk thread."""
 
 import threading
+import time
 from collections.abc import Callable
 from typing import TypeVar
 
+from jasna import update_check
 from jasna.license_api import protection_available, require_protection, typed_license_code
 
 Result = TypeVar("Result")
@@ -62,6 +64,11 @@ def read_unofficial_notice_due() -> bool:
 
 def start_unofficial_notice_check(on_done) -> threading.Thread:
     return _start(read_unofficial_notice_due, on_done)
+
+
+def start_update_check(on_done) -> threading.Thread:
+    """Calls ``on_done(version, error)`` with the newer release to show, or None."""
+    return _start(lambda: update_check.newer_release(time.time()), on_done)
 
 
 def start_device_count(on_done) -> threading.Thread:

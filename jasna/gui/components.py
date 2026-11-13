@@ -16,6 +16,7 @@ from jasna.gui.queues import MainThreadCalls
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import get_locale, t
 from jasna.license_api import protection_available
+from jasna import update_check
 
 logger = logging.getLogger(__name__)
 
@@ -862,16 +863,18 @@ class ShutdownCountdownDialog(ctk.CTkToplevel):
 TRAY_SETTING_KEYS = ("minimize_to_tray", "close_to_tray")
 
 
-class TrayOptionsDialog(ctk.CTkToplevel):
-    """Minimize/close-to-tray switches, saved in settings.json as soon as they change."""
+class OptionsDialog(ctk.CTkToplevel):
+    """Minimize/close-to-tray and update-check switches, saved in settings.json as soon as they change.
+    ``on_update_check_changed(enabled)`` runs after the update-check switch is saved."""
 
-    def __init__(self, master, support):
+    def __init__(self, master, support, on_update_check_changed):
         super().__init__(master)
         self.title(t("dialog_options_title"))
         self.configure(fg_color=Colors.BG_MAIN)
         self.resizable(False, False)
         self.transient(master)
         grab_modal(self)
+        self._on_update_check_changed = on_update_check_changed
 
         content = ctk.CTkFrame(self, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=20, pady=20)
@@ -880,37 +883,17 @@ class TrayOptionsDialog(ctk.CTkToplevel):
         self.switches = {}
         for key in TRAY_SETTING_KEYS:
             usable = support.available and (key == "minimize_to_tray" or support.has_menu)
-            row = ctk.CTkFrame(content, fg_color=Colors.BG_CARD, corner_radius=Sizing.BORDER_RADIUS)
-            row.pack(fill="x", pady=(0, 8))
-            switch = CompactSwitch(row, lambda key=key: self._save(key), Colors.BG_CARD)
-            switch.pack(side="right", padx=12)
-            if saved.get(key, False):
-                switch.select()
-            if not usable:
-                switch.configure(state="disabled")
-            self.switches[key] = switch
-            ctk.CTkLabel(
-                row,
-                text=t(f"option_{key}"),
-                font=(Fonts.FAMILY, Fonts.SIZE_NORMAL, "bold"),
-                text_color=Colors.TEXT_PRIMARY,
-                anchor="w",
-            ).pack(fill="x", padx=12, pady=(10, 0))
             if not support.available:
                 hint = t("option_tray_unavailable")
             elif not usable:
                 hint = t("option_close_to_tray_unavailable")
             else:
                 hint = t(f"option_{key}_hint")
-            ctk.CTkLabel(
-                row,
-                text=hint,
-                font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-                text_color=Colors.TEXT_PRIMARY if usable else Colors.STATUS_PENDING,
-                anchor="w",
-                justify="left",
-                wraplength=300,
-            ).pack(fill="x", padx=12, pady=(2, 10))
+            self._add_switch(content, key, saved.get(key, False), usable, hint, lambda key=key: self._save(key))
+        self._add_switch(
+            content, update_check.ENABLED_SETTING, saved.get(update_check.ENABLED_SETTING, True), True,
+            t("option_check_for_updates_hint"), self._save_update_check,
+        )
 
         ctk.CTkButton(
             content,
@@ -924,7 +907,39 @@ class TrayOptionsDialog(ctk.CTkToplevel):
         ).pack(side="right", pady=(8, 0))
 
         self.update_idletasks()
-        scaling.place_centered_on_parent(self, master, *scaling.to_physical(self, 440, 290))
+        width, _ = scaling.to_physical(self, 440, 0)
+        scaling.place_centered_on_parent(self, master, width, self.winfo_reqheight())
+
+    def _add_switch(self, content, key: str, on: bool, usable: bool, hint: str, command) -> None:
+        row = ctk.CTkFrame(content, fg_color=Colors.BG_CARD, corner_radius=Sizing.BORDER_RADIUS)
+        row.pack(fill="x", pady=(0, 8))
+        switch = CompactSwitch(row, command, Colors.BG_CARD)
+        switch.pack(side="right", padx=12)
+        if on:
+            switch.select()
+        if not usable:
+            switch.configure(state="disabled")
+        self.switches[key] = switch
+        ctk.CTkLabel(
+            row,
+            text=t(f"option_{key}"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL, "bold"),
+            text_color=Colors.TEXT_PRIMARY,
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(10, 0))
+        ctk.CTkLabel(
+            row,
+            text=hint,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
+            text_color=Colors.TEXT_PRIMARY if usable else Colors.STATUS_PENDING,
+            anchor="w",
+            justify="left",
+            wraplength=300,
+        ).pack(fill="x", padx=12, pady=(2, 10))
 
     def _save(self, key: str) -> None:
         update_settings(**{key: bool(self.switches[key].get())})
+
+    def _save_update_check(self) -> None:
+        self._save(update_check.ENABLED_SETTING)
+        self._on_update_check_changed(bool(self.switches[update_check.ENABLED_SETTING].get()))
