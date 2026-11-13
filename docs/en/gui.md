@@ -140,8 +140,8 @@ fail, install the driver and AMF from [Quick start](../../README.md#quick-start)
   needs a tray that shows app icons (KDE, Ubuntu); **Close to tray** is
   Windows only.
 - **Updates**: about once a day Jasna checks for a new version. When one is
-  out, a small **Update** notice shows next to the version in the header; click
-  it to open the download page. The check sends no personal data. To turn it
+  out, a small **New version** notice shows at the right end of the header;
+  click it to open the download page. The check sends no personal data. To turn it
   off, click the gear in the header and turn off **Check for updates**.
 
 ## Activate supporter models

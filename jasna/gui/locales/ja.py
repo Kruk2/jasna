@@ -29,7 +29,6 @@ JA = {
 
         # Header
         "btn_help": "ヘルプ",
-        "btn_about": "このアプリについて",
         "btn_system_check": "システムチェック",
         "btn_video_player": "動画プレーヤー",
 
@@ -290,7 +289,7 @@ JA = {
         "option_close_to_tray_unavailable": "ここでは使用できません：トレイアイコンに終了用のメニューがありません。",
         "option_check_for_updates": "更新を確認",
         "option_check_for_updates_hint": "Jasna は 1 日に 1 回ほど新しいバージョンを確認し、ヘッダーに小さなお知らせを表示します。個人データは送信しません。",
-        "update_available": "更新: v{version}",
+        "update_available": "新しいバージョン v{version}",
         "tip_update_available": "Jasna の新しいバージョンが出ています。クリックするとダウンロードページを開きます。",
         "tray_open": "Jasna を開く",
         "tray_quit": "終了",
@@ -677,10 +676,6 @@ JA = {
         "engine_name_yolo": "YOLO（検出）",
         "engine_name_basicvsrpp": "BasicVSR++（復元）",
         # About dialog
-        "dialog_about_title": "Jasna について",
-        "dialog_about_version": "バージョン {version}",
-        "dialog_about_description": "モザイク復元ツール",
-        "dialog_about_credit": "Lada に着想を得ています",
         "btn_close": "閉じる",
 
         # Language change dialog

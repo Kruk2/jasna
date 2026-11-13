@@ -29,7 +29,6 @@ EN = {
         
         # Header
         "btn_help": "Help",
-        "btn_about": "About",
         "btn_system_check": "System Check",
         "btn_video_player": "Video Player",
 
@@ -290,7 +289,7 @@ EN = {
         "option_close_to_tray_unavailable": "Not available here: the tray icon has no menu to quit from.",
         "option_check_for_updates": "Check for updates",
         "option_check_for_updates_hint": "About once a day, Jasna checks for a new version and shows a small notice in the header. It sends no personal data.",
-        "update_available": "Update: v{version}",
+        "update_available": "New version v{version}",
         "tip_update_available": "A new version of Jasna is out. Click to open its download page.",
         "tray_open": "Open Jasna",
         "tray_quit": "Quit",
@@ -677,10 +676,6 @@ EN = {
         "engine_name_yolo": "YOLO (detection)",
         "engine_name_basicvsrpp": "BasicVSR++ (restoration)",
         # About dialog
-        "dialog_about_title": "About Jasna",
-        "dialog_about_version": "Version {version}",
-        "dialog_about_description": "Mosaic restoration tool",
-        "dialog_about_credit": "Inspired by Lada",
         "btn_close": "Close",
 
         # Language change dialog

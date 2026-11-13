@@ -24,7 +24,7 @@ from jasna.gui import scaling
 from jasna.gui import activation_worker
 from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
 from jasna.gui.components import StatusPill, KofiButton, UnifansButton, XianyuButton, XianyuQrDialog, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, CloseWhileProcessingDialog, Tooltip, OptionsDialog, grab_modal
-from jasna.gui.icons import create_icon, create_native_icon_image
+from jasna.gui.icons import create_icon
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
 from jasna.gui.control_bar import ControlBar
@@ -205,17 +205,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         )
         version.pack(side="left", pady=(4, 0))
 
-        self._update_chip = ctk.CTkButton(
-            left,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            text_color=Colors.STATUS_COMPLETED,
-            width=0,
-            height=24,
-        )
-        Tooltip(self._update_chip, t("tip_update_available"))
-
         # Status pill, left-aligned next to the version (the right side holds the
         # license/support chips, which used to overlap a centered pill).
         self._status_pill = StatusPill(left)
@@ -225,38 +214,20 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         right = ctk.CTkFrame(header, fg_color="transparent")
         right.pack(side="right", padx=Sizing.PADDING_MEDIUM)
         
-        self._options_icon = create_icon("settings", 16, Colors.TEXT_PRIMARY)
+        self._options_icon = create_icon("settings", 20, Colors.TEXT_PRIMARY)
         self._options_btn = ctk.CTkButton(
             right,
             text="",
             image=self._options_icon,
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
-            width=28,
-            height=28,
+            width=32,
+            height=32,
             command=self._show_options,
         )
         self._options_btn.pack(side="left", padx=(0, 8))
         Tooltip(self._options_btn, t("dialog_options_title"))
 
-        # Language selector
-        self._language_icon = create_native_icon_image(
-            right,
-            "globe",
-            16,
-            Colors.TEXT_PRIMARY,
-        )
-        lang_label = tk.Label(
-            right,
-            image=self._language_icon,
-            background=Colors.BG_PANEL,
-            width=scaling.raw_tk_size(right, 18),
-            height=scaling.raw_tk_size(right, 18),
-            borderwidth=0,
-            highlightthickness=0,
-        )
-        lang_label.pack(side="left", padx=(0, 4))
-        
         locale = get_locale()
         self._lang_dropdown = ValueOptionMenu(
             right,
@@ -290,7 +261,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             text_color=Colors.PLAYER_TEXT,
             text_color_disabled=Colors.STATUS_PENDING,
             corner_radius=8,
-            width=145,
+            width=0,
             height=34,
             command=self._open_video_player,
         )
@@ -307,7 +278,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             right, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             fg_color="transparent", hover_color=Colors.BG_CARD,
             text=t("license_chip_inactive"), text_color=Colors.STATUS_WARNING,
-            width=130, command=self._open_license_dialog,
+            width=0, command=self._open_license_dialog,
         )
         self._license_chip.pack(side="left", padx=(0, 12))
         self._refresh_license_chip()
@@ -323,7 +294,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
             text_color=Colors.TEXT_PRIMARY,
-            width=80,
+            width=0,
             command=self._show_system_check,
         )
         self._system_check_btn.pack(side="left", padx=(0, 4))
@@ -335,23 +306,28 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
             text_color=Colors.TEXT_PRIMARY,
-            width=50,
+            width=0,
             command=self._show_help,
         )
         self._help_btn.pack(side="left")
-        
-        self._about_btn = ctk.CTkButton(
+
+        self._update_icon = create_icon("download", 14, Colors.STATUS_COMPLETED)
+        self._update_chip = ctk.CTkButton(
             right,
-            text=t("btn_about"),
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            image=self._update_icon,
+            compound="left",
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY,
-            width=50,
-            command=self._show_about,
+            text_color=Colors.STATUS_COMPLETED,
+            border_width=1,
+            border_color=Colors.STATUS_COMPLETED,
+            corner_radius=14,
+            width=0,
+            height=26,
         )
-        self._about_btn.pack(side="left")
-        
+        Tooltip(self._update_chip, t("tip_update_available"))
+
     def _build_main_body(self):
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True)
@@ -577,7 +553,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             text=t("update_available", version=version),
             command=lambda: webbrowser.open(update_check.release_page_url(version)),
         )
-        self._update_chip.pack(side="left", padx=(8, 0), before=self._status_pill)
+        self._update_chip.pack(side="left", padx=(8, 0), after=self._help_btn)
 
     def _on_update_check_changed(self, enabled: bool):
         if enabled:
@@ -1048,7 +1024,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         """Refresh UI text after language change."""
         # Update header buttons
         self._help_btn.configure(text=t("btn_help"))
-        self._about_btn.configure(text=t("btn_about"))
         self._video_player_btn.configure(text=t("btn_video_player"))
         self._status_pill.refresh_text()
         # Note: Other panels would need their own refresh methods
@@ -1057,61 +1032,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _show_help(self):
         webbrowser.open("https://github.com/Kruk2/jasna")
         
-    def _show_about(self):
-        dialog = ctk.CTkToplevel(self)
-        dialog.title(t("dialog_about_title"))
-        dialog.resizable(False, False)
-        dialog.configure(fg_color=Colors.BG_MAIN)
-        dialog.transient(self)
-        grab_modal(dialog)
-
-        ctk.CTkLabel(
-            dialog,
-            text="Jasna",
-            font=(Fonts.FAMILY, 24, "bold"),
-            text_color=Colors.TEXT_PRIMARY,
-        ).pack(pady=(30, 8))
-        
-        ctk.CTkLabel(
-            dialog,
-            text=t("dialog_about_version", version=__version__),
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_PRIMARY,
-        ).pack()
-        
-        ctk.CTkLabel(
-            dialog,
-            text=t("dialog_about_description"),
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_PRIMARY,
-        ).pack(pady=(16, 8))
-        
-        ctk.CTkLabel(
-            dialog,
-            text=t("dialog_about_credit"),
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.TEXT_PRIMARY,
-        ).pack()
-        
-        ctk.CTkButton(
-            dialog,
-            text=t("btn_close"),
-            fg_color=Colors.BG_CARD,
-            hover_color=Colors.BORDER_LIGHT,
-            text_color=Colors.TEXT_PRIMARY,
-            command=dialog.destroy,
-        ).pack(pady=30)
-
-        # Size to content so translated text never clips the close button
-        dialog.update_idletasks()
-        minimum_width, _ = scaling.to_physical(dialog, 400, 0)
-        scaling.place_centered_on_parent(
-            dialog,
-            self,
-            max(minimum_width, dialog.winfo_reqwidth()),
-            dialog.winfo_reqheight(),
-        )
-        return dialog
 
 
 class GUILogHandler(logging.Handler):

@@ -29,7 +29,6 @@ ZH = {
         
         # Header
         "btn_help": "帮助",
-        "btn_about": "关于",
         "btn_system_check": "系统检查",
         "btn_video_player": "视频播放器",
 
@@ -290,7 +289,7 @@ ZH = {
         "option_close_to_tray_unavailable": "此处不可用：托盘图标没有用于退出的菜单。",
         "option_check_for_updates": "检查更新",
         "option_check_for_updates_hint": "Jasna 大约每天检查一次新版本，有新版本时在顶部显示一个小提示。不会发送任何个人数据。",
-        "update_available": "更新：v{version}",
+        "update_available": "新版本 v{version}",
         "tip_update_available": "Jasna 有新版本了。点击打开下载页面。",
         "tray_open": "打开 Jasna",
         "tray_quit": "退出",
@@ -677,10 +676,6 @@ ZH = {
         "engine_name_yolo": "YOLO（检测）",
         "engine_name_basicvsrpp": "BasicVSR++（修复）",
         # About dialog
-        "dialog_about_title": "关于 Jasna",
-        "dialog_about_version": "版本 {version}",
-        "dialog_about_description": "马赛克修复工具",
-        "dialog_about_credit": "灵感来源于 Lada",
         "btn_close": "关闭",
 
         # Language change dialog
