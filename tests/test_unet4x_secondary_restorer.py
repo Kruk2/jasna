@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 import torch
+from torch._dynamo.utils import counters
 
 from factories import TemporalUpscaler
 from jasna.restorer.unet4x_secondary_restorer import (
@@ -36,6 +37,26 @@ def torch_restorer(plaintext_model, monkeypatch):
     monkeypatch.setattr("jasna.accelerator.has_triton", lambda: False)
     monkeypatch.setattr("jasna.models.unet4x.Unet4x", lambda _data: TemporalUpscaler())
     return Unet4xSecondaryRestorer(device=torch.device("cpu"), fp16=False)
+
+
+def test_compiled_restorer_traces_its_model_before_restoring(plaintext_model, monkeypatch):
+    # Tracing patches every nn.Module call process-wide, so it must finish before the
+    # pipeline threads run their own models.
+    monkeypatch.setattr("jasna.accelerator.is_amd_device", lambda _device: True)
+    monkeypatch.setattr("jasna.accelerator.has_triton", lambda: True)
+    monkeypatch.setattr("jasna.models.unet4x.Unet4x", lambda _data: TemporalUpscaler())
+    compile_model = torch.compile
+    monkeypatch.setattr(torch, "compile", lambda model, **options: compile_model(
+        model, backend="aot_eager", fullgraph=options["fullgraph"], dynamic=options["dynamic"],
+    ))
+    torch._dynamo.reset()
+    counters.clear()
+
+    restorer = Unet4xSecondaryRestorer(device=torch.device("cpu"), fp16=False)
+    graphs_after_build = counters["stats"]["unique_graphs"]
+    restorer.restore(torch.rand(3, 3, 256, 256), keep_start=1, keep_end=3)
+
+    assert (graphs_after_build, counters["stats"]["unique_graphs"]) == (1, 1)
 
 
 def test_torch_restorer_advances_both_previous_frames_and_resets_between_clips(torch_restorer):

@@ -126,6 +126,14 @@ class Unet4xSecondaryRestorer:
             self.runner.context.set_tensor_address("lr_prev", self._g_lr_prev.data_ptr())
             self.runner.context.set_tensor_address("lr_curr", self._g_lr_curr.data_ptr())
             self.runner.context.set_tensor_address("hr_prev", self._g_hr_prev.data_ptr())
+        elif has_triton():
+            self._compile_before_pipeline_threads_start()
+
+    @torch.inference_mode()
+    def _compile_before_pipeline_threads_start(self) -> None:
+        """Compiling patches every ``nn.Module`` call process-wide while it traces, which breaks the
+        models other pipeline threads run meanwhile (RF-DETR in the decode thread)."""
+        self._infer()
 
     def _load_trt_runner(self) -> None:
         from jasna.trt.trt_runner import TrtRunner
