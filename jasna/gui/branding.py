@@ -40,7 +40,9 @@ def create_header_logo() -> ctk.CTkImage:
     )
 
 
-def create_xianyu_qr_image(image: Image.Image) -> ctk.CTkImage:
+def create_xianyu_qr_image() -> ctk.CTkImage:
+    with Image.open(brand_asset_path(XIANYU_QR_PNG)) as source:
+        image = source.convert("RGB")
     return ctk.CTkImage(light_image=image, dark_image=image, size=XIANYU_QR_SIZE)
 
 
