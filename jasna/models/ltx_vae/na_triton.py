@@ -11,6 +11,10 @@ and masks dominate).
 
 Queries may cover only W columns ``[query_w_start, query_w_start + Wq)`` of the K/V grid, so a
 W slab with halo columns attends from its core columns alone.
+
+fp16 Q/K/V (from the slab Q/K/V of GPUs whose ``diffusion_triton.NvidiaLaunch`` accumulates in fp16) sum each
+chunk's P.V in fp16 and add it to the fp32 running sum (``FP16_ACCUMULATE``); a running sum in fp16 moved the
+decode measurably further from an fp32 decoder. Q.K^T always sums in fp32.
 """
 
 import torch
@@ -59,13 +63,23 @@ def _in_window(key, start, KERNEL: tl.constexpr):
 
 
 @triton.jit
+def _add_values(acc, p, v, rescale, FP16_ACCUMULATE: tl.constexpr):
+    """``acc * rescale + p @ v``, the product summed in fp16 for fp16 values."""
+    if FP16_ACCUMULATE:
+        acc = acc * rescale[:, None] + tl.dot(p.to(tl.float16), v, out_dtype=tl.float16).to(tl.float32)
+    else:
+        acc = tl.dot(p.to(v.dtype), v, acc * rescale[:, None])
+    return acc
+
+
+@triton.jit
 def _na3d_fwd_kernel(
     q_ptr, k_ptr, v_ptr, o_ptr,
     T, H, W, query_w_start, query_w_len, num_heads, tiles_h, tiles_w,
     q_stride_b, q_stride_t, q_stride_h, q_stride_w, kv_stride_b, kv_stride_t, kv_stride_h, kv_stride_w,
     KERNEL_T: tl.constexpr, KERNEL_H: tl.constexpr, KERNEL_W: tl.constexpr, HEAD_DIM: tl.constexpr,
     TILE_T: tl.constexpr, TILE_H: tl.constexpr, TILE_W: tl.constexpr, BLOCK_N: tl.constexpr,
-    BOX_ROWS: tl.constexpr,
+    BOX_ROWS: tl.constexpr, FP16_ACCUMULATE: tl.constexpr,
 ):
     BLOCK_M: tl.constexpr = TILE_T * TILE_H * TILE_W
     tile = tl.program_id(0)
@@ -129,7 +143,7 @@ def _na3d_fwd_kernel(
                 rescale = tl.math.exp2(row_max - new_max)
                 p = tl.math.exp2(scores - new_max[:, None])
                 row_sum = row_sum * rescale + tl.sum(p, 1)
-                acc = tl.dot(p.to(v.dtype), v, acc * rescale[:, None])
+                acc = _add_values(acc, p, v, rescale, FP16_ACCUMULATE)
                 row_max = new_max
     else:
         for chunk_start in range(0, box_size, BLOCK_N):
@@ -156,7 +170,7 @@ def _na3d_fwd_kernel(
             rescale = tl.math.exp2(row_max - new_max)
             p = tl.math.exp2(scores - new_max[:, None])
             row_sum = row_sum * rescale + tl.sum(p, 1)
-            acc = tl.dot(p.to(v.dtype), v, acc * rescale[:, None])
+            acc = _add_values(acc, p, v, rescale, FP16_ACCUMULATE)
             row_max = new_max
 
     out = acc / row_sum[:, None]
@@ -181,7 +195,8 @@ def na3d_with_config(
     _na3d_fwd_kernel[launch.grid](
         q, k, v, out, *launch.scalars,
         KERNEL_T=kernel_t, KERNEL_H=kernel_h, KERNEL_W=kernel_w, HEAD_DIM=k.shape[5],
-        num_warps=config.num_warps, num_stages=config.num_stages, **config.kwargs,
+        FP16_ACCUMULATE=v.dtype == torch.float16, num_warps=config.num_warps, num_stages=config.num_stages,
+        **config.kwargs,
     )
     return out
 

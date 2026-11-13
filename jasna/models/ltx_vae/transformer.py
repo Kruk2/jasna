@@ -294,8 +294,7 @@ class NeighborhoodAttention3D(nn.Module):
             q = apply_abs_rope_slab(q, self, w_pos)
             k = apply_abs_rope_slab(k, self, w_pos)
         out = neighborhood_attention(self, q.contiguous(), k.contiguous(), v.contiguous(), 0)
-        out = out.reshape(batch, t, h, w, self.dim)
-        return self.proj(out)
+        return self.proj(out.reshape(batch, t, h, w, self.dim).to(x.dtype))
 
 
 class SwiGLU(nn.Module):
@@ -363,11 +362,8 @@ def residual_modulating_mlp(
     s = scale.reshape(-1, dim)
     sh = shift.reshape(-1, dim)
     if mlp.kernels.residual_swiglu is not None and x.is_cuda:
-        for start in range(0, x_flat.shape[0], SWIGLU_TILE_TOKENS):
-            mlp.kernels.residual_swiglu(
-                x_flat[start : start + SWIGLU_TILE_TOKENS], norm.weight, s[0], sh[0],
-                mlp.w_gate.weight, mlp.w_up.weight, mlp.w_down.weight,
-            )
+        mlp.kernels.residual_swiglu(x_flat, norm.weight, s[0], sh[0], mlp.w_gate.weight, mlp.w_up.weight,
+                                    mlp.w_down.weight)
         return x
     chunk_mlp = _mlp_chunk if x.is_cuda else modulated_swiglu
     w_gate_up = torch.cat([mlp.w_gate.weight, mlp.w_up.weight])
@@ -435,7 +431,7 @@ def _attn_on_w_slab(
     out = neighborhood_attention(attn, q.contiguous(), k.contiguous(), v.contiguous(), halo)
     del q, k, v
     out = out.reshape(batch, t, h, core_len, attn.dim)
-    return F.linear(out, attn.proj.weight, attn.proj.bias) if project else out
+    return F.linear(out.to(x.dtype), attn.proj.weight, attn.proj.bias) if project else out
 
 
 def w_chunked_attention_residual(

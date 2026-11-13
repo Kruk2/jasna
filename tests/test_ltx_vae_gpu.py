@@ -42,6 +42,18 @@ def test_cuda_na3d_matches_the_eager_windows(kernel, kernel_size, query_w):
     torch.testing.assert_close(fused.float(), reference, atol=2e-2, rtol=2e-2)
 
 
+@pytest.mark.parametrize("kernel_size", [(3, 5, 5), (9, 9, 9)])
+def test_the_triton_na3d_on_fp16_inputs_is_as_close_to_fp32_windows_as_on_bf16(kernel_size):
+    q, k, v = _qkv((1, 12, 13, 14, 2, 64))
+    reference = na3d(q.float(), k.float(), v.float(), kernel_size, 0)
+
+    def distance(dtype):
+        out = na_triton.na3d(q.to(dtype), k.to(dtype), v.to(dtype), list(kernel_size), 0)
+        return (out.float() - reference).abs().mean().item()
+
+    assert distance(torch.float16) <= distance(torch.bfloat16)
+
+
 @pytest.mark.parametrize("capability, kernel", [((7, 5), T._fp16_eager_na3d), ((8, 6), na_triton.na3d)])
 def test_gpus_without_triton_tensor_core_dots_use_the_fp16_eager_na3d(capability, kernel, monkeypatch):
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: capability)

@@ -12,7 +12,9 @@
 
 import torch
 
+from jasna.accelerator import amd_gpu_architecture
 from jasna.media.cuda_kernel import aot_kernel
+from jasna.models.ltx_vae import transformer
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
 from jasna.models.ltx_vae.transformer import (
     DIFFUSION_CONTEXT_DIM,
@@ -38,6 +40,10 @@ PROJ_RESIDUAL_LAUNCH = (32, 256, 64, 4, 1)
 CONTEXT_ADD_LAUNCH = (32, 256, 64, 8, 1)
 QKV_BLOCK_ROWS = 32
 QKV_WARPS = 8
+FP16_ACCUMULATE_ARCHITECTURES: frozenset[str] = frozenset()
+"""AMD architectures whose MLP, context and Q/K/V GEMMs accumulate in fp16 (as NVIDIA's
+``NvidiaLaunch.fp16_accumulate``, with bf16 weights and Q/K/V), built into their bundles by
+``scripts/build_ltx_vae_hipfbs.py``. None: no AMD GPU has been measured with it."""
 PROJ_RESIDUAL_MODULE = f"ltx_proj_residual_{DIFFUSION_DIM}"
 CONTEXT_ADD_MODULE = f"ltx_context_add_{DIFFUSION_CONTEXT_DIM}x{DIFFUSION_DIM}"
 
@@ -51,9 +57,22 @@ def qkv_module(dim: int) -> str:
     return f"ltx_slab_qkv_{dim}x{DIFFUSION_HEAD_DIM}"
 
 
+def accumulates_in_fp16(architecture: str) -> bool:
+    return architecture in FP16_ACCUMULATE_ARCHITECTURES
+
+
 GATE_UP_ARGUMENTS = {**{name: "*bf16" for name in ("x_ptr", "norm_ptr", "scale_ptr", "shift_ptr", "gate_ptr",
                                                    "up_ptr", "h_ptr")}, "rows": "i32"}
 DOWN_ARGUMENTS = {"h_ptr": "*bf16", "down_ptr": "*bf16", "x_ptr": "*bf16", "rows": "i32"}
+
+
+def swiglu_arguments(architecture: str) -> tuple[dict[str, str], dict[str, str]]:
+    """The gate/up and down kernels' arguments on ``architecture``: the hidden activation between them is fp16
+    where the GEMMs accumulate in fp16."""
+    hidden = "*fp16" if accumulates_in_fp16(architecture) else "*bf16"
+    return {**GATE_UP_ARGUMENTS, "h_ptr": hidden}, {**DOWN_ARGUMENTS, "h_ptr": hidden}
+
+
 PROJ_RESIDUAL_ARGUMENTS = {"a_ptr": "*bf16", "w_ptr": "*bf16", "b_ptr": "*bf16", "x_ptr": "*bf16:wide",
                            **{name: "i32" for name in ("rows", "core_len", "x_line_stride", "core_start")}}
 CONTEXT_ADD_ARGUMENTS = {"f_ptr": "*bf16", "w_ptr": "*bf16", "b_ptr": "*bf16", "x_ptr": "*bf16:wide",
@@ -94,17 +113,25 @@ def residual_swiglu_(
     w_down: torch.Tensor,
 ) -> None:
     """In place on contiguous ``x`` ``(rows, dim)``: one row each of ``scale``/``shift`` ``(dim,)``,
-    ``w_gate``/``w_up`` ``(hidden, dim)``, ``w_down`` ``(dim, hidden)``, at a ``FUSED_MLP_DIMS`` width."""
+    ``w_gate``/``w_up`` ``(hidden, dim)``, ``w_down`` ``(dim, hidden)``, at a ``FUSED_MLP_DIMS`` width, over
+    ``transformer.SWIGLU_TILE_TOKENS``-row chunks with one hidden-activation workspace."""
     rows, dim = x.shape
     hidden = _swiglu_hidden_dim(dim)
     tensors = (x, norm_weight, scale, shift, w_gate, w_up, w_down)
     _require_bf16(tensors, dim in FUSED_MLP_DIMS and w_gate.shape == (hidden, dim))
-    h = x.new_empty(rows, hidden)
+    architecture = amd_gpu_architecture(x.device)
+    chunk = transformer.SWIGLU_TILE_TOKENS
+    h = x.new_empty(min(rows, chunk), hidden, dtype=torch.float16 if accumulates_in_fp16(architecture) else x.dtype)
     (gate_up_rows, gate_up_cols, *_), (down_rows, down_cols, *_) = SWIGLU_LAUNCH[dim]
     gate_up, down = swiglu_modules(dim)
-    _launch(gate_up, GATE_UP_ARGUMENTS, (-(-rows // gate_up_rows), hidden // gate_up_cols), x.device,
-            (x, norm_weight, scale, shift, w_gate, w_up, h, rows))
-    _launch(down, DOWN_ARGUMENTS, (-(-rows // down_rows), dim // down_cols), x.device, (h, w_down, x, rows))
+    gate_up_arguments, down_arguments = swiglu_arguments(architecture)
+    for start in range(0, rows, chunk):
+        x_chunk = x[start : start + chunk]
+        chunk_rows = x_chunk.shape[0]
+        _launch(gate_up, gate_up_arguments, (-(-chunk_rows // gate_up_rows), hidden // gate_up_cols), x.device,
+                (x_chunk, norm_weight, scale, shift, w_gate, w_up, h, chunk_rows))
+        _launch(down, down_arguments, (-(-chunk_rows // down_rows), dim // down_cols), x.device,
+                (h, w_down, x_chunk, chunk_rows))
 
 
 def proj_residual_(
