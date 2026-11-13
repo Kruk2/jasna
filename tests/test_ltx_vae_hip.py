@@ -3,6 +3,7 @@
 import pytest
 import torch
 
+from jasna.accelerator import HIP_KERNEL_ARCHITECTURES
 from jasna.models.ltx_vae import diffusion_hip, layout_hip, na_hip
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
@@ -74,3 +75,10 @@ def test_the_channels_first_copy_takes_only_channels_last_fp16():
         layout_hip.channels_first_bf16(torch.zeros(1, 4, 2, 3, 3, dtype=torch.float16))
     with pytest.raises(ValueError, match="channels-last 3D fp16"):
         layout_hip.channels_first_bf16(torch.zeros(1, 4, 2, 3, 3).contiguous(memory_format=torch.channels_last_3d))
+
+
+@pytest.mark.parametrize("architecture", sorted(HIP_KERNEL_ARCHITECTURES))
+def test_an_amd_gpu_running_the_jit_decoder_kernels_never_takes_an_nvidia_launch_entry(architecture):
+    diffusion_triton = pytest.importorskip("jasna.models.ltx_vae.diffusion_triton")
+
+    assert diffusion_triton.launch_for(architecture) is diffusion_triton.NVIDIA_DEFAULT_LAUNCH

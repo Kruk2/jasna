@@ -27,6 +27,7 @@ import triton
 import triton.language as tl
 from triton.language.extra import libdevice
 
+from jasna.ltx.kernel_policy import gpu_architecture
 from jasna.models.ltx_vae import transformer
 
 EPS = tl.constexpr(1e-6)
@@ -208,7 +209,14 @@ NVIDIA_DEFAULT_LAUNCH = NvidiaLaunch(
 
 
 def nvidia_launch(device: torch.device) -> NvidiaLaunch:
-    return NVIDIA_LAUNCH.get(torch.cuda.get_device_capability(device), NVIDIA_DEFAULT_LAUNCH)
+    return launch_for(gpu_architecture(device))
+
+
+def launch_for(architecture: tuple[int, int] | str) -> NvidiaLaunch:
+    """The entry of a GPU of ``architecture`` (``kernel_policy.gpu_architecture``: the CUDA capability, or the gfx name
+    on AMD, whatever capability ROCm reports), else ``NVIDIA_DEFAULT_LAUNCH``: an AMD GPU running this source (its
+    ahead-of-time build's tests) never takes an NVIDIA GPU's entry."""
+    return NVIDIA_LAUNCH.get(architecture, NVIDIA_DEFAULT_LAUNCH)
 
 
 def _operand(weight: torch.Tensor, launch: NvidiaLaunch) -> torch.Tensor:
