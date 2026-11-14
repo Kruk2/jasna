@@ -5,7 +5,7 @@ from pathlib import Path, PureWindowsPath
 
 logger = logging.getLogger(__name__)
 
-from jasna import startup_timing  # noqa: F401  captures PROCESS_START near process start
+from jasna import startup_timing  # first: captures PROCESS_START near process start
 from jasna._frozen import is_frozen
 
 if __name__ == "__main__":
@@ -16,6 +16,7 @@ if __name__ == "__main__" and sys.platform in ("linux", "win32") and is_frozen()
     from jasna.protection import initialize_runtime
     try:
         initialize_runtime()
+        startup_timing.mark_startup_checked()
     except Exception as error:
         if sys.argv[1:2] == ["--ltx-worker"]:
             from jasna.protection.ltx_worker import report_startup_failure

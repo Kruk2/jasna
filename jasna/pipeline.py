@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import psutil
 import torch
 
+from jasna import startup_timing
 from jasna.accelerator import device_free_bytes, device_used_bytes, vendor_for_device
 from jasna.job_resume import ResumeJob, resume_directory, saved_ltx_work
 from jasna.media.container_utils import MOV_SUFFIXES
@@ -729,6 +730,7 @@ class Pipeline:
         """Run the job and log the whole GPU's peak used memory while it ran: unlike the models'
         own peaks it counts CUDA/HIP contexts, allocator caches, native allocations and other
         programs on that GPU, so it tells whether the settings fit on a card."""
+        startup_timing.log_first_job()
         gpu_memory = PeakSampler(lambda: device_used_bytes(self.device), GPU_MEMORY_SAMPLE_SECONDS)
         gpu_memory.start()
         try:

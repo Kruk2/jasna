@@ -87,6 +87,55 @@ def test_protected_runtime_never_loads_models_in_parent(monkeypatch):
     assert requests[7][1] == {"seed": 43, "free_bytes": 123}
 
 
+class _LoadClock:
+    """``time.monotonic`` of ``inference``, moved on by each model load by its own seconds."""
+
+    def __init__(self, monkeypatch):
+        self.now = 0.0
+        monkeypatch.setattr(inference.time, "monotonic", lambda: self.now)
+
+    def taking(self, seconds, result=None):
+        def load(*_args, **_kwargs):
+            self.now += seconds
+            return result
+        return load
+
+
+def test_a_licensed_runtime_times_each_model_load_in_the_parent(monkeypatch):
+    clock = _LoadClock(monkeypatch)
+    seconds = {"load_encoder": 2.0, "prepare_transformer": 0.5, "load_transformer": 7.0, "load_decoder": 3.0}
+
+    def request(op, params, tensors, advance=None):
+        clock.now += seconds.get(op, 0.0)
+        return ({"steps": 8, "resident": 40, "count": 48} if op == "load_transformer" else {}), []
+
+    monkeypatch.setattr(inference, "device_free_bytes", lambda device: 9 << 30)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    runtime = inference.ModelRuntime(_files(".enc"), torch.device("cpu"), threading.Event())
+    monkeypatch.setattr(runtime, "request", request)
+    runtime.load_encoder()
+    runtime.prepare_transformer()
+    runtime.load_transformer()
+    runtime.load_decoder()
+    runtime.load_decoder()
+    assert runtime.load_seconds == {"encoder": 2.0, "transformer file": 0.5, "transformer": 7.0, "decoder": 3.0}
+
+
+def test_a_local_runtime_times_the_same_model_loads(monkeypatch):
+    clock = _LoadClock(monkeypatch)
+    monkeypatch.setattr(inference, "load_video_encoder", clock.taking(1.0, object()))
+    monkeypatch.setattr(inference, "load_gpu_libraries_ahead", lambda device, dtype: None)
+    monkeypatch.setattr(inference, "TransformerSource", clock.taking(0.5, object()))
+    monkeypatch.setattr(inference, "LtxTransformer", clock.taking(6.0, object()))
+    monkeypatch.setattr(inference, "load_video_decoder", clock.taking(2.0, object()))
+    runtime = inference.ModelRuntime(LtxModelFiles.placeholder("distilled", fast=False), torch.device("cpu"), threading.Event())
+    runtime.load_encoder()
+    runtime.prepare_transformer()
+    runtime.load_transformer()
+    runtime.load_decoder()
+    assert runtime.load_seconds == {"encoder": 1.0, "transformer file": 0.5, "transformer": 6.0, "decoder": 2.0}
+
+
 @pytest.mark.parametrize("models,protected,resuming,expected", [
     (frozenset({"ltx"}), True, False, True),
     (frozenset({"ltx"}), False, False, False),

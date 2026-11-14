@@ -16,6 +16,14 @@ def test_elapsed_ms_is_monotonic_nonnegative():
     assert second >= first
 
 
+@pytest.mark.parametrize(("checked_at", "line"), [
+    (104.0, "[timing] app startup: 10.0s to the first job (process start 1.5s, startup check 2.5s, until the job 6.0s)"),
+    (None, "[timing] app startup: 10.0s to the first job (process start 1.5s, until the job 8.5s)"),
+], ids=["release", "source"])
+def test_app_startup_splits_the_time_to_the_first_job(checked_at, line):
+    assert startup_timing.app_startup_line(100.0, 101.5, checked_at, 110.0) == line
+
+
 @pytest.mark.parametrize(
     ("results", "checks", "expected"),
     [

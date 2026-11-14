@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Sequence
+import time
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -133,6 +135,16 @@ class ModelRuntime:
         self._decoder = None
         self._transformer_source: TransformerSource | None = None
         self._ahead: Future[None] | None = None
+        self.load_seconds: dict[str, float] = {}
+        """Wall seconds of each model load (with a worker: its request, which also starts the
+        worker and checks the licence when they come first), logged as each ends."""
+
+    @contextmanager
+    def _timed_load(self, model: str) -> Iterator[None]:
+        started = time.monotonic()
+        yield
+        self.load_seconds[model] = time.monotonic() - started
+        logger.info("[timing] LTX model load: %s %.1fs", model, self.load_seconds[model])
 
     def start_ahead(self) -> None:
         """Start the worker on a thread of its own: it takes its license grant, opens the
@@ -192,11 +204,12 @@ class ModelRuntime:
 
     def _load_encoder(self):
         if self._encoder is None:
-            if self.protected:
-                self.request("load_encoder", {}, [])
-                self._encoder = WorkerEncoder(self)
-            else:
-                self._encoder = load_video_encoder(self.files.vae, self.device, self.files.encoder)
+            with self._timed_load("encoder"):
+                if self.protected:
+                    self.request("load_encoder", {}, [])
+                    self._encoder = WorkerEncoder(self)
+                else:
+                    self._encoder = load_video_encoder(self.files.vae, self.device, self.files.encoder)
         return self._encoder
 
     def unload_encoder(self) -> None:
@@ -219,23 +232,26 @@ class ModelRuntime:
             return
         if self.protected:
             if not self._transformer_opening:
-                self.request("prepare_transformer", {}, [])
+                with self._timed_load("transformer file"):
+                    self.request("prepare_transformer", {}, [])
                 self._transformer_opening = True
         elif self._transformer_source is None:
-            load_gpu_libraries_ahead(self.device, torch.bfloat16)
-            self._transformer_source = TransformerSource(self.files.transformer)
+            with self._timed_load("transformer file"):
+                load_gpu_libraries_ahead(self.device, torch.bfloat16)
+                self._transformer_source = TransformerSource(self.files.transformer)
 
     def load_transformer(self):
         self._wait_ahead()
         if self._transformer is None:
-            if self.protected:
-                info, _ = self.request("load_transformer", {"free_bytes": self._free_bytes_for_worker()}, [])
-                self._transformer = WorkerTransformer(self, info)
-                self._transformer_opening = False
-            else:
-                source, self._transformer_source = self._transformer_source, None
-                self._transformer = LtxTransformer(source or TransformerSource(self.files.transformer), self.device,
-                                                   device_free_bytes)
+            with self._timed_load("transformer"):
+                if self.protected:
+                    info, _ = self.request("load_transformer", {"free_bytes": self._free_bytes_for_worker()}, [])
+                    self._transformer = WorkerTransformer(self, info)
+                    self._transformer_opening = False
+                else:
+                    source, self._transformer_source = self._transformer_source, None
+                    self._transformer = LtxTransformer(source or TransformerSource(self.files.transformer),
+                                                       self.device, device_free_bytes)
         return self._transformer
 
     def _free_bytes_for_worker(self) -> int:
@@ -257,11 +273,12 @@ class ModelRuntime:
     def load_decoder(self):
         self._wait_ahead()
         if self._decoder is None:
-            if self.protected:
-                self.request("load_decoder", {}, [])
-                self._decoder = WorkerDecoder(self)
-            else:
-                self._decoder = load_video_decoder(self.files.vae, self.files.tuned_decoder, self.device)
+            with self._timed_load("decoder"):
+                if self.protected:
+                    self.request("load_decoder", {}, [])
+                    self._decoder = WorkerDecoder(self)
+                else:
+                    self._decoder = load_video_decoder(self.files.vae, self.files.tuned_decoder, self.device)
         return self._decoder
 
     def unload_decoder(self) -> None:
