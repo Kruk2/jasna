@@ -553,7 +553,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_DETECTION_MODEL_NAME,
         help=(
             "Detection model name. Installed models are discovered from model_weights/; "
-            "rfdetr-v6 (fast) and rfdetr-vr-v1 (VR180) are bundled with Jasna, "
+            "rfdetr-v6 (fast), rfdetr-vr-v1 (VR180) and lada-yolo-v4 are bundled with Jasna, "
             "rfdetr-v6-large (higher quality) and zelefans-vr-yolo-v2 are optional downloads "
             "(default: %(default)s)"
         ),
@@ -562,7 +562,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--detection-model-path",
         type=str,
         default="",
-        help='Optional path to detection weights. If not set, uses "model_weights/<detection-model>.onnx" (RF-DETR) or ".pt" (YOLO).',
+        help=(
+            'Optional path to detection weights. If not set, uses "model_weights/<detection-model>": '
+            ".onnx for RF-DETR on NVIDIA, .pt for RF-DETR on AMD and for YOLO."
+        ),
     )
     detection.add_argument(
         "--detection-score-threshold",

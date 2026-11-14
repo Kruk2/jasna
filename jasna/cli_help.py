@@ -35,8 +35,8 @@ CLI_HELP: dict[str, str] = {
         "span: a fast AI upscaler, works on NVIDIA and AMD (NVIDIA prepares it for each new video size once, "
         "about half a minute). realplksr: a slower AI upscaler that keeps more fine detail and cleans compression, "
         "NVIDIA and AMD. rtx-super-res: NVIDIA RTX Video Super Resolution, very fast, NVIDIA only. "
-        "dlss5: NVIDIA DLSS 5, reworks lighting and surfaces while it upscales, slow, Windows with an RTX 30-series or newer GPU "
-        "only; Jasna offers to download the unofficial DLSS 5 runtime (467 MB) the first time. "
+        "dlss5: NVIDIA DLSS 5, reworks lighting and surfaces while it upscales, slow, Windows with an RTX 40 or 50 GPU "
+        "only (RTX 30 works but is very slow); Jasna offers to download the unofficial DLSS 5 runtime (467 MB) the first time. "
         "Restores the whole video, so it can't be combined with --segments, --ltx-auto-split or --stream. "
         "(default: %(default)s)"
     ),
