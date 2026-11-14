@@ -20,6 +20,13 @@ from jasna.tensor_utils import half_dtype
 
 logger = logging.getLogger(__name__)
 
+GPU_WINDOWS_MIN_FREE_BYTES = 18 << 30
+"""Decode budget from which decoded windows stay on the GPU: a window only stays there while the
+budget it was decoded with reaches this, so the ones held (~95 MB each at 512 px, ~210 MB at
+768) still leave every later decode the 14.75 GiB that decodes a 768 px window in one tile, so
+no tile layout changes, and each frame skips uploading its canvases. From it on, an allocator's
+cached blocks stay cached between decodes: freeing them could change neither."""
+
 
 def protected_bundle(files: LtxModelFiles) -> bool:
     sources = (files.transformer, files.vae, files.tuned_decoder, files.video_encoder)
@@ -70,10 +77,20 @@ class WorkerTransformer:
 class WorkerDecoder:
     def __init__(self, runtime: ModelRuntime) -> None:
         self._runtime = runtime
+        self._worker_keeps_cache = False
 
     def send_window(self, latent: torch.Tensor, seed: int, free_bytes: int) -> PendingReply:
-        """Send one window to the worker's decoder; its uint8 ``[F, 3, S, S]`` frames come through the reply."""
+        """Send one window to the worker's decoder; its uint8 ``[F, 3, S, S]`` frames come through the reply.
+        After a decode with a budget of ``GPU_WINDOWS_MIN_FREE_BYTES`` the worker keeps its allocator's cache."""
+        self._worker_keeps_cache = free_bytes >= GPU_WINDOWS_MIN_FREE_BYTES
         return self._runtime.send("decode", {"seed": seed, "free_bytes": free_bytes}, [latent])
+
+    def release_cache(self) -> None:
+        """Have the worker hand the cache a roomy decode left back to the driver, so the next
+        budget reading counts it as free (device-wide free VRAM counts it as used)."""
+        if self._worker_keeps_cache:
+            self._runtime.request("empty_cache", {}, [])
+            self._worker_keeps_cache = False
 
 
 class PendingReply:
@@ -394,8 +411,12 @@ class WorkerBackend:
             if self.decoder is None:
                 raise RuntimeError("LTX decoder is not loaded")
             frames = self._decode_to_cpu(tensors[0], params["seed"], params["free_bytes"])
-            torch.cuda.empty_cache()
+            if params["free_bytes"] < GPU_WINDOWS_MIN_FREE_BYTES:
+                # the parent's next budget reading counts this cache as used
+                torch.cuda.empty_cache()
             return {}, [frames]
+        elif op == "empty_cache":
+            torch.cuda.empty_cache()
         else:
             raise ValueError("unsupported LTX inference operation")
         return {}, []
