@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from factories import AnsweredReply
 from jasna.ltx import inference, restore
 from jasna.ltx.model_files import LtxModelFiles
 from jasna import license_api
@@ -59,6 +60,7 @@ def test_protected_runtime_never_loads_models_in_parent(monkeypatch):
         return {}, []
 
     monkeypatch.setattr(runtime, "request", request)
+    monkeypatch.setattr(runtime, "send", lambda op, params, tensors: AnsweredReply(request(op, params, tensors)[1]))
     encoder = runtime.load_encoder()
     assert encoder(pixels) is latent
     assert runtime.load_encoder() is encoder
@@ -73,7 +75,8 @@ def test_protected_runtime_never_loads_models_in_parent(monkeypatch):
     transformer.close()
     decoder = runtime.load_decoder()
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
-    assert restore._decode_window(decoder, latent, 43, 512, lambda _canvas: 123, torch.device("cpu")) is decoded
+    reply, free = restore._send_window_decode(decoder, latent, 43, 512, lambda _canvas: 123)
+    assert reply.tensors()[0] is decoded and free == 123
     runtime.unload_decoder()
     assert [op for op, _, _ in requests] == [
         "load_encoder", "encode", "unload_encoder", "load_transformer", "denoise_chain",

@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 import torch
 
+from factories import AnsweredReply, answered_at_once
 from jasna.ltx import inference, restore
 from jasna.ltx.camera import CropFrame
 from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, MAX_GAP, Region, Window
@@ -366,8 +367,8 @@ def _composer(monkeypatch, decode, composite, starts=(0, 3)):
     decodes = ThreadPoolExecutor(max_workers=1)
     composer = restore._SegmentComposer(
         [plan], None, SimpleNamespace(get=lambda index: index), seed=0, feather=1, budget=lambda canvas: 0,
-        device=torch.device("cpu"), bar=_Bar(), decodes=decodes, latent_reads=decodes, stream=None, super_res=None,
-        projector=None,
+        device=torch.device("cpu"), bar=_Bar(), decodes=decodes, receives=decodes, latent_reads=decodes, stream=None,
+        super_res=None, projector=None,
     )
     return composer, decodes
 
@@ -440,6 +441,66 @@ def test_composer_raises_a_failed_window_decode(monkeypatch):
             composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8))
     finally:
         decodes.shutdown()
+
+
+class _WorkerDecodes:
+    """The worker behind a ``WorkerDecoder``: a decode runs there from its request until its result
+    header is read, and its frames (filled with its seed) are read after that."""
+
+    def __init__(self, windows: int):
+        self._windows = windows
+        self._sent = [threading.Event() for _ in range(windows)]
+        self.running: int | None = None
+        self.readings_while_decoding = 0
+        self.next_sent_before_frames_read: list[bool] = []
+
+    def free_bytes(self, canvas):
+        self.readings_while_decoding += self.running is not None
+        return 30 << 30
+
+    def send(self, op, params, tensors):
+        seed = params["seed"]
+        self.running = seed
+        self._sent[seed].set()
+        worker = self
+
+        class Reply:
+            def answered(self):
+                worker.running = None
+
+            def tensors(self):
+                if seed + 1 < worker._windows:
+                    worker.next_sent_before_frames_read.append(worker._sent[seed + 1].wait(timeout=5))
+                return [torch.full((13, 3, 4, 4), seed, dtype=torch.uint8)]
+
+        return Reply()
+
+
+def test_worker_decodes_the_next_window_while_the_last_frames_cross_the_pipe(monkeypatch):
+    """The next window goes to the worker before the last one's frames are read, its budget read
+    only once the last decode was answered, and windows still reach the frames in start order."""
+    crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
+    windows = tuple(Window(index, 0, start, 13, (crop,) * 13, index) for index, start in enumerate((0, 3, 6)))
+    plan = restore.TrackPlan(0, 0, ((),) * 19, (1.0,) * 19, windows, 3)
+    monkeypatch.setattr(
+        restore, "composite_frame", lambda source, candidates, *, feather, projector: torch.stack(
+            [c.canvas for c in candidates]).max(0).values
+    )
+    worker = _WorkerDecodes(len(windows))
+    decodes, receives, latent_reads = (ThreadPoolExecutor(max_workers=1) for _ in range(3))
+    composer = restore._SegmentComposer(
+        [plan], inference.WorkerDecoder(worker), SimpleNamespace(get=lambda index: index), seed=0, feather=1,
+        budget=worker.free_bytes, device=torch.device("cpu"), bar=_Bar(), decodes=decodes, receives=receives,
+        latent_reads=latent_reads, stream=None, super_res=None, projector=None,
+    )
+    try:
+        out = [int(composer.frame(torch.zeros((3, 4, 4), dtype=torch.uint8))[0, 0, 0]) for _ in range(19)]
+    finally:
+        for executor in (decodes, receives, latent_reads):
+            executor.shutdown()
+    assert out == [0] * 3 + [1] * 3 + [2] * 13
+    assert worker.next_sent_before_frames_read == [True, True]
+    assert worker.readings_while_decoding == 0
 
 
 def test_segment_decode_budget_follows_the_gpu_size_not_free_vram(monkeypatch):
@@ -1193,6 +1254,7 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
     monkeypatch.setattr(inference, "load_video_decoder", forbidden)
     monkeypatch.setattr(inference, "LtxTransformer", forbidden)
     monkeypatch.setattr(inference.ModelRuntime, "request", request)
+    monkeypatch.setattr(inference.ModelRuntime, "send", answered_at_once(request))
     monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, crop, _projector: torch.zeros(3, crop.canvas, crop.canvas, dtype=torch.uint8))
     files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
     render = replace(_render(tmp_path), files=files, window_hop=LESS_OVERLAP_WINDOW_HOP)
@@ -1238,6 +1300,7 @@ def test_encrypted_worker_starts_on_its_own_thread_while_the_scan_runs(fakes, mo
 
     monkeypatch.setattr(restore, "scan_span", slow_scan)
     monkeypatch.setattr(inference.ModelRuntime, "request", request)
+    monkeypatch.setattr(inference.ModelRuntime, "send", answered_at_once(request))
     monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, crop, _projector: torch.zeros(3, crop.canvas, crop.canvas, dtype=torch.uint8))
     files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
     restore.restore_spans(
