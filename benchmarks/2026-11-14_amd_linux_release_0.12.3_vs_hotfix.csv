@@ -1,0 +1,11 @@
+date,version,source,gpu,video,mode,sample,job_wall_s,ltx_s,scan_s,scan_fps,encode_s,denoise_s,compose_s,encode_s_per_window,denoise_s_per_window_step,decode_s_per_window,blocks_resident,peak_vram_worker_mib,note
+2026-11-14,0.12.3,v0.12.3 Linux AMD release,Radeon AI PRO R9700,M284 1080p30 (449 frames),"LTX Standard (2 steps), full VAE",warm-up,129.2,50.7,4.5,189.1,9.9,23.4,12.9,1.43,1.56,1.75,48/48,15994.4,discarded: includes the LTX speed test (59.7 s extra)
+2026-11-14,0.12.3 hotfix,9801a766 Linux AMD release build,Radeon AI PRO R9700,M284 1080p30 (449 frames),"LTX Standard (2 steps), full VAE",warm-up,77.2,61.6,8.3,182.8,14.6,25.3,13.5,1.45,1.56,1.77,48/48,15994.4,discarded
+2026-11-14,0.12.3,v0.12.3 Linux AMD release,Radeon AI PRO R9700,M284 1080p30 (449 frames),"LTX Standard (2 steps), full VAE",A1,81.1,60.9,3.8,188.4,18.6,25.1,13.3,1.44,1.56,1.75,48/48,15994.4,
+2026-11-14,0.12.3 hotfix,9801a766 Linux AMD release build,Radeon AI PRO R9700,M284 1080p30 (449 frames),"LTX Standard (2 steps), full VAE",B1,76.8,61.8,6.0,193.5,16.9,25.2,13.7,1.46,1.56,1.87,48/48,15994.4,
+2026-11-14,0.12.3 hotfix,9801a766 Linux AMD release build,Radeon AI PRO R9700,M284 1080p30 (449 frames),"LTX Standard (2 steps), full VAE",B2,75.3,61.0,3.7,193.7,18.8,25.1,13.4,1.45,1.56,1.75,48/48,15994.4,
+2026-11-14,0.12.3,v0.12.3 Linux AMD release,Radeon AI PRO R9700,M284 1080p30 (449 frames),"LTX Standard (2 steps), full VAE",A2,86.2,61.3,3.7,192.4,18.9,25.3,13.4,1.45,1.56,1.75,48/48,15994.4,
+2026-11-14,0.12.3,v0.12.3 Linux AMD release,Radeon AI PRO R9700,S610 1080p (6056 frames),"LTX Standard (2 steps), full VAE",A1,1005.6,990.9,36.4,172.7,215.4,487.7,251.4,1.51,1.76,1.71,48/48,15994.4,143 windows
+2026-11-14,0.12.3 hotfix,9801a766 Linux AMD release build,Radeon AI PRO R9700,S610 1080p (6056 frames),"LTX Standard (2 steps), full VAE",B1,1018.1,1003.3,36.6,171.6,218.3,490.8,257.6,1.51,1.76,1.75,48/48,15994.4,144 windows
+2026-11-14,0.12.3,v0.12.3 Linux AMD release,Radeon AI PRO R9700,S610 1080p (6056 frames),"LTX Standard (2 steps), full VAE",A2,1019.3,1004.5,37.1,169.4,216.8,490.9,259.7,1.51,1.76,1.73,48/48,15994.4,144 windows
+2026-11-14,0.12.3 hotfix,9801a766 Linux AMD release build,Radeon AI PRO R9700,S610 1080p (6056 frames),"LTX Standard (2 steps), full VAE",B2,1013.5,998.6,36.5,172.5,217.3,488.8,256.1,1.52,1.76,1.76,48/48,15994.4,143 windows
