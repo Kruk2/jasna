@@ -40,7 +40,14 @@ from jasna.ltx import speed
 from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
 from jasna.ltx.compose import Candidate, composite_frame, crop_to_canvas
 from jasna.ltx.model_files import LtxModelFiles
-from jasna.ltx.inference import ModelRuntime, PendingReply, WorkerDecoder, WorkerEncoder, WorkerTransformer
+from jasna.ltx.inference import (
+    GPU_WINDOWS_MIN_FREE_BYTES,
+    ModelRuntime,
+    PendingReply,
+    WorkerDecoder,
+    WorkerEncoder,
+    WorkerTransformer,
+)
 from jasna.ltx.plan import (
     LARGE_CANVAS,
     WINDOW_HOP,
@@ -94,11 +101,6 @@ GPU_DECODE_AHEAD = 16
 """Windows kept decoding or decoded ahead while they wait on the GPU (from
 ``GPU_WINDOWS_MIN_FREE_BYTES`` of budget on): enough for the decoder to work through stretches
 with few windows, where the frames run at video decode and encode speed, instead of waiting."""
-GPU_WINDOWS_MIN_FREE_BYTES = 18 << 30
-"""Decode budget from which decoded windows stay on the GPU: a window only stays there while the
-budget it was decoded with reaches this, so the ones held (~95 MB each at 512 px, ~210 MB at
-768) still leave every later decode the 14.75 GiB that decodes a 768 px window in one tile, so
-no tile layout changes, and each frame skips uploading its canvases."""
 ENCODE_AHEAD = 2
 """Filled windows an encode pass keeps encoding or queued while its frame loop fills the next
 ones; each keeps its pixels (~95 MB at 512 px) until it is encoded."""
@@ -856,8 +858,14 @@ def _send_window_decode(
     """Send one window to the worker's decoder and return, with its budget, once its result
     header is in: the worker has finished it, so the next window's budget is read while no
     decode runs there, as in this process, and goes out while this window's frames still cross
-    the pipe."""
-    free = _decode_free_bytes(budget, canvas, torch.cuda.empty_cache)
+    the pipe. A budget under ``GPU_WINDOWS_MIN_FREE_BYTES`` is read again once both processes'
+    allocators have handed their caches back, as in this process."""
+
+    def empty_caches() -> None:
+        torch.cuda.empty_cache()
+        decoder.release_cache()
+
+    free = _decode_free_bytes(budget, canvas, empty_caches)
     reply = decoder.send_window(latent, seed, free)
     reply.answered()
     return reply, free

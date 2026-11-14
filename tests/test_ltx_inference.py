@@ -341,6 +341,85 @@ def test_local_transformer_reads_device_wide_free_vram(monkeypatch):
     assert received == [inference.device_free_bytes]
 
 
+class _TwoProcessGpu:
+    """Device-wide free VRAM as both processes read it: what other work leaves (``outside``) less
+    the cache each process's allocator keeps after a decode, until that process empties it."""
+
+    window_cache = 1 << 30
+
+    def __init__(self):
+        self.outside = 0
+        self.cache = {"parent": 0, "worker": 0}
+        self.caller = "parent"
+        self.decoded_with = []
+
+    def free_bytes(self, canvas):
+        return self.outside - sum(self.cache.values())
+
+    def empty_cache(self):
+        self.cache[self.caller] = 0
+
+    def decode(self, decoder, latent, free_bytes, generator):
+        self.decoded_with.append(free_bytes)
+        self.cache[self.caller] = self.window_cache
+        return torch.zeros(1, 3, 2, 4, 4)
+
+
+class _WorkerOnGpu:
+    """``ModelRuntime`` running the worker's backend as the worker process of a ``_TwoProcessGpu``."""
+
+    def __init__(self, gpu, backend):
+        self._gpu, self._backend = gpu, backend
+
+    def request(self, op, params, tensors, advance=None):
+        self._gpu.caller = "worker"
+        try:
+            return self._backend.dispatch(op, params, tensors, lambda _n: None)
+        finally:
+            self._gpu.caller = "parent"
+
+    def send(self, op, params, tensors):
+        return AnsweredReply(self.request(op, params, tensors)[1])
+
+
+def test_worker_decodes_pick_the_layouts_of_local_decodes_while_the_worker_keeps_a_roomy_cache(
+        monkeypatch, allocator):
+    """After a roomy decode the worker keeps its allocator cache; a later reading under
+    ``GPU_WINDOWS_MIN_FREE_BYTES`` has it released before reading again, as a local decode
+    empties this process's cache. From that budget on every layout is the one of unlimited
+    memory, so budgets are compared up to it."""
+    gib = 1 << 30
+    outside = [30 * gib, int(18.5 * gib), 10 * gib, 10 * gib, 30 * gib]
+    latent = torch.zeros(1, 128, 16, 16, 16)
+
+    worker_gpu = _TwoProcessGpu()
+    monkeypatch.setattr(torch.cuda, "empty_cache", worker_gpu.empty_cache)
+    monkeypatch.setattr(inference, "decode_latent", worker_gpu.decode)
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend.decoder = object()
+    decoder = inference.WorkerDecoder(_WorkerOnGpu(worker_gpu, backend))
+    worker_caches = []
+    for free in outside:
+        worker_gpu.outside = free
+        reply, _ = restore._send_window_decode(decoder, latent, 1, 512, worker_gpu.free_bytes)
+        reply.tensors()
+        worker_caches.append(worker_gpu.cache["worker"])
+
+    local_gpu = _TwoProcessGpu()
+    monkeypatch.setattr(torch.cuda, "empty_cache", local_gpu.empty_cache)
+    monkeypatch.setattr(restore, "decode_latent", local_gpu.decode)
+    for free in outside:
+        local_gpu.outside = free
+        restore._decode_window(object(), latent, 1, 512, local_gpu.free_bytes, torch.device("cpu"))
+
+    def up_to_roomy(budgets):
+        return [min(free, restore.GPU_WINDOWS_MIN_FREE_BYTES) for free in budgets]
+
+    assert worker_caches == [1 << 30, 1 << 30, 0, 0, 1 << 30]
+    assert up_to_roomy(worker_gpu.decoded_with) == up_to_roomy(local_gpu.decoded_with)
+    assert up_to_roomy(worker_gpu.decoded_with) == [18 * gib, 18 * gib, 10 * gib, 10 * gib, 18 * gib]
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 def test_worker_decode_returns_its_vram_before_the_parent_reads_the_next_budget(monkeypatch):
     """The parent sizes the next window's decode from device-wide free VRAM, which counts the
