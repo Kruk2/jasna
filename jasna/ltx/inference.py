@@ -47,9 +47,10 @@ class WorkerEncoder:
     def __init__(self, runtime: ModelRuntime) -> None:
         self._runtime = runtime
 
-    def __call__(self, pixels: torch.Tensor) -> torch.Tensor:
-        _, tensors = self._runtime.request("encode", {}, [pixels])
-        return tensors[0]
+    def send(self, pixels: torch.Tensor) -> PendingReply:
+        """Send one window's uint8 ``[1, 3, F, S, S]`` host pixels to the worker's encoder; its latent comes
+        through the reply."""
+        return self._runtime.send("encode", {}, [pixels])
 
 
 class WorkerTransformer:

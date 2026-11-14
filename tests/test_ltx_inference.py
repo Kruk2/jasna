@@ -62,7 +62,7 @@ def test_protected_runtime_never_loads_models_in_parent(monkeypatch):
     monkeypatch.setattr(runtime, "request", request)
     monkeypatch.setattr(runtime, "send", lambda op, params, tensors: AnsweredReply(request(op, params, tensors)[1]))
     encoder = runtime.load_encoder()
-    assert encoder(pixels) is latent
+    assert encoder.send(pixels).tensors()[0] is latent
     assert runtime.load_encoder() is encoder
     runtime.unload_encoder()
     transformer = runtime.load_transformer()
