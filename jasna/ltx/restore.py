@@ -33,7 +33,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from jasna.accelerator import device_free_bytes
+from jasna.accelerator import device_free_bytes, release_blas_workspaces
 from jasna.job_resume import write_json
 from jasna.os_utils import atomic_write, scratch_folder
 from jasna.ltx import speed
@@ -1477,6 +1477,7 @@ def _restore_spans(
     finally:
         del decoder
         runtime.unload_decoder()
+        release_blas_workspaces()
     peak_vram_bytes = runtime.peak_vram_bytes()
     for line in progress.summary(profile_key, peak_vram_bytes, blocks):
         logger.info(line)

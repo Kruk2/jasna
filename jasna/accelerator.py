@@ -266,6 +266,15 @@ def empty_cache(device: torch.device | str | None = None) -> None:
             module.empty_cache()
 
 
+def release_blas_workspaces() -> None:
+    """Free the workspace cuBLAS/hipBLAS keeps for every thread handle and stream it ran on
+    (32 MiB each on an RTX 50). They stay allocated until the process ends otherwise, so passes
+    on fresh threads and streams take more VRAM after every job of a session. Only while no
+    other thread runs GPU work."""
+    if torch.cuda.is_initialized():
+        torch._C._cuda_clearCublasWorkspaces()
+
+
 def ipc_collect(device: torch.device | str) -> None:
     module = device_module(torch.device(device))
     if hasattr(module, "ipc_collect"):
