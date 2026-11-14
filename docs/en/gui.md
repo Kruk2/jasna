@@ -156,9 +156,11 @@ shared PC**, and click **Activate**:
   online instead; enter your License code again to switch to offline.
 - **Rented or shared PC**, PCs without a chip, and Linux in a container
   (Docker, distrobox) or virtual machine: Jasna uses a slot only while it runs.
-  Pick this for a PC you will wipe or give back. Jasna checks your license online while it uses supporter
-  models, so keep the PC connected. If the connection stays down, the queue
-  stops. Start it again once you are back online.
+  Pick this for a PC you will wipe or give back. Jasna checks your license online every few minutes while
+  it uses supporter models. A video that is already running always finishes, and a drop that is over
+  does no harm. The next video in the queue does not start only if the PC is still offline at that
+  moment and has been offline for more than about 10 minutes; start the queue again once you are
+  back online.
 
 Good to know:
 
