@@ -249,29 +249,27 @@ def _encoder_checkpoint(tmp_path, config=TINY_ENCODER_CONFIG):
     return path
 
 
-@pytest.mark.parametrize("backend", (KernelBackend.AMD_TRITON, KernelBackend.AMD_PREBUILT))
-def test_an_amd_encoder_is_channels_last_and_only_the_prebuilt_one_releases_the_cache(tmp_path, monkeypatch, backend):
+@pytest.mark.parametrize("triton", (True, False))
+def test_an_eager_amd_encoder_keeps_only_the_kitchen_head_channels_last(tmp_path, monkeypatch, triton):
     path = _encoder_checkpoint(tmp_path)
+    backend = KernelBackend.AMD_TRITON if triton else KernelBackend.AMD_PREBUILT
     monkeypatch.setattr(loader, "kernel_backend", lambda device: backend)
     monkeypatch.setattr(loader, "gpu_architecture", lambda device: "gfx1201")
     monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
 
-    assert all(next(layer.parameters()).is_contiguous(memory_format=torch.channels_last_3d)
-               for layer in (encoder.conv_in, *encoder.down_blocks, encoder.conv_out))
-    assert encoder.releases_cache_between_stages is (backend is KernelBackend.AMD_PREBUILT)
-
-
-def test_an_amd_gpu_without_triton_encodes_on_the_prebuilt_kernels(monkeypatch):
-    from jasna.models.ltx_vae import encoder_hip
-
-    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
-    monkeypatch.setattr(video_encoder, "kernel_backend", lambda device: KernelBackend.AMD_PREBUILT)
-
-    video_encoder.compile_video_encoder(torch.device("cpu"), torch.bfloat16)
-
-    assert video_encoder._encode_cropped is encoder_hip.encode_prebuilt
+    head = video_encoder.AMD_KITCHEN_DOWN_BLOCKS
+    def channels_last(layer):
+        return next(layer.parameters()).is_contiguous(memory_format=torch.channels_last_3d)
+    assert [channels_last(layer) for layer in (encoder.conv_in, *encoder.down_blocks, encoder.conv_out)] == (
+        [True] * (1 + head) + [triton] * (len(encoder.down_blocks) - head + 1))
+    tail = encoder.down_blocks[head]
+    sample = torch.randn(1, 3, 2, 4, 4, dtype=torch.float16).contiguous(memory_format=torch.channels_last_3d)
+    converted = video_encoder._layer_input(sample, tail)
+    tail_format = torch.channels_last_3d if triton else torch.contiguous_format
+    assert converted.dtype == torch.bfloat16 and converted.is_contiguous(memory_format=tail_format)
+    assert encoder.releases_cache_between_stages is not triton
 
 
 def _reserved_peak_of_a_larger_window_after_a_smaller_one(encoder: VideoEncoder) -> int:
