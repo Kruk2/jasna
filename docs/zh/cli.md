@@ -38,9 +38,9 @@ $env:TEMP = 'Z:\Temp'
 | `--version` | — | 打印 Jasna 版本并退出。 |
 | `--input` | — | 视频、图片或文件夹。 |
 | `--output` | — | 输出文件；当 `--input` 是文件夹时为输出文件夹。 |
-| `--output-pattern` | `{original}_out` | 文件夹输入的文件名模板。`{original}` 是输入文件名主干。图片保留源扩展名；视频在模板提供扩展名时使用该扩展名。Jasna 会在处理前检查计划输出路径，如果两个输入映射到同一个文件则报错退出。 |
+| `--output-pattern` | `{original}_out` | 文件夹任务中每个输出的名称；`{original}` 是输入文件名。 |
 | `--device` | `cuda:0` | GPU 选择。AMD 显卡通过 ROCm 也使用相同的 `cuda:N` 名称。 |
-| `--batch-size` | `4`，AMD 为 `8` | 检测批处理大小。旧版 `rfdetr-v5` 始终使用 4。 |
+| `--batch-size` | `4`，AMD 为 `8` | 检测批处理大小。 |
 | `--fp16` / `--no-fp16` | 开启 | 半精度：占用更少显存，通常更快，看不出画质损失。 |
 | `--log-level` | `error` | `debug`、`info`、`warning`、`error`。 |
 | `--no-progress` | 关闭 | 禁用进度条。 |
@@ -58,7 +58,7 @@ $env:TEMP = 'Z:\Temp'
 | `--ltx-vae-decoder` | `auto` | LTX：LTX 把结果转回视频的方式：`full`、`half` 或 `max`，同上。`auto`：`ltx-basic` 用 `max`，其他用 `full`。与应用里的 **LTX 解码器**相同。 |
 | `--ltx-seed` | `20260923` | LTX：换一个种子，结果会略有不同；同一个种子会重复同样的结果。 |
 | `--ltx-trial` / `--no-ltx-trial` | 关闭 | LTX：不需要模型和许可证即可测试速度。视频不会被修复。 |
-| `--ltx-auto-split` | — | LTX：大马赛克（达到视频高度的这个百分比，例如 `12`）用 LTX，较小的用 BasicVSR++。可用于文件夹。不能与 `--segments`、`--fmp4` 或 `--frame-generation` 一起使用。见[区间](segments.md#cli---ltx-auto-split)。 |
+| `--ltx-auto-split` | — | LTX：大马赛克（达到视频高度的这个百分比，例如 `12`）用 LTX，较小的用 BasicVSR++。可用于文件夹。不能与 `--segments`、`--fmp4`、`--frame-generation` 或 `--upscale` 一起使用。见[区间](segments.md#cli---ltx-auto-split)。 |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | 开启 | 为你的 GPU 准备 BasicVSR++：快约 3 倍，几乎不多占显存。首次运行需要 15–60 分钟。仅限 NVIDIA。见[调优](tuning.md)。 |
 | `--max-clip-size` | `90` | 一起修复的帧数。越大越稳定、越快，但占用更多显存。在显存允许的范围内用最大的值。 |
 | `--temporal-overlap` | `8` | 相邻片段共享的帧数，用于隐藏拼接处的闪烁。`8`–`20` 效果好；必须小于 `--max-clip-size` 的一半。 |
@@ -98,7 +98,7 @@ $env:TEMP = 'Z:\Temp'
 
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
-| `--upscale` | `none` | `span`（快速，NVIDIA 或 AMD）、`realplksr`（细节更多、较慢，NVIDIA 或 AMD）、`rtx-super-res`（NVIDIA）或 `dlss5`（Windows，RTX 30 或更新，首次使用时下载运行库）。见[高级处理](advanced_processing.md)。 |
+| `--upscale` | `none` | `span`（快速，NVIDIA 或 AMD）、`realplksr`（细节更多、较慢，NVIDIA 或 AMD）、`rtx-super-res`（NVIDIA）或 `dlss5`（Windows，RTX 40 或 50；RTX 30 也能用但非常慢；首次使用时下载）。见[高级处理](advanced_processing.md)。 |
 | `--upscale-height` | `2160` | `1080`、`1440` 或 `2160`。已经达到这个高度的视频不会放大。 |
 | `--upscale-strength` | `1.0` | 0–1。调低后会混入普通缩放。 |
 | `--upscale-rtx-quality` | `high` | `low`、`medium`、`high`、`ultra`。 |
@@ -144,7 +144,7 @@ $env:TEMP = 'Z:\Temp'
 | `--retarget-high-fps` | 关闭 | 每两帧保留一帧，实现 60 → 30 FPS（以及 59.94 → 29.97）。其他帧率不变；音频保持同步。不能与 `--stream` 或 `--segments` 同时使用。 |
 | `--frame-generation` | `none` | `2x` 用 NVIDIA RTX Video Frame Generation 把帧率翻倍，画面更流畅。需要 RTX 40 系列或更新的显卡。音频和时长不变。不能与 `--stream`、`--segments` 或 `--ltx-auto-split` 同时使用。 |
 | `--fmp4` | 关闭 | `.mp4`/`.mov` 输出在生成过程中即可播放，任务中断后仍可播放。不能与 `--stream`、`--segments` 或 `--ltx-auto-split` 同时使用。见[高级处理](advanced_processing.md)。 |
-| `--segments` | — | 只修复一个视频中的这些区间，单位为秒或 `mm:ss`，例如 `10-25,01:10-01:30.5`。不能与 `--stream`、`--retarget-high-fps`、`--fmp4`、`--ltx-auto-split` 或 `--frame-generation` 同时使用，也不能用于图片或文件夹输入。见[区间](segments.md)。 |
+| `--segments` | — | 只修复一个视频中的这些区间，单位为秒或 `mm:ss`，例如 `10-25,01:10-01:30.5`。不能与 `--stream`、`--retarget-high-fps`、`--fmp4`、`--ltx-auto-split`、`--frame-generation` 或 `--upscale` 同时使用，也不能用于图片或文件夹输入。见[区间](segments.md)。 |
 | `--working-directory` | 输出目录 | 临时文件和保存进度的写入位置。见[区间](segments.md)。 |
 
 ### 选择编解码器
@@ -162,8 +162,7 @@ $env:TEMP = 'Z:\Temp'
 
 ### 编码器设置
 
-`--cq` 是主要的质量设置。数值越低，质量越好，文件越大。Jasna 会把数值原样传给
-编码器（只有 AMD AV1 会乘以 5）。更换编解码器时，数值不会被换算。
+`--cq` 是主要的质量设置。数值越低，质量越好，文件越大。更换编解码器时，数值不会被换算。
 
 | GPU | H.264 默认值 | HEVC 默认值 | AV1 默认值 | 允许范围 |
 | --- | ---: | ---: | ---: | --- |
@@ -187,7 +186,8 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 不使用 `--cq` 时，`--encoder-settings` 中的 `cq=22` 仍然有效。两处同时设置 CQ 会
 报错。在 GUI 中，CQ 只能通过 CQ 控件设置，不能写在**自定义参数**中。
 
-#### NVIDIA (NVENC) 参数，所有编解码器
+<details>
+<summary>NVIDIA (NVENC) 参数，所有编解码器</summary>
 
 | 参数 | 作用 |
 | --- | ------------ |
@@ -220,7 +220,10 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 | `h264` | `profile`（`baseline`、`main`、`high` — 默认 `high`）、`coder`（`cabac`/`cavlc`） |
 | `av1` | `tier`、`tile-rows`、`tile-columns`（并行解码大分辨率画面） |
 
-#### 输出体积自动上限
+</details>
+
+<details>
+<summary>输出体积自动上限</summary>
 
 `cq` 追求固定的质量，不管源视频是怎么编码的。这样，低码率的源输出后会变大好几倍。
 为避免这种情况，Jasna 会根据源视频的码率设置 `maxrate`，并把 `bufsize` 设为它的
@@ -238,7 +241,10 @@ NVIDIA H.264 的余量更大，因为它需要更多码率来保留修复后的�
 自己设置 `maxrate` 可替换这个上限，设一个很大的值则相当于关闭。如果源没有码率信息，
 Jasna 会记录警告，并且不设上限。AMD 默认使用固定 QP，没有上限。
 
-#### AMD (AMF) 参数，所有编解码器
+</details>
+
+<details>
+<summary>AMD (AMF) 参数，所有编解码器</summary>
 
 | 参数 | 作用 |
 | --- | ------------ |
@@ -261,6 +267,8 @@ Jasna 会记录警告，并且不设上限。AMD 默认使用固定 QP，没有�
 | `hevc` | `tier`、`bitdepth`（默认 10；`8` 或 `profile=main` 输出 8-bit 视频）、`vbaq`（默认关闭） |
 | `h264` | `coder`、`bf_ref`（B 帧引用）、`pa_adaptive_mini_gop`（自适应 B 帧排列）、`vbaq`（默认关闭） |
 | `av1` | `bitdepth`（默认 10；`8` 输出 8-bit 视频）、`aq_mode`（默认关闭） |
+
+</details>
 
 ## 流媒体
 
@@ -292,7 +300,7 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 
 | 选项 | 说明 |
 | ------ | ----- |
-| `--license-code CODE` | 在 GPU 初始化之前，使用你的许可证码激活。未指定处理选项时，激活后退出。有 TPM 2.0 安全芯片的电脑之后可离线使用；否则（在 Linux 容器或虚拟机里也总是如此）Jasna 使用支持者模型时会在线核验许可证。也可以不用此选项，改为设置环境变量 `JASNA_LICENSE_CODE`，这样许可证码不会出现在命令行里；Jasna 只在尚未激活的电脑上使用它。 |
+| `--license-code CODE` | 激活后退出（同时指定 `--input` 时会继续处理）。有 TPM 2.0 芯片的电脑之后可离线使用；其他电脑在使用支持者模型时在线核验。也可以用 `JASNA_LICENSE_CODE`，这样许可证码不会出现在命令行里；Jasna 只在尚未激活的电脑上使用它。 |
 | `--online` | 与 `--license-code` 或 `JASNA_LICENSE_CODE` 一起使用：不离线使用，改为在线核验许可证。在租用或共用的电脑上使用，这样不会一直占用 3 个名额中的 1 个。 |
 | `--activation-status` | 显示 Jasna 是否已激活以及正在使用的设备及其 ID，然后退出。未激活时以 1 退出。 |
 

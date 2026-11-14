@@ -10,7 +10,7 @@
 フレームの他の部分は変わりません。まず `low` から始め、ノイズがまだ見える
 場合だけ上げてください。
 
-LTX では使われません。
+LTX では、**大きなモザイクだけ LTX** の BasicVSR++ で復元する部分にだけ使われます。
 
 ## 検出の安定化
 
@@ -99,29 +99,24 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
 
 - **SPAN**（`span`）：高速な AI 拡大。NVIDIA と AMD。NVIDIA では新しい動画サイズ
   ごとに一度だけ準備します（約30秒）。
-- **RealPLKSR**（`realplksr`）：低速ですが、細部をより残し、圧縮ノイズも取る AI 拡大。
-  NVIDIA と AMD。RTX 5090 で 1080p から 4K へ約 5 FPS なので、長い動画は時間が
-  かかります。準備には約1分かかります。
+- **RealPLKSR**（`realplksr`）：低速ですが、細部をより残し、圧縮ノイズも取ります。
+  NVIDIA と AMD。長い動画は時間がかかります。
 - **RTX Super Res**（`rtx-super-res`）：NVIDIA のみ、とても高速。先にノイズや
   ブレを取ることもできます（`--upscale-rtx-denoise`、`--upscale-rtx-deblur`）。
-- **DLSS 5**（`dlss5`、Windows と RTX 30 シリーズ以降の GPU。
-  RTX 30 は低速）：NVIDIA DLSS 5 は光や質感も描き直すため、色や肌が変わることが
-  あります。Jasna には含まれていません。初回に、非公式の DLSS 5 Visual Enhancer
-  v3.0（467 MB）を GitHub からダウンロードするか確認し、そのランタイムを
-  `model_weights/dlss5` に保存します。
-  `--upscale-dlss5-preset` で拡大モデル（`l` と `m` は質感をより多く再現）、
-  `--upscale-dlss5-style` で見た目、`--upscale-dlss5-intensity`（0〜2）で描き直しの
-  強さを選びます。
+- **DLSS 5**（`dlss5`）：Windows、RTX 40 または 50（RTX 30 でも動きますが、とても
+  遅いです）。光や肌の見え方も変えるため、色が違って見えることがあります。初回に
+  Jasna がダウンロードします（467 MB）。オプション：モデル（`--upscale-dlss5-preset`）、
+  見た目（`--upscale-dlss5-style`）、強さ（`--upscale-dlss5-intensity`、0〜2）。
 
 ```bash
 jasna --input in.mp4 --output out.mp4 --restoration-model-name ltx --upscale span --upscale-height 2160
 ```
 
 **強さ**（`--upscale-strength`、0〜1）を下げると普通の拡大が混ざり、柔らかく
-自然な見た目になります。4K はファイルが大きくなるので、Jasna はビットレートの
-上限もそれに合わせて上げます。BasicVSR++ と LTX の両方で使えます。動画全体を
-処理するため、[選択した区間](segments.md)とは併用できず、**大きなモザイクだけ LTX**
-は使われません。ストリーミングでは使えません。プレビューには表示されません。
+自然な見た目になります。BasicVSR++ と LTX の両方で使えます。動画全体を処理する
+ため、[選択した区間](segments.md)、ストリーミング、`--ltx-auto-split` とは併用
+できません。アプリでは**大きなモザイクだけ LTX** は使われません。プレビューには
+表示されません。
 
 ## エンコーダー品質とカスタム設定
 

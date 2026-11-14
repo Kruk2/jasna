@@ -40,8 +40,7 @@ Open it with the scissors button on a video in the queue.
 The editor can find the mosaic scenes for you.
 
 1. Choose a detection model and how often to check: every frame (most
-   accurate) or every 0.25–2 seconds (faster). On an RTX 5090 a scan runs at
-   about **2,000 FPS**.
+   accurate) or every 0.25–2 seconds (faster).
 2. Click **Scan video**. Found ranges show in amber on the timeline.
 3. Move the **Detection threshold** slider to change what counts as found.
 4. **Add all ranges** turns the amber ranges into purple ranges, which are
@@ -91,7 +90,7 @@ Limits:
 - On AMD, some H.264 files are encoded again in full. Only the ranges are
   restored.
 - With `--restoration-model-name ltx`, every range uses LTX.
-- Cannot be used with `--retarget-high-fps`, `--fmp4`, `--ltx-auto-split` or `--frame-generation`.
+- Cannot be used with `--retarget-high-fps`, `--fmp4`, `--ltx-auto-split`, `--frame-generation` or `--upscale`.
 
 If the input can't be used, Jasna stops with an error before it starts.
 
@@ -108,7 +107,7 @@ jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto
 The number is the mosaic size, as % of the video height. The output keeps
 the codec of the source video. If that is not `--codec`, `--cq` and
 `--encoder-settings` are not used for it. If a video can't be processed in parts, it is
-restored whole with LTX. Cannot be used with `--segments`, `--fmp4` or `--frame-generation`.
+restored whole with LTX. Cannot be used with `--segments`, `--fmp4`, `--frame-generation` or `--upscale`.
 
 ## Working Directory
 

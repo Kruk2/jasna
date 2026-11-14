@@ -7,7 +7,7 @@
 修复区域可能会有一些噪点。**降噪强度**（`--denoise low|medium|high`）只清理
 修复区域。画面的其余部分不会改变。请从 `low` 开始，噪点仍然明显时再调高。
 
-使用 LTX 时不会用到。
+使用 LTX 时，只用于**仅大马赛克用 LTX** 中由 BasicVSR++ 修复的部分。
 
 ## 检测稳定性
 
@@ -82,24 +82,21 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
 
 - **SPAN**（`span`）：快速的 AI 放大。支持 NVIDIA 和 AMD。在 NVIDIA 上，每种新的视频
   尺寸会先准备一次，约需半分钟。
-- **RealPLKSR**（`realplksr`）：较慢的 AI 放大，保留更多细节并清除压缩痕迹。支持 NVIDIA 和
-  AMD。在 RTX 5090 上从 1080p 到 4K 约 5 FPS，所以长视频需要一些时间；准备约需一分钟。
+- **RealPLKSR**（`realplksr`）：较慢，保留更多细节并清除压缩痕迹。支持 NVIDIA 和 AMD。
+  长视频需要一些时间。
 - **RTX Super Res**（`rtx-super-res`）：仅限 NVIDIA，非常快。还可以先去除噪点或模糊
   （`--upscale-rtx-denoise`、`--upscale-rtx-deblur`）。
-- **DLSS 5**（`dlss5`，需要 Windows 和 RTX 30 系列或更新的 GPU；RTX 30 较慢）：
-  NVIDIA DLSS 5 还会重绘光照和材质，所以颜色和皮肤可能改变。Jasna 不包含它：首次使用时，
-  Jasna 会询问是否从 GitHub 下载非官方的 DLSS 5 Visual Enhancer v3.0（467 MB），并把其运行库
-  保存在 `model_weights/dlss5`。`--upscale-dlss5-preset` 选择放大模型（`l` 和 `m` 重建更多纹理），
-  `--upscale-dlss5-style` 选择风格，`--upscale-dlss5-intensity`（0–2）控制重绘强度。
+- **DLSS 5**（`dlss5`）：Windows，RTX 40 或 50（RTX 30 也能用，但非常慢）。它还会改变
+  光照和皮肤，所以颜色可能看起来不同。首次使用时 Jasna 会下载它（467 MB）。选项：模型
+  （`--upscale-dlss5-preset`）、风格（`--upscale-dlss5-style`）和强度（`--upscale-dlss5-intensity`，0–2）。
 
 ```bash
 jasna --input in.mp4 --output out.mp4 --restoration-model-name ltx --upscale span --upscale-height 2160
 ```
 
-**强度**（`--upscale-strength`，0–1）调低后会混入普通缩放，画面更柔和自然。4K 需要更大的
-文件，所以 Jasna 会相应提高码率上限。BasicVSR++ 和 LTX 都可以使用。会处理整个视频，
-所以不能与[选定区间](segments.md)一起使用，并跳过**仅大马赛克用 LTX**。不支持流媒体。
-预览中不显示。
+**强度**（`--upscale-strength`，0–1）调低后会混入普通缩放，画面更柔和自然。BasicVSR++ 和
+LTX 都可以使用。会处理整个视频，所以不能与[选定区间](segments.md)、流媒体或
+`--ltx-auto-split` 一起使用；在应用中会跳过**仅大马赛克用 LTX**。预览中不显示。
 
 ## 编码器质量与自定义设置
 

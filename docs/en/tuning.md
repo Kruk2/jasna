@@ -1,8 +1,7 @@
 # Tuning VRAM and GPU Usage
 
-When VRAM gets low, Jasna moves waiting frames to system RAM and back. You
-don't need to set anything for this. The settings below change how much VRAM
-and GPU time a job uses.
+Jasna handles low VRAM by itself. The settings below change how much VRAM and
+GPU time a job uses.
 
 The clip and compilation settings are for BasicVSR++. LTX manages its memory by itself, see
 [What LTX needs](models.md#what-ltx-needs).
@@ -50,8 +49,8 @@ jasna --input input.mp4 --output output.mkv --max-clip-size 90 --temporal-overla
    [comparison](models.md#speed-and-vram-comparison)).
 3. Close other apps that use the GPU (browsers, games, video players).
 
-Cards with 4–6 GB of VRAM: start with max clip size `30` for 1080p video. 4K
-needs more.
+4 GB of VRAM: start with max clip size `30` for 1080p video. 6 GB: `90` fits.
+4K needs more.
 
 Turning off **Compile BasicVSR++** does not help: it saves less than 0.5 GB and
 makes processing about 3x slower.
