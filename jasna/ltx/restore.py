@@ -668,7 +668,9 @@ class _WindowEncodes:
     wait, ``submit`` first finishes the oldest. Pixels on the GPU are read once the frame loop's
     stream has cropped them. A window's buffer goes back once its latent is in host memory; the
     latent then goes to its store on a thread of its own, so the encoder never waits for the disk
-    (each write ends with an fsync, ~30 ms on a hard disk)."""
+    (each write ends with an fsync, ~30 ms on a hard disk). The worker's encoder gets each window's
+    host copy from the encode thread while its latent comes back on a thread of its own, so the
+    next window crosses the pipe while the worker encodes the last one."""
 
     def __init__(self, encoder, buffers: _WindowBuffers, device: torch.device, bar: _StageBar) -> None:
         self._encoder = encoder
@@ -676,6 +678,7 @@ class _WindowEncodes:
         self._device = device
         self._bar = bar
         self._thread = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxEncode")
+        self._receives = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxEncodeReceive")
         self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxLatentWrite")
         self._stream = torch.cuda.Stream(device) if device.type == "cuda" else None
         self._queued: list[tuple[Future[None], int, torch.Tensor]] = []
@@ -688,21 +691,36 @@ class _WindowEncodes:
         if window_pixels.is_cuda:
             cropped = torch.cuda.Event()
             cropped.record()
-        encode = self._thread.submit(self._encode, store, index, canvas, window_pixels, cropped)
+        if isinstance(self._encoder, WorkerEncoder):
+            sent = self._thread.submit(self._send, window_pixels, cropped)
+            encode = self._receives.submit(self._receive, sent, store, index, canvas)
+        else:
+            encode = self._thread.submit(self._encode, store, index, canvas, window_pixels, cropped)
         self._queued.append((encode, canvas, window_pixels))
+
+    def _cropped_pixels(self, window_pixels: torch.Tensor, cropped: torch.cuda.Event | None) -> torch.Tensor:
+        if cropped is not None:
+            self._stream.wait_event(cropped)
+            window_pixels.record_stream(self._stream)
+        return window_pixels
 
     def _encode(
         self, store: LatentStore, index: int, canvas: int, window_pixels: torch.Tensor, cropped: torch.cuda.Event | None
     ) -> None:
         with torch.cuda.stream(self._stream), self._bar.window(canvas), torch.inference_mode():
-            if cropped is not None:
-                self._stream.wait_event(cropped)
-                window_pixels.record_stream(self._stream)
-            pixels = (
-                window_pixels.unsqueeze(0).cpu()
-                if isinstance(self._encoder, WorkerEncoder) else _vae_pixels(window_pixels, self._device)
-            )
+            pixels = _vae_pixels(self._cropped_pixels(window_pixels, cropped), self._device)
             latent = self._encoder(pixels).cpu()
+        self._writes.append(self._writer.submit(store.put, index, latent))
+
+    def _send(self, window_pixels: torch.Tensor, cropped: torch.cuda.Event | None) -> PendingReply:
+        with torch.cuda.stream(self._stream):
+            pixels = self._cropped_pixels(window_pixels, cropped).unsqueeze(0).cpu()
+        return self._encoder.send(pixels)
+
+    def _receive(self, sent: Future[PendingReply], store: LatentStore, index: int, canvas: int) -> None:
+        reply = sent.result()
+        with self._bar.window(canvas):
+            (latent,) = reply.tensors()
         self._writes.append(self._writer.submit(store.put, index, latent))
 
     def _finish_oldest(self) -> None:
@@ -719,6 +737,8 @@ class _WindowEncodes:
 
     def close(self) -> None:
         self._thread.shutdown(cancel_futures=True)
+        # every window sent to the worker is read to its end: the replies behind it wait for that
+        self._receives.shutdown()
         self._writer.shutdown()
 
 

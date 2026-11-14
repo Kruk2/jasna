@@ -1092,6 +1092,44 @@ def test_the_frame_loop_fills_the_next_window_while_a_window_encodes(tmp_path):
     assert [store.has(index) for index in (0, 1)] == [True, True]
 
 
+class _WorkerEncodes:
+    """The worker behind a ``WorkerEncoder``: a window's latent is its pixels' first frame, read
+    once the window after it was sent."""
+
+    def __init__(self, windows: int):
+        self._sent = [threading.Event() for _ in range(windows)]
+        self.next_sent_before_latent_read: list[bool] = []
+
+    def send(self, op, params, tensors):
+        index = next(index for index, sent in enumerate(self._sent) if not sent.is_set())
+        self._sent[index].set()
+        worker, latent = self, tensors[0][:, :, 0].clone()
+
+        class Reply:
+            def answered(self):
+                pass
+
+            def tensors(self):
+                if index + 1 < len(worker._sent):
+                    worker.next_sent_before_latent_read.append(worker._sent[index + 1].wait(timeout=5))
+                return [latent]
+
+        return Reply()
+
+
+def test_the_next_window_goes_to_the_worker_while_it_encodes_the_last(tmp_path):
+    worker = _WorkerEncodes(2)
+    segment, encodes, store = _two_window_encoder(inference.WorkerEncoder(worker), tmp_path)
+    try:
+        for value in range(4):
+            segment.frame(torch.full((3, 16, 16), value, dtype=torch.uint8))
+        encodes.finish()
+    finally:
+        encodes.close()
+    assert worker.next_sent_before_latent_read == [True]
+    assert [store.get(index)[0, :, 0, 0].tolist() for index in (0, 1)] == [[0, 0, 0], [2, 2, 2]]
+
+
 def test_a_failed_window_encode_fails_the_encode_pass(tmp_path):
     def encode(pixels):
         raise RuntimeError("encode failed")
@@ -1209,9 +1247,9 @@ def test_worker_encoder_gets_host_pixels_of_a_gpu_window(tmp_path):
     sent = []
 
     class Runtime:
-        def request(self, op, params, tensors):
+        def send(self, op, params, tensors):
             sent.append(tensors[0])
-            return {}, [torch.zeros(1)]
+            return AnsweredReply([torch.zeros(1)])
 
     crop = CropFrame(crop_box=(0, 0, 8, 8), resize_hw=(8, 8), pad=(0, 0, 0, 0))
     store = restore.LatentStore(tmp_path, "reference")
