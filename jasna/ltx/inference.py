@@ -137,7 +137,7 @@ class ModelRuntime:
         self._ahead: Future[None] | None = None
         self.load_seconds: dict[str, float] = {}
         """Wall seconds of each model load (with a worker: its request, which also starts the
-        worker and checks the licence when they come first), logged as each ends."""
+        worker and checks the license when they come first), logged as each ends."""
 
     @contextmanager
     def _timed_load(self, model: str) -> Iterator[None]:
