@@ -539,6 +539,24 @@ def offload_bundle_targets(path: Path) -> set[str]:
     return targets
 
 
+class AnsweredReply:
+    """A worker reply that is already in, as ``ModelRuntime.send`` returns it."""
+
+    def __init__(self, tensors: list):
+        self._tensors = tensors
+
+    def answered(self) -> None:
+        pass
+
+    def tensors(self) -> list:
+        return self._tensors
+
+
+def answered_at_once(request):
+    """``ModelRuntime.send`` for a fake ``request(runtime, op, params, tensors)``: its reply is in at once."""
+    return lambda runtime, op, params, tensors: AnsweredReply(request(runtime, op, params, tensors)[1])
+
+
 def weight_stub(dtype, device: str = "cuda:0") -> SimpleNamespace:
     """A model weight's dtype and device, for kernel checks that look at nothing else."""
     return SimpleNamespace(dtype=dtype, device=torch.device(device))

@@ -129,7 +129,7 @@ def test_frames_take_decoded_windows_without_waiting_for_the_gpu(monkeypatch, ro
     try:
         composer = restore._SegmentComposer(
             [plan], None, SimpleNamespace(get=lambda index: torch.zeros(1)), seed=0, feather=1,
-            budget=lambda canvas: budget, device=device, bar=bar, decodes=decodes, latent_reads=decodes,
+            budget=lambda canvas: budget, device=device, bar=bar, decodes=decodes, receives=decodes, latent_reads=decodes,
             stream=torch.cuda.Stream(device), super_res=None, projector=None,
         )
         composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))
@@ -184,7 +184,7 @@ def test_composer_decodes_further_ahead_once_windows_wait_on_the_gpu(monkeypatch
     try:
         composer = restore._SegmentComposer(
             plans, None, SimpleNamespace(get=lambda index: index), seed=0, feather=1, budget=lambda canvas: 0,
-            device=device, bar=bar, decodes=decodes, latent_reads=LatentReads(), stream=torch.cuda.Stream(device),
+            device=device, bar=bar, decodes=decodes, receives=decodes, latent_reads=LatentReads(), stream=torch.cuda.Stream(device),
             super_res=None, projector=None,
         )
         composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))

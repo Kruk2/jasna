@@ -71,9 +71,24 @@ class WorkerDecoder:
     def __init__(self, runtime: ModelRuntime) -> None:
         self._runtime = runtime
 
-    def decode_window(self, latent: torch.Tensor, seed: int, free_bytes: int) -> torch.Tensor:
-        _, tensors = self._runtime.request("decode", {"seed": seed, "free_bytes": free_bytes}, [latent])
-        return tensors[0]
+    def send_window(self, latent: torch.Tensor, seed: int, free_bytes: int) -> PendingReply:
+        """Send one window to the worker's decoder; its uint8 ``[F, 3, S, S]`` frames come through the reply."""
+        return self._runtime.send("decode", {"seed": seed, "free_bytes": free_bytes}, [latent])
+
+
+class PendingReply:
+    """A request the worker answers in request order (``answered`` once its result header is in, ``tensors`` once
+    its tensors are too); a cancelled job raises ``Cancelled`` from either."""
+
+    def __init__(self, runtime: ModelRuntime, reply) -> None:
+        self._runtime = runtime
+        self._reply = reply
+
+    def answered(self) -> None:
+        self._runtime._cancellable(self._reply.answered)
+
+    def tensors(self) -> list[torch.Tensor]:
+        return self._runtime._cancellable(self._reply.result)[1]
 
 
 def worker_starts_with_job(models: frozenset[str], *, protected: bool, resuming: bool) -> bool:
@@ -118,6 +133,16 @@ class ModelRuntime:
             self._ahead.result()
 
     def request(self, op: str, params: dict, tensors: list[torch.Tensor], advance=None):
+        client = self._worker_client()
+        return self._cancellable(lambda: client.request(op, params, tensors, advance=advance))
+
+    def send(self, op: str, params: dict, tensors: list[torch.Tensor]) -> PendingReply:
+        """Send a request without waiting for its reply, so the next one can go out while this one's result still
+        crosses the pipe."""
+        client = self._worker_client()
+        return PendingReply(self, self._cancellable(lambda: client.send(op, params, tensors)))
+
+    def _worker_client(self):
         if self._client is None:
             from jasna.license_api import require_protection
 
@@ -130,10 +155,13 @@ class ModelRuntime:
                  "encoder": str(self.files.video_encoder.resolve()), "device": str(self.device)}, self.cancel
             )
         self._client.cancel = self.cancel
+        return self._client
+
+    def _cancellable(self, call: Callable):
         from jasna.protection.ltx_worker import WorkerCancelled
 
         try:
-            return self._client.request(op, params, tensors, advance=advance)
+            return call()
         except WorkerCancelled:
             from jasna.ltx.restore import Cancelled
 
@@ -238,9 +266,9 @@ class ModelRuntime:
         if self.protected:
             self._encoder = self._transformer = self._decoder = None
             self._transformer_opening = False
-            if self._client is not None:
-                self._client.close()
-                self._client = None
+            client, self._client = self._client, None
+            if client is not None:
+                client.close()
         else:
             self.unload_encoder()
             self.unload_transformer()

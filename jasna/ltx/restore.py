@@ -40,7 +40,7 @@ from jasna.ltx import speed
 from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
 from jasna.ltx.compose import Candidate, composite_frame, crop_to_canvas
 from jasna.ltx.model_files import LtxModelFiles
-from jasna.ltx.inference import ModelRuntime, WorkerDecoder, WorkerEncoder, WorkerTransformer
+from jasna.ltx.inference import ModelRuntime, PendingReply, WorkerDecoder, WorkerEncoder, WorkerTransformer
 from jasna.ltx.plan import (
     LARGE_CANVAS,
     WINDOW_HOP,
@@ -818,27 +818,49 @@ def segment_decode_budget(total_bytes: int) -> DecodeBudget:
     return next(budgets for least, budgets in SEGMENT_DECODE_BUDGETS if total_bytes >= least).__getitem__
 
 
+def _decode_free_bytes(budget: DecodeBudget, canvas: int, empty_caches: Callable[[], None]) -> int:
+    """The budget a window decodes with. Under ``GPU_WINDOWS_MIN_FREE_BYTES`` the allocators' cached
+    blocks go back to the driver first, so they count as free; from it on, freeing them (which
+    waits for the whole GPU) would change neither the tile layout nor where the window waits, so
+    they stay cached."""
+    free = budget(canvas)
+    if free < GPU_WINDOWS_MIN_FREE_BYTES:
+        empty_caches()
+        free = budget(canvas)
+    return free
+
+
+def _held_device(device: torch.device, free: int) -> torch.device:
+    """Where a decoded window waits: in host memory while its budget is under
+    ``GPU_WINDOWS_MIN_FREE_BYTES``, since a frame can need every open window of its tracks and
+    holding them on the GPU would shrink the next decode's budget; from there on on the GPU."""
+    return device if device.type == "cuda" and free >= GPU_WINDOWS_MIN_FREE_BYTES else torch.device("cpu")
+
+
 def _decode_window(
     decoder, latent: torch.Tensor, seed: int, canvas: int, budget: DecodeBudget, device: torch.device
 ) -> torch.Tensor:
-    """Decoded window as uint8 ``[F, 3, S, S]``, in host memory while the budget is under
-    ``GPU_WINDOWS_MIN_FREE_BYTES``: a frame can need every open window of its tracks, and holding
-    them on the GPU would shrink the next decode's budget. From there on it stays on the GPU.
-    Below that budget the allocator's cached blocks go back to the driver first, so they count as
-    free; from it on, freeing them (which waits for the whole GPU) would change neither the tile
-    layout nor where the window waits, so they stay cached."""
-    free = budget(canvas)
-    if free < GPU_WINDOWS_MIN_FREE_BYTES:
-        torch.cuda.empty_cache()
-        free = budget(canvas)
-    held = device if device.type == "cuda" and free >= GPU_WINDOWS_MIN_FREE_BYTES else torch.device("cpu")
-    if isinstance(decoder, WorkerDecoder):
-        return decoder.decode_window(latent, seed, free).to(held)
+    """Decoded window as uint8 ``[F, 3, S, S]``, held where ``_held_device`` says."""
+    free = _decode_free_bytes(budget, canvas, torch.cuda.empty_cache)
+    held = _held_device(device, free)
     generator = torch.Generator(device=device).manual_seed(seed)
     with torch.inference_mode():
         video = decode_latent(decoder, latent.to(device), free_bytes=free, generator=generator)
         video = ((video + 1.0) / 2.0).clamp(0.0, 1.0)[0].float()
         return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous().to(held)
+
+
+def _send_window_decode(
+    decoder: WorkerDecoder, latent: torch.Tensor, seed: int, canvas: int, budget: DecodeBudget
+) -> tuple[PendingReply, int]:
+    """Send one window to the worker's decoder and return, with its budget, once its result
+    header is in: the worker has finished it, so the next window's budget is read while no
+    decode runs there, as in this process, and goes out while this window's frames still cross
+    the pipe."""
+    free = _decode_free_bytes(budget, canvas, torch.cuda.empty_cache)
+    reply = decoder.send_window(latent, seed, free)
+    reply.answered()
+    return reply, free
 
 
 def _decode_shares(windows: list[Window]) -> dict[int, list[tuple[int, float]]]:
@@ -868,6 +890,7 @@ class _SegmentComposer:
         device: torch.device,
         bar: _StageBar,
         decodes: ThreadPoolExecutor,
+        receives: ThreadPoolExecutor,
         latent_reads: ThreadPoolExecutor,
         stream: torch.cuda.Stream | None,
         super_res: LtxSuperRes | None,
@@ -896,6 +919,7 @@ class _SegmentComposer:
         self._bar = bar
         self._frame_idx = 0
         self._decodes = decodes
+        self._receives = receives
         self._latent_reads = latent_reads
         self._stream = stream
         self._decode_order = iter(windows)
@@ -918,21 +942,47 @@ class _SegmentComposer:
                 self._budget,
                 self._device,
             )
+        return video, self._decoded_mark()
+
+    def _decoded_mark(self) -> torch.cuda.Event | None:
         if self._stream is None:
-            return video, None
+            return None
         decoded = torch.cuda.Event()
         decoded.record(self._stream)
-        return video, decoded
+        return decoded
+
+    def _send_decode(self, window: Window, latent: Future[torch.Tensor]) -> tuple[PendingReply, int]:
+        """The worker's decode of ``window`` up to its result header (``_send_window_decode``), on
+        the decode thread, so windows go out in start order."""
+        latent = latent.result()
+        with self._bar.window(window.canvas):
+            return _send_window_decode(self._decoder, latent, self._seed + window.noise, window.canvas, self._budget)
+
+    def _receive_decode(
+        self, sent: Future[tuple[PendingReply, int]]
+    ) -> tuple[torch.Tensor, torch.cuda.Event | None]:
+        """The frames of a window the worker decoded, read on a thread of their own while the next
+        window decodes there."""
+        reply, free = sent.result()
+        with torch.cuda.stream(self._stream):
+            video = reply.tensors()[0].to(_held_device(self._device, free))
+        return video, self._decoded_mark()
 
     def _decode_ahead(self) -> None:
         """Queue the next windows in start order until ``DECODE_AHEAD`` are decoding or wait
         unused, so they decode back to back while the frames before their starts are
         composited and written; ``GPU_DECODE_AHEAD`` while the last window taken waits on the GPU.
         Each latent is read from disk on a thread of its own while the windows before it decode,
-        so the decoder never waits for the disk."""
+        so the decoder never waits for the disk. The worker's decodes go out on the decode thread
+        and their frames come back on the receive thread, so the next window decodes in the worker
+        while the last one's frames cross the pipe."""
         while len(self._decoding) < self._ahead and (window := next(self._decode_order, None)) is not None:
             latent = self._latent_reads.submit(self._finals.get, window.index)
-            self._decoding[window.index] = self._decodes.submit(self._decode, window, latent)
+            if isinstance(self._decoder, WorkerDecoder):
+                sent = self._decodes.submit(self._send_decode, window, latent)
+                self._decoding[window.index] = self._receives.submit(self._receive_decode, sent)
+            else:
+                self._decoding[window.index] = self._decodes.submit(self._decode, window, latent)
 
     def _decoded_window(self, window: Window) -> torch.Tensor:
         with self._bar.waiting():
@@ -1006,6 +1056,7 @@ def compose_span(
 
     feather = feather_pixels(frame_h)
     decodes = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxDecode")
+    receives = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxDecodeReceive")
     latent_reads = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxLatentRead")
     cuda = device.type == "cuda"
     decode_stream = torch.cuda.Stream(device) if cuda else None
@@ -1013,8 +1064,8 @@ def compose_span(
         composers = [
             _SegmentComposer(
                 p, decoder, store, seed=segment.seed, feather=feather, budget=budget, device=device, bar=bar,
-                decodes=decodes, latent_reads=latent_reads, stream=decode_stream, super_res=super_res,
-                projector=projector,
+                decodes=decodes, receives=receives, latent_reads=latent_reads, stream=decode_stream,
+                super_res=super_res, projector=projector,
             )
             for p, store, segment in zip(plans, finals, span.segments)
         ]
@@ -1035,6 +1086,8 @@ def compose_span(
                 writer.close()
     finally:
         decodes.shutdown(cancel_futures=True)
+        # every window sent to the worker is read to its end: the replies behind it wait for that
+        receives.shutdown()
         latent_reads.shutdown(cancel_futures=True)
 
 
