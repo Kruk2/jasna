@@ -41,9 +41,9 @@ $env:TEMP = 'Z:\Temp'
 | `--version` | — | Jasna のバージョンを表示して終了します。 |
 | `--input` | — | 動画、画像、またはフォルダー。 |
 | `--output` | — | 出力ファイル。`--input` がフォルダーの場合は出力フォルダー。 |
-| `--output-pattern` | `{original}_out` | フォルダー入力時のファイル名テンプレート。`{original}` は入力ファイル名（拡張子なし）です。画像は元の拡張子を保持し、動画はテンプレートに拡張子があればそれを使います。Jasna は処理前に予定される出力を確認し、2 つの入力が同じファイルに対応する場合はエラーで終了します。 |
+| `--output-pattern` | `{original}_out` | フォルダー処理での各出力の名前。`{original}` は入力ファイル名です。 |
 | `--device` | `cuda:0` | GPU の選択。AMD のカードも ROCm 経由で同じ `cuda:N` の名前を使います。 |
-| `--batch-size` | `4`、AMD は `8` | 検出のバッチサイズ。旧 `rfdetr-v5` は常に 4 を使います。 |
+| `--batch-size` | `4`、AMD は `8` | 検出のバッチサイズ。 |
 | `--fp16` / `--no-fp16` | オン | 半精度計算。VRAM が減り、速くなることが多く、見た目の画質は落ちません。 |
 | `--log-level` | `error` | `debug`、`info`、`warning`、`error`。 |
 | `--no-progress` | オフ | プログレスバーを無効にします。 |
@@ -61,7 +61,7 @@ $env:TEMP = 'Z:\Temp'
 | `--ltx-vae-decoder` | `auto` | LTX：LTX の結果を動画に戻す方法。`full`、`half`、`max`（上と同じ）。`auto`: `ltx-basic` は `max`、それ以外は `full`。アプリの **LTX デコーダー**と同じです。 |
 | `--ltx-seed` | `20260923` | LTX：シードを変えると結果が少し変わります。同じシードなら同じ結果になります。 |
 | `--ltx-trial` / `--no-ltx-trial` | オフ | LTX：モデルやライセンスなしで速度を試します。動画は復元されません。 |
-| `--ltx-auto-split` | — | LTX：大きなモザイク（動画の高さのこの割合以上、例 `12`）を LTX、小さなものを BasicVSR++ で復元します。フォルダーにも使えます。`--segments`、`--fmp4`、`--frame-generation` とは併用できません。[区間](segments.md#cli---ltx-auto-split)を参照。 |
+| `--ltx-auto-split` | — | LTX：大きなモザイク（動画の高さのこの割合以上、例 `12`）を LTX、小さなものを BasicVSR++ で復元します。フォルダーにも使えます。`--segments`、`--fmp4`、`--frame-generation`、`--upscale` とは併用できません。[区間](segments.md#cli---ltx-auto-split)を参照。 |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | オン | BasicVSR++ をお使いの GPU 向けに準備します。約 3 倍速く、VRAM はほとんど増えません。初回は 15～60 分かかります。NVIDIA のみ。詳しくは[調整ガイド](tuning.md)。 |
 | `--max-clip-size` | `90` | 一度に復元するフレーム数。大きいほど安定して速くなりますが、VRAM を多く使います。収まる最大の値を使ってください。 |
 | `--temporal-overlap` | `8` | 隣り合うクリップが共有するフレーム数で、つなぎ目のちらつきを隠します。`8`～`20` が目安で、`--max-clip-size` の半分未満にしてください。 |
@@ -101,7 +101,7 @@ $env:TEMP = 'Z:\Temp'
 
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
-| `--upscale` | `none` | `span`（高速、NVIDIA・AMD）、`realplksr`（高精細・低速、NVIDIA・AMD）、`rtx-super-res`（NVIDIA）、または `dlss5`（Windows、RTX 30 以降、初回にランタイムをダウンロード）。詳しくは[高度な処理](advanced_processing.md)。 |
+| `--upscale` | `none` | `span`（高速、NVIDIA・AMD）、`realplksr`（高精細・低速、NVIDIA・AMD）、`rtx-super-res`（NVIDIA）、または `dlss5`（Windows、RTX 40 または 50。RTX 30 でも動きますがとても遅い。初回にダウンロード）。詳しくは[高度な処理](advanced_processing.md)。 |
 | `--upscale-height` | `2160` | `1080`、`1440`、`2160`。すでにこの高さ以上の動画は拡大しません。 |
 | `--upscale-strength` | `1.0` | 0〜1。下げると普通の拡大が混ざります。 |
 | `--upscale-rtx-quality` | `high` | `low`、`medium`、`high`、`ultra`。 |
@@ -147,7 +147,7 @@ Ctrl+C、エラー、アプリ終了後は、同じコマンドを実行する�
 | `--retarget-high-fps` | オフ | 1 フレームおきに残して 60 → 30 FPS（および 59.94 → 29.97）に変換。他のレートは変わらず、音声もずれません。`--stream` や `--segments` とは併用できません。 |
 | `--frame-generation` | `none` | `2x` で NVIDIA RTX Video Frame Generation によりフレームレートを 2 倍にし、動きを滑らかにします。RTX 40 シリーズ以降の GPU が必要です。音声と長さは変わりません。`--stream`、`--segments`、`--ltx-auto-split` とは併用できません。 |
 | `--fmp4` | オフ | 作成中の `.mp4` / `.mov` 出力をそのまま再生できます。中断してもファイルは再生可能なままです。`--stream`、`--segments`、`--ltx-auto-split` とは併用できません。詳しくは[高度な処理](advanced_processing.md)。 |
-| `--segments` | — | 1 本の動画のこの区間だけを復元します。秒または `mm:ss` で指定。例: `10-25,01:10-01:30.5`。`--stream`、`--retarget-high-fps`、`--fmp4`、`--ltx-auto-split`、`--frame-generation` とは併用できず、画像やフォルダーの入力にも使えません。詳しくは[区間](segments.md)。 |
+| `--segments` | — | 1 本の動画のこの区間だけを復元します。秒または `mm:ss` で指定。例: `10-25,01:10-01:30.5`。`--stream`、`--retarget-high-fps`、`--fmp4`、`--ltx-auto-split`、`--frame-generation`、`--upscale` とは併用できず、画像やフォルダーの入力にも使えません。詳しくは[区間](segments.md)。 |
 | `--working-directory` | 出力ディレクトリ | 一時ファイルと保存済み進行状況の書き込み先。詳しくは[区間](segments.md)。 |
 
 ### コーデックの選び方
@@ -168,7 +168,6 @@ Ctrl+C、エラー、アプリ終了後は、同じコマンドを実行する�
 ### エンコーダー設定
 
 `--cq` が主な品質設定です。低いほど高品質で、ファイルは大きくなります。
-Jasna は数値をそのままエンコーダーに渡します（AMD の AV1 だけは 5 倍します）。
 コーデックを変えても数値は変換されません。
 
 | GPU | H.264 デフォルト | HEVC デフォルト | AV1 デフォルト | 許容範囲 |
@@ -195,7 +194,8 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 両方で CQ を指定するとエラーになります。GUI では、CQ は CQ コントロールでのみ
 設定でき、**カスタム引数**では設定できません。
 
-#### NVIDIA（NVENC）のキー、全コーデック共通
+<details>
+<summary>NVIDIA（NVENC）のキー、全コーデック共通</summary>
 
 | キー | 説明 |
 | --- | ------------ |
@@ -228,7 +228,10 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 | `h264` | `profile`（`baseline`、`main`、`high` — デフォルト `high`）、`coder`（`cabac`/`cavlc`） |
 | `av1` | `tier`、`tile-rows`、`tile-columns`（大きなフレームのデコードを並列化） |
 
-#### 出力サイズの自動上限
+</details>
+
+<details>
+<summary>出力サイズの自動上限</summary>
 
 `cq` は、ソースがどうエンコードされていても一定の品質を狙います。そのため
 ビットレートの低いソースは、出力が数倍に大きくなってしまいます。これを防ぐため、
@@ -250,7 +253,10 @@ NVIDIA H.264 は復元したディテールを保つためにより多くのビ�
 オフになります。ソースにビットレートの情報がない場合、Jasna は警告を記録し、
 上限なしでエンコードします。AMD はデフォルトで固定 QP を使うため、上限はありません。
 
-#### AMD（AMF）のキー、全コーデック共通
+</details>
+
+<details>
+<summary>AMD（AMF）のキー、全コーデック共通</summary>
 
 | キー | 説明 |
 | --- | ------------ |
@@ -273,6 +279,8 @@ NVIDIA H.264 は復元したディテールを保つためにより多くのビ�
 | `hevc` | `tier`、`bitdepth`（デフォルト 10。`8` または `profile=main` で 8-bit 映像）、`vbaq`（デフォルトで無効） |
 | `h264` | `coder`、`bf_ref`（B フレーム参照）、`pa_adaptive_mini_gop`（適応型 B フレーム配置）、`vbaq`（デフォルトで無効） |
 | `av1` | `bitdepth`（デフォルト 10。`8` で 8-bit 映像）、`aq_mode`（デフォルトで無効） |
+
+</details>
 
 ## ストリーミング
 
@@ -305,7 +313,7 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 
 | オプション | 説明 |
 | ------ | ----- |
-| `--license-code CODE` | GPU の準備前に、ライセンスコードで有効化します。処理オプションがなければ有効化して終了します。TPM 2.0 セキュリティチップのある PC では、その後オフラインで動きます。それ以外の場合と、Linux のコンテナーや仮想マシンの中では常に、支援者向けモデルを使う間、ライセンスをオンラインで確認します。このオプションの代わりに環境変数 `JASNA_LICENSE_CODE` を設定すると、コードがコマンドラインに出ません。まだ有効化されていない PC でだけ使われます。 |
+| `--license-code CODE` | 有効化して終了します（`--input` も指定すればそのまま処理を続けます）。TPM 2.0 チップのある PC はその後オフラインで動き、それ以外は支援者向けモデルを使う間オンラインで確認します。`JASNA_LICENSE_CODE` でも指定でき、コードがコマンドラインに出ません。まだ有効化されていない PC でだけ使われます。 |
 | `--online` | `--license-code` または `JASNA_LICENSE_CODE` と一緒に使います。オフラインで使わず、ライセンスをオンラインで確認します。レンタル・共用の PC で使うと、3 台の枠を使い続けません。 |
 | `--activation-status` | 有効化されているか、使用中のデバイスとその ID を表示して終了します。有効化されていなければ 1 で終了します。 |
 

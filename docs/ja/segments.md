@@ -38,7 +38,7 @@
 エディターはモザイクのあるシーンを自動で探せます。
 
 1. 検出モデルと確認の間隔を選びます: 全フレーム（最も正確）または
-   0.25～2 秒ごと（速い）。RTX 5090 ではスキャンは約 **2,000 FPS** です。
+   0.25～2 秒ごと（速い）。
 2. **動画をスキャン**を押します。見つかった区間はタイムラインに琥珀色で
    表示されます。
 3. **検出しきい値**スライダーを動かして、見つかったとみなす基準を変えます。
@@ -90,7 +90,7 @@ Jasna は指定した区間を復元し、残りをコピーします。動画�
 - AMD では、一部の H.264 ファイルは全体を再エンコードします。復元するのは
   区間だけです。
 - `--restoration-model-name ltx` を指定すると、すべての区間が LTX を使います。
-- `--retarget-high-fps`、`--fmp4`、`--ltx-auto-split`、`--frame-generation` とは併用できません。
+- `--retarget-high-fps`、`--fmp4`、`--ltx-auto-split`、`--frame-generation`、`--upscale` とは併用できません。
 
 入力が使えない場合、Jasna は処理を始める前にエラーで止まります。
 
@@ -107,7 +107,7 @@ jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto
 数値はモザイクの大きさで、動画の高さに対する % です。出力は元動画の
 コーデックのままです。それが `--codec` と違う場合、`--cq` と `--encoder-settings`
 は使われません。一部だけを処理できない動画は、全体を LTX で復元します。
-`--segments`、`--fmp4`、`--frame-generation` とは併用できません。
+`--segments`、`--fmp4`、`--frame-generation`、`--upscale` とは併用できません。
 
 ## 作業ディレクトリ
 

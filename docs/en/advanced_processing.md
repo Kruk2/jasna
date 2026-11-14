@@ -10,7 +10,7 @@ Restored areas can have some noise. **Denoise Strength**
 frame is not changed. Start with `low`, and go higher only if the noise is
 still visible.
 
-Not used with LTX.
+With LTX it only works on the BasicVSR++ parts of **LTX only for big mosaics**.
 
 ## Detection stability
 
@@ -100,28 +100,25 @@ Videos that are already this tall are not upscaled.
 
 - **SPAN** (`span`): a fast AI upscaler. NVIDIA and AMD. On NVIDIA it is
   prepared once for each new video size, which takes about half a minute.
-- **RealPLKSR** (`realplksr`): a slower AI upscaler that keeps more fine detail
-  and cleans compression. NVIDIA and AMD. About 5 FPS from 1080p to 4K on an
-  RTX 5090, so a long video takes a while; preparing it takes about a minute.
+- **RealPLKSR** (`realplksr`): slower, keeps more fine detail and cleans
+  compression. NVIDIA and AMD. Long videos take a while.
 - **RTX Super Res** (`rtx-super-res`): NVIDIA only, very fast. It can also
   remove noise or blur first (`--upscale-rtx-denoise`, `--upscale-rtx-deblur`).
-- **DLSS 5** (`dlss5`, Windows with an RTX 30-series or newer GPU; RTX 30 is
-  slow): NVIDIA DLSS 5 also reworks lighting and surfaces, so
-  colors and skin can change. Jasna doesn't include it: the first time, Jasna
-  offers to download the unofficial DLSS 5 Visual Enhancer v3.0 (467 MB) from
-  GitHub and keeps its runtime in `model_weights/dlss5`. `--upscale-dlss5-preset` picks the upscaling model
-  (`l` and `m` rebuild more texture), `--upscale-dlss5-style` the look and
-  `--upscale-dlss5-intensity` (0–2) how strong the rework is.
+- **DLSS 5** (`dlss5`): Windows, RTX 40 or 50 (RTX 30 works but is very slow).
+  It also changes lighting and skin, so colors can look different. Jasna
+  downloads it the first time (467 MB). Options: model
+  (`--upscale-dlss5-preset`), look (`--upscale-dlss5-style`) and strength
+  (`--upscale-dlss5-intensity`, 0–2).
 
 ```bash
 jasna --input in.mp4 --output out.mp4 --restoration-model-name ltx --upscale span --upscale-height 2160
 ```
 
 **Strength** (`--upscale-strength`, 0–1) mixes in a plain resize for a softer,
-more natural look. 4K needs a bigger file, so Jasna raises its bitrate limit
-to match. Works with BasicVSR++ and LTX. The whole video is restored, so it is
-not available with [selected ranges](segments.md), and **LTX only for big
-mosaics** is skipped. Not available with streaming. The preview does not show it.
+more natural look. Works with BasicVSR++ and LTX. The whole video is restored,
+so it is not available with [selected ranges](segments.md), streaming or
+`--ltx-auto-split`; in the app, **LTX only for big mosaics** is skipped. The
+preview does not show it.
 
 ## Encoder quality and custom settings
 

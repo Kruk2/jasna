@@ -32,7 +32,6 @@
 编辑器可以帮你找出有马赛克的场景。
 
 1. 选择检测模型和检查频率：每一帧（最准确）或每 0.25–2 秒（更快）。
-   在 RTX 5090 上，扫描速度约为 **2,000 FPS**。
 2. 点击**扫描视频**。找到的区间在时间线上显示为琥珀色。
 3. 移动**检测阈值**滑块，可以改变哪些算作找到。
 4. **添加全部 N 个区间**把琥珀色区间变成紫色区间，紫色区间会被修复。
@@ -75,7 +74,7 @@ Jasna 会修复列出的区间，并复制其余部分。每个区间前后会�
   相同时，才会使用 `--cq` 和 `--encoder-settings`。
 - 在 AMD 上，部分 H.264 文件会整体重新编码。只有区间会被修复。
 - 使用 `--restoration-model-name ltx` 时，所有区间都用 LTX。
-- 不能与 `--retarget-high-fps`、`--fmp4`、`--ltx-auto-split` 或 `--frame-generation` 一起使用。
+- 不能与 `--retarget-high-fps`、`--fmp4`、`--ltx-auto-split`、`--frame-generation` 或 `--upscale` 一起使用。
 
 如果输入无法使用，Jasna 会在开始前报错停止。
 
@@ -90,7 +89,7 @@ jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto
 
 这个数字是马赛克大小，占视频高度的百分比。输出保留源视频的编解码器。如果它不是
 `--codec`，`--cq` 和 `--encoder-settings` 不会用于它。如果某个视频无法按区间处理，
-会整段用 LTX 修复。不能与 `--segments`、`--fmp4` 或 `--frame-generation` 一起使用。
+会整段用 LTX 修复。不能与 `--segments`、`--fmp4`、`--frame-generation` 或 `--upscale` 一起使用。
 
 ## 工作目录
 

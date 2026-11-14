@@ -31,14 +31,12 @@ models slowly, and it warns you at startup.
 - **▶** (start) continues a paused queue from its pending items. Finished items
   stay finished. After the queue finishes, press ▶ to process everything again
   with your current settings.
-- **Ⅱ** (pause) appears for jobs using LTX or ranges. It asks first, then keeps saved work
-  and puts the current item back to **Pending**. Press **▶** to continue.
-  If the input, settings or Jasna version changed, Jasna asks before replacing saved work;
-  **No** keeps it and skips that video. It only asks when no other video is waiting,
-  so a queue never stops on this question; otherwise it keeps the work and skips the video.
-  **Outdated Progress** (in the **Output** tab, Advanced) can always start over or always skip instead.
-- **■** (stop) is used for other jobs. They start over next time;
-  **File Conflict** decides what happens to any unfinished output.
+- **Ⅱ** pauses LTX and range jobs and keeps their progress; **▶** continues.
+  If the video, settings or Jasna version changed, Jasna asks before it starts
+  over (set a fixed answer with **Outdated Progress** in the **Output** tab,
+  Advanced view).
+- **■** stops other jobs. They start over next time; **File Conflict** decides
+  what happens to any unfinished output.
 - Closing the window while a video is processing asks first: **Minimize** keeps
   it running, **Stop and quit** ends it.
 - **Clear done** removes finished items. **Clear** removes everything.
@@ -168,16 +166,19 @@ Good to know:
 - One License code works on **3 devices at the same time**. Activating the
   same PC again does not use a new slot.
 - Reopen **Activate Jasna** to see **Devices in use**: offline PCs plus
-  devices running supporter models online right now, each with a short ID
-  (like `JT1-1a2b3c4d`), and **(this PC)** next to the one you're on. Jasna
-  checks this online.
+  devices running supporter models online right now, with **(this PC)** next
+  to the one you're on.
 - Offline PCs keep their slot. Reinstalling the system or changing the GPU,
   disk or RAM keeps it; a new motherboard or a security chip reset in the BIOS
-  counts as a new PC. If activation goes wrong, send a screenshot of the
-  **Activate Jasna** window to where you got your License code.
+  counts as a new PC.
 - Online devices count only while Jasna runs, and each open Jasna counts.
   "In use on 3 devices"? Close Jasna on another device and start again. If
   Jasna crashed or was force-closed, wait up to 15 minutes.
+
+### If activation fails
+
+- Send a screenshot of the **Activate Jasna** window to where you got your
+  License code.
 - If Jasna works online on a PC with a security chip, the activation message
   says why.
 - Linux with a security chip: Jasna asks you to run

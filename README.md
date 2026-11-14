@@ -15,7 +15,7 @@ and a command line, and runs on your GPU.
 
 **Start here**
 
-- [What Jasna does](#what-jasna-does)
+- [What Jasna can do](#what-jasna-can-do)
 - [What you need](#what-you-need)
 - [Quick start](#quick-start)
 - [Help and community](#help-and-community)
@@ -30,17 +30,23 @@ and a command line, and runs on your GPU.
 - [Licensing](#licensing)
 - [Acknowledgments](#acknowledgments)
 
-## What Jasna does
+## What Jasna can do
 
-- Finds mosaics in a video and restores them. The rest of the picture is not
-  touched.
-- Two restoration models: fast **BasicVSR++** (free) and slow but more
-  detailed **LTX** (for supporters).
-- Restores only the parts you choose, with a preview, in the **Segment
-  Editor**.
-- Works with VR180 videos and still images (SD 1.5, for supporters).
-- Lets you watch a video restored live in the **Video Player**, without making
-  a file.
+- **Restore mosaics in videos.** Only the mosaic areas change. [Quick start](#quick-start)
+- **Pick fast or detailed.** BasicVSR++ is fast and free; LTX is slower with more detail (supporters). [Choosing models](docs/en/models.md#restoration-model)
+- **Test LTX for free.** Trial mode shows how fast LTX runs on your PC. [LTX options](docs/en/models.md#ltx-options)
+- **Use LTX only where it helps.** Big mosaics get LTX, the rest BasicVSR++. [Mosaic scanning](docs/en/segments.md#mosaic-scanning)
+- **Restore only some scenes.** Choose ranges with a preview in the Segment Editor. [Segment Editor](docs/en/segments.md#segment-editor-gui)
+- **Pause and continue.** Long LTX jobs keep their progress. [Pause and continue](docs/en/models.md#pause-and-continue)
+- **Sharpen restored areas.** UNet 4x, RTX Super Res or Topaz. [Secondary restoration](docs/en/models.md#secondary-restoration)
+- **Upscale the whole video** to 1080p, 1440p or 4K. [Upscale](docs/en/advanced_processing.md#upscale-the-whole-video)
+- **Smoother motion.** Double the frame rate on RTX 40 and 50. [Frame generation](docs/en/gui.md#frame-generation)
+- **VR180 videos**, side by side or top/bottom. [VR180](docs/en/vr180.md)
+- **Still images** with SD 1.5 (supporters). [Images](docs/en/models.md#still-image-restoration-sd-15)
+- **Watch while it restores**, in the app or in a browser. [Video Player](docs/en/gui.md#video-player), [Streaming](docs/en/streaming.md)
+- **Many videos at once.** Queue, presets and an action when the queue is done. [Using the GUI](docs/en/gui.md#the-queue)
+- **Output extras.** Color LUT, sharpening, 60→30 FPS, play while it's being made. [Advanced processing](docs/en/advanced_processing.md)
+- **Command line and rented GPUs.** [CLI](docs/en/cli.md), [Cloud GPUs](docs/en/cloud.md)
 
 ## What you need
 
@@ -61,8 +67,8 @@ and a command line, and runs on your GPU.
 - Disk format: NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux. Network disks
   are not supported. Use an SSD; on a hard disk (HDD) Jasna starts and loads
   models slowly.
-- LTX needs an NVIDIA RTX or AMD Radeon RX 7000/9000 GPU, at least 8 GB VRAM
-  and 16 GB RAM. See [What LTX needs](docs/en/models.md#what-ltx-needs).
+- LTX needs an NVIDIA RTX or AMD Radeon RX 7000/9000 GPU (AMD integrated GPUs
+  untested), at least 8 GB VRAM and 16 GB RAM. See [What LTX needs](docs/en/models.md#what-ltx-needs).
 
 | AMD GPU | Jasna | LTX |
 | --- | --- | --- |
@@ -153,59 +159,20 @@ GitHub.
 2. In Jasna, open **Activate Jasna**, enter the License code, choose
    **This is my PC** or **Rented or shared PC** and press **Activate**.
 
-One License code works on **3 devices at the same time**. To see how many are
-in use, open **Activate Jasna** again.
-
-- **PC with a TPM 2.0 security chip** (most Windows 11 PCs): after one online
-  activation, Jasna works offline. The PC keeps one of your 3 slots. Windows
-  may ask for permission once. A new motherboard or a security chip reset
-  counts as a new PC.
-- **Other PCs, rented GPUs, and Linux in a container (Docker, distrobox) or
-  virtual machine**: Jasna needs internet while it uses supporter models. A
-  device counts only while Jasna runs. See [Cloud GPUs](docs/en/cloud.md).
-- Linux with a security chip: to use it offline, run
-  `sudo usermod -aG tss $USER`, restart the PC and activate again.
-
-Coming from Jasna 0.11? Your activation carries over the first time you use a
-supporter model, and Jasna 0.11 keeps working on the same PC.
-
-Have an email and key from Jasna 0.10? They no longer work. Get a new License
-code from where you bought it.
+One License code works on **3 devices at the same time**. On your own PC with
+a TPM 2.0 security chip (most Windows 11 PCs), Jasna then works offline.
+Elsewhere it needs internet while it uses supporter models. Details and help:
+[Activate supporter models](docs/en/gui.md#activate-supporter-models). Rented
+GPU: see [Cloud GPUs](docs/en/cloud.md).
 
 ## Advanced
 
 ### How Jasna works
 
-Almost everything runs on the GPU, from reading the video to saving it.
-
-1. **Decode** the video on the GPU (NVDEC on NVIDIA, AMF on AMD).
-2. **Detect** mosaics in each frame (default model `rfdetr-v6`).
-3. **Track** each mosaic over time and group its frames into clips (up to
-   **Max Clip Size** frames). Clips end at scene cuts, so two different shots
-   are never mixed.
-4. **Restore** each clip as a 256x256 picture with BasicVSR++. Clips overlap a
-   little, so there are no visible jumps between them.
-5. Optional **secondary restoration** (UNet 4x, RTX Super Res or Topaz TVAI)
-   makes the restored picture bigger and sharper.
-6. **Blend** the restored picture back into the original frame. Only the
-   mosaic area changes.
-7. **Encode** with the GPU encoder (NVENC on NVIDIA, AMF on AMD). Audio is
-   copied (encoded again only if the output format can't hold it).
-
-On NVIDIA, the first job prepares the models for steps 2 and 4 (and UNet 4x,
-if used) for your exact GPU; on AMD, only UNet 4x. The result is saved in
-`model_weights` and used again later. You can copy it to a newer Jasna
-version.
-
-LTX works differently. It goes over the video in 4 passes: find mosaics,
-prepare, restore with a diffusion model, save. It is slower but can add more
-real detail. Its quality choices: Basic (about 1.7x faster than Standard),
-Standard (default), Good (about 1.5x slower), High (about 2.5x slower) and Top
-(about 5x slower). See
+Jasna finds each mosaic, follows it from frame to frame, restores only that
+area and puts it back. The rest of the picture is not touched. Almost
+everything runs on the GPU. LTX is slower but can add more real detail; see
 [Choosing models](docs/en/models.md#restoration-model).
-
-LTX jobs and jobs with ranges can pause and continue. See
-[Pause and continue](docs/en/models.md#pause-and-continue).
 
 ### Command line
 
@@ -248,33 +215,10 @@ jasna --input input_folder --output output_folder
 
 ### Benchmarks
 
-Time to restore a whole 3:22 video with BasicVSR++ on an RTX 5090 (Linux).
-Lower is better.
-
-| Input | Jasna v0.4.1 | Jasna v0.9.1 |
-| --- | ---: | ---: |
-| 720p H.264 | 01:35 | **00:32** (3.0x faster) |
-| 1080p H.264 | 01:46 | **00:34** (3.1x faster) |
-| 2160p H.264 | 03:23 | **01:03** (3.2x faster) |
-
-<details>
-<summary>GPU memory, older versions and how it was measured</summary>
-
-GPU memory used (typical / peak, in GB). `—` means not measured.
-
-| Input | v0.4.1 | v0.5.0 | v0.9.0 | **v0.9.1** |
-| --- | ---: | ---: | ---: | ---: |
-| 720p H.264 8-bit | 17.6/19.9 | 8.6/9.0 | 8.6/9.1 | **4.2/4.6** |
-| 1080p H.264 8-bit | 18.9/21.4 | 9.5/10.2 | 9.3/10.1 | **4.8/5.6** |
-| 2160p H.264 8-bit | 26.0/30.5 | 12.9/15.0 | 11.4/15.4 | **7.2/10.9** |
-| 8K VR HEVC 60 fps (15 s) | — | — | 17.1/18.3 | — |
-
-Times for older versions (v0.5.0: 00:45 / 00:47 / 01:22; v0.9.0: 00:34 / 00:39 / 01:15 for 720p / 1080p / 2160p; 8K VR:
-00:34), the test settings, RAM use and every codec are in the
-[full benchmark report](benchmarks/2026-07-26_release_matrix.md). Older
-full-length videos: [legacy report](benchmarks/2026-07-26_legacy_videos.md).
-
-</details>
+On an RTX 5090 (Linux), Jasna 0.9.1 restored a 3:22 1080p video with
+BasicVSR++ in 34 seconds. Test settings, GPU memory and older versions are in
+the [full benchmark report](benchmarks/2026-07-26_release_matrix.md); newer
+results are in [benchmarks](benchmarks/).
 
 ### Licensing
 

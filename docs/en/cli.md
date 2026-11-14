@@ -41,9 +41,9 @@ $env:TEMP = 'Z:\Temp'
 | `--version` | — | Print the Jasna version and exit. |
 | `--input` | — | Video, image, or folder. |
 | `--output` | — | Output file, or output folder when `--input` is a folder. |
-| `--output-pattern` | `{original}_out` | Filename template for folder input. `{original}` is the input stem. Images keep their source extension; videos use the template extension when provided. Jasna checks planned outputs before processing and errors out if two inputs map to the same file. |
+| `--output-pattern` | `{original}_out` | Name for each output in a folder job; `{original}` is the input name. |
 | `--device` | `cuda:0` | GPU selection. AMD cards use the same `cuda:N` names through ROCm. |
-| `--batch-size` | `4`, AMD `8` | Detection batch size. Legacy `rfdetr-v5` always uses 4. |
+| `--batch-size` | `4`, AMD `8` | Detection batch size. |
 | `--fp16` / `--no-fp16` | on | Half precision: less VRAM, often faster, no visible quality loss. |
 | `--log-level` | `error` | `debug`, `info`, `warning`, `error`. |
 | `--no-progress` | off | Disable the progress bar. |
@@ -61,7 +61,7 @@ $env:TEMP = 'Z:\Temp'
 | `--ltx-vae-decoder` | `auto` | LTX: how LTX turns its result back into video: `full`, `half` or `max`, as above. `auto`: `max` for `ltx-basic`, `full` for the others. Same as **LTX Decoder** in the app. |
 | `--ltx-seed` | `20260923` | LTX: another seed gives a slightly different result; the same seed repeats it. |
 | `--ltx-trial` / `--no-ltx-trial` | off | LTX: test the speed without the model or a license. The video is not restored. |
-| `--ltx-auto-split` | — | LTX: big mosaics (at least this percent of the video height, e.g. `12`) with LTX, smaller ones with BasicVSR++. Works on folders. Cannot be combined with `--segments`, `--fmp4` or `--frame-generation`. See [Segments](segments.md#cli---ltx-auto-split). |
+| `--ltx-auto-split` | — | LTX: big mosaics (at least this percent of the video height, e.g. `12`) with LTX, smaller ones with BasicVSR++. Works on folders. Cannot be combined with `--segments`, `--fmp4`, `--frame-generation` or `--upscale`. See [Segments](segments.md#cli---ltx-auto-split). |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | on | Prepares BasicVSR++ for your GPU: about 3x faster, almost no extra VRAM. The first run takes 15–60 minutes. NVIDIA only. See [Tuning](tuning.md). |
 | `--max-clip-size` | `90` | Frames restored together. Bigger is steadier and faster but uses more VRAM. Use the biggest that fits. |
 | `--temporal-overlap` | `8` | Frames shared by neighboring clips, to hide flicker where they meet. `8`–`20` works well; must be less than half of `--max-clip-size`. |
@@ -101,7 +101,7 @@ The `--ltx-*` options need `--restoration-model-name ltx-basic`, `ltx`, `ltx-4st
 
 | Option | Default | Notes |
 | ------ | ------- | ----- |
-| `--upscale` | `none` | `span` (fast, NVIDIA or AMD), `realplksr` (more detail, slower, NVIDIA or AMD), `rtx-super-res` (NVIDIA) or `dlss5` (Windows, RTX 30 or newer, runtime downloaded on first use). See [Advanced processing](advanced_processing.md#upscale-the-whole-video). |
+| `--upscale` | `none` | `span` (fast, NVIDIA or AMD), `realplksr` (more detail, slower, NVIDIA or AMD), `rtx-super-res` (NVIDIA) or `dlss5` (Windows, RTX 40 or 50; RTX 30 works but is very slow; downloaded on first use). See [Advanced processing](advanced_processing.md#upscale-the-whole-video). |
 | `--upscale-height` | `2160` | `1080`, `1440` or `2160`. Videos already this tall are not upscaled. |
 | `--upscale-strength` | `1.0` | 0–1. Lower mixes in a plain resize. |
 | `--upscale-rtx-quality` | `high` | `low`, `medium`, `high`, `ultra`. |
@@ -147,7 +147,7 @@ continue an LTX job or a job with `--segments` from saved work. See [Pause and c
 | `--retarget-high-fps` | off | 60 → 30 FPS (and 59.94 → 29.97) by keeping every second frame. Other rates unchanged; audio stays in sync. Not available with `--stream` or `--segments`. |
 | `--frame-generation` | `none` | `2x` doubles the frame rate for smoother motion with NVIDIA RTX Video Frame Generation. Needs an RTX 40-series or newer GPU. Audio and length stay the same. Not available with `--stream`, `--segments` or `--ltx-auto-split`. |
 | `--fmp4` | off | Play `.mp4`/`.mov` output while it is still being made; it also survives an interrupted job. Not available with `--stream`, `--segments` or `--ltx-auto-split`. See [Advanced processing](advanced_processing.md). |
-| `--segments` | — | Restore only these ranges of one video, in seconds or `mm:ss`, e.g. `10-25,01:10-01:30.5`. Cannot be combined with `--stream`, `--retarget-high-fps`, `--fmp4`, `--ltx-auto-split` or `--frame-generation`, or with image or folder input. See [Segments](segments.md). |
+| `--segments` | — | Restore only these ranges of one video, in seconds or `mm:ss`, e.g. `10-25,01:10-01:30.5`. Cannot be combined with `--stream`, `--retarget-high-fps`, `--fmp4`, `--ltx-auto-split`, `--frame-generation` or `--upscale`, or with image or folder input. See [Segments](segments.md). |
 | `--working-directory` | output dir | Where temporary files and saved progress are written. See [Segments](segments.md). |
 
 ### Choosing a codec
@@ -166,8 +166,7 @@ when `--codec` (default `hevc`) is the input codec.
 ### Encoder settings
 
 `--cq` is the main quality setting. Lower means better quality and a bigger
-file. Jasna sends the number to the encoder as it is (only AMD AV1 multiplies
-it by 5). When you change the codec, the number is not converted.
+file. When you change the codec, the number is not converted.
 
 | GPU | H.264 default | HEVC default | AV1 default | Accepted range |
 | --- | ---: | ---: | ---: | --- |
@@ -193,7 +192,8 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 Setting CQ in both places is an error. In the GUI, CQ can be set only with the
 CQ control, not in **Custom Args**.
 
-#### NVIDIA (NVENC) keys, all codecs
+<details>
+<summary>NVIDIA (NVENC) keys, all codecs</summary>
 
 | Key | What it does |
 | --- | ------------ |
@@ -226,7 +226,10 @@ Per-codec extras:
 | `h264` | `profile` (`baseline`, `main`, `high` — default `high`), `coder` (`cabac`/`cavlc`) |
 | `av1` | `tier`, `tile-rows`, `tile-columns` (parallelize decode of large frames) |
 
-#### Automatic output size ceiling
+</details>
+
+<details>
+<summary>Automatic output size ceiling</summary>
 
 `cq` aims for a fixed quality, no matter how the source was encoded. A source
 with low bitrate would then come out several times bigger. To stop that, Jasna
@@ -248,7 +251,10 @@ Set your own `maxrate` to replace the limit, or a very high one to turn it off.
 If the source has no bitrate information, Jasna logs a warning and uses no
 limit. AMD uses constant QP by default and has no limit.
 
-#### AMD (AMF) keys, all codecs
+</details>
+
+<details>
+<summary>AMD (AMF) keys, all codecs</summary>
 
 | Key | What it does |
 | --- | ------------ |
@@ -271,6 +277,8 @@ Per-codec extras:
 | `hevc` | `tier`, `bitdepth` (default 10; `8` or `profile=main` gives 8-bit video), `vbaq` (off by default) |
 | `h264` | `coder`, `bf_ref` (B-frame references), `pa_adaptive_mini_gop` (adaptive B-frame placement), `vbaq` (off by default) |
 | `av1` | `bitdepth` (default 10; `8` gives 8-bit video), `aq_mode` (off by default) |
+
+</details>
 
 ## Streaming
 
@@ -303,7 +311,7 @@ To replace the file, use a script with a temporary file. `ffmpeg` must be on
 
 | Option | Notes |
 | ------ | ----- |
-| `--license-code CODE` | Activate with your License code before GPU setup. With no processing options, activate and exit. On a PC with a TPM 2.0 security chip, Jasna then works offline; otherwise, and always in a Linux container or virtual machine, it checks the license online while it uses supporter models. Instead of this option you can set the `JASNA_LICENSE_CODE` environment variable, so the code doesn't show in the command line; Jasna uses it only on a PC that is not activated yet. |
+| `--license-code CODE` | Activate, then exit (or keep going if you also give `--input`). PCs with a TPM 2.0 chip then work offline; others check online while supporter models run. `JASNA_LICENSE_CODE` works too and keeps the code out of the command line; Jasna uses it only on a PC that is not activated yet. |
 | `--online` | With `--license-code` or `JASNA_LICENSE_CODE`: check the license online instead of working offline. Use it on rented or shared PCs, so they never keep one of your 3 devices. |
 | `--activation-status` | Show whether Jasna is activated and which of your devices are in use, then exit. Exits with 1 when Jasna is not activated. |
 

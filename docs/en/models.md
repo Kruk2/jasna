@@ -16,14 +16,13 @@ The detection model finds the mosaics in each frame.
 - **`rfdetr-vr-v1`** (included): best for VR180 videos.
 - **`zelefans-vr-yolo-v2`** (separate download): another VR180 model.
 - **Lada YOLO** models: can be better for 2D animation.
-- The old `rfdetr-v5` still works.
 
 On AMD, RF-DETR is slower than on NVIDIA. If speed is more important than
 detection quality, use `lada-yolo-v4`.
 
-Each model has its own default detection threshold (`rfdetr-v6`: 0.35,
-`rfdetr-v6-large` and `rfdetr-vr-v1`: 0.40). Change it with **Detection
-Threshold** in the **Detection** tab, or with `--detection-score-threshold`.
+Each model uses its own best threshold. Lower **Detection Threshold** (in the
+**Detection** tab, or `--detection-score-threshold`) if mosaics are missed;
+raise it if normal areas get restored.
 
 ```bash
 jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
@@ -136,7 +135,8 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
   **Top Quality**. Basic Quality is about 1.7x faster than Standard Quality and slightly softer. Good Quality has a bit more detail and is
   about 1.5x slower. High Quality has more detail and is about 2.5x slower. Top Quality is
   slightly better than High Quality and about 5x slower; it is rarely worth it. On an RTX 5090,
-  Standard Quality takes about 1-2x the video's length. CLI: `--restoration-model-name ltx-basic` (Basic), `ltx` (Standard),
+  Standard Quality takes about 1-2x the video's length. Basic and Top Quality show in the
+  **Advanced** view. CLI: `--restoration-model-name ltx-basic` (Basic), `ltx` (Standard),
   `ltx-4step` (Good), `ltx-8step` (High) or `ltx-undistilled` (Top).
 - **Fast mode** (RTX 50-series only): about 1.4x faster, slightly less detail,
   smaller download. CLI: `--ltx-fast`.
@@ -156,11 +156,9 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
 - **LTX only for big mosaics**: big mosaics get LTX, the rest the faster
   BasicVSR++. Saves a lot of time on long videos. See
   [Restoring only parts of a video](segments.md#cli---ltx-auto-split).
-- **LTX Encoder** and **LTX Decoder** (**Expert** view): **Full** is the sharpest and slowest,
-  **Half** is faster, **Max** is the fastest and a little softer. **Auto** (default) uses the Half
-  encoder and Max decoder for Basic Quality, Full for the others. Pick Full for both if Basic
-  Quality looks too soft. A choice you don't have yet is downloaded when
-  you press Start. CLI: `--ltx-vae-encoder` and `--ltx-vae-decoder`.
+- **LTX Encoder** and **LTX Decoder** (**Expert** view): leave them on **Auto**. **Max** is
+  faster but a little softer. If Basic Quality looks too soft, set both to **Full**. Another
+  choice is downloaded when you press Start. CLI: `--ltx-vae-encoder` and `--ltx-vae-decoder`.
 
 To preview LTX, open the [Segment Editor](segments.md), select a range,
 choose LTX and turn on **Restore preview**. The Video Player always uses
@@ -182,10 +180,7 @@ about 5x slower. With **Sharper large mosaics** on, large mosaics take about 2.5
 | RTX 2080 Ti | about 10 min | not available |
 
 - The first LTX run takes longer while Jasna prepares it for your GPU.
-- Progress shows four steps: finding mosaics, preparing, restoring, saving.
-  The first LTX video on your GPU, and the first after each update, starts
-  with a short speed test. After that, the time left is accurate from the end
-  of step 1.
+- Progress shows four steps. The time left gets accurate after the first one.
 - LTX slows down when other apps use the GPU. Close games and browsers.
 - **Windows**: LTX fails with "Access is denied" while Windhawk runs inside
   Jasna. Exit Windhawk or add `jasna.exe` to its excluded processes. Jasna
