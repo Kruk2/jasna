@@ -183,7 +183,7 @@ class ModelRuntime:
         self._wait_ahead()
         if self._transformer is None:
             if self.protected:
-                info, _ = self.request("load_transformer", {"free_bytes": device_free_bytes(self.device)}, [])
+                info, _ = self.request("load_transformer", {"free_bytes": self._free_bytes_for_worker()}, [])
                 self._transformer = WorkerTransformer(self, info)
                 self._transformer_opening = False
             else:
@@ -191,6 +191,12 @@ class ModelRuntime:
                 self._transformer = LtxTransformer(source or TransformerSource(self.files.transformer), self.device,
                                                    device_free_bytes)
         return self._transformer
+
+    def _free_bytes_for_worker(self) -> int:
+        """Device-wide free VRAM once this process's allocator has handed back its cached blocks
+        (an encode pass's window pixels): only this process could reuse them, not the worker."""
+        torch.cuda.empty_cache()
+        return device_free_bytes(self.device)
 
     def unload_transformer(self) -> None:
         if self._transformer is not None:

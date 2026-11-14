@@ -355,6 +355,34 @@ def test_worker_decode_returns_its_vram_before_the_parent_reads_the_next_budget(
     assert torch.cuda.memory_reserved(device) == reserved
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_parent_returns_its_cached_vram_before_the_worker_sizes_the_resident_blocks(monkeypatch):
+    """The worker cannot use the blocks this process's allocator keeps cached (an encode pass's
+    window pixels), so they must not shrink the free VRAM the resident blocks are sized from."""
+    device = torch.device("cuda")
+    reserved_at_load = []
+
+    class Client:
+        def __init__(self, config, cancel):
+            pass
+
+        def request(self, op, params, tensors, advance=None):
+            if op == "load_transformer":
+                reserved_at_load.append(torch.cuda.memory_reserved(device))
+                return {"steps": 4, "resident": 36, "count": 48}, []
+            return {}, []
+
+    monkeypatch.setattr(license_api, "require_protection", lambda: None)
+    monkeypatch.setitem(sys.modules, "jasna.protection.ltx_worker", SimpleNamespace(WorkerClient=Client, WorkerCancelled=RuntimeError))
+    runtime = inference.ModelRuntime(_files(".enc"), device, threading.Event())
+    torch.cuda.empty_cache()
+    reserved = torch.cuda.memory_reserved(device)
+    window_pixels = torch.empty((3, 121, 512, 512), dtype=torch.uint8, device=device)
+    del window_pixels
+    runtime.load_transformer()
+    assert reserved_at_load == [reserved]
+
+
 def test_worker_opens_the_transformer_file_ahead_on_its_own_thread(monkeypatch, allocator):
     """``prepare_transformer`` runs while the encoder holds the GPU: the file is opened on another
     thread and the later load takes that source instead of opening the file again."""

@@ -1106,6 +1106,37 @@ def test_window_buffers_stay_on_the_gpu_up_to_their_budget():
     assert buffers.take(8) is taken[0]
 
 
+@_NEEDS_CUDA
+def test_consecutive_jobs_hold_no_more_gpu_memory_than_the_first(fakes, monkeypatch, tmp_path):
+    """cuBLAS keeps a workspace (32 MiB on an RTX 50) for every thread and stream it ran on until
+    the process ends: passes on fresh threads and streams left more VRAM taken after every job of
+    a session, and its later jobs kept fewer transformer blocks resident."""
+    device = torch.device("cuda", 0)
+    weights = torch.ones(64, 64, device=device)
+
+    def on_gpu(result):
+        torch.mm(weights, weights)
+        return result
+
+    monkeypatch.setattr(inference, "load_video_encoder", lambda path, device, encoder: lambda pixels: on_gpu(torch.zeros(1)))
+    monkeypatch.setattr(restore, "decode_latent", lambda decoder, latent, free_bytes, generator: on_gpu(
+        torch.zeros(1, 3, restore.WINDOW_FRAMES, 2, 2, device=device)))
+    monkeypatch.setattr(restore, "composite_frame", lambda source, candidates, *, feather, projector: on_gpu(source))
+    render = replace(_render(tmp_path), device=device, budget=restore.free_vram_budget(device))
+    video = [(frame.to(device), pts) for frame, pts in _video(30, range(3, 28))]
+    allocated = []
+    for _job in range(3):
+        restore.restore_spans(
+            [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)],
+            render, work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
+            progress=restore.Progress(30, disable=True, report=None), cancel=threading.Event(),
+            runtime=inference.ModelRuntime(FILES, device, threading.Event()),
+        )
+        torch.cuda.synchronize(device)
+        allocated.append(torch.cuda.memory_allocated(device))
+    assert allocated[2] == allocated[1] == allocated[0]
+
+
 @pytest.mark.parametrize(("device", "free_gib", "expected_gib"), [("cuda", 32, 22), ("cuda", 8, 0), ("cpu", 32, 0)])
 def test_encode_keeps_window_pixels_on_the_gpu_beyond_a_reserve(monkeypatch, device, free_gib, expected_gib):
     monkeypatch.setattr(restore, "device_free_bytes", lambda device: free_gib << 30)
