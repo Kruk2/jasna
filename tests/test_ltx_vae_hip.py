@@ -1,10 +1,10 @@
-"""The ahead-of-time AMD VAE kernels (``na_hip``, ``diffusion_hip``, ``encoder_hip``) and their routing; no GPU needed."""
+"""The ahead-of-time AMD decoder kernels (``na_hip``, ``diffusion_hip``) and their routing; no GPU needed."""
 
 import pytest
 import torch
 
 from jasna.accelerator import HIP_KERNEL_ARCHITECTURES
-from jasna.models.ltx_vae import diffusion_hip, encoder_hip, encoder_hip_launch, na_hip
+from jasna.models.ltx_vae import diffusion_hip, layout_hip, na_hip
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
 
@@ -12,23 +12,9 @@ from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
 def test_the_launch_table_has_every_kernel_the_launchers_launch():
     launched = {*map(na_hip.module_name, na_hip.WINDOWS), *(m for d in T.FUSED_MLP_DIMS for m in diffusion_hip.swiglu_modules(d)),
                 diffusion_hip.PROJ_RESIDUAL_MODULE, diffusion_hip.CONTEXT_ADD_MODULE,
-                *map(diffusion_hip.qkv_module, T.FUSED_QKV_DIMS)}
+                *map(diffusion_hip.qkv_module, T.FUSED_QKV_DIMS), layout_hip.MODULE}
 
     assert all(set(kernels) == launched for kernels in KERNEL_LAUNCH.values())
-
-
-def test_the_encoder_launch_table_has_every_kernel_on_every_decoder_architecture():
-    launched = {*(encoder_hip.norm_pad_module(*build) for build in encoder_hip.NORM_PAD_BUILDS),
-                *map(encoder_hip.downsample_module, encoder_hip.DOWNSAMPLE_WIDTHS)}
-
-    assert set(encoder_hip_launch.KERNEL_LAUNCH) == set(KERNEL_LAUNCH)
-    assert all(set(kernels) == launched for kernels in encoder_hip_launch.KERNEL_LAUNCH.values())
-
-
-def test_a_residual_must_match_the_layer_output():
-    x = torch.zeros(1, 256, 2, 3, 3, dtype=torch.bfloat16)
-    with pytest.raises(ValueError, match="residual must match"):
-        encoder_hip.norm_pad(x, torch.bfloat16, lead=2, pad=0, norm=True, residual=x.half())
 
 
 def test_a_model_runs_the_kernels_it_was_given_and_others_keep_the_torch_code():
@@ -82,6 +68,13 @@ def test_rejects_inputs_the_kernel_was_not_built_for():
         na_hip.na3d(q, q, q, [3, 3, 3], 0)
     with pytest.raises(ValueError, match="head dim 64"):
         na_hip.na3d(q.half(), q.half(), q.half(), [3, 3, 3], 0)
+
+
+def test_the_channels_first_copy_takes_only_channels_last_fp16():
+    with pytest.raises(ValueError, match="channels-last 3D fp16"):
+        layout_hip.channels_first_bf16(torch.zeros(1, 4, 2, 3, 3, dtype=torch.float16))
+    with pytest.raises(ValueError, match="channels-last 3D fp16"):
+        layout_hip.channels_first_bf16(torch.zeros(1, 4, 2, 3, 3).contiguous(memory_format=torch.channels_last_3d))
 
 
 @pytest.mark.parametrize("architecture", sorted(HIP_KERNEL_ARCHITECTURES))

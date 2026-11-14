@@ -135,13 +135,13 @@ def test_a_user_miopen_system_database_wins(monkeypatch, tmp_path, sdpa_switches
 
 
 @pytest.mark.parametrize("triton", [True, False])
-def test_miopen_runs_channels_last_convs_natively_with_or_without_triton(monkeypatch, sdpa_switches, triton):
+def test_miopen_runs_channels_last_convs_natively_only_where_they_compile(monkeypatch, sdpa_switches, triton):
     monkeypatch.setattr(torch.version, "hip", "7.2")
     monkeypatch.setenv("PYTORCH_MIOPEN_SUGGEST_NHWC", "restored after the test")
     monkeypatch.delenv("PYTORCH_MIOPEN_SUGGEST_NHWC")
     monkeypatch.setattr(accelerator, "has_triton", lambda: triton)
     configure_rocm_process_env()
-    assert os.environ.get("PYTORCH_MIOPEN_SUGGEST_NHWC") == "1"
+    assert os.environ.get("PYTORCH_MIOPEN_SUGGEST_NHWC") == ("1" if triton else None)
 
 
 def test_process_env_is_left_alone_off_rocm_including_the_channels_last_convs(monkeypatch):
