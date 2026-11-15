@@ -1,4 +1,4 @@
-"""Compile TensorRT engines in a subprocess to guarantee full VRAM release."""
+"""Compile TensorRT engines in a subprocess to guarantee full VRAM release; UNet 4x compiles in this process."""
 from __future__ import annotations
 
 import json
@@ -6,7 +6,7 @@ import logging
 import subprocess
 import sys
 import typing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from jasna._frozen import is_frozen
@@ -173,15 +173,39 @@ def ensure_engines_compiled(
     if not any(missing):
         return result
 
-    logger.info("Spawning GPU model compilation subprocess...")
-    start_msg = "Compiling TensorRT engines (this may take several minutes)..."
-    # The frozen GUI drops its console (FreeConsole), leaving stdout invalid — an
-    # unconditional print() there raises WinError 6. Print only on the CLI (no callback).
-    if log_callback:
-        log_callback(start_msg)
-    else:
-        print(start_msg)
+    _show("Compiling TensorRT engines (this may take several minutes)...", log_callback)
+    if any(missing._replace(unet4x=False)):
+        _run_compiler_subprocess(replace(req, unet4x=False), log_callback)
+        if req.basicvsrpp and nvidia:
+            result.use_basicvsrpp_tensorrt = all_basicvsrpp_sub_engines_exist(
+                req.basicvsrpp_model_path, req.fp16
+            )
 
+    if missing.unet4x:
+        # In this process: a compiler subprocess would need its own license check, which online activation counts
+        # as another device.
+        from jasna.restorer.unet4x_secondary_restorer import compile_unet4x_engine
+        _show("Compiling Unet4x engine...", log_callback)
+        compile_unet4x_engine(device, fp16=req.fp16)
+        _show("Unet4x engine compiled.", log_callback)
+
+    return result
+
+
+def _show(message: str, log_callback: typing.Callable[[str], None] | None) -> None:
+    """The frozen GUI drops its console (FreeConsole), leaving stdout invalid — an unconditional print() there
+    raises WinError 6. Print only on the CLI (no callback)."""
+    if log_callback:
+        log_callback(message)
+    else:
+        print(message)
+
+
+def _run_compiler_subprocess(
+    req: EngineCompilationRequest,
+    log_callback: typing.Callable[[str], None] | None,
+) -> None:
+    logger.info("Spawning GPU model compilation subprocess...")
     frozen = is_frozen()
     if frozen:
         cmd = [get_application_executable(), "--compile-engines", req.to_json()]
@@ -203,22 +227,12 @@ def ensure_engines_compiled(
     for line in proc.stdout:
         line = line.rstrip("\n\r")
         if line:
-            if log_callback:
-                log_callback(line)
-            else:
-                print(line)
+            _show(line, log_callback)
             logger.debug("[compiler] %s", line)
     returncode = proc.wait(timeout=_TIMEOUT_SECONDS)
 
     if returncode != 0:
         raise RuntimeError(f"Engine compilation subprocess failed (exit code {returncode})")
-
-    if req.basicvsrpp and nvidia:
-        result.use_basicvsrpp_tensorrt = all_basicvsrpp_sub_engines_exist(
-            req.basicvsrpp_model_path, req.fp16
-        )
-
-    return result
 
 
 def _subprocess_compile(req: EngineCompilationRequest) -> None:
@@ -260,12 +274,6 @@ def _subprocess_compile(req: EngineCompilationRequest) -> None:
             fp16=req.fp16,
         )
         print("Detection engine compiled.")
-
-    if missing.unet4x:
-        from jasna.restorer.unet4x_secondary_restorer import compile_unet4x_engine
-        print("Compiling Unet4x engine...")
-        compile_unet4x_engine(device, fp16=req.fp16)
-        print("Unet4x engine compiled.")
 
     for width, height in missing.upscale_input_sizes:
         from jasna.upscale.network import UPSCALE_NETWORKS, compile_network_engine

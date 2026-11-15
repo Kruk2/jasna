@@ -368,6 +368,82 @@ def test_a_stale_encrypted_unet4x_engine_counts_as_missing(monkeypatch, tmp_path
     assert _unet4x_engine_exists(fp16=True) is False
 
 
+@pytest.fixture
+def unet4x_licensed_in_this_process_only(monkeypatch, tmp_path: Path) -> Path:
+    """An encrypted UNet 4x whose license opens it in this process, while a compiler subprocess's own check finds
+    every device slot taken (online activation, #762). Returns the encrypted engine path."""
+    pytest.importorskip("jasna.protection.protected_model")
+    import jasna.trt as trt
+    from jasna.protection import license_store, protected_model
+    from jasna.protection.lease import LeaseError
+
+    engine_path = tmp_path / "unet-4x.fp16.win.engine.enc"
+    for module in ("jasna.engine_paths", "jasna.restorer.unet4x_secondary_restorer"):
+        monkeypatch.setattr(f"{module}.UNET4X_ONNX_PATH", tmp_path / "unet-4x.onnx")
+        monkeypatch.setattr(f"{module}.get_unet4x_encrypted_engine_path", lambda fp16=True: engine_path)
+    monkeypatch.setattr(license_store, "is_licensed", lambda: True)
+    in_subprocess = []
+
+    def licensed(operation):
+        def checked(model_id, data):
+            if in_subprocess:
+                raise LeaseError("devices_full")
+            return operation(data)
+        return checked
+
+    monkeypatch.setattr(protected_model, "decrypt_model_bytes", licensed(lambda path: b"onnx"))
+    monkeypatch.setattr(protected_model, "encrypt_engine_bytes", licensed(lambda engine: b"sealed " + engine))
+    monkeypatch.setattr(protected_model, "decrypt_engine_bytes", licensed(lambda sealed: sealed.removeprefix(b"sealed ")))
+    monkeypatch.setattr(trt, "_build_serialized_engine", lambda onnx, device, **kwargs: b"engine of " + onnx)
+    monkeypatch.setattr("jasna._frozen.patch_frozen_torch", lambda: None)
+
+    started_process = subprocess.Popen
+
+    def compiler_subprocess(command, **kwargs):
+        if command[1:3] != ["-m", "jasna.engine_compiler"]:
+            return started_process(command, **kwargs)  # imports such as Triton's probe their tools
+        in_subprocess.append(True)
+        try:
+            with warnings.catch_warnings():
+                _subprocess_compile(EngineCompilationRequest.from_json(command[-1]))
+            returncode = 0
+        except LeaseError:
+            returncode = 1
+        finally:
+            in_subprocess.clear()
+            logging.disable(logging.NOTSET)
+        return _mock_proc([], returncode)
+
+    monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", compiler_subprocess)
+    return engine_path
+
+
+def test_unet4x_compiles_without_a_second_license_check(unet4x_licensed_in_this_process_only: Path) -> None:
+    from jasna.protection import protected_model
+
+    ensure_engines_compiled(EngineCompilationRequest(device="cuda:0", fp16=True, unet4x=True))
+
+    sealed = unet4x_licensed_in_this_process_only.read_bytes()
+    assert protected_model.decrypt_engine_bytes("unet-4x", sealed) == b"engine of onnx"
+
+
+def test_compiling_other_engines_keeps_the_unet4x_license_check_here(
+    unet4x_licensed_in_this_process_only: Path, monkeypatch,
+) -> None:
+    unet4x_licensed_in_this_process_only.write_bytes(b"sealed engine of onnx")
+    compiled = []
+    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_args: bool(compiled))
+    monkeypatch.setattr(
+        "jasna.restorer.basicvsrpp_sub_engines.compile_basicvsrpp_engines", lambda *args: compiled.append(args),
+    )
+
+    result = ensure_engines_compiled(EngineCompilationRequest(
+        device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="model.pth", unet4x=True,
+    ))
+
+    assert result.use_basicvsrpp_tensorrt is True
+
+
 def test_an_offline_license_check_keeps_the_encrypted_unet4x_engine(monkeypatch, tmp_path: Path) -> None:
     from jasna.protection.lease import LeaseError
     from jasna.restorer import unet4x_secondary_restorer
