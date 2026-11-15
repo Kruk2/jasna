@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import struct
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import av
@@ -11,6 +12,7 @@ import pytest
 
 from jasna.accelerator import AcceleratorVendor
 from jasna.media.audio_utils import source_audio_codec
+from jasna.media.container_utils import output_creation_time
 from jasna.media.probe import get_video_meta_data
 from jasna.media.splice import (
     SpliceSpan,
@@ -26,6 +28,8 @@ from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 from jasna.segments import SegmentRange
 
 from factories import (
+    creation_times,
+    write_dated_source,
     write_double_adts_aac_source,
     write_hrd_timing_sei_source,
     write_variable_frame_rate_source,
@@ -579,6 +583,28 @@ def test_final_mux_copies_double_adts_aac_into_mp4(tmp_path: Path) -> None:
 
     with av.open(str(output)) as container:
         assert sum(1 for _ in container.decode(audio=0)) > 1
+
+
+def test_output_creation_time_is_utc_in_ffmpeg_form() -> None:
+    evening_at_utc_plus_one = datetime(2026, 11, 15, 19, 0, 0, 120, tzinfo=timezone(timedelta(hours=1)))
+
+    assert output_creation_time(evening_at_utc_plus_one) == "2026-11-15T18:00:00.000120Z"
+
+
+@pytest.mark.parametrize(("suffix", "dated_tags"), [(".mp4", 3), (".mkv", 1)])
+def test_final_mux_claims_the_processing_time_not_the_sources(tmp_path: Path, suffix: str, dated_tags: int) -> None:
+    source = write_dated_source(tmp_path / f"source{suffix}")
+    assembled = tmp_path / "assembled.ts"
+    _ffmpeg("-i", str(source), "-map", "0:v:0", "-c:v", "copy", "-bsf:v", "h264_mp4toannexb", str(assembled))
+    output = tmp_path / f"output{suffix}"
+
+    started = datetime.now(timezone.utc).replace(microsecond=0)
+    mux_final_output(assembled, source, output, codec="h264", comment=COMMENT)
+    finished = datetime.now(timezone.utc)
+
+    claimed = creation_times(output)
+    assert len(claimed) == dated_tags
+    assert all(started <= moment <= finished for moment in claimed)
 
 
 def test_source_with_non_utf8_tags_probes_and_splices(tmp_path: Path) -> None:

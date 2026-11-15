@@ -7,6 +7,7 @@ import queue
 import threading
 from collections import deque
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
 from types import MappingProxyType
@@ -30,9 +31,12 @@ from jasna.accelerator import (
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.cas import GpuCasSharpener
 from jasna.media.container_utils import (
+    CREATION_TIME,
     MOV_SUFFIXES,
     is_mov_chapter_stream,
+    output_creation_time,
     subtitle_transcode_codec,
+    with_output_creation_time,
 )
 from jasna.media.encoder_settings import cq_controls, encoder_cq_spec, validate_encoder_settings
 from jasna.media.lut import GpuLutApplier, parse_cube_file
@@ -573,8 +577,9 @@ class VideoEncoder:
         ctx.color_trc = transfer
         self.out_stream = out_v
 
-        self._copy_source_metadata(in_v, out_v)
-        self._setup_source_streams(in_v)
+        creation_time = output_creation_time(datetime.now(timezone.utc))
+        self._copy_source_metadata(in_v, out_v, creation_time)
+        self._setup_source_streams(in_v, creation_time)
 
         # Wrap torch's already-current primary context.  FFmpeg's primary_ctx
         # mode tries to change its scheduling flags and fails once torch has
@@ -628,21 +633,22 @@ class VideoEncoder:
         self._encode_thread.start()
         return self
 
-    def _copy_source_metadata(self, in_v, out_v) -> None:
+    def _copy_source_metadata(self, in_v, out_v, creation_time: str) -> None:
         self.dst.metadata.update(self._src.metadata)
+        self.dst.metadata[CREATION_TIME] = creation_time
         if self.settings is not None:
             for key in [key for key in self.dst.metadata if key.lower() == "comment"]:
                 del self.dst.metadata[key]
             comment = settings_comment(self.settings, encoder=self.encoder_name, options=self.encoder_options)
             self.dst.metadata["comment"] = with_source_comment(comment, self._src.metadata)
             logger.info("%s settings: %s", self.output_path.name, self.dst.metadata["comment"])
-        out_v.metadata.update(in_v.metadata)
+        out_v.metadata.update(with_output_creation_time(in_v.metadata, creation_time))
         out_v.disposition = in_v.disposition
         if not self.smart_fragment:
             self._source_chapters = self._src.chapters()
             self.dst.set_chapters(self._source_chapters)
 
-    def _setup_source_streams(self, in_v) -> None:
+    def _setup_source_streams(self, in_v, creation_time: str) -> None:
         self._source_pipes: dict[int, tuple[str, object, object]] = {}
         self._source_backlog: deque = deque()
         self._source_iter = None
@@ -757,7 +763,7 @@ class VideoEncoder:
                     )
                     kind = "copy"
 
-            out_stream.metadata.update(in_stream.metadata)
+            out_stream.metadata.update(with_output_creation_time(in_stream.metadata, creation_time))
             out_stream.disposition = in_stream.disposition
             if in_stream.type == "attachment":
                 continue

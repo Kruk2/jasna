@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
+from datetime import datetime, timezone
 
 import av
 from av.codec.codec import Properties
@@ -8,6 +9,7 @@ from av.codec.codec import Properties
 
 _MOV_FORMATS = frozenset({"mov", "mp4", "m4a", "3gp", "3g2", "mj2"})
 MOV_SUFFIXES = frozenset({".mp4", ".mov"})
+CREATION_TIME = "creation_time"
 
 
 def is_mov_chapter_stream(
@@ -26,6 +28,17 @@ def is_mov_chapter_stream(
         return False
     handler = stream.metadata.get("handler_name", "").casefold()
     return "subtitle" in handler or "chapter" in handler
+
+
+def output_creation_time(processed_at: datetime) -> str:
+    """The ``creation_time`` an output claims: when Jasna wrote it, not when the source was
+    made, so restored files sort by processing date. FFmpeg's form: UTC ISO 8601, microseconds, Z."""
+    return processed_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def with_output_creation_time(source_tags: Mapping[str, str], creation_time: str) -> dict[str, str]:
+    """``source_tags`` copied to an output stream, a ``creation_time`` among them replaced."""
+    return {key: creation_time if key == CREATION_TIME else value for key, value in source_tags.items()}
 
 
 def subtitle_transcode_codec(

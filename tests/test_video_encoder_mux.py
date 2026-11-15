@@ -9,6 +9,7 @@ import subprocess
 import sys
 import wave
 from dataclasses import replace
+from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from jasna.media.video_decoder import VideoReader
 from jasna.media.video_encoder import VideoEncoder
 from jasna.os_utils import resolve_executable
 
-from factories import write_non_utf8_metadata_source
+from factories import creation_times, write_dated_source, write_non_utf8_metadata_source
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
@@ -554,6 +555,20 @@ def test_container_metadata_and_audio_language_copied(tmp_path):
     with av.open(str(dst)) as c:
         assert c.metadata.get("title") == "jasna-test"
         assert c.streams.audio[0].metadata.get("language") == "pol"
+
+
+@pytest.mark.parametrize(("suffix", "dated_tags"), [(".mp4", 3), (".mkv", 1)])
+def test_output_claims_the_processing_time_not_the_sources(tmp_path, suffix, dated_tags):
+    src = write_dated_source(tmp_path / f"src{suffix}")
+    dst = tmp_path / f"out{suffix}"
+
+    started = datetime.now(timezone.utc).replace(microsecond=0)
+    _transcode(src, dst)
+    finished = datetime.now(timezone.utc)
+
+    claimed = creation_times(dst)
+    assert len(claimed) == dated_tags
+    assert all(started <= moment <= finished for moment in claimed)
 
 
 @pytest.mark.parametrize("suffix", [".mp4", ".mkv", ".mov"])

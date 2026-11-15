@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from fractions import Fraction
 from io import BytesIO
 from pathlib import Path
@@ -17,8 +18,10 @@ from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.media.probe import VideoMetadata, resolve_video_start_pts
 from jasna.media.audio_utils import aac_reencode_args, needs_audio_reencode
 from jasna.media.container_utils import (
+    CREATION_TIME,
     MOV_SUFFIXES,
     is_mov_chapter_stream,
+    output_creation_time,
     subtitle_transcode_codec,
 )
 from jasna.os_utils import find_executable, resolve_executable, subprocess_no_window_kwargs
@@ -728,13 +731,13 @@ def mux_final_output(
     with av.open(str(source), metadata_errors="replace") as container:
         comment = with_source_comment(comment, container.metadata)
         log.info("%s settings: %s", destination.name, comment)
-        primary_video_index = container.streams.video[0].index
+        primary_video = container.streams.video[0]
         copied_streams = []
         transcoded_subtitles = {}
         source_formats = set(container.format.name.split(","))
         source_chapters = container.chapters()
         for stream in container.streams:
-            if stream.index == primary_video_index:
+            if stream.index == primary_video.index:
                 continue
             if is_mov_chapter_stream(
                 stream,
@@ -789,9 +792,11 @@ def mux_final_output(
         for stream in copied_streams:
             args += ["-map", f"1:{stream.index}"]
 
+        creation_time = output_creation_time(datetime.now(timezone.utc))
         args += [
             "-map_metadata", "1",
             "-metadata", f"comment={comment}",
+            "-metadata", f"{CREATION_TIME}={creation_time}",
             "-map_metadata:s:v:0", "1:s:v:0",
             "-map_chapters", "1",
             "-c", "copy",
@@ -801,6 +806,9 @@ def mux_final_output(
                 f"-map_metadata:s:{output_index}",
                 f"1:s:{stream.index}",
             ]
+        for output_index, stream in enumerate([primary_video, *copied_streams]):
+            if CREATION_TIME in stream.metadata:
+                args += [f"-metadata:s:{output_index}", f"{CREATION_TIME}={creation_time}"]
         audio_streams = [
             stream for stream in copied_streams if stream.type == "audio"
         ]

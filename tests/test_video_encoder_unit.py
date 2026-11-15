@@ -33,6 +33,8 @@ from factories import write_double_adts_aac_source, write_two_block_wma_source
 
 pytestmark = pytest.mark.usefixtures("nvidia_vendor")
 
+PROCESSED_AT = "2026-11-15T18:00:00.000000Z"
+
 
 def _fake_metadata(**overrides) -> VideoMetadata:
     defaults = dict(
@@ -152,7 +154,7 @@ class TestSourceContainerPreservation:
         input_video = _source_stream(0, "video", "h264")
         output_video = SimpleNamespace(metadata={}, disposition=0)
 
-        encoder._copy_source_metadata(input_video, output_video)
+        encoder._copy_source_metadata(input_video, output_video, PROCESSED_AT)
 
         encoder.dst.set_chapters.assert_not_called()
 
@@ -177,7 +179,7 @@ class TestSourceContainerPreservation:
             ),
         )
 
-        encoder._setup_source_streams(primary_video)
+        encoder._setup_source_streams(primary_video, PROCESSED_AT)
 
         assert encoder._source_pipes == {}
         encoder._src.demux.assert_not_called()
@@ -202,7 +204,7 @@ class TestSourceContainerPreservation:
             add_stream_from_template=MagicMock(),
         )
 
-        encoder._setup_source_streams(primary_video)
+        encoder._setup_source_streams(primary_video, PROCESSED_AT)
 
         encoder.dst.add_stream_from_template.assert_not_called()
         encoder._src.demux.assert_not_called()
@@ -717,7 +719,7 @@ class TestSourceStreamPump:
         destination = tmp_path / "result.mp4"
         enc = _make_encoder(tmp_path)
         with av.open(str(source)) as enc._src, av.open(str(destination), "w") as enc.dst:
-            enc._setup_source_streams(enc._src.streams.video[0])
+            enc._setup_source_streams(enc._src.streams.video[0], PROCESSED_AT)
             enc._drain_source_streams()
 
         with av.open(str(source)) as src:

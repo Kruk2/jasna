@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 from contextlib import contextmanager, nullcontext
+from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
 from queue import Queue
@@ -521,6 +522,29 @@ def write_non_utf8_metadata_source(path: Path) -> Path:
     assert data.count(marker) >= 2
     path.write_bytes(data.replace(marker, b"JASNA\x90TAG"))
     return path
+
+
+def write_dated_source(path: Path) -> Path:
+    """H.264 + AAC file whose container and streams claim they were made in 2001."""
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+            # 384 px wide: the narrowest frame hevc_amf encodes.
+            "-f", "lavfi", "-i", "testsrc2=size=384x256:rate=12:duration=1",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+            "-metadata", "creation_time=2001-02-03T04:05:06Z",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path),
+        ],
+        check=True,
+    )
+    return path
+
+
+def creation_times(path: Path) -> list[datetime]:
+    """Every ``creation_time`` tag of ``path``: its container's, then its streams'."""
+    with av.open(str(path)) as container:
+        tags = [container.metadata, *(stream.metadata for stream in container.streams)]
+        return [datetime.fromisoformat(tag["creation_time"]) for tag in tags if "creation_time" in tag]
 
 
 def offload_bundle_targets(path: Path) -> set[str]:
