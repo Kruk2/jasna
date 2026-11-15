@@ -12,7 +12,7 @@ from jasna.gui.locales import get_locale, t
 from jasna.gui.queues import MainThreadCalls
 from jasna.ltx import model_files
 from jasna.ltx.model_files import LTX_MODELS, DownloadableFile, download_size_text
-from jasna.license_api import protection_available
+from jasna.license_api import ltx_driver_mismatch, protection_available
 from jasna.session_config import LtxModelName, LtxVaeName
 
 Variant = tuple[LtxModelName, bool]
@@ -144,6 +144,12 @@ class LtxModels:
         if not files:
             return True
         if self.downloading or not self.state.downloadable:
+            return False
+        mismatch = ltx_driver_mismatch()
+        if mismatch is not None:
+            messagebox.showerror(t("ltx_download_title"), t(
+                "ltx_driver_mismatch", path=mismatch.path, library=mismatch.library_version,
+                driver=mismatch.driver_version))
             return False
         name = t(f"model_{model_key('ltx', model)}")
         confirm_key = (

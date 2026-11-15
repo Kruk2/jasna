@@ -267,6 +267,7 @@ JA = {
         "ltx_downloading": "LTX モデルをダウンロード中：{percent}%",
         "ltx_downloading_short": "モデルをダウンロード中",
         "ltx_download_failed": "ダウンロードに失敗しました：{message}",
+        "ltx_driver_mismatch": "LTX は {path} を使えません。これは NVIDIA ドライバー {library} のものですが、この PC はドライバー {driver} で動いています。多くの場合、コンテナ内の CUDA 互換パッケージです。ライブラリパスから外すか、それを含まないイメージを使ってください。",
         "dlss5_download_title": "DLSS 5 のダウンロード",
         "dlss5_download_confirm": "DLSS 5 は Jasna に含まれていません。{page} の非公式コミュニティ版を使います。\nダウンロードしますか（{size}）？",
         "dlss5_download_failed": "ダウンロードに失敗しました：{message}",

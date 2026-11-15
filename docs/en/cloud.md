@@ -94,6 +94,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | `No activation found` or `Activate Jasna with your License code` | Run the `export` line, then start Jasna again, or activate again. |
 | `unsafe Jasna launch environment` | Start it with `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` |
 | `LTX worker could not start` … `could not verify this library or module` | This machine (for example RunPod) can't run LTX. Use Vast. |
+| `does not match the installed NVIDIA driver` or `CUDA compatibility package` | Your container image adds CUDA compatibility libraries. Remove their folder from `/etc/ld.so.conf.d`, run `ldconfig`, and start again, or use an image without them. |
 
 `Bit depth 10 ... not supported` is OK. Jasna reads that video a bit
 slower, that's all.

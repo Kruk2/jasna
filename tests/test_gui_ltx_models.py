@@ -19,6 +19,7 @@ from jasna.gui.ltx_models import (
     trial_only,
 )
 from jasna.gui.models import AppSettings, PresetManager
+from jasna.license_api import DriverLibraryMismatch
 from jasna.ltx import model_files
 from jasna.ltx.model_files import bundle_names
 from jasna.segments import SegmentRange, SegmentRestoration
@@ -520,3 +521,18 @@ def test_the_progress_stage_is_marked_as_a_trial(tk_root) -> None:
     bar.set_trial(False)
     bar.update_progress(percent=10, stage=stage)
     assert bar._fps_label.cget("text") == status_text(0.0, stage, trial=False)
+
+
+def test_ensure_explains_a_driver_mismatch_instead_of_downloading(tmp_path, monkeypatch, downloadable) -> None:
+    asked = _answer(monkeypatch, yes=True)
+    downloads = _fake_download(monkeypatch, error=None)
+    errors: list[str] = []
+    monkeypatch.setattr(messagebox, "showerror", lambda _title, message: errors.append(message))
+    mismatch = DriverLibraryMismatch("/usr/local/cuda-13.4/compat/lib.real/libcuda.so.615.65.02", "615.65.02", "610.57.04")
+    monkeypatch.setattr(ltx_models_module, "ltx_driver_mismatch", lambda: mismatch)
+    models = LtxModels(tmp_path, _NowCalls(), lambda: None)
+
+    assert not models.ensure("distilled", False, on_ready=lambda: pytest.fail("not downloaded"))
+
+    assert errors == [t("ltx_driver_mismatch", path=mismatch.path, library="615.65.02", driver="610.57.04")]
+    assert asked == [] and downloads == [] and not models.downloading

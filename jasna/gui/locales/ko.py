@@ -267,6 +267,7 @@ KO = {
         "ltx_downloading": "LTX 모델 다운로드 중: {percent}%",
         "ltx_downloading_short": "모델 다운로드 중",
         "ltx_download_failed": "다운로드 실패: {message}",
+        "ltx_driver_mismatch": "LTX에서 {path}을(를) 사용할 수 없습니다. 이 파일은 NVIDIA 드라이버 {library}용이지만 이 PC는 드라이버 {driver}을(를) 사용합니다. 보통 컨테이너 안의 CUDA 호환 패키지입니다. 라이브러리 경로에서 빼거나 이 패키지가 없는 이미지를 사용하세요.",
         "dlss5_download_title": "DLSS 5 다운로드",
         "dlss5_download_confirm": "DLSS 5는 Jasna에 포함되어 있지 않습니다. {page}의 비공식 커뮤니티 버전을 사용합니다.\n다운로드할까요 ({size})?",
         "dlss5_download_failed": "다운로드 실패: {message}",

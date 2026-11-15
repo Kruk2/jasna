@@ -267,6 +267,7 @@ TH = {
         "ltx_downloading": "กำลังดาวน์โหลดโมเดล LTX: {percent}%",
         "ltx_downloading_short": "กำลังดาวน์โหลดโมเดล",
         "ltx_download_failed": "ดาวน์โหลดไม่สำเร็จ: {message}",
+        "ltx_driver_mismatch": "LTX ใช้ {path} ไม่ได้ ไฟล์นี้มาจากไดรเวอร์ NVIDIA {library} แต่พีซีเครื่องนี้ใช้ไดรเวอร์ {driver} ส่วนใหญ่มาจากแพ็กเกจ CUDA compatibility ในคอนเทนเนอร์ ให้เอาออกจาก library path หรือใช้อิมเมจที่ไม่มีแพ็กเกจนี้",
         "dlss5_download_title": "ดาวน์โหลด DLSS 5",
         "dlss5_download_confirm": "DLSS 5 ไม่ได้มาพร้อม Jasna ใช้เวอร์ชันชุมชนที่ไม่เป็นทางการจาก {page}\nดาวน์โหลดหรือไม่ ({size})?",
         "dlss5_download_failed": "ดาวน์โหลดไม่สำเร็จ: {message}",

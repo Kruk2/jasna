@@ -448,3 +448,20 @@ def test_cli_does_not_offer_ltx_when_every_range_uses_basicvsrpp(tmp_path, monke
     main._ensure_ltx_model(ltx, (SegmentRange(0, 1, SegmentRestoration("basicvsrpp", None)),))
 
     assert asked == []
+
+
+def test_cli_names_a_driver_mismatch_before_offering_the_download(tmp_path, monkeypatch, nvidia_vendor):
+    from factories import session_config
+    from jasna import main
+    from jasna.license_api import DriverLibraryMismatch
+
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or "y")
+    monkeypatch.setattr("jasna.license_api.require_protection", lambda: None)
+    compat = "/usr/local/cuda-13.4/compat/lib.real/libnvidia-ptxjitcompiler.so.615.65.02"
+    monkeypatch.setattr("jasna.license_api.ltx_driver_mismatch",
+                        lambda: DriverLibraryMismatch(compat, "615.65.02", "610.57.04"))
+
+    with pytest.raises(SystemExit, match=f"^Error: LTX can't use {compat}: .* 615.65.02, .* 610.57.04"):
+        main._ensure_ltx_model(session_config(restoration_model_name="ltx", restoration_model_path=tmp_path), None)
+    assert asked == []

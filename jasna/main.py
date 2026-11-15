@@ -983,9 +983,16 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     )
     if not missing:
         return
-    from jasna.license_api import require_protection
+    from jasna.license_api import ltx_driver_mismatch, require_protection
 
     require_protection()
+    mismatch = ltx_driver_mismatch()
+    if mismatch is not None:
+        sys.exit(
+            f"Error: LTX can't use {mismatch.path}: it is from NVIDIA driver {mismatch.library_version}, but this "
+            f"machine runs driver {mismatch.driver_version}. It usually comes from a CUDA compatibility package in "
+            "the container. Remove its folder from /etc/ld.so.conf.d and run ldconfig, or use an image without it."
+        )
     names = ", ".join(file.name for file in missing)
     size = download_size_text(missing)
     updating = any((directory / file.name).is_file() for file in missing)

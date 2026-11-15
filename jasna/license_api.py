@@ -1,6 +1,8 @@
 """Keep public source usable without the optional private protection package."""
 
+import sys
 import unicodedata
+from dataclasses import dataclass
 from importlib.util import find_spec
 
 from jasna._frozen import is_frozen
@@ -8,6 +10,24 @@ from jasna._frozen import is_frozen
 
 class ProtectionUnavailableError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class DriverLibraryMismatch:
+    """An NVIDIA library LTX would load that is from another driver version than the installed one."""
+
+    path: str
+    library_version: str
+    driver_version: str
+
+
+def ltx_driver_mismatch() -> DriverLibraryMismatch | None:
+    """What stops LTX from starting on this Linux machine, found before any model download."""
+    if not (is_frozen() and sys.platform == "linux"):
+        return None
+    from jasna.protection.ltx_worker_security import linux_driver_library_mismatch
+
+    return linux_driver_library_mismatch()
 
 
 def protection_available() -> bool:

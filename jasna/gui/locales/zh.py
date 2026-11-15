@@ -267,6 +267,7 @@ ZH = {
         "ltx_downloading": "正在下载 LTX 模型：{percent}%",
         "ltx_downloading_short": "正在下载模型",
         "ltx_download_failed": "下载失败：{message}",
+        "ltx_driver_mismatch": "LTX 无法使用 {path}：它来自 NVIDIA 驱动 {library}，但这台电脑运行的是驱动 {driver}。这通常是容器里的 CUDA 兼容包。请把它从库路径中移除，或换一个不带它的镜像。",
         "dlss5_download_title": "DLSS 5 下载",
         "dlss5_download_confirm": "DLSS 5 不是 Jasna 的一部分。它使用来自 {page} 的非官方社区版本。\n要下载吗（{size}）？",
         "dlss5_download_failed": "下载失败：{message}",

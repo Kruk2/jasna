@@ -267,6 +267,7 @@ EN = {
         "ltx_downloading": "Downloading LTX model: {percent}%",
         "ltx_downloading_short": "Downloading model",
         "ltx_download_failed": "Download failed: {message}",
+        "ltx_driver_mismatch": "LTX can't use {path}: it is from NVIDIA driver {library}, but this PC runs driver {driver}. It usually comes from a CUDA compatibility package in the container. Remove it from the library path, or use an image without it.",
         "dlss5_download_title": "DLSS 5 download",
         "dlss5_download_confirm": "DLSS 5 is not part of Jasna. It uses an unofficial community version from {page}.\nDownload it ({size})?",
         "dlss5_download_failed": "Download failed: {message}",
