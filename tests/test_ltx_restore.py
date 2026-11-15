@@ -191,7 +191,7 @@ def _run_spans(tmp_path, spans):
         spans,
         _render(tmp_path),
         work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
-        progress=restore.Progress(0, disable=True, report=None),
+        progress=restore.Progress(0, disable=True, writer_adds_frame_work=False, report=None),
         cancel=threading.Event(), runtime=_runtime(),
     )
 
@@ -338,7 +338,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         device=torch.device("cpu"),
         work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
         speed_profile=tmp_path / "speed.json",
-        progress=restore.Progress(12, disable=True, report=None),
+        progress=restore.Progress(12, disable=True, writer_adds_frame_work=False, report=None),
         cancel=threading.Event(),
         max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None, frame_numbers=TEN_PTS_PER_FRAME,
         runtime=_runtime(),
@@ -598,7 +598,7 @@ class _Clock:
 def test_progress_reports_the_stage_and_the_share_of_the_whole_run(monkeypatch):
     clock = _Clock(monkeypatch)
     reports = []
-    progress = restore.Progress(10, disable=True, report=lambda *args: reports.append(args))
+    progress = restore.Progress(10, disable=True, writer_adds_frame_work=False, report=lambda *args: reports.append(args))
     with progress.bar("scan", 10) as bar:
         clock.now = 100.0
         bar.update(10)
@@ -618,7 +618,7 @@ def test_progress_reports_the_stage_and_the_share_of_the_whole_run(monkeypatch):
 def test_progress_reports_each_pass_with_its_own_share_and_time_left(monkeypatch):
     clock = _Clock(monkeypatch)
     reports = []
-    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress = restore.Progress(100, disable=True, writer_adds_frame_work=False, report=lambda *args: reports.append(args))
     with progress.bar("scan", 100) as bar:
         clock.now = 1.0
         bar.update(10)
@@ -644,7 +644,7 @@ def _recorded_bar_options(monkeypatch) -> list[dict]:
 
 def test_speed_test_bars_are_labelled_as_the_speed_test(monkeypatch):
     options = _recorded_bar_options(monkeypatch)
-    run = restore.Progress(1000, disable=True, report=None)
+    run = restore.Progress(1000, disable=True, writer_adds_frame_work=False, report=None)
     with run.speed_test().bar("scan", 10):
         pass
     with run.bar("scan", 10):
@@ -654,13 +654,13 @@ def test_speed_test_bars_are_labelled_as_the_speed_test(monkeypatch):
 
 @pytest.mark.parametrize(("video_frames", "speed_test_frames"), [(61, 61), (1000, restore.SPEED_TEST_FRAMES)])
 def test_speed_test_counts_only_the_frames_the_video_has(video_frames, speed_test_frames):
-    assert restore.Progress(video_frames, disable=True, report=None).speed_test().frames == speed_test_frames
+    assert restore.Progress(video_frames, disable=True, writer_adds_frame_work=False, report=None).speed_test().frames == speed_test_frames
 
 
 def test_progress_begin_shows_the_next_pass_while_its_model_loads(monkeypatch):
     _Clock(monkeypatch)
     reports = []
-    progress = restore.Progress(10, disable=True, report=lambda *args: reports.append(args))
+    progress = restore.Progress(10, disable=True, writer_adds_frame_work=False, report=lambda *args: reports.append(args))
     with progress.bar("scan", 10) as bar:
         bar.update(10)
     progress.begin("encode")
@@ -684,7 +684,7 @@ _RATES = {
 def test_progress_estimates_the_time_left_from_the_speed_profile_once_planned(monkeypatch):
     clock = _Clock(monkeypatch)
     reports = []
-    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress = restore.Progress(100, disable=True, writer_adds_frame_work=False, report=lambda *args: reports.append(args))
     progress.expect(_RATES)
     with progress.bar("scan", 100) as bar:
         clock.now = 10.0
@@ -707,7 +707,7 @@ def test_progress_estimates_the_time_left_from_the_speed_profile_once_planned(mo
 def test_run_fraction_does_not_count_the_speed_test_before_the_run(monkeypatch):
     clock = _Clock(monkeypatch)
     reports = []
-    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress = restore.Progress(100, disable=True, writer_adds_frame_work=False, report=lambda *args: reports.append(args))
     clock.now = 300.0
     progress.expect(_RATES)
     with progress.bar("scan", 100) as bar:
@@ -724,7 +724,7 @@ def test_run_fraction_does_not_count_the_speed_test_before_the_run(monkeypatch):
 def test_pass_time_left_is_the_profile_work_left_scaled_by_the_measured_pace(monkeypatch):
     clock = _Clock(monkeypatch)
     reports = []
-    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress = restore.Progress(100, disable=True, writer_adds_frame_work=False, report=lambda *args: reports.append(args))
     progress.expect(_RATES)
     progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
     with progress.bar("compose", 100) as bar:
@@ -763,7 +763,7 @@ def test_decode_shares_spread_each_window_over_the_frames_it_decodes_during():
 def test_compose_time_left_falls_steadily_while_windows_decode_ahead(monkeypatch):
     clock = _Clock(monkeypatch)
     reports = []
-    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress = restore.Progress(100, disable=True, writer_adds_frame_work=False, report=lambda *args: reports.append(args))
     progress.expect(_RATES)
     progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
     shares = restore._decode_shares([_window(index, index * 10, 10) for index in range(10)])
@@ -783,10 +783,43 @@ def test_compose_time_left_falls_steadily_while_windows_decode_ahead(monkeypatch
     assert all(later <= earlier + 1e-9 for earlier, later in zip(lefts, lefts[1:]))
 
 
+def test_compose_writing_through_an_upscaler_is_timed_by_its_frame_pace(monkeypatch):
+    clock = _Clock(monkeypatch)
+    reports = []
+    progress = restore.Progress(100, disable=True, writer_adds_frame_work=True, report=lambda *args: reports.append(args))
+    progress.expect(_RATES)
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
+    clock.now = 100.0
+    with progress.bar("compose", 100) as bar:
+        bar.update(10)
+        clock.now = 110.0
+        bar.update(10)
+
+    seconds_per_frame = 1.0
+    fraction, left, stage = reports[-1]
+    assert stage.seconds_left == pytest.approx(80 * seconds_per_frame)
+    assert left == pytest.approx(stage.seconds_left)
+
+
+@pytest.mark.parametrize(("writer_adds_frame_work", "learned_passes"), [(False, {"encode", "compose"}), (True, {"encode"})])
+def test_compose_rates_are_learned_only_without_writer_frame_work(monkeypatch, writer_adds_frame_work, learned_passes):
+    clock = _Clock(monkeypatch)
+    progress = restore.Progress(100, disable=True, writer_adds_frame_work=writer_adds_frame_work, report=None)
+    progress.expect(_RATES)
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
+    for stage in ("encode", "compose"):
+        with progress.bar(stage, 100) as bar:
+            bar.update(50)
+            clock.now += 5.0
+            bar.update(50)
+
+    assert {name.split("/")[0] for name in progress.learned_rates()} == learned_passes
+
+
 def test_run_fraction_never_goes_back_when_the_pace_drops(monkeypatch):
     clock = _Clock(monkeypatch)
     reports = []
-    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress = restore.Progress(100, disable=True, writer_adds_frame_work=False, report=lambda *args: reports.append(args))
     progress.expect(_RATES)
     progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
     clock.now = 100.0
@@ -806,7 +839,7 @@ def test_run_fraction_never_goes_back_when_the_pace_drops(monkeypatch):
 def test_progress_without_rates_for_a_planned_canvas_keeps_the_fixed_shares(monkeypatch):
     _Clock(monkeypatch)
     reports = []
-    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress = restore.Progress(100, disable=True, writer_adds_frame_work=False, report=lambda *args: reports.append(args))
     progress.expect(_RATES)
     progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 3, 768: 1}, crop_megapixels=40.0))
     with progress.bar("encode", 100) as bar:
@@ -817,7 +850,7 @@ def test_progress_without_rates_for_a_planned_canvas_keeps_the_fixed_shares(monk
 
 def test_stage_bars_time_warm_units_for_the_profile(monkeypatch):
     clock = _Clock(monkeypatch)
-    progress = restore.Progress(10, disable=True, report=None)
+    progress = restore.Progress(10, disable=True, writer_adds_frame_work=False, report=None)
     clock.now = 2.0
     with progress.bar("compose", 10) as bar:
         clock.now = 3.0
@@ -852,7 +885,7 @@ def test_stage_bars_time_warm_units_for_the_profile(monkeypatch):
 
 def test_a_one_step_track_is_timed_from_its_start(monkeypatch):
     clock = _Clock(monkeypatch)
-    progress = restore.Progress(10, disable=True, report=None)
+    progress = restore.Progress(10, disable=True, writer_adds_frame_work=False, report=None)
     with progress.bar("denoise", 3, unit="step") as bar:
         clock.now = 5.0
         advance = bar.track(512, 1)
@@ -891,7 +924,7 @@ def test_worker_passes_are_timed_on_the_wall_clock(monkeypatch):
 
     transformer = inference.WorkerTransformer(Worker(), {"steps": 3, "resident": 48, "count": 48})
     encoder = inference.WorkerEncoder(Worker())
-    progress = restore.Progress(10, disable=True, report=None)
+    progress = restore.Progress(10, disable=True, writer_adds_frame_work=False, report=None)
     with progress.bar("encode", 10, marks=restore.timing_marks(encoder)) as bar:
         bar.update(10)
         for _ in range(2):
@@ -941,7 +974,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
         device=torch.device("cpu"),
         work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
         speed_profile=tmp_path / "speed.json",
-        progress=restore.Progress(0, disable=True, report=None),
+        progress=restore.Progress(0, disable=True, writer_adds_frame_work=False, report=None),
         cancel=threading.Event(),
         max_gap=MAX_GAP, min_duration=0, super_res=None, vr_projector=None, frame_numbers=TEN_PTS_PER_FRAME,
         runtime=_runtime(),
@@ -955,7 +988,7 @@ def test_the_planned_work_counts_each_window_crop_on_every_frame_it_covers(fakes
     planned = []
     monkeypatch.setattr(restore.Progress, "plan", lambda self, work: planned.append(work))
     span = restore.LtxSpan(_source(_video(30, range(3, 28))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)
-    progress = restore.Progress(30, disable=True, report=None)
+    progress = restore.Progress(30, disable=True, writer_adds_frame_work=False, report=None)
     restore.prepare_spans([span], _render(tmp_path), tmp_path, progress=progress, cancel=threading.Event())
     (work,) = planned
     assert (work.frames, work.windows) == (30, {512: 1})
@@ -965,7 +998,7 @@ def test_the_planned_work_counts_each_window_crop_on_every_frame_it_covers(fakes
 def test_a_prepared_span_denoises_with_many_seeds(fakes, tmp_path):
     video = _video(30, range(3, 28))
     span = restore.LtxSpan(_source(video), (restore.LtxSegment(50, 150, seed=1),), _Writer)
-    progress = restore.Progress(30, disable=True, report=None)
+    progress = restore.Progress(30, disable=True, writer_adds_frame_work=False, report=None)
     cancel = threading.Event()
     (prepared,) = restore.prepare_spans([span], _render(tmp_path), tmp_path, progress=progress, cancel=cancel)
     transformer = _Transformer(None, None, None)
@@ -1005,7 +1038,7 @@ def test_restore_spans_shows_each_pass_before_its_model_loads(fakes, monkeypatch
         [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)],
         _render(tmp_path),
         work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
-        progress=restore.Progress(12, disable=True, report=lambda *args: reports.append(args)),
+        progress=restore.Progress(12, disable=True, writer_adds_frame_work=False, report=lambda *args: reports.append(args)),
         cancel=threading.Event(), runtime=_runtime(),
     )
     assert shown_at_load == [("encoder", "encode"), ("transformer", "denoise"), ("decoder", "compose")]
@@ -1228,7 +1261,7 @@ def test_consecutive_jobs_hold_no_more_gpu_memory_than_the_first(fakes, monkeypa
         restore.restore_spans(
             [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)],
             render, work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
-            progress=restore.Progress(30, disable=True, report=None), cancel=threading.Event(),
+            progress=restore.Progress(30, disable=True, writer_adds_frame_work=False, report=None), cancel=threading.Event(),
             runtime=inference.ModelRuntime(FILES, device, threading.Event()),
         )
         torch.cuda.synchronize(device)
@@ -1299,7 +1332,7 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
     writer = _Writer()
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), lambda: writer)],
-        render, work_dir=tmp_path, resume_dir=_new_dir(tmp_path), progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(),
+        render, work_dir=tmp_path, resume_dir=_new_dir(tmp_path), progress=restore.Progress(12, disable=True, writer_adds_frame_work=False, report=None), cancel=threading.Event(),
         runtime=_runtime(files),
     )
     assert writer.closed
@@ -1344,7 +1377,7 @@ def test_encrypted_worker_starts_on_its_own_thread_while_the_scan_runs(fakes, mo
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), _Writer)],
         replace(_render(tmp_path), files=files), work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
-        progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(), runtime=_runtime(files),
+        progress=restore.Progress(12, disable=True, writer_adds_frame_work=False, report=None), cancel=threading.Event(), runtime=_runtime(files),
     )
     assert requests[0] == ("prepare_transformer", False)
     assert requests[1:3] == [("load_encoder", True), ("encode", False)]
@@ -1368,7 +1401,7 @@ def test_a_failed_scan_waits_for_the_worker_start_before_it_raises(fakes, monkey
     runtime = inference.ModelRuntime(files, torch.device("cpu"), threading.Event())
     with pytest.raises(RuntimeError, match="synthetic scan failure"):
         restore.prepare_spans([restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), _Writer)],
-                              replace(_render(tmp_path), files=files), tmp_path, progress=restore.Progress(12, disable=True, report=None),
+                              replace(_render(tmp_path), files=files), tmp_path, progress=restore.Progress(12, disable=True, writer_adds_frame_work=False, report=None),
                               cancel=threading.Event(), runtime=runtime)
     assert finished == ["prepare_transformer"]
 
@@ -1403,7 +1436,7 @@ def test_a_worker_that_fails_to_start_stops_the_scan(fakes, monkeypatch, tmp_pat
     with pytest.raises(RuntimeError, match="LTX worker could not start"):
         restore.prepare_spans([restore.LtxSpan(frames, (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), _Writer)],
                               replace(_render(tmp_path), files=files, detector=detector), tmp_path,
-                              progress=restore.Progress(12, disable=True, report=None),
+                              progress=restore.Progress(12, disable=True, writer_adds_frame_work=False, report=None),
                               cancel=threading.Event(), runtime=runtime)
     assert detector.batches == [[0, 1, 2, 3]]
 
@@ -1417,7 +1450,7 @@ def test_a_run_without_a_speed_profile_runs_a_speed_test_first(fakes, tmp_path):
         [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), lambda: writer)],
         _render(tmp_path),
         work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
-        progress=restore.Progress(12, disable=True, report=lambda *args: reports.append(args)),
+        progress=restore.Progress(12, disable=True, writer_adds_frame_work=False, report=lambda *args: reports.append(args)),
         cancel=threading.Event(), runtime=_runtime(),
     )
     assert _Transformer.seeds == [[0], [7]]
@@ -1444,7 +1477,7 @@ def test_a_fresh_encode_pass_counts_frames_and_warms_up_after_its_first_batch(fa
         restore.Progress, "bar",
         lambda self, stage, total, unit="frame", marks=None: REAL_BAR(self, stage, total, unit, restore._WallClockMark),
     )
-    progress = restore.Progress(12, disable=True, report=None)
+    progress = restore.Progress(12, disable=True, writer_adds_frame_work=False, report=None)
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)],
         _render(tmp_path), work_dir=tmp_path, resume_dir=_new_dir(tmp_path), progress=progress, cancel=threading.Event(),
@@ -1458,7 +1491,7 @@ def test_skipping_reused_passes_keeps_the_profile_paced_fraction(monkeypatch):
     estimates = {"encode": (0.0, 100.0), "denoise": (0.0, 1000.0), "compose": (0.0, 100.0)}
     monkeypatch.setattr(restore.speed, "pass_estimates", lambda _rates, _work: dict(estimates))
     reports = []
-    progress = restore.Progress(100, disable=True, report=lambda fraction, _left, _step: reports.append(fraction))
+    progress = restore.Progress(100, disable=True, writer_adds_frame_work=False, report=lambda fraction, _left, _step: reports.append(fraction))
     progress.plan(restore.speed.Work(100, 1.0, {512: 1}, 1.0))
     progress.skip("scan", "encode")
     progress.begin("denoise")
@@ -1476,7 +1509,7 @@ def test_a_run_with_a_speed_profile_skips_the_speed_test(fakes, tmp_path):
 def _resume_spans(tmp_path, spans):
     restore.restore_spans(
         spans, _render(tmp_path), work_dir=tmp_path, resume_dir=tmp_path / "saved",
-        progress=restore.Progress(50, disable=True, report=None), cancel=threading.Event(), runtime=_runtime(),
+        progress=restore.Progress(50, disable=True, writer_adds_frame_work=False, report=None), cancel=threading.Event(), runtime=_runtime(),
     )
 
 

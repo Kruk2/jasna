@@ -16,9 +16,25 @@ from jasna.vr_projection import FisheyeProjector, GnomonicProjector
 def test_ltx_progress_reaches_the_progress_callback_with_its_stage():
     cb = MagicMock()
     p = make_pipeline(progress_callback=cb, disable_progress=True)
-    with p._ltx_progress(10, cb).bar("scan", 10) as bar:
+    with p._ltx_progress(10, cb, writer_adds_frame_work=False).bar("scan", 10) as bar:
         bar.update(10)
     assert cb.call_args[0] == (pytest.approx(2.0), 0.0, 0.0, 0, 0, StageProgress("scan", 1, 4, 1.0, 0.0))
+
+
+@pytest.mark.parametrize(
+    ("config", "adds_work"),
+    [
+        ({}, False),
+        ({"upscale_model": "realplksr", "upscale_height": 2160}, True),
+        ({"upscale_model": "realplksr", "upscale_height": 1080}, False),
+        ({"frame_generation": "2x"}, True),
+    ],
+    ids=["plain", "upscaled", "already-that-tall", "frame-generation"],
+)
+def test_frame_writer_adds_work_when_it_upscales_or_generates_frames(config, adds_work):
+    pipeline = make_pipeline(**config)
+
+    assert pipeline._frame_writer_adds_work(video_metadata(video_width=1920, video_height=1080)) is adds_work
 
 
 @pytest.mark.parametrize(

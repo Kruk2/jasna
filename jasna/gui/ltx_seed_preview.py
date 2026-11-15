@@ -164,7 +164,7 @@ class SeedRenderer:
         writer = writer_for(run_dir, span.effect_ranges[0])
         ltx_span = pipeline.ltx_span(self.metadata, self.index, span, (seeded,), lambda: writer)
         frames = round((span.end_pts - span.start_pts) * self.index.time_base * self.metadata.video_fps)
-        progress = Progress(frames, disable=True, report=report)
+        progress = Progress(frames, disable=True, writer_adds_frame_work=False, report=report)
 
         key = prepared_key(segment, settings)
         prepared = self._prepared.get(key)

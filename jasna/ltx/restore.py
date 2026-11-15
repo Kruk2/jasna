@@ -210,13 +210,19 @@ class Progress:
     from the end of the scan on; else they are 0 until the denoise pass has timed a step.
     A pass's own seconds left are the profile's seconds of work it has left, scaled by how
     long its work so far took against the profile (clock changes, uneven mosaics), else
-    its pace so far. Every pass records its timing for the profile."""
+    its pace so far. Every pass records its timing for the profile.
+    ``writer_adds_frame_work``: the compose pass writes through an upscaler or frame
+    generation, per-frame work the profile does not time, so that pass is timed by its frame
+    pace once known and its rates are not learned."""
 
     _bar_label = "LTX"
 
-    def __init__(self, frames: int, *, disable: bool, report: ProgressReport | None) -> None:
+    def __init__(
+        self, frames: int, *, disable: bool, writer_adds_frame_work: bool, report: ProgressReport | None
+    ) -> None:
         self.frames = frames
         self._disable = disable
+        self._writer_adds_frame_work = writer_adds_frame_work
         self._report = report
         self._started = time.monotonic()
         self._pass_end = self._started
@@ -242,7 +248,12 @@ class Progress:
             speed_test_report = lambda fraction, _left, _step: report(
                 0.0, 0.0, StageProgress("speed_test", 1, 1, fraction, 0.0)
             )
-        speed_test = Progress(min(self.frames, SPEED_TEST_FRAMES), disable=self._disable, report=speed_test_report)
+        speed_test = Progress(
+            min(self.frames, SPEED_TEST_FRAMES),
+            disable=self._disable,
+            writer_adds_frame_work=False,
+            report=speed_test_report,
+        )
         speed_test._bar_label = "LTX speed test"
         return speed_test
 
@@ -251,7 +262,13 @@ class Progress:
         self._estimates = speed.pass_estimates(self._rates, work) if work.windows else None
 
     def learned_rates(self) -> dict[str, float]:
-        return speed.learned_rates(self.timings, self._work, self._rates)
+        timings = {
+            stage: timing for stage, timing in self.timings.items() if not self._paced_by_frames(stage)
+        }
+        return speed.learned_rates(timings, self._work, self._rates)
+
+    def _paced_by_frames(self, stage: LtxStage) -> bool:
+        return stage == "compose" and self._writer_adds_frame_work
 
     def summary(
         self, profile_key: str, peak_vram_bytes: tuple[int, int | None], blocks: tuple[int, int] | None
@@ -297,9 +314,15 @@ class Progress:
         units = {f"{stage}/window{canvas}": count for canvas, count in windows.items()}
         return speed.variable_seconds(self._rates, stage, {**units, **self._work.frame_units(stage, frames)})
 
-    def _profile_stage_left(self, stage: LtxStage, profiled_done: float, pace_ratio: float) -> float | None:
+    def _profile_stage_left(
+        self, stage: LtxStage, paced_left: float | None, profiled_done: float, pace_ratio: float
+    ) -> float | None:
+        """The pass's seconds left when the profile covers the run: its frame pace once known
+        for a pass the profile does not time, else the profile's work left at the measured pace."""
         if self._estimates is None or stage not in self._estimates:
             return None
+        if self._paced_by_frames(stage) and paced_left is not None:
+            return paced_left
         return max(0.0, self._estimates[stage][1] - profiled_done) * pace_ratio
 
     def _advanced(
@@ -310,7 +333,7 @@ class Progress:
         its measured seconds per profile second. Returns the run's seconds left the
         profile gives, if any."""
         stage_fraction = min(1.0, done / total) if total else 1.0
-        profile_stage_left = self._profile_stage_left(stage, profiled_done, pace_ratio)
+        profile_stage_left = self._profile_stage_left(stage, paced_left, profiled_done, pace_ratio)
         left = None
         if profile_stage_left is not None:
             later = speed.TIMED_PASSES[speed.TIMED_PASSES.index(stage) + 1 :]

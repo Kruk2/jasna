@@ -392,13 +392,22 @@ class Pipeline:
         finally:
             progress.close(ensure_completed_bar=True)
 
-    def _ltx_progress(self, frames: int, callback: ProgressCallback | None):
+    def _ltx_progress(self, frames: int, callback: ProgressCallback | None, *, writer_adds_frame_work: bool):
         from jasna.ltx.restore import Progress
 
         report = None
         if callback is not None:
             report = lambda fraction, eta, stage: callback(fraction * 100.0, 0.0, eta, 0, 0, stage)
-        return Progress(frames, disable=self.disable_progress, report=report)
+        return Progress(
+            frames, disable=self.disable_progress, writer_adds_frame_work=writer_adds_frame_work, report=report
+        )
+
+    def _frame_writer_adds_work(self, metadata) -> bool:
+        """Whether ``_frame_writer`` generates or upscales frames."""
+        return (
+            self.config.frame_generation != "none"
+            or frame_upscale_size(self.config, int(metadata.video_width), int(metadata.video_height)) is not None
+        )
 
     def _run_ltx(self, metadata) -> None:
         from jasna.ltx.plan import track_max_gap
@@ -439,7 +448,9 @@ class Pipeline:
                 speed_profile=profile_path(),
                 resume_dir=resume_dir,
                 progress=self._ltx_progress(
-                    frame_rate.output_frame_count(metadata.num_frames), self.progress_callback
+                    frame_rate.output_frame_count(metadata.num_frames),
+                    self.progress_callback,
+                    writer_adds_frame_work=self._frame_writer_adds_work(metadata),
                 ),
                 cancel=self._cancel_event,
                 max_gap=track_max_gap(self.max_detection_gap),
@@ -545,7 +556,7 @@ class Pipeline:
                 render,
                 work_dir=work_dir,
                 resume_dir=self.resume.directory / "ltx",
-                progress=self._ltx_progress(frames, progress_callback),
+                progress=self._ltx_progress(frames, progress_callback, writer_adds_frame_work=False),
                 cancel=self._cancel_event,
                 runtime=self._ltx_runtime,
             )
