@@ -104,18 +104,20 @@ def test_pyav_sw_backend_skips_hwaccel_and_amf(monkeypatch) -> None:
         assert container.streams.video[0].codec_context.thread_type == "AUTO"
 
 
-def test_auto_backend_decodes_vc1_with_pyav_hwaccel(monkeypatch) -> None:
-    vali_factory = MagicMock()
-    monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
-    monkeypatch.setattr(module.av, "open", MagicMock(return_value=_fake_container(True)))
-    monkeypatch.setattr(module, "vendor_for_device", lambda _device: AcceleratorVendor.NVIDIA)
-    monkeypatch.setattr(module, "current_stream", lambda _device: None)
-    metadata = _metadata()
-    metadata.codec_name = "vc1"
-    reader = module.VideoReader("input.mkv", 4, torch.device("cuda:0"), metadata)
-    reader.__enter__()
-    vali_factory.assert_not_called()
-    assert "hwaccel" in module.av.open.call_args.kwargs
+@pytest.mark.parametrize(
+    ("backend", "codec", "vendor", "expected"),
+    [
+        ("auto", "h264", AcceleratorVendor.NVIDIA, "vali"),
+        # Issue #811: NVDEC shows stale or green pictures for VC-1 skipped frames.
+        ("auto", "vc1", AcceleratorVendor.NVIDIA, "pyav-sw"),
+        ("auto", "vc1", AcceleratorVendor.AMD, "pyav-hw"),
+        ("auto", "h264", AcceleratorVendor.AMD, "pyav-hw"),
+        ("pyav-hw", "vc1", AcceleratorVendor.NVIDIA, "pyav-hw"),
+        ("vali", "vc1", AcceleratorVendor.NVIDIA, "vali"),
+    ],
+)
+def test_decode_path_for_codec(backend, codec, vendor, expected) -> None:
+    assert module._decode_path(backend, codec, vendor) == expected
 
 
 def test_pyav_reader_skips_frames_without_planes(monkeypatch) -> None:

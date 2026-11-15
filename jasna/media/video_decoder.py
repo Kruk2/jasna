@@ -3,7 +3,7 @@ import math
 import threading
 from fractions import Fraction
 from queue import Full, Queue
-from typing import Callable, Iterator, TypeVar
+from typing import Callable, Iterator, Literal, TypeVar
 
 import av
 import torch
@@ -44,8 +44,24 @@ _NVDEC_MIN_CODED_SIZE = {"av1": (128, 128)}
 
 # VALI hands VC-1 to NVIDIA's own parser, which drops every frame before the
 # first keyframe and, outside ASF, replaces missing pts with a 30 fps count
-# from 0. FFmpeg's VC-1 decoder with the NVDEC hwaccel keeps both.
-_CODECS_SKIPPING_VALI = frozenset({"vc1"})
+# from 0. FFmpeg's VC-1 decoder with the NVDEC hwaccel shows a stale or green
+# picture for a skipped frame (a 1-byte "repeat the previous picture" packet).
+# FFmpeg's software VC-1 decoder gets all three right.
+_CODECS_DECODED_IN_SOFTWARE_ON_NVIDIA = frozenset({"vc1"})
+
+DecodePath = Literal["vali", "pyav-hw", "pyav-sw"]
+
+
+def _decode_path(backend: DecodeBackendName, codec_name: str, vendor: AcceleratorVendor) -> DecodePath:
+    """The decoder ``VideoReader`` opens first; "pyav-hw" is AMF on AMD, and a
+    failing VALI open under "auto" still falls back to "pyav-hw"."""
+    if backend != "auto":
+        return backend
+    if vendor is not AcceleratorVendor.NVIDIA:
+        return "pyav-hw"
+    if codec_name in _CODECS_DECODED_IN_SOFTWARE_ON_NVIDIA:
+        return "pyav-sw"
+    return "vali"
 
 
 class VideoDecodeError(RuntimeError):
@@ -362,9 +378,8 @@ class VideoReader:
     def __enter__(self):
         current_stream(self.device)
         backend = self.decode_backend
-        if backend == "vali" or (
-            backend == "auto" and self.metadata.codec_name not in _CODECS_SKIPPING_VALI
-        ):
+        path = _decode_path(backend, self.metadata.codec_name, self.vendor)
+        if path == "vali":
             if self.vendor is AcceleratorVendor.NVIDIA:
                 try:
                     self._vali_source = _ValiFrameSource(
@@ -388,9 +403,9 @@ class VideoReader:
                     self.height = self._vali_source.height
                     log.info("Using VALI NVDEC decoder for %s", self.file)
                     return self
-            elif backend == "vali":
+            else:
                 raise VideoDecodeError("The VALI decode backend requires an NVIDIA device")
-        software_only = backend == "pyav-sw"
+        software_only = path == "pyav-sw"
         self._software_only = software_only
         try:
             if not software_only and self.vendor is AcceleratorVendor.NVIDIA:
