@@ -557,10 +557,10 @@ def test_a_window_decode_returns_cached_memory_only_where_it_could_change_the_de
     assert memory["cached"] == cached_after
 
 
-def test_large_canvas_needs_twelve_gib_free():
+def test_large_canvas_fits_a_12_gb_card_with_a_desktop_on_it():
     gib = 1 << 30
-    assert restore.large_canvas_fits(True, 12 * gib)
-    assert not restore.large_canvas_fits(True, 11 * gib)
+    assert restore.large_canvas_fits(True, int(9.7 * gib))
+    assert not restore.large_canvas_fits(True, int(8.5 * gib))
     assert not restore.large_canvas_fits(False, 30 * gib)
 
 
@@ -1614,7 +1614,7 @@ def _save_whole_video_768_plan(resume_dir: Path) -> None:
 
 
 def test_whole_video_canvas_without_saved_work_follows_the_free_vram(fakes, tmp_path):
-    assert restore.whole_video_large_canvas(True, 9 << 30, tmp_path / "saved") is False
+    assert restore.whole_video_large_canvas(True, 8 << 30, tmp_path / "saved") is False
 
 
 def test_resume_replays_the_saved_whole_video_canvas_decision(fakes, monkeypatch, tmp_path):
@@ -1627,7 +1627,7 @@ def test_resume_replays_the_saved_whole_video_canvas_decision(fakes, monkeypatch
 def test_resume_of_saved_768_px_windows_fails_plainly_when_vram_is_short(fakes, tmp_path):
     _save_whole_video_768_plan(tmp_path / "saved")
     with pytest.raises(RuntimeError, match="768 px"):
-        restore.whole_video_large_canvas(True, 9 << 30, tmp_path / "saved")
+        restore.whole_video_large_canvas(True, 8 << 30, tmp_path / "saved")
 
 
 def test_resuming_only_the_remaining_span_uses_its_original_latents(fakes, monkeypatch, tmp_path):

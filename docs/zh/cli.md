@@ -52,7 +52,7 @@ $env:TEMP = 'Z:\Temp'
 | `--restoration-model-name` | `basicvsrpp` | 视频修复模型：`basicvsrpp`（快）、`ltx-basic`（基础画质 LTX：比 `ltx` 快约 1.7 倍，画面稍柔和）、`ltx`（标准画质 LTX：细节更多，慢很多；推荐）、`ltx-4step`（良好画质：细节比 `ltx` 稍多，慢约 1.5 倍）、`ltx-8step`（高画质：细节比 `ltx` 更多，慢约 2.5 倍）或 `ltx-undistilled`（顶级画质：稍好，比 `ltx` 慢约 5 倍）。见[选择模型](models.md#修复模型)。 |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth`，LTX 为 `model_weights/ltx-restore` | 修复模型权重（LTX 为文件夹）。 |
 | `--ltx-fast` / `--no-ltx-fast` | 关闭 | LTX：快约 1.4 倍，细节略少。仅限 RTX 50 系列；其他 GPU 会报错停止。 |
-| `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多。大多数视频都有大马赛克，整个视频可能慢到约 3 倍。需要约 12 GB 空闲显存；不够时，这些马赛克按普通方式修复。 |
+| `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多。大多数视频都有大马赛克，整个视频可能慢到约 3 倍。需要约 9 GB 空闲显存，12 GB 显卡也能用；不够时，这些马赛克按普通方式修复。 |
 | `--ltx-overlap` | `17` | LTX：LTX 修复的各段之间共享的帧数（`17`、`25`、`33`、`41` 或 `49`）。马赛克持续超过 4 秒时，越少越快；`33` 是重叠更多的旧模式。 |
 | `--ltx-vae-encoder` | `auto` | LTX：LTX 读取视频的方式：`full`（最清晰、最慢）、`half`（更快）或 `max`（最快，画面稍柔和）。`auto`：`ltx-basic` 用 `half`，其他用 `full`。与应用里的 **LTX 编码器**相同。 |
 | `--ltx-vae-decoder` | `auto` | LTX：LTX 把结果转回视频的方式：`full`、`half` 或 `max`，同上。`auto`：`ltx-basic` 用 `max`，其他用 `full`。与应用里的 **LTX 解码器**相同。 |

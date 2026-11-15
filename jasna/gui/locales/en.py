@@ -614,7 +614,7 @@ EN = {
         "tip_ltx_seed": "Different seeds give slightly different results.\nUse the same seed to get the same result again.",
         "tip_ltx_new_seed": "Random seed",
         "tip_ltx_fast": "About 1.4x faster, slightly less detail.\nRTX 50-series only.",
-        "tip_ltx_large_canvas": "More detail on large mosaics. Most videos have some, so a whole video can take up to about 3x longer.\nNeeds 12 GB of free VRAM.",
+        "tip_ltx_large_canvas": "More detail on large mosaics. Most videos have some, so a whole video can take up to about 3x longer.\nNeeds 9 GB of free VRAM, so 12 GB cards can use it.",
         "tip_ltx_overlap": "Frames shared between the chunks LTX restores.\nFewer is faster when a mosaic stays on screen for more than 4 seconds; 33 is the older mode with more overlap.\nDefault: 17",
         "tip_ltx_vae_encoder": "How LTX reads the video before it restores it.\nFull: sharpest, slowest. Half: faster. Max: fastest, slightly softer.\nAuto: Half for Basic Quality, Full for the others.\nA choice you don't have yet is downloaded when you press Start.\nDefault: Auto",
         "tip_ltx_vae_decoder": "How LTX turns its result back into video.\nFull: sharpest, slowest. Half: faster. Max: fastest, slightly softer.\nAuto: Max for Basic Quality, Full for the others.\nA choice you don't have yet is downloaded when you press Start.\nDefault: Auto",

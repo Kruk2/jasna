@@ -79,7 +79,7 @@ CLI_HELP: dict[str, str] = {
     ),
     "ltx_large_canvas": (
         "ltx: restore large mosaics at 768 px instead of 512 px. More detail; most videos have some, "
-        "so a whole run can take up to about 3x longer; needs 12 GB of free VRAM (ignored otherwise). "
+        "so a whole run can take up to about 3x longer; needs 9 GB of free VRAM, so 12 GB cards can use it (ignored otherwise). "
         "(default: %(default)s)"
     ),
     "ltx_overlap": (

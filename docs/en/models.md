@@ -143,7 +143,7 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
 - **Fast mode** (RTX 50-series only): about 1.4x faster, slightly less detail,
   smaller download. CLI: `--ltx-fast`.
 - **Sharper large mosaics**: more detail on big mosaics (close-ups, 4K).
-  Most videos have some, so a whole video can take up to about 3x longer. Needs about 12 GB of free VRAM (16 GB cards for
+  Most videos have some, so a whole video can take up to about 3x longer. Needs about 9 GB of free VRAM, so 12 GB cards can use it (16 GB cards for
   Segment Editor ranges); otherwise Jasna restores them normally. CLI:
   `--ltx-large-canvas`.
 - **LTX Overlap** (**Expert** view): frames shared between the chunks LTX

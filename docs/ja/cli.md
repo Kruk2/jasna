@@ -55,7 +55,7 @@ $env:TEMP = 'Z:\Temp'
 | `--restoration-model-name` | `basicvsrpp` | 動画復元モデル：`basicvsrpp`（高速）、`ltx-basic`（基本画質の LTX：`ltx` より約 1.7 倍速く、少しやわらかい）、`ltx`（標準画質の LTX：より精細、かなり遅い。おすすめ）、`ltx-4step`（良好画質：`ltx` より少し精細で約 1.5 倍遅い）、`ltx-8step`（高画質：`ltx` より精細で約 2.5 倍遅い）、`ltx-undistilled`（最高画質：少し良く、`ltx` より約 5 倍遅い）。[モデルの選び方](models.md#復元モデル)を参照。 |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth`、LTX では `model_weights/ltx-restore` | 復元モデルの重み（LTX はフォルダー）。 |
 | `--ltx-fast` / `--no-ltx-fast` | オフ | LTX：約 1.4 倍高速、ディテールはわずかに減ります。RTX 50 シリーズのみ。他の GPU ではエラーで止まります。 |
-| `--ltx-large-canvas` / `--no-ltx-large-canvas` | オフ | LTX：大きなモザイクをより精細に。ほとんどの動画に大きなモザイクがあるため、動画全体で最大約 3 倍時間がかかります。空き VRAM が約 12 GB 必要です。足りない場合、そのモザイクは通常どおり復元します。 |
+| `--ltx-large-canvas` / `--no-ltx-large-canvas` | オフ | LTX：大きなモザイクをより精細に。ほとんどの動画に大きなモザイクがあるため、動画全体で最大約 3 倍時間がかかります。空き VRAM が約 9 GB 必要で、12 GB のカードでも使えます。足りない場合、そのモザイクは通常どおり復元します。 |
 | `--ltx-overlap` | `17` | LTX：LTX が復元する区間どうしで共有するフレーム数（`17`、`25`、`33`、`41`、`49`）。モザイクが 4 秒以上続く場面では少ないほど速くなります。`33` は重なりの多い従来のモードです。 |
 | `--ltx-vae-encoder` | `auto` | LTX：LTX が動画を読み込む方法。`full`（最もシャープで最も遅い）、`half`（速い）、`max`（最速、少しやわらかい）。`auto`: `ltx-basic` は `half`、それ以外は `full`。アプリの **LTX エンコーダー**と同じです。 |
 | `--ltx-vae-decoder` | `auto` | LTX：LTX の結果を動画に戻す方法。`full`、`half`、`max`（上と同じ）。`auto`: `ltx-basic` は `max`、それ以外は `full`。アプリの **LTX デコーダー**と同じです。 |
