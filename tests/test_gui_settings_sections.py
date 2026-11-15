@@ -159,6 +159,7 @@ def test_frame_generation_is_off_and_locked_on_a_gpu_without_it(panel_factory) -
 )
 def test_upscale_models_follow_the_gpu(panel_factory, monkeypatch, vendor, platform, offered) -> None:
     monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr("platform.release", lambda: "6.8.0-generic")
     panel = panel_factory()
     _apply(panel, replace(AppSettings(), upscale_model="rtx-super-res"))
 
