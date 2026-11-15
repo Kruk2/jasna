@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 import types
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -243,6 +243,42 @@ def test_freeconsole_dangling_std_handles_break_subprocess_until_redirect(tmp_pa
     before, after = result_path.read_text().split(",")
     assert before == "False"  # bug reproduces: dangling stdin handle breaks Popen(stdin=None)
     assert after == "True"     # fix: NUL OS std handles let the child duplicate them
+
+
+@pytest.mark.parametrize(
+    ("library_path", "expected"),
+    [
+        ("/opt/jasna/nvvfx/libs:/usr/local/cuda/lib64", "/usr/local/cuda/lib64"),
+        ("/home/me/lib:/opt/jasna-other/lib", "/home/me/lib:/opt/jasna-other/lib"),
+        # OpenCV's loader adds an unnormalized path and a trailing empty entry.
+        ("/opt/jasna/cv2/../../lib64:/opt/jasna/nvvfx/libs:", None),
+        (None, None),
+    ],
+)
+def test_library_path_keeps_only_folders_outside_the_app(library_path, expected) -> None:
+    environment = {"HOME": "/home/me"}
+    if library_path is not None:
+        environment["LD_LIBRARY_PATH"] = library_path
+
+    child = os_utils.without_app_library_path(environment, PurePosixPath("/opt/jasna"))
+
+    assert child.get("LD_LIBRARY_PATH") == expected
+    assert child["HOME"] == "/home/me"
+
+
+def test_frozen_linux_host_programs_lose_the_bundle_library_folders(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils.sys, "platform", "linux")
+    monkeypatch.setattr(os_utils.sys, "executable", "/opt/jasna/jasna")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/jasna/nvvfx/libs:/usr/local/cuda/lib64")
+
+    assert os_utils.host_program_environment()["LD_LIBRARY_PATH"] == "/usr/local/cuda/lib64"
+
+
+def test_windows_host_programs_inherit_the_environment(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32")
+
+    assert os_utils.host_program_environment() is None
 
 
 def test_subprocess_window_options_are_empty_off_windows(monkeypatch) -> None:

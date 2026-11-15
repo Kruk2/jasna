@@ -8,6 +8,7 @@ from pathlib import Path
 from tkinter import messagebox
 
 from jasna.gui.locales import t
+from jasna.os_utils import host_program_environment
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ def open_containing_folder(path: Path, *, parent, select_file: bool = False) -> 
         command = ["xdg-open", str(folder)]
 
     try:
-        subprocess.Popen(command)
+        subprocess.Popen(command, env=host_program_environment())
     except OSError as exc:
         logger.warning("Could not open containing folder %s", folder, exc_info=True)
         messagebox.showerror(
@@ -39,9 +40,9 @@ def open_file(path: Path, *, parent) -> None:
         if system == "Windows":
             os.startfile(str(path))
         elif system == "Darwin":
-            subprocess.Popen(["open", str(path)])
+            subprocess.Popen(["open", str(path)], env=host_program_environment())
         else:
-            subprocess.Popen(["xdg-open", str(path)])
+            subprocess.Popen(["xdg-open", str(path)], env=host_program_environment())
     except OSError as exc:
         logger.warning("Could not open file %s", path, exc_info=True)
         messagebox.showerror(

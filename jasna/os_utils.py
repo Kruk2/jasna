@@ -7,8 +7,9 @@ import secrets
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
 from jasna._frozen import is_frozen
@@ -250,6 +251,35 @@ def subprocess_no_window_kwargs() -> dict:
         "startupinfo": get_subprocess_startup_info(),
         "creationflags": subprocess.CREATE_NO_WINDOW,
     }
+
+
+def without_app_library_path(environment: Mapping[str, str], app_dir: PurePosixPath) -> dict[str, str]:
+    """``environment`` without the empty ``LD_LIBRARY_PATH`` entries and those written as paths
+    inside ``app_dir``.
+
+    Bundled packages add them when imported: NVIDIA VFX its library folder, OpenCV a folder next to
+    the app plus an empty entry, which means the working directory, often the app folder. A system
+    program started with them loads Jasna's copies, e.g. systemctl fails on the bundled libcrypto."""
+    child = dict(environment)
+    user_entries = [
+        entry
+        for entry in child.get("LD_LIBRARY_PATH", "").split(":")
+        if entry and not PurePosixPath(entry).is_relative_to(app_dir)
+    ]
+    if user_entries:
+        child["LD_LIBRARY_PATH"] = ":".join(user_entries)
+    else:
+        child.pop("LD_LIBRARY_PATH", None)
+    return child
+
+
+def host_program_environment() -> dict[str, str] | None:
+    """Environment for programs of the user's system that Jasna starts (shutdown, the user's own
+    commands, the file manager); ``None`` keeps the inherited one off Linux."""
+    if sys.platform != "linux":
+        return None
+    app_dir = PurePosixPath(sys.executable).parent if is_frozen() else PurePosixPath(sys.prefix)
+    return without_app_library_path(os.environ, app_dir)
 
 
 def _parse_ffmpeg_major_version(version_output: str) -> int:

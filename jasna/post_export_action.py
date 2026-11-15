@@ -8,7 +8,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from jasna.os_utils import subprocess_no_window_kwargs
+from jasna.os_utils import host_program_environment, subprocess_no_window_kwargs
 
 
 logger = logging.getLogger(__name__)
@@ -47,10 +47,12 @@ def run_post_export_action(action: str, command: str = "") -> None:
 
     if action == POST_EXPORT_ACTION_SHUTDOWN:
         cmd = ["shutdown", "/s", "/t", "0"] if sys.platform == "win32" else ["systemctl", "poweroff"]
-        subprocess.Popen(cmd, **subprocess_no_window_kwargs())
+        subprocess.Popen(cmd, env=host_program_environment(), **subprocess_no_window_kwargs())
         return
 
-    subprocess.Popen(command.strip(), shell=True, **subprocess_no_window_kwargs())
+    subprocess.Popen(
+        command.strip(), shell=True, env=host_program_environment(), **subprocess_no_window_kwargs()
+    )
 
 
 def run_post_export_action_safely(action: str, command: str, report_error: Callable[[str], None]) -> bool:
@@ -154,6 +156,7 @@ def run_post_export_video_command(
             expanded,
             shell=True,
             cwd=output_path.resolve(strict=False).parent,
+            env=host_program_environment(),
             **kwargs,
         )
     except OSError as exc:

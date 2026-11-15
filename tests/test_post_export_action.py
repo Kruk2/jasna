@@ -39,28 +39,34 @@ def test_run_post_export_shutdown_windows(monkeypatch) -> None:
 
     run_post_export_action("shutdown")
 
-    assert calls == [(["shutdown", "/s", "/t", "0"], {"creationflags": 1})]
+    assert calls == [(["shutdown", "/s", "/t", "0"], {"env": None, "creationflags": 1})]
 
 
-def test_run_post_export_shutdown_linux(monkeypatch) -> None:
+def test_run_post_export_shutdown_linux_without_bundled_libraries(
+    monkeypatch, linux_bundled_library_path
+) -> None:
+    # Issue #822: systemctl failed on the bundled libcrypto.
     calls: list[tuple[list[str], dict]] = []
-    monkeypatch.setattr("jasna.post_export_action.sys.platform", "linux")
-    monkeypatch.setattr("jasna.post_export_action.subprocess_no_window_kwargs", lambda: {})
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kwargs: calls.append((cmd, kwargs)))
 
     run_post_export_action("shutdown")
 
-    assert calls == [(["systemctl", "poweroff"], {})]
+    [(cmd, kwargs)] = calls
+    assert cmd == ["systemctl", "poweroff"]
+    assert kwargs["env"]["LD_LIBRARY_PATH"] == linux_bundled_library_path
 
 
-def test_run_post_export_custom_command_uses_shell(monkeypatch) -> None:
+def test_run_post_export_custom_command_uses_shell_without_bundled_libraries(
+    monkeypatch, linux_bundled_library_path
+) -> None:
     calls: list[tuple[str, dict]] = []
-    monkeypatch.setattr("jasna.post_export_action.subprocess_no_window_kwargs", lambda: {})
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kwargs: calls.append((cmd, kwargs)))
 
     run_post_export_action("command", "  echo done  ")
 
-    assert calls == [("echo done", {"shell": True})]
+    [(cmd, kwargs)] = calls
+    assert (cmd, kwargs["shell"]) == ("echo done", True)
+    assert kwargs["env"]["LD_LIBRARY_PATH"] == linux_bundled_library_path
 
 
 def test_run_post_export_safely_reports_spawn_error(monkeypatch) -> None:
@@ -173,13 +179,14 @@ def test_windows_quoting_keeps_trailing_backslash_inside_quotes(monkeypatch) -> 
     assert _quote_shell_value("C:\\") == '"C:\\\\"'
 
 
-def test_run_post_export_video_command_waits_for_success(monkeypatch, tmp_path: Path) -> None:
+def test_run_post_export_video_command_waits_for_success(
+    monkeypatch, tmp_path: Path, linux_bundled_library_path
+) -> None:
     process = MagicMock(pid=123)
     process.wait.return_value = 0
     popen = MagicMock(return_value=process)
     monkeypatch.setattr("jasna.post_export_action.subprocess.Popen", popen)
     monkeypatch.setattr("jasna.post_export_action.subprocess_no_window_kwargs", lambda: {})
-    monkeypatch.setattr("jasna.post_export_action.sys.platform", "linux")
     input_path = tmp_path / "in.mp4"
     output_path = tmp_path / "out.mp4"
 
@@ -190,10 +197,13 @@ def test_run_post_export_video_command_waits_for_success(monkeypatch, tmp_path: 
         lambda: False,
     )
 
+    environment = popen.call_args.kwargs["env"]
+    assert environment["LD_LIBRARY_PATH"] == linux_bundled_library_path
     popen.assert_called_once_with(
         f"tool {shlex.quote(str(output_path))}",
         shell=True,
         cwd=tmp_path,
+        env=environment,
         start_new_session=True,
     )
     process.wait.assert_called_once_with(timeout=0.1)

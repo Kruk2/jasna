@@ -291,6 +291,18 @@ def nvidia_vendor(monkeypatch):
 
 
 @pytest.fixture
+def linux_bundled_library_path(monkeypatch) -> str:
+    """Linux, with a bundled package's library folder put ahead of the user's own
+    ``LD_LIBRARY_PATH``; returns the user's own value."""
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys, "prefix", "/opt/jasna")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/jasna/nvvfx/libs:/usr/local/cuda/lib64")
+    return "/usr/local/cuda/lib64"
+
+
+@pytest.fixture
 def no_gpu_cleanup(monkeypatch):
     """Skip the per-job torch cleanup: it initializes CUDA, which can outlast thread joins in a busy run."""
     monkeypatch.setattr("jasna.gui.processor._cleanup_torch", lambda torch_mod: None)

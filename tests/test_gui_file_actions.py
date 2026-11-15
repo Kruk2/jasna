@@ -32,7 +32,7 @@ def test_open_containing_folder_uses_platform_launcher(
 
     file_actions.open_containing_folder(VIDEO, parent=MagicMock(), select_file=select_file)
 
-    launch.assert_called_once_with(_command(command))
+    assert launch.call_args.args == (_command(command),)
 
 
 def test_open_containing_folder_shows_localized_error_on_failure(monkeypatch) -> None:
@@ -66,7 +66,20 @@ def test_open_file_uses_platform_launcher(monkeypatch, system: str, command: lis
 
     file_actions.open_file(VIDEO, parent=MagicMock())
 
-    launch.assert_called_once_with(_command(command))
+    assert launch.call_args.args == (_command(command),)
+
+
+@pytest.mark.parametrize("open_path", [file_actions.open_file, file_actions.open_containing_folder])
+def test_linux_file_manager_starts_without_bundled_libraries(
+    monkeypatch, linux_bundled_library_path, open_path
+) -> None:
+    launch = MagicMock()
+    monkeypatch.setattr(file_actions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(file_actions.subprocess, "Popen", launch)
+
+    open_path(VIDEO, parent=MagicMock())
+
+    assert launch.call_args.kwargs["env"]["LD_LIBRARY_PATH"] == linux_bundled_library_path
 
 
 def test_open_file_uses_windows_default_application(monkeypatch) -> None:
