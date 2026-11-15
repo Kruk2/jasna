@@ -573,6 +573,37 @@ def check_ascii_install_path() -> tuple[bool, str]:
     return True, path_str
 
 
+LTX_MIN_LINUX_KERNEL = (5, 8)
+
+
+def kernel_runs_ltx(release: str) -> bool:
+    """Whether the Linux kernel ``release`` (``uname -r``, such as ``5.10.55+``) can run the LTX worker."""
+    major, minor = re.match(r"(\d+)\.(\d+)", release).groups()
+    return (int(major), int(minor)) >= LTX_MIN_LINUX_KERNEL
+
+
+def old_linux_kernel_for_ltx() -> str | None:
+    """The running Linux kernel's release when it is too old for LTX, else None."""
+    if sys.platform != "linux":
+        return None
+    release = platform.release()
+    return None if kernel_runs_ltx(release) else release
+
+
+def leftover_install_dll() -> str | None:
+    """A DLL an older version left in this Windows release folder (a release extracted over an
+    older one), which the loader may pick instead of this version's; None when there is none."""
+    if sys.platform != "win32" or not is_frozen():
+        return None
+    from jasna.packaging.windows_dll_paths import ambiguous_dll_names
+
+    ambiguous = ambiguous_dll_names(_install_dir())
+    if not ambiguous:
+        return None
+    logger.warning("DLLs that more than one Jasna folder provides: %s", "; ".join(ambiguous))
+    return Path(ambiguous[0].split(" = ")[0]).name
+
+
 def install_on_hard_disk() -> bool:
     """True when Jasna's folder is on a spinning hard disk (HDD); False on SSDs and when the
     drive type cannot be told (network shares, RAID, virtual disks)."""

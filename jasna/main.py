@@ -15,6 +15,7 @@ from jasna.media.probe import UnsupportedVideoError
 from jasna.os_utils import (
     AMD_DRIVER_URL,
     AMF_LINUX_INSTALL_URL,
+    LTX_MIN_LINUX_KERNEL,
     MIN_DRIVER_VERSION,
     check_amd_amf_runtime,
     check_ascii_install_path,
@@ -26,6 +27,8 @@ from jasna.os_utils import (
     escape_unencodable_output,
     gpu_check_error,
     install_on_hard_disk,
+    leftover_install_dll,
+    old_linux_kernel_for_ltx,
 )
 from jasna.session_config import (
     DEFAULT_CODEC,
@@ -739,6 +742,12 @@ def _check_system(args: argparse.Namespace) -> None:
         print(f"Current path: {path_info}")
         sys.exit(1)
 
+    leftover = leftover_install_dll()
+    if leftover is not None:
+        print(f"Error: the Jasna folder still has files from an older version, such as {leftover}. "
+              "Extract Jasna into a new, empty folder, then move the model_weights folder there.")
+        sys.exit(1)
+
     check_required_executables()
 
     driver_ok, driver_info = check_gpu_driver_version()
@@ -1236,6 +1245,10 @@ def _main() -> None:
             model_option = f"--restoration-model-name {args.restoration_model_name}"
             if is_streaming:
                 parser.error(f"{model_option} does not support --stream")
+            if (kernel := old_linux_kernel_for_ltx()) is not None:
+                minimum = ".".join(map(str, LTX_MIN_LINUX_KERNEL))
+                parser.error(f"LTX needs Linux kernel {minimum} or newer; this system runs {kernel}. "
+                             "Update the system to use LTX.")
             unsupported = ltx_unsupported_options(
                 auto_split=auto_split, secondary_restoration=args.secondary_restoration, denoise_strength=args.denoise
             )

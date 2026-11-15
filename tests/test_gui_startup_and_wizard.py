@@ -146,6 +146,24 @@ def test_startup_warns_when_installed_on_a_hard_disk(jasna_app, monkeypatch, har
     assert _logged_warnings(jasna_app) == ([t("hard_disk_warning")] if hard_disk else [])
 
 
+@pytest.mark.parametrize("leftover", ["c10.dll", None])
+def test_startup_warns_when_an_older_version_left_dlls_in_the_folder(jasna_app, monkeypatch, leftover):
+    from tkinter import messagebox
+
+    from jasna import os_utils
+    from jasna.gui.locales import t
+
+    monkeypatch.setattr(os_utils, "leftover_install_dll", lambda: leftover)
+    shown = []
+    monkeypatch.setattr(messagebox, "showwarning", lambda title, message, parent: shown.append((title, message)))
+
+    jasna_app._warn_if_older_version_files_left()
+
+    expected = [(t("old_files_warning_title"), t("old_files_warning_body", file=leftover))] if leftover else []
+    assert shown == expected
+    assert _logged_warnings(jasna_app) == [message for _title, message in expected]
+
+
 @pytest.mark.parametrize("amd", [True, False])
 def test_system_checks_check_amf_only_on_amd(monkeypatch, amd):
     from jasna import accelerator, os_utils

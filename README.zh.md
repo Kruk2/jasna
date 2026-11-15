@@ -62,7 +62,7 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 - AMD：见下表。支持 UNet 4x 二次修复。
 - 磁盘格式：Windows 用 NTFS；Linux 用 ext4、Btrfs、XFS 或 ZFS。不支持网络磁盘。请使用
   固态硬盘（SSD）；在机械硬盘（HDD）上 Jasna 启动和加载模型都很慢。
-- LTX 需要 NVIDIA RTX 或 AMD Radeon RX 7000/9000 显卡（AMD 核显未测试），至少 8 GB 显存和 16 GB 内存。见
+- LTX 需要 NVIDIA RTX 或 AMD Radeon RX 7000/9000 显卡（AMD 核显未测试），至少 8 GB 显存和 16 GB 内存；Linux 上需要 5.8 或更新的内核。见
   [LTX 需要什么](docs/zh/models.md#ltx-需要什么)。
 
 | AMD 显卡 | Jasna | LTX |
@@ -101,7 +101,7 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 
 **第一个任务会很慢。** 在 NVIDIA 上，Jasna 会先为你的 GPU 准备模型。这大约需要
 **15–60 分钟**，只会发生一次。在此期间请关闭其他应用，也不要使用电脑。更新 Jasna 时，
-把 `model_weights` 文件夹复制到新版本中，这样就不用再等一次。更新后，LTX 仍可能要求重新下载模型。
+请解压到一个新的空文件夹（不要覆盖旧文件夹），再把 `model_weights` 文件夹复制过去，这样就不用再等一次。更新后，LTX 仍可能要求重新下载模型。
 在 AMD 上，只有首次使用 UNet 4x 时需要这样准备。
 
 每个设置都有提示：把鼠标移到 ⓘ 图标上即可查看。GPU 显存不足？降低

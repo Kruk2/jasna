@@ -62,6 +62,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **VRAM**: 8 GB minimum. More VRAM is faster: on smaller cards parts of the
   model are kept in system RAM.
 - **System RAM**: 16 GB minimum (LTX uses about 10 GB).
+- **Linux**: kernel 5.8 or newer (`uname -r` shows it). Older systems, such as
+  some NAS systems, can't run LTX.
 - **Disk**: the model is not bundled. Jasna asks before downloading it the
   first time you start an LTX job, and downloads only the model you picked:
 

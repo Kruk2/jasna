@@ -68,7 +68,8 @@ and a command line, and runs on your GPU.
   are not supported. Use an SSD; on a hard disk (HDD) Jasna starts and loads
   models slowly.
 - LTX needs an NVIDIA RTX or AMD Radeon RX 7000/9000 GPU (AMD integrated GPUs
-  untested), at least 8 GB VRAM and 16 GB RAM. See [What LTX needs](docs/en/models.md#what-ltx-needs).
+  untested), at least 8 GB VRAM and 16 GB RAM; on Linux, kernel 5.8 or newer.
+  See [What LTX needs](docs/en/models.md#what-ltx-needs).
 
 | AMD GPU | Jasna | LTX |
 | --- | --- | --- |
@@ -107,8 +108,9 @@ and a command line, and runs on your GPU.
 
 **Your first job is slow.** On NVIDIA, Jasna first prepares the models for
 your exact GPU. This takes about **15–60 minutes**, only once. Close other
-apps and don't use the PC during this time. When you update Jasna, copy the
-`model_weights` folder to the new version, so you don't wait again. LTX may
+apps and don't use the PC during this time. When you update Jasna, extract it
+into a new, empty folder (not over the old one) and copy the `model_weights`
+folder there, so you don't wait again. LTX may
 still ask to download its model again after an update. On AMD, only UNet 4x
 needs this preparation, on its first use.
 

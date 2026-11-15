@@ -778,3 +778,12 @@ def test_scratch_folder_has_the_default_folder_mode(tmp_path):
     (tmp_path / "plain").mkdir()
     with os_utils.scratch_folder(tmp_path, ".ltx-") as folder:
         assert folder.stat().st_mode == (tmp_path / "plain").stat().st_mode
+
+
+@pytest.mark.parametrize(
+    ("release", "supported"),
+    [("4.4.302+", False), ("5.4.0-216-generic", False), ("5.7.19", False), ("5.8.0-63-generic", True),
+     ("5.10.55+", True), ("5.15.167.4-microsoft-standard-WSL2", True), ("6.8.0-45-generic", True), ("10.0.0", True)],
+)
+def test_ltx_runs_on_linux_kernels_from_5_8(release, supported) -> None:
+    assert os_utils.kernel_runs_ltx(release) is supported

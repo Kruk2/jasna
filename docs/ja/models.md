@@ -61,6 +61,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **VRAM**: 最低 8 GB。VRAM が多いほど速くなります。少ないカードではモデルの
   一部をシステム RAM に置きます。
 - **システム RAM**: 最低 16 GB（LTX は約 10 GB 使います）。
+- **Linux**: カーネル 5.8 以降（`uname -r` で確認できます）。一部の NAS など、
+  古いシステムでは LTX を使えません。
 - **ディスク**: モデルは同梱されていません。初めて LTX のジョブを始めるとき、
   Jasna はダウンロード前に確認し、選んだモデルだけをダウンロードします。
 

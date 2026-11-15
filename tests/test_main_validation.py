@@ -207,6 +207,19 @@ def test_usage_error_is_one_short_message(tmp_path, capsys):
     ]
 
 
+@pytest.mark.parametrize("model", ["ltx", "ltx-undistilled"])
+def test_ltx_on_an_old_linux_kernel_is_a_usage_error(tmp_path, capsys, model):
+    with (
+        _h264_source(),
+        patch.object(main, "old_linux_kernel_for_ltx", return_value="5.4.0-216-generic"),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        run_cli(cli_args(tmp_path, "--restoration-model-name", model))
+
+    assert exit_info.value.code == 2
+    assert "Linux kernel 5.8 or newer" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     ("args", "missing", "error"),
     [
@@ -251,6 +264,7 @@ def _system_checks_pass(*, driver: str):
         patch.object(main, "check_supported_gpu", return_value=(True, "ok")),
         patch.object(main, "check_gpu_driver_version", return_value=(True, driver)),
         patch.object(main, "install_on_hard_disk", return_value=False),
+        patch.object(main, "leftover_install_dll", return_value=None),
     ):
         yield
 
@@ -284,6 +298,23 @@ def test_cli_warns_when_installed_on_a_hard_disk(capsys, hard_disk):
     ):
         main._check_system(argparse.Namespace(device="cuda:0"))
     assert ("installed on a hard disk drive (HDD)" in capsys.readouterr().out) is hard_disk
+
+
+@pytest.mark.parametrize("leftover", ["c10.dll", None])
+def test_cli_stops_when_an_older_version_left_dlls_in_the_folder(capsys, leftover):
+    with (
+        _system_checks_pass(driver="620"),
+        patch("jasna.accelerator.is_nvidia_device", return_value=False),
+        patch.object(main, "leftover_install_dll", return_value=leftover),
+    ):
+        if leftover:
+            with pytest.raises(SystemExit) as exit_info:
+                main._check_system(argparse.Namespace(device="cuda:0"))
+            assert exit_info.value.code == 1
+        else:
+            main._check_system(argparse.Namespace(device="cuda:0"))
+    out = capsys.readouterr().out
+    assert ("older version" in out and "c10.dll" in out) is (leftover is not None)
 
 
 @pytest.mark.parametrize(

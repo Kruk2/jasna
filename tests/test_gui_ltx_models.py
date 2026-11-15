@@ -76,6 +76,19 @@ def test_availability_without_downloads(tmp_path) -> None:
     assert run_unavailable_reason(state, "distilled", True, CPU, trial=True) == "model_ltx_needs_nvidia"
 
 
+def test_ltx_is_unavailable_on_an_old_linux_kernel(tmp_path, monkeypatch) -> None:
+    from jasna import os_utils
+
+    _install(tmp_path, "distilled", fast=False)
+    state = read_install_state(tmp_path, "auto", "auto")
+    monkeypatch.setattr(os_utils, "old_linux_kernel_for_ltx", lambda: "5.4.0-216-generic")
+
+    assert card_unavailable_reason(NVIDIA) == "model_ltx_needs_newer_linux"
+    assert run_unavailable_reason(state, "distilled", False, NVIDIA, trial=False) == "model_ltx_needs_newer_linux"
+    assert run_unavailable_reason(state, "distilled", False, AMD, trial=True) == "model_ltx_needs_newer_linux"
+    assert card_unavailable_reason(CPU) == "model_ltx_needs_nvidia"
+
+
 def test_availability_with_downloads(tmp_path, downloadable) -> None:
     state = read_install_state(tmp_path, "auto", "auto")
 

@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from jasna import os_utils
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui.download_worker import start_download
 from jasna.gui.activation_worker import read_license_info
@@ -55,7 +56,11 @@ def read_install_state(directory: Path, encoder: LtxVaeName, decoder: LtxVaeName
 def card_unavailable_reason(vendor: AcceleratorVendor | None) -> str | None:
     """Locale key saying why the LTX card cannot be picked; ``vendor`` is None until the GPU is known.
     Without model files LTX still runs as a trial."""
-    return "model_ltx_needs_nvidia" if vendor is AcceleratorVendor.CPU else None
+    if vendor is AcceleratorVendor.CPU:
+        return "model_ltx_needs_nvidia"
+    if os_utils.old_linux_kernel_for_ltx() is not None:
+        return "model_ltx_needs_newer_linux"
+    return None
 
 
 def trial_only(state: LtxInstallState) -> bool:
@@ -67,8 +72,8 @@ def run_unavailable_reason(
     state: LtxInstallState, model: LtxModelName, fast: bool, vendor: AcceleratorVendor | None, *, trial: bool
 ) -> str | None:
     """Locale key saying why LTX cannot restore right now with this variant."""
-    if vendor is AcceleratorVendor.CPU:
-        return "model_ltx_needs_nvidia"
+    if (reason := card_unavailable_reason(vendor)) is not None:
+        return reason
     if trial:
         return None
     if state.installed(model, fast):

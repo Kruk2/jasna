@@ -143,6 +143,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.after_idle(self._start_cuda_warmup)
         self.after_idle(self._warn_if_windhawk_loaded)
         self.after_idle(self._warn_if_installed_on_hard_disk)
+        self.after_idle(self._warn_if_older_version_files_left)
         self.after_idle(self._start_update_check)
         self.after_idle(activation_worker.start_pc_license_refresh)
 
@@ -459,6 +460,16 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _warn_if_installed_on_hard_disk(self):
         if os_utils.install_on_hard_disk():
             self._log_panel.warning(t("hard_disk_warning"))
+
+    def _warn_if_older_version_files_left(self):
+        leftover = os_utils.leftover_install_dll()
+        if leftover is None:
+            return
+        from tkinter import messagebox
+
+        message = t("old_files_warning_body", file=leftover)
+        self._log_panel.warning(message)
+        messagebox.showwarning(t("old_files_warning_title"), message, parent=self)
 
     def _start_cuda_warmup(self):
         def _run():

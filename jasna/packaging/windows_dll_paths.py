@@ -85,6 +85,16 @@ def frozen_dll_directories(root: Path) -> list[Path]:
     return out
 
 
+def ambiguous_dll_names(root: Path) -> list[str]:
+    """DLL names that more than one DLL search folder provides; the loader would pick either.
+    A release has none, so in an installed release they are files an older version left behind."""
+    providers = {}
+    for directory in frozen_dll_directories(root):
+        for path in directory.glob("*.dll"):
+            providers.setdefault(path.name.casefold(), []).append(path.relative_to(root).as_posix())
+    return sorted(" = ".join(sorted(names)) for names in providers.values() if len(names) > 1)
+
+
 def configure_windows_dll_search_paths() -> None:
     if sys.platform != "win32" or not is_frozen():
         return

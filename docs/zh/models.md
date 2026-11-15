@@ -55,6 +55,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **显存**：至少 8 GB。显存越大越快：显存较小的显卡会把模型的一部分放在系统
   内存中。
 - **系统内存**：至少 16 GB（LTX 约占用 10 GB）。
+- **Linux**：内核 5.8 或更新（用 `uname -r` 查看）。较旧的系统（例如部分 NAS）无法运行 LTX。
 - **磁盘**：模型不随 Jasna 附带。第一次开始 LTX 任务时，Jasna 会先询问再下载，只下载你选的模型：
 
   | 模型 | 下载大小 |
