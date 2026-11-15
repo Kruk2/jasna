@@ -8,6 +8,7 @@ from jasna.ltx.model_files import PlaceholderTensors, open_tensors
 from jasna.ltx import sampler, trial_shapes, transformer as T
 from jasna.ltx import blocks as blocks_module
 from jasna.models.ltx_vae import loader as vae_loader
+from jasna.protection import ProtectionError
 
 
 def _small_transformer_specs(block_spec):
@@ -145,6 +146,44 @@ def test_failed_transformer_load_reports_its_own_error_when_cleanup_also_fails(t
     with pytest.raises(RuntimeError, match="block load failure") as raised:
         sampler.LtxTransformer(sampler.TransformerSource(path), torch.device("cpu"), _twenty_gib_free)
     assert "out of memory" in str(raised.value.__cause__)
+
+
+def _native_store_refusing_more_resident_blocks_than(monkeypatch, fits, refusal):
+    def from_reader(cls, reader, names, device, *, resident):
+        if resident > fits:
+            raise refusal(resident)
+        return cls(_NativeStore(None, device, resident), device, len(names), resident)
+    monkeypatch.setattr(OpaqueBlockStore, "from_reader", classmethod(from_reader))
+
+
+def _native_resident_out_of_memory(resident):
+    return ProtectionError("LTX private load rejected: native block allocation "
+                           f"(allocating {resident} resident blocks on the GPU: CUDA error: out of memory)")
+
+
+@pytest.mark.parametrize("refusal", [_native_resident_out_of_memory, lambda _resident: torch.OutOfMemoryError()])
+def test_blocks_that_the_gpu_refuses_after_sizing_stream_from_ram_instead(tmp_path, monkeypatch, refusal):
+    path = _small_transformer_file(tmp_path / "small-transformer.safetensors")
+    monkeypatch.setattr(sampler, "is_frozen", lambda: True)
+    monkeypatch.setattr(sampler.T, "NUM_BLOCKS", 4)
+    _without_compiling(monkeypatch)
+    _native_store_refusing_more_resident_blocks_than(monkeypatch, 1, refusal)
+    transformer = sampler.LtxTransformer(sampler.TransformerSource(path), torch.device("cpu"), _twenty_gib_free)
+    try:
+        assert (transformer.blocks.resident, transformer.blocks.count) == (1, 4)
+    finally:
+        transformer.close()
+
+
+def test_a_block_load_failure_other_than_gpu_memory_still_fails_the_load(tmp_path, monkeypatch):
+    path = _small_transformer_file(tmp_path / "small-transformer.safetensors")
+    monkeypatch.setattr(sampler, "is_frozen", lambda: True)
+    monkeypatch.setattr(sampler.T, "NUM_BLOCKS", 4)
+    _without_compiling(monkeypatch)
+    _native_store_refusing_more_resident_blocks_than(
+        monkeypatch, 1, lambda _resident: ProtectionError("LTX private load rejected: integrity check (open:core:32)"))
+    with pytest.raises(ProtectionError, match="integrity check"):
+        sampler.LtxTransformer(sampler.TransformerSource(path), torch.device("cpu"), _twenty_gib_free)
 
 
 def test_frozen_trial_keeps_its_placeholder_blocks_in_the_plain_tensor_store(monkeypatch):

@@ -22,7 +22,7 @@ import torch
 from jasna._frozen import is_frozen
 from jasna.accelerator import allocatable_bytes
 from jasna.ltx import transformer as T
-from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
+from jasna.ltx.blocks import BlockStore, OpaqueBlockStore, gpu_refused_resident_blocks
 from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors, open_tensors
 from jasna.ltx.plan import SharedLatents, shared_latents
 from jasna.tensor_utils import compile_static
@@ -148,6 +148,22 @@ def _opaque_blocks(reader) -> bool:
     return is_frozen() and not isinstance(reader, PlaceholderHandle)
 
 
+def _load_blocks(reader, names: list[dict[str, str]], device: torch.device, resident: int) -> BlockStore | OpaqueBlockStore:
+    """The transformer blocks with ``resident`` of them on the GPU; while the GPU refuses that many, half as many."""
+    store = OpaqueBlockStore if _opaque_blocks(reader) else BlockStore
+    while True:
+        try:
+            return store.from_reader(reader, names, device, resident=resident)
+        except Exception as error:
+            if not resident or not gpu_refused_resident_blocks(error):
+                raise
+            logger.warning(
+                "LTX: the GPU did not have room for %d transformer blocks after all (%s); loading again with %d "
+                "on the GPU, the rest stream from RAM (slower)", resident, error, resident // 2,
+            )
+            resident //= 2
+
+
 def _block_functions(
     device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[int, ...]]]
 ) -> tuple[Callable, Callable, str]:
@@ -197,12 +213,8 @@ class LtxTransformer:
                          for index in range(T.NUM_BLOCKS)]
                 sizes = [sum(math.prod(specs[name][1]) * specs[name][0].itemsize for name in block.values())
                          for block in names]
-                resident = self._resident_blocks(sizes)
                 block_specs = {name: specs[source] for name, source in names[0].items()}
-                if _opaque_blocks(handle):
-                    self.blocks = OpaqueBlockStore.from_reader(handle, names, device, resident=resident)
-                else:
-                    self.blocks = BlockStore.from_reader(handle, names, device, resident=resident)
+                self.blocks = _load_blocks(handle, names, device, self._resident_blocks(sizes))
             logger.info("LTX quantized linears: %s", T.enable_quant_kernels(device) or "torch")
             if isinstance(self.blocks, OpaqueBlockStore):
                 T.enable_int8_attention(device)

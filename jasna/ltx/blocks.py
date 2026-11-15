@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 
 _ALIGN = 256
 _PAGE_LOCK_MARGIN_BYTES = 2 << 30
+_NATIVE_RESIDENT_OUT_OF_MEMORY = "resident blocks on the GPU: CUDA error: out of memory"
+
+
+def gpu_refused_resident_blocks(error: BaseException) -> bool:
+    """Whether a block store failed because the GPU did not give the VRAM its resident blocks were sized for: on
+    Windows a later allocation can fail although the free VRAM and the allocation probe said it fits (#818)."""
+    return isinstance(error, torch.OutOfMemoryError) or _NATIVE_RESIDENT_OUT_OF_MEMORY in str(error)
 
 
 @dataclass(frozen=True)
