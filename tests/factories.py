@@ -540,6 +540,22 @@ def write_dated_source(path: Path) -> Path:
     return path
 
 
+def write_transport_stream_with_empty_end(path: Path) -> Path:
+    """Two-second 12 fps H.264 MPEG-TS followed by 17 MB of zeros, like an unfinished download.
+    ffprobe looks for the last timestamps only in the final 16 MB, so it reports no duration."""
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=12:duration=2",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path),
+        ],
+        check=True,
+    )
+    with path.open("ab") as stream:
+        stream.write(bytes(17_000_000))
+    return path
+
+
 def creation_times(path: Path) -> list[datetime]:
     """Every ``creation_time`` tag of ``path``: its container's, then its streams'."""
     with av.open(str(path)) as container:

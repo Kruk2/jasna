@@ -130,21 +130,8 @@ def parse_spatial_metadata(json_video_stream: dict) -> tuple[str, str]:
     return stereo_layout, spherical_projection
 
 
-def get_video_meta_data(path: str) -> VideoMetadata:
-    from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
-    ffprobe = resolve_executable("ffprobe")
-    cmd = [
-        ffprobe,
-        "-v",
-        "quiet",
-        "-print_format",
-        "json",
-        "-select_streams",
-        "v",
-        "-show_streams",
-        "-show_format",
-        path,
-    ]
+def _ffprobe_video_json(path: str, *options: str) -> dict:
+    cmd = [resolve_executable("ffprobe"), "-v", "quiet", "-print_format", "json", "-select_streams", "v", *options, path]
     p = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -162,7 +149,18 @@ def get_video_meta_data(path: str) -> VideoMetadata:
             stderr_text,
         )
         raise RuntimeError(f"error running ffprobe: {err.strip()}. Code: {p.returncode}, cmd: {cmd}")
-    json_output = json.loads(out)
+    return json.loads(out)
+
+
+def _video_packet_count(path: str) -> int:
+    """Reads the whole file, so only for videos whose container gives no frame count or duration."""
+    json_output = _ffprobe_video_json(path, "-count_packets", "-show_entries", "stream=nb_read_packets")
+    return int(json_output["streams"][0]["nb_read_packets"])
+
+
+def get_video_meta_data(path: str) -> VideoMetadata:
+    from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
+    json_output = _ffprobe_video_json(path, "-show_streams", "-show_format")
     json_video_stream = json_output["streams"][0]
     json_video_format = json_output["format"]
 
@@ -191,6 +189,10 @@ def get_video_meta_data(path: str) -> VideoMetadata:
     num_frames = int(json_video_stream.get('nb_frames', 0))
     if num_frames == 0:
         num_frames = _frame_count_from_container(path)
+    if num_frames <= 0:
+        num_frames = _video_packet_count(path)
+    container_duration = json_video_stream.get('duration') or json_video_format.get('duration')
+    duration = float(container_duration) if container_duration else num_frames / (average_fps or fps)
     is_10bit = is_stream_10bit(json_video_stream)
     stereo_layout, spherical_projection = parse_spatial_metadata(json_video_stream)
 
@@ -202,7 +204,7 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         average_fps=average_fps,
         video_fps_exact=fps_exact,
         codec_name=json_video_stream['codec_name'],
-        duration=float(json_video_stream.get('duration', json_video_format['duration'])),
+        duration=duration,
         time_base=time_base,
         start_pts=start_pts,
         color_range=color_range,

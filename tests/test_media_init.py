@@ -19,6 +19,7 @@ from jasna.media.probe import (
     parse_video_bitrate,
     resolve_video_start_pts,
 )
+from factories import write_transport_stream_with_empty_end
 
 
 @pytest.mark.parametrize(
@@ -238,6 +239,13 @@ def test_missing_frame_count_falls_back_to_counting():
     with patch("jasna.media.probe._frame_count_from_container", return_value=50) as count:
         assert _probe(nb_frames="0").num_frames == 50
     count.assert_called_once_with("test.mp4")
+
+
+def test_probe_counts_a_transport_stream_whose_end_has_no_timestamps(tmp_path):
+    meta = get_video_meta_data(str(write_transport_stream_with_empty_end(tmp_path / "clip.ts")))
+
+    assert meta.num_frames == pytest.approx(24, abs=1)
+    assert meta.duration == pytest.approx(2.0, abs=0.1)
 
 
 def test_ffprobe_failure_raises():
