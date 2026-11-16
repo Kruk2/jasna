@@ -1154,17 +1154,19 @@ def large_canvas_fits(requested: bool, free_bytes: int) -> bool:
     return requested
 
 
-def whole_video_large_canvas(requested: bool, free: int, resume_dir: Path) -> bool:
+def whole_video_large_canvas(requested: bool, free: int, resume_dir: Path, *, encoder_bytes: int) -> bool:
     """The 768 px decision of a whole-video run: saved work keeps the one it was made with,
-    else ``free``, the VRAM free before the job's LTX worker started, decides."""
+    else ``free``, the VRAM free before the job's LTX worker started, decides, less the
+    ``encoder_bytes`` the video encoder will hold beside LTX (#790)."""
+    beside_encoder = free - encoder_bytes
     saved = _read_plans(_plans_file(_pts_key(*WHOLE_VIDEO_PTS), resume_dir))
     if saved is None:
-        return large_canvas_fits(requested, free)
-    if saved.large_canvas and free < LARGE_CANVAS_MIN_FREE_BYTES:
+        return large_canvas_fits(requested, beside_encoder)
+    if saved.large_canvas and beside_encoder < LARGE_CANVAS_MIN_FREE_BYTES:
         raise RuntimeError(
             f"The saved LTX work for this video uses 768 px windows, which need "
-            f"{LARGE_CANVAS_MIN_FREE_BYTES / 2**30:.0f} GiB of free GPU memory; {free / 2**30:.1f} GiB is free. "
-            "Close other programs that use the GPU and try again."
+            f"{LARGE_CANVAS_MIN_FREE_BYTES / 2**30:.0f} GiB of free GPU memory beside the video encoder; "
+            f"{beside_encoder / 2**30:.1f} GiB is free. Close other programs that use the GPU and try again."
         )
     return saved.large_canvas
 

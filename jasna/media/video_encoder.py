@@ -245,6 +245,45 @@ _COLOR_VARIANTS = {
 _NVENC_PITCH_ALIGNMENT = 16
 ENCODE_BUFFER_SIZE = 8
 
+NVENC_MAX_SURFACES = 64
+LARGE_FRAME_PIXELS = 4096 * 2160
+"""Frames above DCI 4K get a shorter default NVENC lookahead: at 8K, rc-lookahead 32 holds 22
+more 96 MiB frames than the B-frames need, which left LTX too little VRAM on 16 GB cards (#790)."""
+NVENC_WORK_FRAMES = 20
+"""NVENC's own buffers (references, lookahead analysis) in output frames: 16-22 measured at 4K
+and 8K, HEVC and AV1, on an RTX 5090 (2026-11-16)."""
+
+
+def nvenc_held_frames(rc_lookahead: int, b_frames: int) -> int:
+    """Input frames NVENC keeps referenced: FFmpeg's ``nvenc_recalc_surfaces`` with the default
+    ``surfaces`` and ``delay``, whose output starts only once all but one surface are queued."""
+    frame_interval_p = b_frames + 1
+    surfaces = max(4, frame_interval_p * 4)
+    if rc_lookahead > 0:
+        surfaces = max(surfaces, rc_lookahead + frame_interval_p + 5)
+    return min(surfaces, NVENC_MAX_SURFACES)
+
+
+def lookahead_within_b_frame_surfaces(b_frames: int) -> int:
+    """The longest lookahead NVENC runs on the surfaces its B-frames already hold."""
+    return max(0, nvenc_held_frames(0, b_frames) - (b_frames + 1) - 5)
+
+
+def nvenc_vram_bytes(spec: EncoderSpec, options: Mapping[str, str], *, width: int, height: int) -> int:
+    """VRAM an NVENC encode holds: its queued input frames plus its own buffers."""
+    frame_bytes = width * height * 3 // 2 * (2 if spec.ten_bit else 1)
+    held = nvenc_held_frames(int(options.get("rc-lookahead", 0)), int(options.get("bf", 0)))
+    return (held + NVENC_WORK_FRAMES) * frame_bytes
+
+
+def nvenc_vram_beside_ltx(spec: EncoderSpec, options: Mapping[str, str], *, width: int, height: int) -> int:
+    """VRAM the 768 px decision keeps free for NVENC: only frames above DCI 4K, since its
+    threshold was measured with a smaller encode already on the card."""
+    if width * height <= LARGE_FRAME_PIXELS:
+        return 0
+    return nvenc_vram_bytes(spec, options, width=width, height=height)
+
+
 # `cq` alone targets a fixed quality and ignores how the source was stored, so a
 # cheaply encoded source is re-encoded far above its own quality point and grows
 # several times over (issues #235, #243). A ceiling tied to the source bitrate
@@ -447,6 +486,12 @@ def resolve_encoder_options(
             source_bitrate_cap_options(metadata, output_codec=codec, vendor=vendor, frame_generation=frame_generation)
         )
     encoder_options.update(overrides)
+    if (
+        vendor is AcceleratorVendor.NVIDIA
+        and metadata.video_width * metadata.video_height > LARGE_FRAME_PIXELS
+        and not {"rc-lookahead", "lookahead_level"} & overrides.keys()
+    ):
+        encoder_options["rc-lookahead"] = str(lookahead_within_b_frame_surfaces(int(encoder_options["bf"])))
     if smart_fragment:
         encoder_options.update(
             AMF_SMART_FRAGMENT_OPTIONS if vendor is AcceleratorVendor.AMD else NVENC_SMART_FRAGMENT_OPTIONS

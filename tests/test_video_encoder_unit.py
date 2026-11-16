@@ -931,3 +931,75 @@ class TestResolveEncoderOptions:
         assert (options["qp_i"], options["qp_p"]) == ("21", "21")
         assert "cq" not in options
         assert "maxrate" not in options
+
+
+def _nvenc_options(codec="hevc", settings=None, *, width, height):
+    from jasna.accelerator import AcceleratorVendor
+    from jasna.media.video_encoder import resolve_encoder_options
+
+    return resolve_encoder_options(
+        AcceleratorVendor.NVIDIA, codec, _fake_metadata(video_width=width, video_height=height), settings or {},
+        smart_fragment=False,
+    )
+
+
+class TestNvencLookaheadVram:
+    # Torch peaks of 8192x4096 encodes on an RTX 5090 differed by exactly 22 frames
+    # between rc-lookahead 32 and 10 or 0 (bf 4), as FFmpeg 8.1's surface count says.
+    @pytest.mark.parametrize(
+        ("rc_lookahead", "b_frames", "held"), [(32, 4, 42), (10, 4, 20), (0, 4, 20), (0, 0, 4), (90, 4, 64)]
+    )
+    def test_held_frames_follow_ffmpeg_surfaces(self, rc_lookahead, b_frames, held):
+        assert video_encoder_module.nvenc_held_frames(rc_lookahead, b_frames) == held
+
+    @pytest.mark.parametrize("codec", ["hevc", "h264", "av1"])
+    def test_8k_default_lookahead_holds_no_more_frames_than_its_b_frames(self, codec):
+        _spec, options = _nvenc_options(codec, width=8192, height=4096)
+        lookahead, b_frames = int(options["rc-lookahead"]), int(options["bf"])
+
+        assert lookahead > 0
+        assert video_encoder_module.nvenc_held_frames(lookahead, b_frames) == (
+            video_encoder_module.nvenc_held_frames(0, b_frames)
+        )
+
+    def test_8k_without_b_frames_turns_lookahead_off(self):
+        _spec, options = _nvenc_options(settings={"bf": 0}, width=8192, height=4096)
+        assert options["rc-lookahead"] == "0"
+
+    @pytest.mark.parametrize(("width", "height"), [(3840, 2160), (4096, 2160)])
+    def test_4k_keeps_the_default_lookahead(self, width, height):
+        _spec, options = _nvenc_options(width=width, height=height)
+        assert options["rc-lookahead"] == DEFAULT_ENCODER_OPTIONS["rc-lookahead"]
+
+    @pytest.mark.parametrize("settings", [{"rc-lookahead": 32}, {"lookahead_level": 2}])
+    def test_8k_keeps_a_lookahead_the_user_asked_for(self, settings):
+        _spec, options = _nvenc_options(settings=settings, width=8192, height=4096)
+        assert options["rc-lookahead"] == "32"
+
+    @pytest.mark.parametrize(
+        ("width", "height", "reserved"), [(1920, 1080, False), (3840, 2160, False), (4096, 2160, False), (8192, 4096, True)]
+    )
+    def test_768_decision_reserves_the_encoder_only_above_4k(self, width, height, reserved):
+        spec, options = _nvenc_options(width=width, height=height)
+        beside_ltx = video_encoder_module.nvenc_vram_beside_ltx(spec, options, width=width, height=height)
+        assert beside_ltx == (
+            video_encoder_module.nvenc_vram_bytes(spec, options, width=width, height=height) if reserved else 0
+        )
+        assert (beside_ltx > 0) is reserved
+
+    # NVML peak of 200-frame encodes on an RTX 5090 (2026-11-16), less the 14 RGB frames
+    # waiting in VideoEncoder's queues.
+    @pytest.mark.parametrize(
+        ("codec", "width", "height", "rc_lookahead", "measured_mib"),
+        [
+            ("av1", 8192, 4096, 32, 6118),
+            ("av1", 8192, 4096, 10, 3908),
+            ("hevc", 8192, 4096, 32, 5756),
+            ("hevc", 3840, 2160, 32, 1452),
+            ("hevc", 1920, 1080, 32, 426),
+        ],
+    )
+    def test_vram_estimate_matches_measured_encodes(self, codec, width, height, rc_lookahead, measured_mib):
+        spec, options = _nvenc_options(codec, {"rc-lookahead": rc_lookahead}, width=width, height=height)
+        estimate = video_encoder_module.nvenc_vram_bytes(spec, options, width=width, height=height) / 2**20
+        assert estimate == pytest.approx(measured_mib, rel=0.15)

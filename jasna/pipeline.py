@@ -12,12 +12,12 @@ import psutil
 import torch
 
 from jasna import startup_timing
-from jasna.accelerator import device_free_bytes, device_used_bytes, vendor_for_device
+from jasna.accelerator import AcceleratorVendor, device_free_bytes, device_used_bytes, vendor_for_device
 from jasna.job_resume import ResumeJob, resume_directory, saved_ltx_work
 from jasna.media.container_utils import MOV_SUFFIXES
 from jasna.media.encoder_settings import require_encodable_size
 from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
-from jasna.media.video_encoder import VideoEncoder, resolve_encoder_options
+from jasna.media.video_encoder import VideoEncoder, nvenc_vram_beside_ltx, resolve_encoder_options
 from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.media.splice import (
     H264_SMART_MAX_B_FRAMES,
@@ -350,11 +350,10 @@ class Pipeline:
                 "Fragmented MP4 has no effect on %s output; it is already playable while it grows",
                 self.output_video.suffix,
             )
-        upscale_size = frame_upscale_size(self.config, int(metadata.video_width), int(metadata.video_height))
         return VideoEncoder(
             str(self.output_video),
             device=self.device,
-            metadata=metadata if upscale_size is None else upscaled_metadata(metadata, upscale_size),
+            metadata=self._encoder_metadata(metadata),
             codec=self.codec,
             encoder_settings=self.encoder_settings,
             lut_path=self.lut_path,
@@ -363,6 +362,24 @@ class Pipeline:
             fmp4=self.fmp4,
             settings=settings,
             frame_generation=self.config.frame_generation != "none",
+        )
+
+    def _encoder_metadata(self, metadata):
+        upscale_size = frame_upscale_size(self.config, int(metadata.video_width), int(metadata.video_height))
+        return metadata if upscale_size is None else upscaled_metadata(metadata, upscale_size)
+
+    def _encoder_vram_bytes(self, metadata) -> int:
+        """VRAM the 768 px decision keeps for the output's NVENC encode; AMF's is not measured."""
+        vendor = vendor_for_device(self.device)
+        if vendor is not AcceleratorVendor.NVIDIA:
+            return 0
+        encoder_metadata = self._encoder_metadata(metadata)
+        spec, options = resolve_encoder_options(
+            vendor, self.codec, encoder_metadata, self.encoder_settings, smart_fragment=False,
+            frame_generation=self.config.frame_generation != "none",
+        )
+        return nvenc_vram_beside_ltx(
+            spec, options, width=encoder_metadata.video_width, height=encoder_metadata.video_height
         )
 
     def _run_full(
@@ -416,7 +433,10 @@ class Pipeline:
 
         frame_rate = self._resolve_frame_rate(metadata)
         resume_dir = self.resume.directory / "ltx"
-        large_canvas = whole_video_large_canvas(self.ltx_large_canvas, self._free_bytes_before_ltx, resume_dir)
+        large_canvas = whole_video_large_canvas(
+            self.ltx_large_canvas, self._free_bytes_before_ltx, resume_dir,
+            encoder_bytes=self._encoder_vram_bytes(metadata),
+        )
         settings = self._job_settings(frozenset({"ltx"}), ltx_large_canvas=large_canvas)
         encoder = self._video_encoder(metadata, frame_rate, settings)
         try:

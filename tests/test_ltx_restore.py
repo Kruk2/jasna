@@ -1614,20 +1614,32 @@ def _save_whole_video_768_plan(resume_dir: Path) -> None:
 
 
 def test_whole_video_canvas_without_saved_work_follows_the_free_vram(fakes, tmp_path):
-    assert restore.whole_video_large_canvas(True, 8 << 30, tmp_path / "saved") is False
+    assert restore.whole_video_large_canvas(True, 8 << 30, tmp_path / "saved", encoder_bytes=0) is False
+
+
+def test_whole_video_canvas_leaves_room_for_the_video_encoder(fakes, tmp_path):
+    gib = 1 << 30
+    assert restore.whole_video_large_canvas(True, int(9.7 * gib), tmp_path / "saved", encoder_bytes=0) is True
+    assert restore.whole_video_large_canvas(True, int(9.7 * gib), tmp_path / "saved", encoder_bytes=2 * gib) is False
+
+
+def test_resume_of_saved_768_px_windows_counts_the_video_encoder(fakes, tmp_path):
+    _save_whole_video_768_plan(tmp_path / "saved")
+    with pytest.raises(RuntimeError, match="768 px"):
+        restore.whole_video_large_canvas(True, 10 << 30, tmp_path / "saved", encoder_bytes=2 << 30)
 
 
 def test_resume_replays_the_saved_whole_video_canvas_decision(fakes, monkeypatch, tmp_path):
     _save_whole_video_768_plan(tmp_path / "saved")
     monkeypatch.setattr(restore, "large_canvas_fits", lambda *_a: pytest.fail("canvas decision repeated"))
 
-    assert restore.whole_video_large_canvas(False, 16 << 30, tmp_path / "saved") is True
+    assert restore.whole_video_large_canvas(False, 16 << 30, tmp_path / "saved", encoder_bytes=0) is True
 
 
 def test_resume_of_saved_768_px_windows_fails_plainly_when_vram_is_short(fakes, tmp_path):
     _save_whole_video_768_plan(tmp_path / "saved")
     with pytest.raises(RuntimeError, match="768 px"):
-        restore.whole_video_large_canvas(True, 8 << 30, tmp_path / "saved")
+        restore.whole_video_large_canvas(True, 8 << 30, tmp_path / "saved", encoder_bytes=0)
 
 
 def test_resuming_only_the_remaining_span_uses_its_original_latents(fakes, monkeypatch, tmp_path):
