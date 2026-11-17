@@ -16,7 +16,6 @@ from jasna.os_utils import get_application_executable, subprocess_no_window_kwar
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT_SECONDS = 30 * 60
 
 
 @dataclass
@@ -212,7 +211,7 @@ def _run_compiler_subprocess(
         if line:
             _show(line, log_callback)
             logger.debug("[compiler] %s", line)
-    returncode = proc.wait(timeout=_TIMEOUT_SECONDS)
+    returncode = proc.wait()
 
     if returncode != 0:
         raise RuntimeError(f"Engine compilation subprocess failed (exit code {returncode})")
