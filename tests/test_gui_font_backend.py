@@ -9,6 +9,7 @@ from jasna.gui.font_backend import (
     font_backend_problem,
     font_backend_status_json,
 )
+from jasna.gui.locales import TRANSLATIONS
 from jasna.gui.theme import Fonts, apply_ui_fonts, font_families_for_platform
 
 
@@ -34,39 +35,29 @@ def test_linux_theme_uses_fontconfig_generic_families():
     assert font_families_for_platform("linux", "zh") == ("sans-serif", "monospace")
 
 
-@pytest.mark.parametrize(
-    ("language", "ui_family", "mono_family"),
-    [
-        ("zh", "Microsoft YaHei UI", "Microsoft YaHei UI"),
-        ("ja", "Yu Gothic UI", "Yu Gothic UI"),
-        ("ko", "Malgun Gothic", "Malgun Gothic"),
-        ("th", "Leelawadee UI", "Leelawadee UI"),
-        ("en", "Segoe UI", "Consolas"),
-    ],
-)
-def test_windows_theme_uses_script_font_for_language(language, ui_family, mono_family):
-    assert font_families_for_platform("win32", language) == (ui_family, mono_family)
+def test_windows_theme_uses_segoe_ui_and_consolas_for_english():
+    assert font_families_for_platform("win32", "en") == ("Segoe UI", "Consolas")
 
 
-def test_apply_ui_fonts_gives_chinese_log_text_a_cjk_font(monkeypatch):
+@pytest.mark.parametrize("language", sorted(set(TRANSLATIONS) - {"en"}))
+def test_windows_theme_gives_ui_and_log_text_one_script_font(language):
+    ui_family, mono_family = font_families_for_platform("win32", language)
+
+    assert ui_family == mono_family != "Segoe UI"
+
+
+@pytest.mark.parametrize("language", ["zh", "ja"])
+def test_apply_ui_fonts_sets_the_language_fonts_and_customtkinter_theme_font(monkeypatch, language):
     monkeypatch.setattr(Fonts, "FAMILY", Fonts.FAMILY)
     monkeypatch.setattr(Fonts, "FAMILY_MONO", Fonts.FAMILY_MONO)
     monkeypatch.setitem(ctk.ThemeManager.theme["CTkFont"], "family", ctk.ThemeManager.theme["CTkFont"]["family"])
 
-    apply_ui_fonts("win32", "zh")
+    apply_ui_fonts("win32", language)
 
-    assert Fonts.FAMILY_MONO == "Microsoft YaHei UI"
-
-
-def test_apply_ui_fonts_sets_customtkinter_theme_font(monkeypatch):
-    monkeypatch.setattr(Fonts, "FAMILY", Fonts.FAMILY)
-    monkeypatch.setattr(Fonts, "FAMILY_MONO", Fonts.FAMILY_MONO)
-    monkeypatch.setitem(ctk.ThemeManager.theme["CTkFont"], "family", ctk.ThemeManager.theme["CTkFont"]["family"])
-
-    apply_ui_fonts("win32", "ja")
-
-    assert Fonts.FAMILY == "Yu Gothic UI"
-    assert ctk.ThemeManager.theme["CTkFont"]["family"] == "Yu Gothic UI"
+    ui_family, mono_family = font_families_for_platform("win32", language)
+    assert (Fonts.FAMILY, Fonts.FAMILY_MONO, ctk.ThemeManager.theme["CTkFont"]["family"]) == (
+        ui_family, mono_family, ui_family,
+    )
 
 
 def test_healthy_linux_font_backend_has_no_problem():

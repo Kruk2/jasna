@@ -10,13 +10,14 @@ from __future__ import annotations
 import queue
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PIL import Image
 
 from jasna.gui.queues import replace_pending
 from jasna.gui.models import AppSettings
+from jasna.gui.preview_frames import downscaled_size, gpu_frame_image, preview_image
 from jasna.gui.video_session import SessionCache, build_video_session
 from jasna.session_factory import RestorationSession
 from jasna.media.probe import VideoMetadata
@@ -107,27 +108,6 @@ def playback_window(metadata: VideoMetadata, start_seconds: float, max_clip_size
     return PreviewWindow(seek_ts=start_seconds, end_pts=end_pts, center_pts=start_pts)
 
 
-def frame_image(
-    frame,
-    max_size: tuple[int, int],
-    lut_applier=None,
-    *,
-    stereo: str = "off",
-) -> Image.Image:
-    frame = left_eye(frame, stereo)
-    if lut_applier is not None:
-        frame = lut_applier.apply(frame)
-    image = Image.fromarray(frame.cpu().permute(1, 2, 0).numpy()).copy()
-    max_width, max_height = max_size
-    scale = min(1.0, max_width / image.width, max_height / image.height)
-    if scale < 1.0:
-        image = image.resize(
-            (max(2, round(image.width * scale)), max(2, round(image.height * scale))),
-            Image.Resampling.LANCZOS,
-        )
-    return image
-
-
 class _CenterFrameCollector:
     """PassFrameWriter that keeps the restored frame closest to ``center_pts`` and
     cancels the pass once the center has been written."""
@@ -144,19 +124,19 @@ class _CenterFrameCollector:
         self._cancel_event = cancel_event
         self._lut_applier = lut_applier
         self._stereo = stereo
-        self._best_pts: int | None = None
+        self.best_pts: int | None = None
         self._best_frame = None
         self.done = False
 
     def write(self, frame, pts: int) -> None:
         if self.done:
             return
-        if self._best_pts is None or abs(pts - self._center_pts) < abs(self._best_pts - self._center_pts):
-            self._best_pts = pts
+        if self.best_pts is None or abs(pts - self._center_pts) < abs(self.best_pts - self._center_pts):
+            self.best_pts = pts
             frame = left_eye(frame, self._stereo)
             if self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
-            self._best_frame = frame.cpu()
+            self._best_frame = frame.clone()
         if pts >= self._center_pts:
             self.done = True
             self._cancel_event.set()
@@ -169,7 +149,8 @@ class _CenterFrameCollector:
         return self._best_frame is not None
 
     def result_image(self, max_size: tuple[int, int]) -> Image.Image:
-        return frame_image(self._best_frame, max_size)
+        frame = self._best_frame
+        return gpu_frame_image(frame, downscaled_size((int(frame.shape[-1]), int(frame.shape[-2])), max_size))
 
 
 class _PlaybackFrameCollector:
@@ -195,12 +176,7 @@ class _PlaybackFrameCollector:
         self._frames.append(
             (
                 pts,
-                frame_image(
-                    frame,
-                    self._max_size,
-                    self._lut_applier,
-                    stereo=self._stereo,
-                ),
+                preview_image(frame, self._max_size, lut_applier=self._lut_applier, stereo=self._stereo),
             )
         )
 
@@ -232,7 +208,7 @@ class RestorationPreviewWorker:
         metadata: VideoMetadata,
         *,
         max_size: tuple[int, int] = (640, 360),
-        on_stopped: Callable[[], None] | None = None,
+        on_stopped: Callable[[], None],
     ) -> None:
         self.path = Path(path)
         self.metadata = metadata
@@ -288,9 +264,6 @@ class RestorationPreviewWorker:
         self._cancel_active_pass()
         self._replace_command(_Cancel())
 
-    def join(self, timeout: float | None = None) -> None:
-        self._thread.join(timeout=timeout)
-
     def _cancel_active_pass(self) -> None:
         with self._cancel_lock:
             if self._active_cancel is not None:
@@ -308,7 +281,7 @@ class RestorationPreviewWorker:
 
     def _run(self) -> None:
         pipeline = None
-        pipeline_settings: AppSettings | None = None
+        pipeline_key: tuple[AppSettings, str] | None = None
 
         def drop_pipeline() -> None:
             nonlocal pipeline
@@ -334,9 +307,9 @@ class RestorationPreviewWorker:
                     continue
                 try:
                     session = sessions.get(command.settings, lambda: load_session(command))
-                    if pipeline is None or command.settings != pipeline_settings:
-                        pipeline = self._build_pipeline(command.settings, session)
-                        pipeline_settings = command.settings
+                    if pipeline is None or (command.settings, command.projection) != pipeline_key:
+                        pipeline = self._build_pipeline(command.settings, command.projection, session)
+                        pipeline_key = (command.settings, command.projection)
                     if not self._commands.empty() or self._closed.is_set():
                         continue
                     self.events.put(RestorationStatus("restoring", command.generation))
@@ -348,24 +321,23 @@ class RestorationPreviewWorker:
                         self.events.put(RestorationFailed(str(exc), command.generation))
         finally:
             sessions.close()
-            if self._on_stopped is not None:
-                self._on_stopped()
+            self._on_stopped()
 
-    def _build_pipeline(self, settings: AppSettings, session: RestorationSession):
+    def _build_pipeline(self, settings: AppSettings, projection: str, session: RestorationSession):
         from jasna.gui.video_session import video_session_config
         from jasna.session_factory import build_pipeline
 
-        config = video_session_config(settings, codec=settings.codec, encoder_settings={})
+        config = replace(
+            video_session_config(settings, codec=settings.codec, encoder_settings={}), vr_projection=projection
+        )
         pipeline = build_pipeline(config, session, self.path, self.path)
-        pipeline.validate_metadata(self.metadata)
+        pipeline.prepare(self.metadata)
         return pipeline
 
     def _run_preview_pass(self, command: _Request, pipeline) -> RestorationFrame | RestorationClip | None:
         from jasna.pipeline_threads import run_restoration_pass
 
         settings = command.settings
-        pipeline.vr_projection = command.projection
-        pipeline.configure_vr(self.metadata)
         stereo = pipeline.vr_resolution.resolved
         window = (
             playback_window(self.metadata, command.center_seconds, settings.max_clip_size)
@@ -376,17 +348,13 @@ class RestorationPreviewWorker:
         with self._cancel_lock:
             self._active_cancel = cancel_event
 
-        lut_applier = None
-        lut_path = (settings.lut_path or "").strip()
-        if lut_path:
-            from jasna.media.lut import GpuLutApplier, parse_cube_file
+        from jasna.media.lut import lut_applier
 
-            lut_applier = GpuLutApplier(parse_cube_file(lut_path), pipeline.device)
-
+        lut = lut_applier(settings.lut_path, pipeline.device)
         collector = (
-            _PlaybackFrameCollector(self.metadata, self.max_size, lut_applier, stereo=stereo)
+            _PlaybackFrameCollector(self.metadata, self.max_size, lut, stereo=stereo)
             if command.playback
-            else _CenterFrameCollector(window.center_pts, cancel_event, lut_applier, stereo=stereo)
+            else _CenterFrameCollector(window.center_pts, cancel_event, lut, stereo=stereo)
         )
         try:
             error = run_restoration_pass(
@@ -413,7 +381,7 @@ class RestorationPreviewWorker:
                 return RestorationFrame(
                     max(
                         0.0,
-                        (collector._best_pts - self.metadata.start_pts)
+                        (collector.best_pts - self.metadata.start_pts)
                         * float(self.metadata.time_base),
                     ),
                     collector.result_image(self.max_size),

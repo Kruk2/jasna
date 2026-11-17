@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Callable, Hashable, Mapping
 
 from jasna.gui.models import AppSettings
 from jasna.session_config import SessionConfig, ltx_unsupported_options
-from jasna.session_factory import RestorationSession
+from jasna.session_factory import ImageSession, RestorationSession
 
 if TYPE_CHECKING:
     import torch
@@ -21,7 +21,6 @@ def video_session_key(settings: AppSettings) -> tuple:
     key = (
         settings.detection_model,
         settings.detection_score_threshold,
-        settings.batch_size,
         settings.fp16_mode,
         settings.max_clip_size,
         settings.compile_basicvsrpp,
@@ -60,8 +59,12 @@ def video_session_config(
     encoder_settings: Mapping[str, object],
 ) -> SessionConfig:
     from jasna.engine_paths import default_restoration_model_path
-    from jasna.ltx.plan import window_hop
-    from jasna.mosaic.detection_registry import coerce_detection_model_name, require_detection_model_weights
+    from jasna.ltx.windows import window_hop
+    from jasna.mosaic.detection_registry import (
+        coerce_detection_model_name,
+        default_detection_batch_size,
+        require_detection_model_weights,
+    )
 
     det_name = coerce_detection_model_name(str(settings.detection_model))
     standard_model = settings.restoration_model == "basicvsrpp"
@@ -74,7 +77,7 @@ def video_session_config(
     return SessionConfig(
         device="cuda:0",
         fp16=bool(settings.fp16_mode),
-        batch_size=int(settings.batch_size),
+        batch_size=default_detection_batch_size("cuda:0"),
         detection_model_name=det_name,
         detection_model_path=require_detection_model_weights(det_name),
         detection_score_threshold=float(settings.detection_score_threshold),
@@ -136,8 +139,6 @@ def build_video_session(
     *,
     log: Callable[[str], None],
 ) -> RestorationSession:
-    from jasna._suppress_noise import install as _install_noise_filters
-    _install_noise_filters()
     from jasna.session_factory import build_restoration_session
 
     config = video_session_config(settings, codec=settings.codec, encoder_settings={})
@@ -148,35 +149,31 @@ def build_image_session(
     settings: AppSettings,
     *,
     log: Callable[[str], None] | None,
-) -> tuple:
+) -> ImageSession:
     """Load the mosaic detector and SD 1.5 inpaint restorer used for still images."""
     import torch
 
-    from jasna._suppress_noise import install as _install_noise_filters
     from jasna.engine_paths import SD15_DIR
     from jasna.gui.locales import t
-    from jasna.mosaic.detection_registry import resolve_detection_model
+    from jasna.mosaic.detection_registry import default_detection_batch_size, resolve_detection_model
     from jasna.restorer.sd15_download import bundle_present
-    from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
-    from jasna.session_factory import build_compiled_detection_model
+    from jasna.session_factory import build_image_session as build_session
 
-    _install_noise_filters()
     if not bundle_present(SD15_DIR):
         raise FileNotFoundError(t("interactive_model_missing"))
-    device = torch.device("cuda:0")
     detection_model_name, detection_model_path, _ = resolve_detection_model(
         str(settings.detection_model), "", None
     )
-    detector = build_compiled_detection_model(
+    device = torch.device("cuda:0")
+    return build_session(
         detection_model_name,
         detection_model_path,
         device=device,
-        batch_size=settings.batch_size,
+        batch_size=default_detection_batch_size(device),
         fp16=settings.fp16_mode,
         score_threshold=settings.detection_score_threshold,
         log_callback=log,
     )
-    return detector, Sd15InpaintRestorer(SD15_DIR, device, settings.fp16_mode), device
 
 
 def release_session_memory(device: "torch.device") -> None:

@@ -69,6 +69,30 @@ def _restore_hidden_modal(event) -> None:
         event.widget.deiconify()
 
 
+class _Dialog(ctk.CTkToplevel):
+    """A fixed-size dialog window over ``master`` in the app's colours."""
+
+    def __init__(self, master, title: str):
+        super().__init__(master)
+        self.title(title)
+        self.configure(fg_color=Colors.BG_MAIN)
+        self.resizable(False, False)
+        self.transient(master)
+
+
+def _cancel_button(master, command, **size) -> ctk.CTkButton:
+    return ctk.CTkButton(
+        master,
+        text=t("btn_cancel"),
+        font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        fg_color="transparent",
+        hover_color=Colors.BG_CARD,
+        text_color=Colors.TEXT_PRIMARY,
+        command=command,
+        **size,
+    )
+
+
 def format_duration(seconds: float) -> str:
     mins, secs = divmod(int(seconds), 60)
     hours, mins = divmod(mins, 60)
@@ -222,15 +246,11 @@ class XianyuButton(_SupportButton):
         )
 
 
-class XianyuQrDialog(ctk.CTkToplevel):
+class XianyuQrDialog(_Dialog):
     """The official Xianyu listing's QR code; ``unofficial_notice`` puts the note for buyers of an unofficial copy above it."""
 
     def __init__(self, master, unofficial_notice: bool = False):
-        super().__init__(master)
-        self.title(t("unofficial_notice_title" if unofficial_notice else "xianyu_dialog_title"))
-        self.configure(fg_color=Colors.BG_MAIN)
-        self.resizable(False, False)
-        self.transient(master)
+        super().__init__(master, t("unofficial_notice_title" if unofficial_notice else "xianyu_dialog_title"))
 
         content = ctk.CTkFrame(self, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=20, pady=20)
@@ -280,19 +300,14 @@ def shows_xianyu_seller(language: str) -> bool:
     return language == "zh"
 
 
-class LicenseDialog(ctk.CTkToplevel):
+class LicenseDialog(_Dialog):
     """Activate with the License code."""
 
     def __init__(self, master, on_activated):
-        super().__init__(master)
+        super().__init__(master, t("supporter_title"))
         self._closed = False
         self._on_activated = on_activated
         self._main_thread = MainThreadCalls(self, 50)
-
-        self.title(t("supporter_title"))
-        self.resizable(False, False)
-        self.configure(fg_color=Colors.BG_MAIN)
-        self.transient(master)
         grab_modal(self)
 
         outer = ctk.CTkFrame(self, fg_color="transparent")
@@ -572,21 +587,15 @@ class Toast(ctk.CTkFrame):
         self.destroy()
 
 
-class PresetDialog(ctk.CTkToplevel):
+class PresetDialog(_Dialog):
     """Modal dialog for creating a new preset."""
-    
-    def __init__(self, master, on_create: callable, existing_names: list[str], **kwargs):
-        super().__init__(master, **kwargs)
-        
-        self.title(t("dialog_create_preset"))
-        self.configure(fg_color=Colors.BG_MAIN)
-        self.resizable(False, False)
-        self.transient(master)
+
+    def __init__(self, master, on_create: callable, existing_names: list[str]):
+        super().__init__(master, t("dialog_create_preset"))
         grab_modal(self)
-        
+
         self._on_create = on_create
         self._existing_names = [n.lower() for n in existing_names]
-        self._result = None
         
         self.update_idletasks()
         scaling.place_centered_on_parent(self, master, *scaling.to_physical(self, 320, 180))
@@ -625,17 +634,7 @@ class PresetDialog(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(content, fg_color="transparent")
         btn_frame.pack(fill="x", pady=(20, 0))
         
-        ctk.CTkButton(
-            btn_frame,
-            text=t("btn_cancel"),
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY,
-            width=90,
-            height=36,
-            command=self.destroy,
-        ).pack(side="right", padx=(8, 0))
+        _cancel_button(btn_frame, self.destroy, width=90, height=36).pack(side="right", padx=(8, 0))
         
         ctk.CTkButton(
             btn_frame,
@@ -664,16 +663,11 @@ class PresetDialog(ctk.CTkToplevel):
         self.destroy()
 
 
-class ConfirmDialog(ctk.CTkToplevel):
+class ConfirmDialog(_Dialog):
     """Confirmation dialog."""
-    
-    def __init__(self, master, title: str, message: str, on_confirm: callable, **kwargs):
-        super().__init__(master, **kwargs)
-        
-        self.title(title)
-        self.configure(fg_color=Colors.BG_MAIN)
-        self.resizable(False, False)
-        self.transient(master)
+
+    def __init__(self, master, title: str, message: str, on_confirm: callable):
+        super().__init__(master, title)
         grab_modal(self)
         
         self._on_confirm = on_confirm
@@ -695,16 +689,7 @@ class ConfirmDialog(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(content, fg_color="transparent")
         btn_frame.pack(fill="x")
         
-        ctk.CTkButton(
-            btn_frame,
-            text=t("btn_cancel"),
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY,
-            width=80,
-            command=self.destroy,
-        ).pack(side="right", padx=(8, 0))
+        _cancel_button(btn_frame, self.destroy, width=80).pack(side="right", padx=(8, 0))
         
         ctk.CTkButton(
             btn_frame,
@@ -722,14 +707,9 @@ class ConfirmDialog(ctk.CTkToplevel):
         self.destroy()
 
 
-class CloseWhileProcessingDialog(ctk.CTkToplevel):
+class CloseWhileProcessingDialog(_Dialog):
     def __init__(self, master, on_minimize: callable, on_quit: callable):
-        super().__init__(master)
-
-        self.title(t("close_running_title"))
-        self.configure(fg_color=Colors.BG_MAIN)
-        self.resizable(False, False)
-        self.transient(master)
+        super().__init__(master, t("close_running_title"))
         grab_modal(self)
 
         self._on_minimize = on_minimize
@@ -752,16 +732,7 @@ class CloseWhileProcessingDialog(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(content, fg_color="transparent")
         btn_frame.pack(fill="x")
 
-        ctk.CTkButton(
-            btn_frame,
-            text=t("btn_cancel"),
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY,
-            width=80,
-            command=self.destroy,
-        ).pack(side="right", padx=(8, 0))
+        _cancel_button(btn_frame, self.destroy, width=80).pack(side="right", padx=(8, 0))
 
         self.quit_button = ctk.CTkButton(
             btn_frame,
@@ -801,19 +772,14 @@ def countdown_tick(time_left: float) -> tuple[int, int]:
     return shown, math.ceil((time_left - (shown - 1)) * 1000)
 
 
-class ShutdownCountdownDialog(ctk.CTkToplevel):
+class ShutdownCountdownDialog(_Dialog):
     """Counts down before shutting the PC down; Cancel or closing the window aborts it."""
 
     def __init__(self, master, seconds: int, on_expired, on_cancelled):
-        super().__init__(master)
+        super().__init__(master, t("shutdown_countdown_title"))
         self._deadline = time.monotonic() + seconds
         self._on_expired = on_expired
         self._on_cancelled = on_cancelled
-
-        self.title(t("shutdown_countdown_title"))
-        self.configure(fg_color=Colors.BG_MAIN)
-        self.resizable(False, False)
-        self.transient(master)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
 
         content = ctk.CTkFrame(self, fg_color="transparent")
@@ -863,16 +829,12 @@ class ShutdownCountdownDialog(ctk.CTkToplevel):
 TRAY_SETTING_KEYS = ("minimize_to_tray", "close_to_tray")
 
 
-class OptionsDialog(ctk.CTkToplevel):
+class OptionsDialog(_Dialog):
     """Minimize/close-to-tray and update-check switches, saved in settings.json as soon as they change.
     ``on_update_check_changed(enabled)`` runs after the update-check switch is saved."""
 
     def __init__(self, master, support, on_update_check_changed):
-        super().__init__(master)
-        self.title(t("dialog_options_title"))
-        self.configure(fg_color=Colors.BG_MAIN)
-        self.resizable(False, False)
-        self.transient(master)
+        super().__init__(master, t("dialog_options_title"))
         grab_modal(self)
         self._on_update_check_changed = on_update_check_changed
 
@@ -915,8 +877,7 @@ class OptionsDialog(ctk.CTkToplevel):
         row.pack(fill="x", pady=(0, 8))
         switch = CompactSwitch(row, command, Colors.BG_CARD)
         switch.pack(side="right", padx=12)
-        if on:
-            switch.select()
+        switch.set(on)
         if not usable:
             switch.configure(state="disabled")
         self.switches[key] = switch

@@ -31,11 +31,11 @@ def test_license_dialog_names_the_official_sellers(tk_root, settle_activation, u
 
 
 def test_wizard_blocks_amd_without_amf_and_links_the_fix(tk_root, monkeypatch):
-    from jasna import accelerator, os_utils
+    from jasna import accelerator, system_requirements
     from jasna.gui import system_checks
 
     for name in ("check_ascii_install_path", "check_gpu_driver_version", "check_windows_nvidia_sysmem_fallback_policy"):
-        monkeypatch.setattr(os_utils, name, lambda: (True, ""))
+        monkeypatch.setattr(system_requirements, name, lambda: (True, ""))
     for name in ("check_ffprobe", "check_gpu", "check_cuda"):
         monkeypatch.setattr(system_checks, name, lambda: (True, ""))
     monkeypatch.setattr(system_checks, "check_amf", lambda: (False, t("wizard_amf_missing_linux")))
@@ -64,3 +64,13 @@ def test_chinese_license_dialog_has_the_xianyu_button_and_stays_modal_after_the_
     qr.destroy()
 
     assert dialog.grab_current() == dialog
+
+
+def test_english_license_dialog_has_no_xianyu_button(tk_root, settle_activation, gui_language):
+    from jasna.gui.components import LicenseDialog, XianyuButton
+
+    gui_language("en")
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
+    settle_activation(dialog)
+
+    assert not [child for child in dialog.winfo_children()[0].winfo_children() if isinstance(child, XianyuButton)]

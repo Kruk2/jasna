@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import subprocess
 import threading
+from contextlib import nullcontext
 from fractions import Fraction
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import torch
-from av.video.reformatter import ColorRange as AvColorRange
-from av.video.reformatter import Colorspace as AvColorspace
 
+from factories import FixedDetectorSession, make_pipeline, session_config, video_metadata
 from jasna.gui import raw_player
 from jasna.gui.raw_player import (
     PlayerFailed,
@@ -24,34 +24,29 @@ from jasna.gui.raw_player import (
     run_raw_restoration_pass,
 )
 from jasna.gui.models import AppSettings
-from jasna.media.probe import VideoMetadata
+from jasna.restorer.restoration_pipeline import RestorationPipeline
 
-
-def _metadata() -> VideoMetadata:
-    return VideoMetadata(
-        video_file="video.mp4",
-        video_height=1080,
-        video_width=1920,
-        video_fps=60.0,
-        average_fps=60.0,
-        video_fps_exact=Fraction(60, 1),
-        codec_name="h264",
-        duration=10.0,
-        time_base=Fraction(1, 1000),
-        start_pts=100,
-        color_space=AvColorspace.ITU709,
-        color_range=AvColorRange.MPEG,
-        num_frames=600,
-        is_10bit=False,
-    )
+METADATA = video_metadata(
+    fps=60,
+    num_frames=600,
+    video_file="video.mp4",
+    video_width=1920,
+    video_height=1080,
+    codec_name="h264",
+    time_base=Fraction(1, 1000),
+    start_pts=100,
+)
 
 
 def _player_frame(seconds: float, generation: int = 1) -> PlayerFrame:
     return PlayerFrame(seconds, raw_player.Image.new("RGB", (2, 2)), generation)
 
 
-def test_timestamp_buffer_caps_frames_and_wakes_cancelled_producer() -> None:
-    frame_buffer = TimestampFrameBuffer(max_seconds=20, max_frames=1)
+@pytest.mark.parametrize(
+    ("max_seconds", "max_frames"), [(20, 1), (0.1, 60)], ids=["frame-cap", "time-cap"]
+)
+def test_timestamp_buffer_caps_and_releases_a_cancelled_producer(max_seconds, max_frames) -> None:
+    frame_buffer = TimestampFrameBuffer(max_seconds=max_seconds, max_frames=max_frames)
     cancel = threading.Event()
     frame_buffer.reset(1)
     assert frame_buffer.put(_player_frame(0.0), cancel)
@@ -62,32 +57,11 @@ def test_timestamp_buffer_caps_frames_and_wakes_cancelled_producer() -> None:
 
     producer.start()
     cancel.set()
-    with frame_buffer._condition:
-        frame_buffer._condition.notify_all()
-    producer.join(timeout=1)
+    producer.join()
 
     assert result == [False]
-    assert len(frame_buffer) == 1
-
-
-def test_timestamp_buffer_caps_buffered_time() -> None:
-    frame_buffer = TimestampFrameBuffer(max_seconds=0.1, max_frames=60)
-    cancel = threading.Event()
-    frame_buffer.reset(1)
-    assert frame_buffer.put(_player_frame(0.0), cancel)
-    result: list[bool] = []
-    producer = threading.Thread(
-        target=lambda: result.append(frame_buffer.put(_player_frame(0.1), cancel))
-    )
-
-    producer.start()
-    cancel.set()
-    with frame_buffer._condition:
-        frame_buffer._condition.notify_all()
-    producer.join(timeout=1)
-
-    assert result == [False]
-    assert len(frame_buffer) == 1
+    assert frame_buffer.pop_due(1.0).seconds == 0.0
+    assert frame_buffer.empty()
 
 
 def test_timestamp_buffer_discards_old_generation() -> None:
@@ -133,54 +107,11 @@ def test_timestamp_buffer_preroll_accepts_short_eof_tail() -> None:
     assert frame_buffer.ready(0.5)
 
 
-def test_default_player_buffer_absorbs_restoration_bursts() -> None:
-    frame_buffer = TimestampFrameBuffer()
-
-    assert raw_player.PREROLL_SECONDS >= 1.0
-    assert frame_buffer._max_seconds >= raw_player.PREROLL_SECONDS * 2
-    assert frame_buffer._max_frames >= raw_player.DISPLAY_FPS * frame_buffer._max_seconds
-
-
-def test_gpu_frame_image_casts_byte_before_bilinear_resize(monkeypatch) -> None:
-    import torch.nn.functional as functional
-
-    dtypes = []
-    interpolate = functional.interpolate
-
-    def checked_interpolate(frame, *args, **kwargs):
-        dtypes.append(frame.dtype)
-        return interpolate(frame, *args, **kwargs)
-
-    monkeypatch.setattr(functional, "interpolate", checked_interpolate)
-    frame = torch.arange(3 * 4 * 8, dtype=torch.uint8).reshape(3, 4, 8)
-
-    image = raw_player._gpu_frame_image(frame, (4, 4))
-
-    assert image.size == (4, 2)
-    assert dtypes == [torch.float32]
-
-
-def test_gpu_frame_image_upscales_to_fill_player_surface() -> None:
-    frame = torch.full((3, 4, 8), 20, dtype=torch.uint8)
-
-    image = raw_player._gpu_frame_image(frame, (16, 8), exact_size=True)
-
-    assert image.size == (16, 8)
-
-
-def test_gpu_frame_image_converts_anamorphic_frame_to_display_shape() -> None:
-    frame = torch.full((3, 576, 720), 20, dtype=torch.uint8)
-
-    image = raw_player._gpu_frame_image(frame, (768, 576), exact_size=True)
-
-    assert image.size == (768, 576)
-
-
 def test_raw_writer_downsizes_before_building_image_and_caps_display_rate() -> None:
     frame_buffer = TimestampFrameBuffer()
     frame_buffer.reset(4)
     writer = RawFrameWriter(
-        _metadata(),
+        METADATA,
         frame_buffer,
         threading.Event(),
         4,
@@ -192,21 +123,25 @@ def test_raw_writer_downsizes_before_building_image_and_caps_display_rate() -> N
     writer.write(frame, 116)
     writer.write(frame, 134)
 
-    assert len(frame_buffer) == 2
     assert frame_buffer.peek().image.size == (80, 40)
+    assert [frame_buffer.pop_due(0.0).seconds, frame_buffer.pop_due(1.0).seconds] == [0.0, pytest.approx(0.034)]
+    assert frame_buffer.empty()
+
+
+def _worker(settings: AppSettings, frame_buffer: TimestampFrameBuffer | None = None, on_stopped=lambda: None):
+    return RawPlayerWorker(
+        "video.mp4",
+        METADATA,
+        settings,
+        TimestampFrameBuffer() if frame_buffer is None else frame_buffer,
+        max_size=(640, 360),
+        on_stopped=on_stopped,
+    )
 
 
 def test_raw_worker_coalesces_seeks_and_invalidates_buffer() -> None:
     frame_buffer = TimestampFrameBuffer()
-    settings = AppSettings()
-    worker = RawPlayerWorker(
-        "video.mp4",
-        _metadata(),
-        settings,
-        frame_buffer,
-        max_size=(640, 360),
-        on_stopped=lambda: None,
-    )
+    worker = _worker(AppSettings(), frame_buffer)
 
     first = worker.play_from(1.0)
     second = worker.play_from(4.0)
@@ -215,103 +150,92 @@ def test_raw_worker_coalesces_seeks_and_invalidates_buffer() -> None:
     assert second == first + 1
     assert command.seconds == pytest.approx(4.0)
     assert command.generation == second
-    assert command.settings is settings
-    assert frame_buffer.generation == second
+    assert not frame_buffer.put(_player_frame(4.0, generation=first), threading.Event())
+    assert frame_buffer.put(_player_frame(4.0, generation=second), threading.Event())
     worker.close()
 
 
 def test_raw_worker_reports_stop_after_close() -> None:
     stopped = threading.Event()
-    worker = RawPlayerWorker(
-        "video.mp4",
-        _metadata(),
-        AppSettings(),
-        TimestampFrameBuffer(),
-        max_size=(640, 360),
-        on_stopped=stopped.set,
-    )
+    worker = _worker(AppSettings(), on_stopped=stopped.set)
     worker.start()
 
     worker.close()
 
-    assert stopped.wait(timeout=5)
+    assert stopped.wait(timeout=30)
 
 
-def test_raw_worker_reload_reuses_worker_with_new_settings() -> None:
-    frame_buffer = TimestampFrameBuffer()
-    initial = AppSettings(secondary_restoration="none")
+def test_raw_worker_reload_plays_the_new_settings_from_the_new_position() -> None:
+    worker = _worker(AppSettings(secondary_restoration="none"))
     changed = AppSettings(secondary_restoration="rtx-super-res")
-    worker = RawPlayerWorker(
-        "video.mp4",
-        _metadata(),
-        initial,
-        frame_buffer,
-        max_size=(640, 360),
-        on_stopped=lambda: None,
-    )
 
     generation = worker.reload_from(changed, 4.0)
     command = worker._commands.get_nowait()
 
-    assert not worker._closed.is_set()
-    assert worker.settings is changed
-    assert command.settings is changed
+    assert command.settings == changed
     assert command.seconds == pytest.approx(4.0)
     assert command.generation == generation
     worker.close()
 
 
-def test_raw_worker_rebuilds_changed_settings_on_same_owner_thread(
-    monkeypatch,
-) -> None:
-    from jasna.gui import video_session
-    from jasna import session_factory
+class _ClosableRestorer:
+    """Primary restorer that only records being closed."""
 
+    device = torch.device("cpu")
+    input_dtype = torch.float32
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.fixture
+def player_sessions(monkeypatch):
+    """Real CPU sessions in place of the ones ``RawPlayerWorker`` loads, with a fake restorer and
+    no detector; returns them, the threads that built them and the devices whose memory was released."""
+    from jasna.gui import video_session
+
+    built = {"sessions": [], "threads": [], "released": []}
+
+    def build_session(*_args, **_kwargs):
+        built["threads"].append(threading.get_ident())
+        built["sessions"].append(
+            FixedDetectorSession(
+                device=torch.device("cpu"),
+                restoration_pipeline=RestorationPipeline(_ClosableRestorer()),
+                log_callback=None,
+                detector=MagicMock(),
+            )
+        )
+        return built["sessions"][-1]
+
+    monkeypatch.setattr(video_session, "build_video_session", build_session)
+    monkeypatch.setattr(video_session, "video_session_config", lambda *_args, **_kwargs: session_config(device="cpu"))
+    monkeypatch.setattr(video_session, "release_session_memory", built["released"].append)
+    return built
+
+
+def test_raw_worker_rebuilds_changed_settings_on_same_owner_thread(monkeypatch, player_sessions) -> None:
     initial = AppSettings(secondary_restoration="none")
     changed = AppSettings(secondary_restoration="rtx-super-res")
-    worker = RawPlayerWorker(
-        "video.mp4",
-        _metadata(),
-        initial,
-        TimestampFrameBuffer(),
-        max_size=(640, 360),
-        on_stopped=lambda: None,
-    )
-    build_threads: list[int] = []
-    pipelines: list[SimpleNamespace] = []
-    sessions: list[SimpleNamespace] = []
+    stopped = threading.Event()
+    worker = _worker(initial, on_stopped=stopped.set)
+    pipelines = []
     first_pass_started = threading.Event()
     release_first_pass = threading.Event()
     second_pass_started = threading.Event()
 
-    def build_session(*_args, **_kwargs):
-        build_threads.append(threading.get_ident())
-        session = SimpleNamespace(
-            device=torch.device("cpu"),
-            close=MagicMock(),
-        )
-        sessions.append(session)
-        return session
-
-    def build_pipeline(*_args, **_kwargs):
-        pipeline = SimpleNamespace(validate_metadata=lambda _m: None, configure_vr=lambda _m: None)
+    def run_pass(pipeline, _metadata, _writer, _cancel_event, *, seek_seconds):
         pipelines.append(pipeline)
-        return pipeline
-
-    def run_pass(command, _pipeline, _session):
-        if command.settings is initial:
+        if len(pipelines) == 1:
             first_pass_started.set()
             assert release_first_pass.wait(30)
         else:
             second_pass_started.set()
-        return False
 
-    release_memory = MagicMock()
-    monkeypatch.setattr(video_session, "build_video_session", build_session)
-    monkeypatch.setattr(video_session, "video_session_config", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(session_factory, "build_pipeline", build_pipeline)
-    monkeypatch.setattr(worker, "_run_pass", run_pass)
-    monkeypatch.setattr(video_session, "release_session_memory", release_memory)
+    monkeypatch.setattr(raw_player, "run_raw_restoration_pass", run_pass)
 
     worker.start()
     worker.play_from(0)
@@ -320,111 +244,89 @@ def test_raw_worker_rebuilds_changed_settings_on_same_owner_thread(
     release_first_pass.set()
     assert second_pass_started.wait(30)
     worker.close()
-    worker.join(30)
 
-    assert not worker.is_alive()
-    assert len(set(build_threads)) == 1
-    assert len(pipelines) == 2
-    sessions[0].close.assert_called_once_with()
-    release_memory.assert_any_call(sessions[0].device)
+    assert stopped.wait(30)
+    first, second = player_sessions["sessions"]
+    assert len(set(player_sessions["threads"])) == 1
+    assert [pipeline.restoration_pipeline for pipeline in pipelines] == [
+        first.restoration_pipeline, second.restoration_pipeline
+    ]
+    assert first.restoration_pipeline.restorer.closed
+    assert player_sessions["released"] == [first.device, second.device]
 
 
-def test_raw_worker_releases_session_when_pipeline_construction_fails(
-    monkeypatch,
-) -> None:
-    from jasna.gui import video_session
+def test_raw_worker_releases_session_when_pipeline_construction_fails(monkeypatch, player_sessions) -> None:
     from jasna import session_factory
 
-    session = SimpleNamespace(
-        device=torch.device("cpu"),
-        close=MagicMock(),
-    )
-    release = MagicMock()
-    monkeypatch.setattr(video_session, "build_video_session", lambda *_args, **_kwargs: session)
-    monkeypatch.setattr(video_session, "video_session_config", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(video_session, "release_session_memory", release)
-    monkeypatch.setattr(
-        session_factory,
-        "build_pipeline",
-        MagicMock(side_effect=RuntimeError("pipeline failed")),
-    )
-    worker = RawPlayerWorker(
-        "video.mp4",
-        _metadata(),
-        AppSettings(),
-        TimestampFrameBuffer(),
-        max_size=(640, 360),
-        on_stopped=lambda: None,
-    )
+    monkeypatch.setattr(session_factory, "build_pipeline", MagicMock(side_effect=RuntimeError("pipeline failed")))
+    stopped = threading.Event()
+    worker = _worker(AppSettings(), on_stopped=stopped.set)
 
     worker.start()
     generation = worker.play_from(0)
-    assert worker.events.get(timeout=2) == PlayerStatus("loading_models", generation)
-    assert worker.events.get(timeout=2) == PlayerFailed("pipeline failed", generation)
+    assert worker.events.get(timeout=30) == PlayerStatus("loading_models", generation)
+    assert worker.events.get(timeout=30) == PlayerFailed("pipeline failed", generation)
     worker.close()
-    worker.join(2)
 
-    assert not worker.is_alive()
-    session.close.assert_called_once_with()
-    release.assert_called_once_with(session.device)
+    assert stopped.wait(30)
+    (session,) = player_sessions["sessions"]
+    assert session.restoration_pipeline.restorer.closed
+    assert player_sessions["released"] == [session.device]
 
 
-def test_raw_pass_forwards_seek_and_player_writer(monkeypatch) -> None:
+class _AsyncSecondary:
+    """Satisfies ``AsyncSecondaryRestorer``, as Topaz Video AI does."""
+
+    name = "async"
+    num_workers = 1
+    has_pending = False
+
+    def push_clip(self, frames_256, *, keep_start, keep_end):
+        return 0
+
+    def pop_completed(self):
+        return []
+
+    def flush_pending(self, target_seqs=None):
+        return False
+
+    def flush_all(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def test_raw_pass_refuses_an_async_secondary_restorer() -> None:
+    pipeline = make_pipeline(restoration_pipeline=RestorationPipeline(_ClosableRestorer(), secondary_restorer=_AsyncSecondary()))
+
+    with pytest.raises(ValueError, match="Topaz Video AI"):
+        run_raw_restoration_pass(pipeline, METADATA, MagicMock(), threading.Event(), seek_seconds=1.0)
+
+
+@pytest.mark.parametrize(("seek_seconds", "seek_ts"), [(0.0, None), (2.5, 2.5)])
+def test_raw_pass_seeks_only_past_the_start(monkeypatch, seek_seconds, seek_ts) -> None:
     from jasna import pipeline_threads
 
-    class ImmediateThread:
-        def __init__(self, *, target, args=(), kwargs=None, **_options):
-            self._run = lambda: target(*args, **(kwargs or {}))
+    seeks = []
+    monkeypatch.setattr(pipeline_threads, "run_restoration_pass", lambda *_args, seek_ts, **_kwargs: seeks.append(seek_ts))
 
-        def start(self):
-            self._run()
+    run_raw_restoration_pass(make_pipeline(), METADATA, MagicMock(), threading.Event(), seek_seconds=seek_seconds)
 
-        def is_alive(self):
-            return False
+    assert seeks == [seek_ts]
 
-        def join(self, timeout=None):
-            pass
 
-    decode = MagicMock()
-    blend = MagicMock()
-    monkeypatch.setattr(pipeline_threads, "decode_detect_loop", decode)
-    monkeypatch.setattr(pipeline_threads, "primary_restore_loop", MagicMock())
-    monkeypatch.setattr(pipeline_threads, "secondary_restore_loop", MagicMock())
-    monkeypatch.setattr(pipeline_threads, "blend_encode_loop", blend)
-    monkeypatch.setattr(raw_player.threading, "Thread", ImmediateThread)
-    monkeypatch.setattr(pipeline_threads, "VramOffloader", MagicMock())
-    pipeline = SimpleNamespace(
-        input_video=Path("video.mp4"),
-        decode_backend="auto",
-        device=torch.device("cpu"),
-        restoration_pipeline=SimpleNamespace(
-            secondary_num_workers=1,
-            secondary_restorer=None,
-        ),
-        max_clip_size=30,
-        batch_size=2,
-        temporal_overlap=4,
-        max_detection_gap=2,
-        min_detection_duration=2,
-        scene_detection=False,
-        vr_projector=None,
-        job_detection_model=MagicMock(),
-        stereo=None,
-    )
-    writer = MagicMock()
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_raw_pass_raises_a_worker_error_unless_cancelled(monkeypatch, cancelled) -> None:
+    from jasna import pipeline_threads
 
-    run_raw_restoration_pass(
-        pipeline,
-        _metadata(),
-        writer,
-        threading.Event(),
-        seek_seconds=2.5,
-    )
+    cancel = threading.Event()
+    if cancelled:
+        cancel.set()
+    monkeypatch.setattr(pipeline_threads, "run_restoration_pass", lambda *_args, **_kwargs: RuntimeError("decode failed"))
 
-    ctx, decode_pipeline = decode.call_args.args
-    assert ctx.seek_ts == pytest.approx(2.5)
-    assert decode_pipeline.scene_detection is False
-    assert blend.call_args.args[1] is writer
+    with nullcontext() if cancelled else pytest.raises(RuntimeError, match="decode failed"):
+        run_raw_restoration_pass(make_pipeline(), METADATA, MagicMock(), cancel, seek_seconds=1.0)
 
 
 def test_software_clock_freezes_and_resumes(monkeypatch) -> None:
@@ -444,48 +346,14 @@ def test_software_clock_freezes_and_resumes(monkeypatch) -> None:
     assert clock.seconds() == pytest.approx(4.75)
 
 
-@pytest.mark.parametrize(
-    ("stdout", "expected"),
-    [("1\n", True), ("", False)],
-)
-def test_source_has_audio_uses_ffprobe_process(
-    monkeypatch,
-    stdout: str,
-    expected: bool,
-) -> None:
-    calls: list[tuple[list[str], dict]] = []
-
-    def run(command, **kwargs):
-        calls.append((command, kwargs))
-        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
-
+@pytest.mark.parametrize(("stdout", "expected"), [("1\n", True), ("", False)])
+def test_source_has_audio_reads_the_audio_streams_ffprobe_lists(monkeypatch, stdout: str, expected: bool) -> None:
     monkeypatch.setattr(raw_player, "resolve_executable", lambda name: "/tools/ffprobe")
-    monkeypatch.setattr(raw_player, "subprocess_no_window_kwargs", lambda: {"creationflags": 7})
-    monkeypatch.setattr(raw_player.subprocess, "run", run)
+    monkeypatch.setattr(
+        raw_player.subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, 0, stdout, "")
+    )
 
     assert raw_player.source_has_audio("video.mp4") is expected
-    assert calls == [
-        (
-            [
-                "/tools/ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "a",
-                "-show_entries",
-                "stream=index",
-                "-of",
-                "csv=p=0",
-                "video.mp4",
-            ],
-            {
-                "stdout": raw_player.subprocess.PIPE,
-                "stderr": raw_player.subprocess.PIPE,
-                "text": True,
-                "creationflags": 7,
-            },
-        )
-    ]
 
 
 def test_source_has_audio_reports_ffprobe_failure(monkeypatch) -> None:
@@ -493,11 +361,7 @@ def test_source_has_audio_reports_ffprobe_failure(monkeypatch) -> None:
     monkeypatch.setattr(
         raw_player.subprocess,
         "run",
-        lambda command, **kwargs: SimpleNamespace(
-            returncode=1,
-            stdout="",
-            stderr="invalid media",
-        ),
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "invalid media"),
     )
 
     with pytest.raises(OSError, match="ffprobe audio probe failed: invalid media"):

@@ -6,14 +6,26 @@ from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.download_worker import start_download
-from jasna.gui.settings_sections.widgets import SLIDER_WIDTH, Row, add_setting_label, create_slider_value_label, layout_rows
+from jasna.gui.settings_sections.widgets import (
+    SLIDER_WIDTH,
+    Row,
+    add_setting_label,
+    bind_edits,
+    create_slider_value_label,
+    layout_rows,
+    parse_int,
+    set_entry_text,
+    set_widgets_enabled,
+)
 from jasna.gui.theme import Colors, Fonts, Sizing
 
 
 class ImageRestorationSection:
-    def __init__(self, parent, widgets: dict, on_modified, show_toast, on_interactive):
-        self._widgets = widgets
+    def __init__(self, parent, on_modified, show_toast, on_interactive):
+        self._widgets = {}
         self._on_modified = on_modified
+        self._enabled = True
+        self._downloading = False
         self._show_toast = show_toast
         self._on_interactive = on_interactive
 
@@ -66,7 +78,7 @@ class ImageRestorationSection:
         self._widgets["image_restore_strength"] = ctk.CTkSlider(
             row_str, from_=0.1, to=0.7, number_of_steps=12,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=SLIDER_WIDTH, command=lambda v: self._widgets["image_restore_strength_val"].configure(text=f"{v:.2f}"),
+            width=SLIDER_WIDTH, command=self._on_strength_slider,
         )
         self._widgets["image_restore_strength"].pack(side="right", padx=(0, 8))
 
@@ -91,6 +103,7 @@ class ImageRestorationSection:
             seed_frame, width=70, fg_color=Colors.BG_PANEL, text_color=Colors.TEXT_PRIMARY, border_color=Colors.BORDER_LIGHT,
         )
         self._widgets["image_restore_seed"].pack(side="right", padx=12, pady=8)
+        bind_edits(self._widgets["image_restore_seed"], self._on_modified)
 
         freeu_frame = ctk.CTkFrame(row_last, fg_color=Colors.BG_CARD, corner_radius=6)
         add_setting_label(freeu_frame, "image_restore_freeu", in_card=True)
@@ -116,7 +129,7 @@ class ImageRestorationSection:
             Row(freeu_frame, dict(side="right", fill="x", expand=True, padx=(4, 0)), "expert"),
         ]
 
-        self._refresh_sd15_download_state()
+        self._refresh_download_button()
 
     def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
         """Simple keeps the download and the interactive editor; steps and FreeU are expert settings."""
@@ -124,20 +137,38 @@ class ImageRestorationSection:
         layout_rows(self._rows, level, standard=standard, ltx=ltx)
         return True
 
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = enabled
+        set_widgets_enabled(
+            (self._widgets[key] for key in (
+                "image_restore_interactive_btn", "image_restore_steps", "image_restore_strength",
+                "image_restore_variants", "image_restore_seed", "image_restore_freeu",
+            )),
+            enabled,
+        )
+        self._refresh_download_button()
+
     def _on_slider_change(self, key: str, value: int):
         self._widgets[f"{key}_val"].configure(text=str(value))
         self._on_modified()
 
-    def _refresh_sd15_download_state(self):
-        """Grey out the download button when the model is already installed."""
+    def _on_strength_slider(self, value: float) -> None:
+        self._widgets["image_restore_strength_val"].configure(text=f"{value:.2f}")
+        self._on_modified()
+
+    def _refresh_download_button(self):
+        """The download button is usable only while the model is missing, no download runs
+        and no job runs."""
         from jasna.engine_paths import SD15_DIR
         from jasna.restorer.sd15_download import bundle_present
 
+        if self._downloading:
+            return
         btn = self._widgets["image_restore_download_btn"]
         if bundle_present(SD15_DIR):
             btn.configure(state="disabled", text=t("image_restore_installed"))
         else:
-            btn.configure(state="normal", text=t("image_restore_download"))
+            btn.configure(state="normal" if self._enabled else "disabled", text=t("image_restore_download"))
 
     def _on_download_sd15(self):
         from tkinter import messagebox
@@ -146,7 +177,7 @@ class ImageRestorationSection:
         from jasna.restorer.sd15_download import bundle_present
 
         if bundle_present(SD15_DIR):
-            self._refresh_sd15_download_state()
+            self._refresh_download_button()
             return
         if not messagebox.askyesno(
             t("section_image_restoration"),
@@ -156,6 +187,7 @@ class ImageRestorationSection:
 
         btn = self._widgets["image_restore_download_btn"]
         btn.configure(state="disabled", text=t("image_restore_downloading"))
+        self._downloading = True
         main_thread = MainThreadCalls(btn, 100)
 
         def on_percent(percent: int):
@@ -177,13 +209,12 @@ class ImageRestorationSection:
         )
 
     def _finish_download(self, error: str | None):
-        btn = self._widgets["image_restore_download_btn"]
+        self._downloading = False
+        self._refresh_download_button()
         if error:
-            btn.configure(state="normal", text=t("image_restore_download"))
             self._show_toast(error, "error")
         else:
             self._show_toast(t("image_restore_download_done"), "success")
-            self._refresh_sd15_download_state()
 
     def apply(self, preset):
         self._widgets["image_restore_steps"].set(preset.image_restore_steps)
@@ -192,22 +223,14 @@ class ImageRestorationSection:
         self._widgets["image_restore_strength_val"].configure(text=f"{preset.image_restore_strength:.2f}")
         self._widgets["image_restore_variants"].set(preset.image_restore_variants)
         self._widgets["image_restore_variants_val"].configure(text=str(preset.image_restore_variants))
-        self._widgets["image_restore_seed"].delete(0, "end")
-        self._widgets["image_restore_seed"].insert(0, str(preset.image_restore_seed))
-        if preset.image_restore_freeu:
-            self._widgets["image_restore_freeu"].select()
-        else:
-            self._widgets["image_restore_freeu"].deselect()
+        set_entry_text(self._widgets["image_restore_seed"], str(preset.image_restore_seed))
+        self._widgets["image_restore_freeu"].set(preset.image_restore_freeu)
 
     def collect(self) -> dict:
-        try:
-            image_restore_seed = int(self._widgets["image_restore_seed"].get().strip() or "0")
-        except ValueError:
-            image_restore_seed = 0
         return {
             "image_restore_steps": int(self._widgets["image_restore_steps"].get()),
             "image_restore_strength": round(float(self._widgets["image_restore_strength"].get()), 2),
             "image_restore_freeu": self._widgets["image_restore_freeu"].get() == 1,
-            "image_restore_seed": image_restore_seed,
+            "image_restore_seed": parse_int(self._widgets["image_restore_seed"].get(), 0),
             "image_restore_variants": int(self._widgets["image_restore_variants"].get()),
         }

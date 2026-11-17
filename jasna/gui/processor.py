@@ -14,7 +14,13 @@ from jasna.license_api import LicenseCheckStopped
 from jasna.gui.job_log import JobLog, job_log_path
 from jasna.gui.locales import t
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobProcessingSnapshot, JobStatus, AppSettings
-from jasna.gui.video_session import SessionCache, build_image_session, build_video_session, video_session_config
+from jasna.gui.video_session import (
+    SessionCache,
+    build_image_session,
+    build_video_session,
+    release_session_memory,
+    video_session_config,
+)
 from jasna.media.probe import UnsupportedVideoError
 from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
@@ -23,10 +29,11 @@ from jasna.progressbar import StageProgress
 from jasna.session_config import SessionConfig
 from jasna.system_report import log_system_summary
 from jasna.session_factory import (
+    ImageSession,
     RestorationSession,
     build_job_pipeline,
     find_resume_output,
-    ltx_auto_split,
+    plan_job,
     plan_segment_job,
     splice_source,
 )
@@ -75,31 +82,15 @@ def _pipeline_was_stopped(pipeline) -> bool:
     return bool(pipeline.cancel_requested) and not bool(pipeline.completed)
 
 
-def _cleanup_torch(torch_mod) -> None:
-    import gc
-
-    gc.collect()
-    if torch_mod.cuda.is_available():
-        torch_mod.cuda.synchronize()
-        torch_mod.cuda.empty_cache()
-        torch_mod.cuda.ipc_collect()
-        torch_mod.cuda.reset_peak_memory_stats()
-
-
 def build_job_encoder_settings(settings: AppSettings, codec: str) -> dict:
     # Built per job (not cached in the video session) so a codec change
     # between queued jobs is always validated against the selected codec.
     from jasna.accelerator import vendor_for_device
-    from jasna.media.encoder_settings import cq_controls, parse_encoder_settings, resolve_encoder_settings
+    from jasna.media.encoder_settings import resolve_custom_encoder_settings
 
-    vendor = vendor_for_device()
-    custom_settings = parse_encoder_settings(settings.encoder_custom_args)
-    if duplicates := cq_controls(custom_settings, vendor):
-        raise ValueError(
-            "CQ is controlled by the quality slider; remove "
-            f"{', '.join(duplicates)} from custom encoder settings"
-        )
-    return resolve_encoder_settings(custom_settings, cq=settings.encoder_cq, codec=codec, vendor=vendor)
+    return resolve_custom_encoder_settings(
+        settings.encoder_custom_args, cq=settings.encoder_cq, codec=codec, vendor=vendor_for_device()
+    )
 
 
 def job_config(settings: AppSettings) -> SessionConfig:
@@ -136,7 +127,7 @@ class Processor:
 
         # Heavy models are loaded once and reused across consecutive jobs of the
         # same type; the other session is unloaded when the type switches.
-        self._img_session: tuple | None = None      # (detector, restorer, device)
+        self._img_session: ImageSession | None = None
         # Settings are fixed per run; per-job detector overrides swap inside the session.
         self._video_sessions = SessionCache(key=lambda _settings: None)
         self._current_pipeline = None
@@ -234,8 +225,7 @@ class Processor:
             self._end_job_log()
 
         try:
-            import torch
-            _cleanup_torch(torch)
+            release_session_memory("cuda:0")
         except Exception:
             logger.warning("Torch cleanup failed after job", exc_info=True)
 
@@ -488,7 +478,6 @@ class Processor:
             if segments else None
         )
         s = self._ensure_video_session(settings)
-        self._prepare_job_detector(config, s)
         if self._stop_event.is_set():
             raise ProcessingStopped("Processing stopped")
         gate = ProgressGate(0.1)
@@ -513,8 +502,7 @@ class Processor:
                 stage=stage,
             ))
 
-        if segment_job is None:
-            segment_job = ltx_auto_split(config, s, input_path, output_path, progress_callback=progress_callback)
+        segment_job = plan_job(config, s, input_path, output_path, segment_job, progress_callback=progress_callback)
         if segment_job is not None and segment_job.reencodes_whole_video:
             self._progress(ProgressUpdate(job_id=job_id, status=JobStatus.PROCESSING, resumable=False))
 
@@ -531,25 +519,6 @@ class Processor:
                 raise ProcessingStopped("Processing stopped")
         finally:
             self._current_pipeline = None
-
-    def _prepare_job_detector(
-        self,
-        config: SessionConfig,
-        session: RestorationSession,
-    ) -> None:
-        from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
-
-        ensure_engines_compiled(
-            EngineCompilationRequest(
-                device=str(session.device),
-                fp16=config.fp16,
-                detection=True,
-                detection_model_name=config.detection_model_name,
-                detection_model_path=str(config.detection_model_path),
-                detection_batch_size=config.batch_size,
-            ),
-            log_callback=lambda msg: self._log("INFO", msg),
-        )
 
     def _close_video_session(self):
         if self._video_sessions.session is None:
@@ -569,46 +538,31 @@ class Processor:
 
     def _run_image_job(self, job_id: int, input_path: Path, output_path: Path):
         """Restore a still image with the (shared) SD 1.5 inpaint session."""
-        from jasna.image_restore import clamp_strength, restore_image, variant_output_paths
-        from jasna.media import image_io
-        from jasna.restorer.sd15_inpaint_restorer import DEFAULT_FREEU
+        from jasna.image_restore import ImageRestoreOptions, restore_image_file
 
         self._ensure_image_session()
-        detector, restorer, device = self._img_session
         settings = self._settings
 
         if self._stop_event.is_set():
             raise ProcessingStopped("Processing stopped")
         self._progress(ProgressUpdate(job_id=job_id, status=JobStatus.PROCESSING, progress=20.0, message="Detecting mosaics"))
 
-        num_variants = max(1, int(settings.image_restore_variants))
-        freeu = dict(DEFAULT_FREEU) if bool(settings.image_restore_freeu) else None
-        strength = clamp_strength(float(settings.image_restore_strength))
-
-        img = image_io.read_image_rgb_chw(input_path)
-        outputs = restore_image(
-            img, detector, restorer,
-            device=device, fp16=settings.fp16_mode,
+        options = ImageRestoreOptions(
             steps=int(settings.image_restore_steps),
-            strength=strength, seed=int(settings.image_restore_seed),
-            num_variants=num_variants, freeu=freeu,
+            strength=float(settings.image_restore_strength),
+            seed=int(settings.image_restore_seed),
+            variants=int(settings.image_restore_variants),
+            freeu=bool(settings.image_restore_freeu),
         )
-        for path, out in zip(variant_output_paths(output_path, num_variants), outputs):
-            image_io.write_image_rgb_chw(path, out)
+        for path in restore_image_file(self._img_session, options, input_path, output_path):
             self._log("INFO", f"Wrote {path.name}")
         self._progress(ProgressUpdate(job_id=job_id, status=JobStatus.PROCESSING, progress=100.0))
 
     def _close_image_session(self):
         if self._img_session is None:
             return
-        detector, restorer, _ = self._img_session
-        self._img_session = None
-        detector.close()
-        restorer.close()
-        import gc
-        import torch
-        for _ in range(3):
-            gc.collect()
-        _cleanup_torch(torch)
+        session, self._img_session = self._img_session, None
+        session.close()
+        release_session_memory(session.device)
         self._log("INFO", "SD 1.5 model unloaded")
 

@@ -215,8 +215,8 @@ class ControlBar(ctk.CTkFrame):
         self._start_disabled_tooltip = None
         self._trial = False
         self._resumable = False
-        
-        
+        self._queue_current = 0
+
         self._build_controls()
         self._build_progress()
         self._build_stats()
@@ -440,7 +440,11 @@ class ControlBar(ctk.CTkFrame):
         else:
             self._eta_label.configure(text="ETA: --")
             
-        self._queue_progress.configure(text=f"{queue_current} / {queue_total}")
+        self._queue_current = queue_current
+        self.set_queue_total(queue_total)
+
+    def set_queue_total(self, queue_total: int) -> None:
+        self._queue_progress.configure(text=f"{self._queue_current} / {queue_total}")
 
     def set_completed(self, elapsed_seconds: float):
         self.set_running(False)

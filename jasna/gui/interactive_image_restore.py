@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-from contextlib import nullcontext
+from collections.abc import Callable
 from pathlib import Path
 
 import customtkinter as ctk
@@ -51,7 +51,8 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         settings: AppSettings,
         output_folder: str,
         output_pattern: str,
-        on_log: callable | None = None,
+        on_log: Callable[[str, str], None],
+        on_stopped: Callable[[], None],
     ):
         super().__init__(master)
         self._main_thread = MainThreadCalls(self, 50)
@@ -60,6 +61,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         self._output_folder = output_folder
         self._output_pattern = output_pattern
         self._on_log = on_log
+        self._on_stopped = on_stopped
 
         self._index = 0
         self._seed = int(settings.image_restore_seed)
@@ -287,8 +289,9 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         self._requests.put((token, self._index, self._seed))
 
     def _worker_loop(self) -> None:
-        detector = None
-        restorer = None
+        from jasna.gui.video_session import build_image_session, release_session_memory
+
+        session = None
         prepared_by_path = {}
         try:
             while True:
@@ -298,55 +301,47 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
 
                 token, index, seed = request
                 try:
-                    detector, restorer, device = self._ensure_session(detector, restorer)
+                    if session is None:
+                        session = build_image_session(self._settings, log=None)
                     path = self._paths[index]
                     prepared = prepared_by_path.get(path)
                     if prepared is None:
-                        prepared = self._prepare(path, detector, device)
+                        prepared = self._prepare(path, session)
                         prepared_by_path[path] = prepared
-                    result = self._render(prepared, restorer, seed)
+                    result = self._render(prepared, session, seed)
                     mask = self._mask(prepared)
                     self._main_thread.post(lambda: self._finish_render(token, index, seed, prepared.img_chw_u8, mask, result))
                 except Exception as exc:
                     self._main_thread.post(lambda e=exc, tk=token: self._fail_render(tk, e))
         finally:
-            if detector is not None:
-                detector.close()
-            if restorer is not None:
-                restorer.close()
             try:
-                import torch
-                from jasna.gui.processor import _cleanup_torch
-                _cleanup_torch(torch)
-            except Exception:
-                logger.warning("Torch cleanup failed during render worker teardown", exc_info=True)
+                if session is not None:
+                    session.close()
+                    try:
+                        release_session_memory(session.device)
+                    except Exception:
+                        logger.warning("Torch cleanup failed during render worker teardown", exc_info=True)
+            finally:
+                self._on_stopped()
 
-    def _ensure_session(self, detector, restorer):
-        if detector is not None and restorer is not None:
-            return detector, restorer, self._device
-
-        from jasna.gui.video_session import build_image_session
-
-        detector, restorer, self._device = build_image_session(self._settings, log=None)
-        return detector, restorer, self._device
-
-    def _prepare(self, path: Path, detector, device):
+    def _prepare(self, path: Path, session):
         from jasna.image_restore import prepare_image_restore
         from jasna.media import image_io
 
         img = image_io.read_image_rgb_chw(path)
-        return prepare_image_restore(img, detector, device=device, fp16=self._settings.fp16_mode)
+        return prepare_image_restore(img, session.detector, device=session.device, fp16=session.fp16)
 
-    def _render(self, prepared, restorer, seed: int):
+    def _render(self, prepared, session, seed: int):
+        from jasna.accelerator import device_context
         from jasna.image_restore import clamp_strength, render_prepared_image
         from jasna.restorer.sd15_inpaint_restorer import DEFAULT_FREEU
 
         freeu = dict(DEFAULT_FREEU) if bool(self._settings.image_restore_freeu) else None
         strength = clamp_strength(float(self._settings.image_restore_strength))
-        with __import__("torch").cuda.device(self._device) if self._device.type == "cuda" else nullcontext():
+        with device_context(session.device):
             return render_prepared_image(
                 prepared,
-                restorer,
+                session.restorer,
                 steps=int(self._settings.image_restore_steps),
                 strength=strength,
                 seed=int(seed),
@@ -377,8 +372,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         message = str(exc)
         self._status.configure(text=message, text_color=Colors.STATUS_ERROR)
         self._save.configure(state="disabled")
-        if self._on_log:
-            self._on_log("ERROR", message)
+        self._on_log("ERROR", message)
 
     def _show_current_view(self) -> None:
         image = self._current_result
@@ -404,8 +398,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         path.parent.mkdir(parents=True, exist_ok=True)
         image_io.write_image_rgb_chw(path, self._current_result)
         self._status.configure(text=t("interactive_saved", path=str(path)), text_color=Colors.STATUS_COMPLETED)
-        if self._on_log:
-            self._on_log("INFO", f"Wrote {path}")
+        self._on_log("INFO", f"Wrote {path}")
 
     def _close(self) -> None:
         self._closed = True

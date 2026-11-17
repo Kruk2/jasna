@@ -2,11 +2,10 @@
 
 import logging
 import os
-import subprocess
 import sys
 from collections.abc import Iterable
 
-from jasna import os_utils
+from jasna import os_utils, system_requirements
 from jasna.gui.locales import t
 
 logger = logging.getLogger(__name__)
@@ -33,16 +32,16 @@ def evaluate_check_results(
 
 def run_system_checks(results: dict[str, tuple[bool | None, str]]) -> None:
     """Fill ``results`` one check at a time, so a caller that stops waiting still sees the finished ones."""
-    results["ascii_path"] = os_utils.check_ascii_install_path()
+    results["ascii_path"] = system_requirements.check_ascii_install_path()
     results["ffprobe"] = check_ffprobe()
-    results["driver"] = os_utils.check_gpu_driver_version()
+    results["driver"] = system_requirements.check_gpu_driver_version()
     if results["driver"][0] is False:
         results["gpu"] = results["cuda"] = results["driver"]
     else:
         results["gpu"] = check_gpu()
         results["cuda"] = check_cuda()
     if os.name == "nt":
-        results["sysmem"] = os_utils.check_windows_nvidia_sysmem_fallback_policy()
+        results["sysmem"] = system_requirements.check_windows_nvidia_sysmem_fallback_policy()
     from jasna.accelerator import is_amd_device
 
     if is_amd_device():
@@ -58,36 +57,21 @@ def check_amf() -> tuple[bool, str]:
 
 
 def check_ffprobe() -> tuple[bool, str]:
-    path = os_utils.find_executable("ffprobe")
-    if not path:
+    status = system_requirements.ffprobe_status()
+    if status.path is None:
         return False, t("wizard_not_found")
-    completed = subprocess.run(
-        [path, "-version"],
-        capture_output=True,
-        text=True,
-        check=False,
-        **os_utils.subprocess_no_window_kwargs(),
-    )
-    if completed.returncode != 0:
-        logger.error(
-            "ffprobe failed (exit code %s). stdout:\n%s\nstderr:\n%s",
-            completed.returncode,
-            completed.stdout or "",
-            completed.stderr or "",
-        )
-        return False, t("wizard_not_callable", path=path)
-    try:
-        major = os_utils._parse_ffmpeg_major_version((completed.stdout or "") + (completed.stderr or ""))
-    except ValueError:
-        return False, t("wizard_found_no_major", path=path)
-    if major != 8:
-        return False, t("wizard_found_bad_major", path=path, major=major)
-    return True, t("wizard_found_major", path=path, major=major)
+    if not status.runs:
+        return False, t("wizard_not_callable", path=status.path)
+    if status.major is None:
+        return False, t("wizard_found_no_major", path=status.path)
+    if not status.ok:
+        return False, t("wizard_found_bad_major", path=status.path, major=status.major)
+    return True, t("wizard_found_major", path=status.path, major=status.major)
 
 
 def check_gpu() -> tuple[bool, str]:
     try:
-        ok, result = os_utils.check_supported_gpu()
+        ok, result = system_requirements.check_supported_gpu()
         if ok:
             return True, result
         if result == "no_cuda":

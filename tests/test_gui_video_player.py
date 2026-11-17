@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from pathlib import Path
@@ -9,9 +10,11 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from factories import video_metadata
 from jasna.gui import video_player as video_player_module
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
+from jasna.gui.raw_player import PlayerFrame
 from jasna.gui.video_player import (
     VideoPlayerDialog,
     available_player_secondary_restorations,
@@ -84,51 +87,6 @@ def test_player_timer_resolution_does_nothing_off_windows(monkeypatch) -> None:
     load_timer.assert_not_called()
 
 
-def test_windows_video_renderer_embeds_and_updates_native_window(monkeypatch) -> None:
-    import numpy as np
-
-    user32 = SimpleNamespace(
-        FindWindowW=MagicMock(return_value=123),
-        ShowWindow=MagicMock(),
-        SetParent=MagicMock(),
-        SetWindowLongW=MagicMock(),
-        EnableWindow=MagicMock(),
-        MoveWindow=MagicMock(),
-    )
-    cv2 = SimpleNamespace(
-        WINDOW_NORMAL=0,
-        COLOR_RGB2BGR=1,
-        namedWindow=MagicMock(),
-        cvtColor=lambda rgb, _code, *, dst: dst.__setitem__(
-            slice(None), rgb[:, :, ::-1]
-        ),
-        imshow=MagicMock(),
-        pollKey=MagicMock(),
-        destroyWindow=MagicMock(),
-    )
-    monkeypatch.setattr(
-        video_player_module,
-        "_load_windows_video_backend",
-        lambda: (cv2, np, user32),
-    )
-    host = SimpleNamespace(winfo_id=lambda: 456)
-    renderer = video_player_module._WindowsVideoRenderer(host)
-
-    renderer.display(Image.new("RGB", (4, 2), "red"), (8, 4))
-    renderer.hide()
-    renderer.close()
-
-    cv2.namedWindow.assert_called_once()
-    user32.SetParent.assert_called_once_with(123, 456)
-    user32.EnableWindow.assert_called_once_with(123, False)
-    user32.MoveWindow.assert_called_once_with(123, 0, 0, 8, 4, True)
-    shown = cv2.imshow.call_args.args[1]
-    assert shown.shape == (4, 8, 3)
-    assert shown[0, 0].tolist() == [0, 0, 255]
-    cv2.pollKey.assert_called_once_with()
-    cv2.destroyWindow.assert_called_once()
-
-
 def test_native_video_renderer_is_windows_only(monkeypatch) -> None:
     monkeypatch.setattr(video_player_module.sys, "platform", "linux")
 
@@ -164,7 +122,7 @@ class _FakePlayerWorker:
         self._on_stopped()
 
 
-_METADATA = SimpleNamespace(duration=100.0, video_width=1920, video_height=1080, sample_aspect_ratio=1.0)
+_METADATA = video_metadata(fps=24, num_frames=2400, video_width=1920, video_height=1080)
 
 
 @pytest.fixture
@@ -281,15 +239,15 @@ def test_closing_while_playing_stops_the_worker_first(player) -> None:
 def test_same_sized_frames_reuse_the_scaled_tk_image(player, monkeypatch) -> None:
     monkeypatch.setattr(video_player_module, "_create_native_video_renderer", lambda _host: None)
     dialog, _closed = player()
-    first = SimpleNamespace(generation=0, image=Image.new("RGB", (640, 360), "red"))
-    second = SimpleNamespace(generation=0, image=Image.new("RGB", (640, 360), "blue"))
+    first = PlayerFrame(0.0, Image.new("RGB", (640, 360), "red"), 0)
+    second = PlayerFrame(0.0, Image.new("RGB", (640, 360), "blue"), 0)
 
     dialog._show_frame(first)
     photo = dialog._photo
     dialog._show_frame(second)
 
     assert dialog._photo is photo
-    assert (photo.width(), photo.height()) == dialog._surface_size()
+    assert (photo.width(), photo.height()) == dialog._view_size
 
 
 def test_fullscreen_hides_chrome_and_shows_controls_at_the_bottom_edge(player) -> None:
@@ -336,11 +294,7 @@ def test_player_view_size_uses_source_aspect_ratio() -> None:
 
 
 def test_player_display_aspect_includes_sample_aspect_ratio() -> None:
-    metadata = SimpleNamespace(
-        video_width=720,
-        video_height=576,
-        sample_aspect_ratio=16 / 15,
-    )
+    metadata = video_metadata(video_width=720, video_height=576, sample_aspect_ratio=Fraction(16, 15))
 
     assert video_player_module.video_display_aspect(metadata) == (768, 576)
 
@@ -387,11 +341,11 @@ def test_player_secondary_options_follow_gpu_and_model_availability(
 def test_header_player_button_follows_gpu_use(jasna_app, monkeypatch) -> None:
     button = jasna_app._video_player_btn
 
-    jasna_app._set_preview_gpu_busy(True)
+    jasna_app._set_preview_gpu_busy("preview", True)
     jasna_app._main_thread._run_pending()
     assert button.cget("state") == "disabled"
 
-    jasna_app._set_preview_gpu_busy(False)
+    jasna_app._set_preview_gpu_busy("preview", False)
     jasna_app._main_thread._run_pending()
     assert button.cget("state") == "normal"
 

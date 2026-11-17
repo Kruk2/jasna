@@ -35,7 +35,7 @@ def ltx_render_seconds(settings: AppSettings, metadata: VideoMetadata, segment: 
     import torch
 
     from jasna.ltx.model_files import bundle_names
-    from jasna.ltx.plan import window_hop
+    from jasna.ltx.windows import window_hop
     from jasna.ltx.speed import profile_path, segment_estimate_seconds
 
     return segment_estimate_seconds(
@@ -101,6 +101,7 @@ class SeedPanel(ctk.CTkFrame):
         self._tried: dict[RangeKey, dict[int, tuple[SeedFrame, ...]]] = {}
         self._shown: tuple[RangeKey, int] | None = None
         self._image: tuple[SeedFrame, Image.Image] | None = None
+        self._render_estimate: tuple[RangeKey, AppSettings, float] | None = None
 
         self.grid_columnconfigure(0, weight=1)
         self._cancel_btn = ctk.CTkButton(
@@ -279,13 +280,21 @@ class SeedPanel(ctk.CTkFrame):
             text=t(
                 "segments_ltx_render",
                 seed=self.preview_seed(segment),
-                duration=format_duration(ltx_render_seconds(self._video_settings(), self._metadata, segment)),
+                duration=format_duration(self._render_seconds(segment, self._video_settings())),
             ),
             state="disabled" if reason is not None or self._scanning() else "normal",
         )
         self._render_tooltip.set_text(t(reason) if reason else t("tip_segments_ltx_render"))
         if not self._render_btn.winfo_manager():
             self._render_btn.pack(side="left")
+
+    def _render_seconds(self, segment: SegmentRange, settings: AppSettings) -> float:
+        """``ltx_render_seconds`` of ``segment``, worked out again only for another range or other
+        settings, since it reads the speed profile and asks CUDA for the GPU name."""
+        key = range_key(segment)
+        if self._render_estimate is None or self._render_estimate[:2] != (key, settings):
+            self._render_estimate = (key, settings, ltx_render_seconds(settings, self._metadata, segment))
+        return self._render_estimate[2]
 
     def render(self) -> bool:
         """Render the LTX range under the playhead with its preview seed, after asking when it
@@ -295,7 +304,7 @@ class SeedPanel(ctk.CTkFrame):
             return False
         seed = self.preview_seed(segment)
         settings = self._video_settings()
-        seconds = ltx_render_seconds(settings, self._metadata, segment)
+        seconds = self._render_seconds(segment, settings)
         if seconds > LTX_RENDER_ASK_SECONDS and not messagebox.askyesno(
             t("segments_ltx_render_confirm_title"),
             t("segments_ltx_render_confirm", seed=seed, duration=format_duration(seconds)),

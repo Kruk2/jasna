@@ -305,9 +305,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             screen_margin=scaling.to_physical(self, *scaling.SCREEN_MARGIN),
             minimum_size=scaling.to_physical(self, *_PLAYER_MIN_SIZE),
         )
-        x = rect[0] + (screen_size[0] - size[0]) // 2
-        y = rect[1] + (screen_size[1] - size[1]) // 2
-        scaling.apply_geometry(self, *size, x, y)
+        scaling.apply_geometry(self, *size, *scaling.centered_position(size, rect, rect))
         logical_size = scaling.to_logical(self, *size)
         scaling.apply_minsize(
             self,
@@ -664,7 +662,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             self._metadata,
             settings,
             self._frame_buffer,
-            max_size=self._surface_size(),
+            max_size=self._view_size,
             on_stopped=lambda: self._main_thread.post(self._finish_stop),
         )
         self._worker.start()
@@ -796,7 +794,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         if frame.generation != self._generation:
             return
         self._last_frame_image = frame.image
-        self._display_image(frame.image, self._surface_size())
+        self._display_image(frame.image, self._view_size)
 
     def _display_image(
         self,
@@ -1001,9 +999,6 @@ class VideoPlayerDialog(ctk.CTkToplevel):
     def _hide_fullscreen_controls(self) -> None:
         self._bottom_panel.place_forget()
         self._fullscreen_controls_visible = False
-
-    def _surface_size(self) -> tuple[int, int]:
-        return self._view_size
 
     def _begin_stop(self) -> None:
         if self._stopping:

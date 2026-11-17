@@ -21,7 +21,8 @@ import torch
 
 from jasna.accelerator import device_free_bytes
 from jasna.gui.models import AppSettings
-from jasna.gui.queues import replace_pending
+from jasna.gui.preview_frames import preview_image
+from jasna.gui.queues import drain, replace_pending
 from jasna.gui.video_session import SessionCache, build_video_session, video_session_key
 from jasna.media.probe import VideoMetadata
 from jasna.media.splice import KeyframeIndex, segment_render_span
@@ -64,23 +65,25 @@ SeedEvent = SeedProgress | SeedReady | SeedFailed
 
 
 class SeedFrameWriter:
-    """FrameWriter that saves the frames of one effect range as JPEG files."""
+    """FrameWriter that saves the frames of one effect range as JPEG files, the left eye of VR
+    like the other previews."""
 
-    def __init__(self, directory: Path, effect_range: tuple[int, int], metadata: VideoMetadata, lut_applier) -> None:
+    def __init__(
+        self, directory: Path, effect_range: tuple[int, int], metadata: VideoMetadata, lut_applier, stereo: str
+    ) -> None:
         self._directory = directory
         self._start_pts, self._end_pts = effect_range
         self._metadata = metadata
         self._lut_applier = lut_applier
+        self._stereo = stereo
         self.frames: list[SeedFrame] = []
 
     def write(self, frame: torch.Tensor, pts: int) -> None:
         if not self._start_pts <= int(pts) < self._end_pts:
             return
-        from jasna.gui.restoration_preview import frame_image
-
         size = (int(self._metadata.video_width), int(self._metadata.video_height))
         path = self._directory / f"{int(pts)}.jpg"
-        frame_image(frame, size, self._lut_applier).save(
+        preview_image(frame, size, lut_applier=self._lut_applier, stereo=self._stereo).save(
             path, quality=JPEG_QUALITY, subsampling=0
         )
         seconds = (int(pts) - self._metadata.start_pts) * float(self._metadata.time_base)
@@ -128,21 +131,16 @@ class SeedRenderer:
         seed: int,
         settings: AppSettings,
         *,
-        writer_for: Callable[[Path, tuple[int, int]], object],
+        writer_for: Callable[[Path, tuple[int, int], str], object],
         report: Callable[[str, float, float], None],
         cancel: threading.Event,
     ):
         """Restore ``segment`` with ``seed``; returns the writer ``writer_for(directory,
-        effect range)`` made, after every frame of the range went through it."""
+        effect range, stereo layout)`` made, after every frame of the range went through it."""
         from jasna.gui.video_session import video_session_config
-        from jasna.ltx.restore import (
-            PreparedSpan,
-            Progress,
-            compose_spans,
-            denoise_spans,
-            final_stores,
-            prepare_spans,
-        )
+        from jasna.ltx.progress import Progress
+        from jasna.ltx.restore import PreparedSpan, compose_spans, denoise_spans, prepare_spans
+        from jasna.ltx.resume_files import final_stores
         from jasna.ltx.inference import ModelRuntime
         from jasna.session_factory import build_pipeline
 
@@ -161,7 +159,7 @@ class SeedRenderer:
         self._runs += 1
         run_dir = self._temp / f"run-{self._runs}"
         run_dir.mkdir()
-        writer = writer_for(run_dir, span.effect_ranges[0])
+        writer = writer_for(run_dir, span.effect_ranges[0], pipeline.vr_resolution.resolved)
         ltx_span = pipeline.ltx_span(self.metadata, self.index, span, (seeded,), lambda: writer)
         frames = round((span.end_pts - span.start_pts) * self.index.time_base * self.metadata.video_fps)
         progress = Progress(frames, disable=True, writer_adds_frame_work=False, report=report)
@@ -279,6 +277,7 @@ class LtxSeedPreviewWorker:
 
     def cancel(self) -> None:
         self._generation += 1
+        drain(self._commands)
         self._cancel_active()
 
     def release(self) -> None:
@@ -305,7 +304,7 @@ class LtxSeedPreviewWorker:
         return SeedRenderer(self.path, self.metadata, self.index, self.work_dir)
 
     def _run(self) -> None:
-        from jasna.ltx.restore import Cancelled
+        from jasna.ltx.inference import Cancelled
 
         renderer: SeedRenderer | None = None
         try:
@@ -328,8 +327,8 @@ class LtxSeedPreviewWorker:
                         command.segment,
                         command.seed,
                         command.settings,
-                        writer_for=lambda directory, effect: SeedFrameWriter(
-                            directory, effect, self.metadata, _lut_applier(command.settings)
+                        writer_for=lambda directory, effect, stereo: SeedFrameWriter(
+                            directory, effect, self.metadata, _lut_applier(command.settings), stereo
                         ),
                         report=lambda fraction, eta, stage: self.events.put(
                             SeedProgress(command.seed, stage.name, fraction, eta, generation)
@@ -357,9 +356,6 @@ class LtxSeedPreviewWorker:
 
 
 def _lut_applier(settings: AppSettings):
-    lut_path = (settings.lut_path or "").strip()
-    if not lut_path:
-        return None
-    from jasna.media.lut import GpuLutApplier, parse_cube_file
+    from jasna.media.lut import lut_applier
 
-    return GpuLutApplier(parse_cube_file(lut_path), torch.device("cuda:0"))
+    return lut_applier(settings.lut_path, torch.device("cuda:0"))

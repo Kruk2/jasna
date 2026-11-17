@@ -19,6 +19,7 @@ from PIL import Image
 from jasna.gui.queues import replace_pending
 from jasna._frozen import is_frozen
 from jasna.gui.models import AppSettings
+from jasna.gui.preview_frames import gpu_frame_image
 from jasna.media.probe import VideoMetadata
 from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 
@@ -70,11 +71,6 @@ class TimestampFrameBuffer:
         self._condition = threading.Condition()
         self._generation = 0
         self._eof = False
-
-    @property
-    def generation(self) -> int:
-        with self._condition:
-            return self._generation
 
     @property
     def eof(self) -> bool:
@@ -141,10 +137,6 @@ class TimestampFrameBuffer:
         with self._condition:
             return not self._frames
 
-    def __len__(self) -> int:
-        with self._condition:
-            return len(self._frames)
-
     def _span_locked(self) -> float:
         if len(self._frames) < 2:
             return 0.0
@@ -175,7 +167,6 @@ class RawFrameWriter:
         self._size_lock = threading.Lock()
         self._lut_applier = lut_applier
         self._last_emitted_seconds: float | None = None
-        self.frames_written = 0
 
     def set_max_size(self, max_size: tuple[int, int]) -> None:
         with self._size_lock:
@@ -201,49 +192,14 @@ class RawFrameWriter:
             max_size = self._max_size
         player_frame = PlayerFrame(
             seconds=seconds,
-            image=_gpu_frame_image(frame, max_size, exact_size=True),
+            image=gpu_frame_image(frame, max_size),
             generation=self._generation,
         )
         if self._frame_buffer.put(player_frame, self._cancel_event):
             self._last_emitted_seconds = seconds
-            self.frames_written += 1
 
     def after_write(self, frames_written: int, stop_event: threading.Event) -> None:
         pass
-
-
-def _gpu_frame_image(
-    frame,
-    max_size: tuple[int, int],
-    *,
-    exact_size: bool = False,
-) -> Image.Image:
-    import torch.nn.functional as functional
-
-    height, width = int(frame.shape[-2]), int(frame.shape[-1])
-    max_width, max_height = max(2, int(max_size[0])), max(2, int(max_size[1]))
-    if exact_size:
-        target = (max_height, max_width)
-    else:
-        scale = min(max_width / width, max_height / height)
-        target = (
-            max(2, round(height * scale)),
-            max(2, round(width * scale)),
-        )
-    if target != (height, width):
-        resize_dtype = frame.dtype
-        if not frame.dtype.is_floating_point:
-            import torch
-
-            resize_dtype = torch.float16 if frame.is_cuda else torch.float32
-        frame = functional.interpolate(
-            frame.unsqueeze(0).to(resize_dtype),
-            size=target,
-            mode="bilinear",
-            align_corners=False,
-        ).squeeze(0).round_().clamp_(0, 255).to(frame.dtype)
-    array = frame.to("cpu").permute(1, 2, 0).contiguous().numpy()
-    return Image.fromarray(array).copy()
 
 
 @dataclass(frozen=True)
@@ -322,12 +278,6 @@ class RawPlayerWorker:
         self._cancel_active_pass()
         self._replace_command(_Stop(), allow_closed=True)
 
-    def join(self, timeout: float | None = None) -> None:
-        self._thread.join(timeout)
-
-    def is_alive(self) -> bool:
-        return self._thread.is_alive()
-
     def _cancel_active_pass(self) -> None:
         with self._cancel_lock:
             if self._active_cancel is not None:
@@ -398,25 +348,20 @@ class RawPlayerWorker:
             self.path,
             self.path,
         )
-        pipeline.validate_metadata(self.metadata)
-        pipeline.configure_vr(self.metadata)
+        pipeline.prepare(self.metadata)
         return pipeline
 
     def _run_pass(self, command: _Play, pipeline, session) -> bool:
         cancel_event = threading.Event()
-        lut_applier = None
-        lut_path = (command.settings.lut_path or "").strip()
-        if lut_path:
-            from jasna.media.lut import GpuLutApplier, parse_cube_file
+        from jasna.media.lut import lut_applier
 
-            lut_applier = GpuLutApplier(parse_cube_file(lut_path), session.device)
         writer = RawFrameWriter(
             self.metadata,
             self.frame_buffer,
             cancel_event,
             command.generation,
             self._max_size,
-            lut_applier,
+            lut_applier(command.settings.lut_path, session.device),
         )
         with self._cancel_lock:
             self._active_cancel = cancel_event

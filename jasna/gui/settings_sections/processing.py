@@ -8,15 +8,16 @@ from jasna.accelerator import AcceleratorVendor
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
+    SLIDER_WIDTH,
     Row,
     add_setting_label,
-    ValueOptionMenu,
-    SLIDER_WIDTH,
     create_slider_value_label,
     layout_rows,
+    option_menu,
+    set_widgets_enabled,
 )
 from jasna.gui.theme import Colors, Sizing
-from jasna.session_config import DecodeBackendName
+from jasna.session_config import DecodeBackendName, DenoiseStrengthName
 
 # The sub-engines no longer depend on the clip length, so a long clip costs
 # activation memory only — high values stay usable on a large GPU.
@@ -34,8 +35,8 @@ def decode_backends(vendor: AcceleratorVendor | None) -> tuple[DecodeBackendName
 
 
 class ProcessingSection:
-    def __init__(self, parent, widgets: dict, on_modified, on_max_clip_size_change):
-        self._widgets = widgets
+    def __init__(self, parent, on_modified, on_max_clip_size_change):
+        self._widgets = {}
         self._on_modified = on_modified
         self._on_max_clip_size_change = on_max_clip_size_change
 
@@ -54,18 +55,10 @@ class ProcessingSection:
 
         denoise_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(denoise_row, "denoise_strength")
-        self._widgets["denoise_strength"] = ValueOptionMenu(
+        self._widgets["denoise_strength"] = option_menu(
             denoise_row,
-            options={
-                "none": t("denoise_none"),
-                "low": t("denoise_low"),
-                "medium": t("denoise_medium"),
-                "high": t("denoise_high"),
-            },
-            command=lambda _value: self._on_modified(),
-            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
-            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
-            dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
+            {strength: t(f"denoise_{strength}") for strength in get_args(DenoiseStrengthName)},
+            lambda _value: self._on_modified(),
             width=120,
         )
         self._widgets["denoise_strength"].pack(side="right")
@@ -88,13 +81,10 @@ class ProcessingSection:
         decode_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(decode_row, "decode_backend")
         self._decode_backends = decode_backends(None)
-        self._widgets["decode_backend"] = ValueOptionMenu(
+        self._widgets["decode_backend"] = option_menu(
             decode_row,
-            options={backend: t(f"decode_backend_{backend.replace('-', '_')}") for backend in self._decode_backends},
-            command=lambda _value: self._on_modified(),
-            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
-            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
-            dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
+            {backend: t(f"decode_backend_{backend.replace('-', '_')}") for backend in self._decode_backends},
+            lambda _value: self._on_modified(),
             width=140,
         )
         self._widgets["decode_backend"].pack(side="right")
@@ -131,10 +121,21 @@ class ProcessingSection:
         self._widgets["decode_backend"].offer(self._decode_backends)
         self._set_decode_backend(self._widgets["decode_backend"].get_value())
 
+    def max_clip_size(self) -> int:
+        return int(self._widgets["max_clip_size"].get())
+
     def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
         any_toggle = layout_rows(self._toggles, level, standard=standard, ltx=ltx)
         hidden = () if any_toggle else (self._toggles_row,)
         return layout_rows(self._rows, level, standard=standard, ltx=ltx, hidden=hidden)
+
+    def set_enabled(self, enabled: bool) -> None:
+        set_widgets_enabled(
+            (self._widgets[key] for key in (
+                "temporal_overlap", "denoise_strength", "max_clip_size", "decode_backend", "fp16_mode", "compile_basicvsrpp"
+            )),
+            enabled,
+        )
 
     def _on_temporal_overlap_slider(self, value: float):
         self._widgets["temporal_overlap_val"].configure(text=str(int(value)))
@@ -153,17 +154,14 @@ class ProcessingSection:
         self._widgets["max_clip_size"].set(preset.max_clip_size)
         self._widgets["max_clip_size_val"].configure(text=str(preset.max_clip_size))
         self._set_decode_backend(preset.decode_backend)
-        for key in ("fp16_mode", "compile_basicvsrpp"):
-            if getattr(preset, key):
-                self._widgets[key].select()
-            else:
-                self._widgets[key].deselect()
+        self._widgets["fp16_mode"].set(preset.fp16_mode)
+        self._widgets["compile_basicvsrpp"].set(preset.compile_basicvsrpp)
 
     def collect(self) -> dict:
         return {
             "temporal_overlap": int(self._widgets["temporal_overlap"].get()),
             "denoise_strength": self._widgets["denoise_strength"].get_value(),
-            "max_clip_size": int(self._widgets["max_clip_size"].get()),
+            "max_clip_size": self.max_clip_size(),
             "decode_backend": self._widgets["decode_backend"].get_value(),
             "fp16_mode": self._widgets["fp16_mode"].get() == 1,
             "compile_basicvsrpp": self._widgets["compile_basicvsrpp"].get() == 1,

@@ -211,7 +211,10 @@ class PreviewCanvas(tk.Canvas):
             scale = transform[0]
             display = self._decorate(display, (scale, -crop[0] * scale, -crop[1] * scale))
         self.delete("all")
-        self._photo = ImageTk.PhotoImage(display)
+        if self._photo is not None and (self._photo.width(), self._photo.height()) == display.size:
+            self._photo.paste(display)
+        else:
+            self._photo = ImageTk.PhotoImage(display)
         width, height = self._canvas_size()
         self.create_image((width - display.width) // 2, (height - display.height) // 2, image=self._photo, anchor="nw")
         if self._on_drawn is not None:

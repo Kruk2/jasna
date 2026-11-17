@@ -18,11 +18,17 @@ def test_menu_has_clipboard_actions(tk_root):
     assert menu.type(3) == "separator"
 
 
-def test_right_click_is_bound(tk_root):
+def test_right_click_opens_the_menu(tk_root, monkeypatch):
     entry = ctk.CTkEntry(tk_root)
-    attach_entry_context_menu(entry)
+    entry.pack()
+    menu = attach_entry_context_menu(entry)
+    opened = []
+    monkeypatch.setattr(menu, "tk_popup", lambda x, y: opened.append((x, y)))
+    tk_root.update()
 
-    assert entry._entry.bind("<Button-3>")
+    entry._entry.event_generate("<Button-3>", x=1, y=1)
+
+    assert len(opened) == 1
 
 
 def test_paste_inserts_clipboard_text(tk_root):

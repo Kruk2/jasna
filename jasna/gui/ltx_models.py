@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from jasna import os_utils
+from jasna import system_requirements
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui.download_worker import start_download
 from jasna.gui.activation_worker import read_license_info
@@ -58,7 +58,7 @@ def card_unavailable_reason(vendor: AcceleratorVendor | None) -> str | None:
     Without model files LTX still runs as a trial."""
     if vendor is AcceleratorVendor.CPU:
         return "model_ltx_needs_nvidia"
-    if os_utils.old_linux_kernel_for_ltx() is not None:
+    if system_requirements.old_linux_kernel_for_ltx() is not None:
         return "model_ltx_needs_newer_linux"
     return None
 
@@ -117,10 +117,9 @@ class LtxModels:
     box and runs the download on a worker thread, reporting back on the main thread."""
 
     def __init__(self, directory: Path, main_thread: MainThreadCalls, on_change: Callable[[], None]) -> None:
-        self._directory = directory
+        self.directory = directory
         self._main_thread = main_thread
         self._on_change = on_change
-        self.directory = directory
         self._vaes: tuple[LtxVaeName, LtxVaeName] = ("auto", "auto")
         self.state = read_install_state(directory, *self._vaes)
         self.percent: int | None = None
@@ -133,7 +132,7 @@ class LtxModels:
         """Check the files of this VAE choice from now on."""
         if (encoder, decoder) != self._vaes:
             self._vaes = (encoder, decoder)
-            self.state = read_install_state(self._directory, encoder, decoder)
+            self.state = read_install_state(self.directory, encoder, decoder)
 
     def ensure(self, model: LtxModelName, fast: bool, *, on_ready: Callable[[], None]) -> bool:
         """True when the variant is installed, or the user agreed to download it and the
@@ -153,7 +152,7 @@ class LtxModels:
             return False
         name = t(f"model_{model_key('ltx', model)}")
         confirm_key = (
-            "ltx_update_confirm" if any((self._directory / file.name).is_file() for file in files)
+            "ltx_update_confirm" if any((self.directory / file.name).is_file() for file in files)
             else "ltx_download_confirm"
         )
         if not messagebox.askyesno(
@@ -164,7 +163,7 @@ class LtxModels:
         self._on_change()
         mirror_first = get_locale().current_language == "zh"
         start_download(
-            lambda progress: model_files.download_files(self._directory, list(files), progress, mirror_first=mirror_first),
+            lambda progress: model_files.download_files(self.directory, list(files), progress, mirror_first=mirror_first),
             lambda percent: self._main_thread.post(lambda: self._set_percent(percent)),
             lambda error: self._main_thread.post(lambda: self._finish(error, on_ready)),
         )
@@ -178,7 +177,7 @@ class LtxModels:
         from tkinter import messagebox
 
         self.percent = None
-        self.state = read_install_state(self._directory, *self._vaes)
+        self.state = read_install_state(self.directory, *self._vaes)
         self._on_change()
         if error:
             messagebox.showerror(t("ltx_download_title"), t("ltx_download_failed", message=error))

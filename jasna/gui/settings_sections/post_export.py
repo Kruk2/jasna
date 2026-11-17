@@ -2,15 +2,23 @@
 
 import customtkinter as ctk
 
-from jasna.gui.components import Tooltip
 from jasna.gui.locales import t
-from jasna.gui.settings_sections.widgets import Row, ValueOptionMenu, add_setting_label, get_tooltip, layout_rows
+from jasna.gui.settings_sections.widgets import (
+    Row,
+    add_setting_label,
+    bind_edits,
+    layout_rows,
+    option_menu,
+    set_entry_text,
+)
 from jasna.gui.theme import Colors, Fonts, Sizing
+
+_ACTIONS = ("none", "shutdown", "command")
 
 
 class PostExportSection:
-    def __init__(self, parent, widgets: dict, on_modified):
-        self._widgets = widgets
+    def __init__(self, parent, on_modified):
+        self._widgets = {}
         self._on_modified = on_modified
         self._level = "expert"
 
@@ -20,21 +28,8 @@ class PostExportSection:
 
         add_setting_label(row1, "post_export_action")
 
-        self._widgets["post_export_action"] = ValueOptionMenu(
-            row1,
-            options={
-                "none": t("post_export_none"),
-                "shutdown": t("post_export_shutdown"),
-                "command": t("post_export_command"),
-            },
-            command=self._on_action_changed,
-            fg_color=Colors.BG_CARD,
-            button_color=Colors.BG_CARD,
-            button_hover_color=Colors.BORDER_LIGHT,
-            dropdown_fg_color=Colors.BG_CARD,
-            dropdown_hover_color=Colors.PRIMARY,
-            text_color=Colors.TEXT_PRIMARY,
-            width=160,
+        self._widgets["post_export_action"] = option_menu(
+            row1, {action: t(f"post_export_{action}") for action in _ACTIONS}, self._on_action_changed, width=160
         )
         self._widgets["post_export_action"].pack(side="right")
         self._widgets["post_export_action"].set_value("none")
@@ -55,25 +50,10 @@ class PostExportSection:
             placeholder_text=t("post_export_command_placeholder"),
         )
         self._widgets["post_export_command"].pack(fill="x")
-        self._widgets["post_export_command"].bind("<KeyRelease>", lambda _event: self._on_modified())
+        bind_edits(self._widgets["post_export_command"], self._on_modified)
 
         video_command_label_row = ctk.CTkFrame(inner, fg_color="transparent")
-        video_command_label = ctk.CTkLabel(
-            video_command_label_row,
-            text=t("post_export_video_command"),
-            text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-        )
-        video_command_label.pack(side="left")
-        video_command_tip = ctk.CTkLabel(
-            video_command_label_row,
-            text="ⓘ",
-            text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            cursor="hand2",
-        )
-        video_command_tip.pack(side="left", padx=4)
-        Tooltip(video_command_tip, get_tooltip("post_export_video_command"))
+        add_setting_label(video_command_label_row, "post_export_video_command")
         self._widgets["post_export_video_command"] = ctk.CTkEntry(
             inner,
             fg_color=Colors.BG_CARD,
@@ -81,9 +61,7 @@ class PostExportSection:
             text_color=Colors.TEXT_PRIMARY,
             placeholder_text=t("post_export_video_command_placeholder"),
         )
-        self._widgets["post_export_video_command"].bind(
-            "<KeyRelease>", lambda _event: self._on_modified()
-        )
+        bind_edits(self._widgets["post_export_video_command"], self._on_modified)
 
         self._rows = [
             Row(row1, dict(fill="x"), "simple"),
@@ -96,7 +74,7 @@ class PostExportSection:
     def _refresh(self) -> None:
         action = self._widgets["post_export_action"].get_value()
         self._widgets["post_export_action"].offer(
-            [value for value in ("none", "shutdown", "command") if value != "command" or self._level == "expert" or action == "command"]
+            [value for value in _ACTIONS if value != "command" or self._level == "expert" or action == "command"]
         )
         hidden = () if action == "command" else (self._command_frame,)
         layout_rows(self._rows, self._level, standard=True, ltx=True, hidden=hidden)
@@ -107,18 +85,19 @@ class PostExportSection:
         self._refresh()
         return True
 
+    def set_enabled(self, enabled: bool) -> None:
+        """The queue-wide action and its command stay editable while the queue runs: they are read
+        when it ends."""
+        self._widgets["post_export_video_command"].configure(state="normal" if enabled else "disabled")
+
     def _on_action_changed(self, _value: str):
         self._refresh()
         self._on_modified()
 
     def apply(self, preset):
         self._widgets["post_export_action"].set_value(preset.post_export_action)
-        self._widgets["post_export_command"].delete(0, "end")
-        self._widgets["post_export_command"].insert(0, preset.post_export_command or "")
-        self._widgets["post_export_video_command"].delete(0, "end")
-        self._widgets["post_export_video_command"].insert(
-            0, preset.post_export_video_command or ""
-        )
+        set_entry_text(self._widgets["post_export_command"], preset.post_export_command or "")
+        set_entry_text(self._widgets["post_export_video_command"], preset.post_export_video_command or "")
         self._on_action_changed(self._widgets["post_export_action"].get_value())
 
     def collect(self) -> dict:

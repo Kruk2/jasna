@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +26,14 @@ class EnginePreflightResult:
         return tuple(r for r in self.requirements if not r.exists)
 
 
+def first_run_warning(missing_keys: Sequence[str]) -> str:
+    """The note shown before a run that first has to build the engines named by ``missing_keys``."""
+    from jasna.gui.locales import t
+
+    missing_lines = "\n".join(f"- {t(f'engine_name_{key}')}" for key in missing_keys)
+    return f"{t('engine_first_run_body')}\n\n{t('engine_first_run_missing')}\n{missing_lines}"
+
+
 def _detection_weights_path(settings: AppSettings) -> Path:
     from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path
 
@@ -39,14 +48,13 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         default_restoration_model_path,
         expected_unet4x_engine_path,
         get_basicvsrpp_sub_engine_paths,
-        get_onnx_tensorrt_engine_path,
-        get_yolo_tensorrt_engine_path,
     )
     from jasna.mosaic.detection_registry import (
         coerce_detection_model_name,
+        default_detection_batch_size,
+        detection_engine_path,
         is_rfdetr_model,
         is_yolo_model,
-        rfdetr_model_config,
     )
 
     reqs: list[EngineRequirement] = []
@@ -62,12 +70,8 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
             det_engine = None
             det_exists = True
         else:
-            config = rfdetr_model_config(det_name)
-            det_engine = get_onnx_tensorrt_engine_path(
-                det_weights,
-                batch_size=config.engine_batch_size(settings.batch_size),
-                fp16=bool(settings.fp16_mode),
-                dynamic_batch=config.dynamic_batch,
+            det_engine = detection_engine_path(
+                det_name, det_weights, default_detection_batch_size(device), fp16=bool(settings.fp16_mode)
             )
             det_exists = det_engine.is_file()
         if det_engine is not None:
@@ -81,7 +85,9 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
                 )
             )
     elif is_yolo_model(det_name) and not amd:
-        det_engine = get_yolo_tensorrt_engine_path(det_weights, fp16=bool(settings.fp16_mode))
+        det_engine = detection_engine_path(
+            det_name, det_weights, default_detection_batch_size(device), fp16=bool(settings.fp16_mode)
+        )
         det_exists = det_engine.is_file()
         reqs.append(
             EngineRequirement(

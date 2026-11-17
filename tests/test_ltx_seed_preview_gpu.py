@@ -66,7 +66,7 @@ def test_seed_preview_restores_a_range_exactly_like_a_segment_job(tmp_path) -> N
             previewed,
             1234,
             settings,
-            writer_for=lambda _directory, effect: _Capture(effect),
+            writer_for=lambda _directory, effect, _stereo: _Capture(effect),
             report=lambda *_args: None,
             cancel=threading.Event(),
         )

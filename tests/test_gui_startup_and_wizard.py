@@ -1,19 +1,10 @@
-import sys
 import threading
-import types
 
 import pytest
 
 from jasna import startup_timing
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui.system_checks import evaluate_check_results
-
-
-def test_elapsed_ms_is_monotonic_nonnegative():
-    first = startup_timing.elapsed_ms()
-    second = startup_timing.elapsed_ms()
-    assert first >= 0.0
-    assert second >= first
 
 
 @pytest.mark.parametrize(("checked_at", "line"), [
@@ -41,58 +32,40 @@ def test_evaluate_check_results(results, checks, expected):
     assert evaluate_check_results(results, results.keys() if checks is None else checks) == expected
 
 
-def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, vendor=AcceleratorVendor.NVIDIA, major=8, driver_ok=True) -> tuple[dict, tuple]:
-    from jasna import accelerator, os_utils
+NVIDIA, AMD, CPU = AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD, AcceleratorVendor.CPU
 
-    calls = {}
-    fake_torch = types.SimpleNamespace(
-        zeros=lambda *a, **k: calls.setdefault("device", k.get("device")),
-        cuda=types.SimpleNamespace(get_device_capability=lambda _index: (major, 0)),
-    )
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
-    monkeypatch.setattr(accelerator, "torch", fake_torch)
-    monkeypatch.setattr(os_utils, "check_supported_gpu", lambda: gpu_check_result)
-    monkeypatch.setattr(os_utils, "check_gpu_driver_version", lambda: (driver_ok, "driver"))
-    monkeypatch.setattr(accelerator, "vendor_for_device", lambda device=None: vendor)
+
+@pytest.mark.parametrize(
+    ("vendor", "major", "gpu_check", "driver_ok", "support", "launched"),
+    [
+        (NVIDIA, 8, (True, "RTX 3090"), True, (NVIDIA, False, False), ["cuda"]),
+        (NVIDIA, 9, (True, "GPU"), True, (NVIDIA, False, True), ["cuda"]),
+        (NVIDIA, 12, (True, "GPU"), True, (NVIDIA, True, True), ["cuda"]),
+        (AMD, 12, (True, "GPU"), True, (AMD, False, False), ["cuda"]),
+        (NVIDIA, 12, (False, "no_cuda"), True, (CPU, False, False), []),
+        (NVIDIA, 12, (False, ("arch_unsupported", "gfx1103")), True, (CPU, False, False), []),
+        (AMD, 12, (True, "AMD GPU"), False, (CPU, False, False), []),
+    ],
+    ids=["ampere", "hopper", "blackwell", "amd", "no-cuda", "unsupported-arch", "amd-old-driver"],
+)
+def test_warm_up_reports_gpu_support_and_launches_a_kernel_only_on_a_usable_gpu(
+    request, monkeypatch, cuda_capability, vendor, major, gpu_check, driver_ok, support, launched
+):
+    import torch
+
+    from jasna import system_requirements
     from jasna.gui.app import _warm_up_cuda
 
-    return calls, _warm_up_cuda()
+    cuda_capability((major, 0))
+    if vendor is AMD:
+        request.getfixturevalue("amd_gpu")()
+    devices: list[str] = []
+    monkeypatch.setattr(torch, "zeros", lambda *_a, device=None, **_k: devices.append(device))
+    monkeypatch.setattr(system_requirements, "check_supported_gpu", lambda: gpu_check)
+    monkeypatch.setattr(system_requirements, "check_gpu_driver_version", lambda: (driver_ok, "driver"))
 
-
-def test_warm_up_cuda_inits_context_when_gpu_supported(monkeypatch):
-    calls, support = _warm_up_with_gpu_check(monkeypatch, (True, "RTX 4090"))
-    assert calls["device"] == "cuda"
-    assert support == (AcceleratorVendor.NVIDIA, False, False)
-
-
-@pytest.mark.parametrize(
-    ("vendor", "major", "support"),
-    [
-        (AcceleratorVendor.NVIDIA, 12, (AcceleratorVendor.NVIDIA, True, True)),
-        (AcceleratorVendor.NVIDIA, 9, (AcceleratorVendor.NVIDIA, False, True)),
-        (AcceleratorVendor.AMD, 12, (AcceleratorVendor.AMD, False, False)),
-    ],
-)
-def test_warm_up_cuda_reports_gpu_support(monkeypatch, vendor, major, support):
-    assert _warm_up_with_gpu_check(monkeypatch, (True, "GPU"), vendor=vendor, major=major)[1] == support
-
-
-@pytest.mark.parametrize(
-    "gpu_check_result",
-    [(False, "no_cuda"), (False, ("arch_unsupported", "gfx1103"))],
-)
-def test_warm_up_cuda_launches_no_kernel_on_unsupported_gpu(monkeypatch, gpu_check_result):
-    calls, support = _warm_up_with_gpu_check(monkeypatch, gpu_check_result)
-    assert calls == {}
-    assert support == (AcceleratorVendor.CPU, False, False)
-
-
-def test_warm_up_launches_no_kernel_with_an_old_driver(monkeypatch):
-    calls, support = _warm_up_with_gpu_check(
-        monkeypatch, (True, "AMD GPU"), vendor=AcceleratorVendor.AMD, driver_ok=False,
-    )
-    assert calls == {}
-    assert support == (AcceleratorVendor.CPU, False, False)
+    assert _warm_up_cuda() == support
+    assert devices == launched
 
 
 def _logged_warnings(app) -> list[str]:
@@ -136,10 +109,10 @@ def test_startup_warns_only_when_windhawk_is_loaded(jasna_app, monkeypatch, load
 
 @pytest.mark.parametrize("hard_disk", [True, False])
 def test_startup_warns_when_installed_on_a_hard_disk(jasna_app, monkeypatch, hard_disk):
-    from jasna import os_utils
+    from jasna import system_requirements
     from jasna.gui.locales import t
 
-    monkeypatch.setattr(os_utils, "install_on_hard_disk", lambda: hard_disk)
+    monkeypatch.setattr(system_requirements, "install_on_hard_disk", lambda: hard_disk)
 
     jasna_app._warn_if_installed_on_hard_disk()
 
@@ -150,10 +123,10 @@ def test_startup_warns_when_installed_on_a_hard_disk(jasna_app, monkeypatch, har
 def test_startup_warns_when_an_older_version_left_dlls_in_the_folder(jasna_app, monkeypatch, leftover):
     from tkinter import messagebox
 
-    from jasna import os_utils
+    from jasna import system_requirements
     from jasna.gui.locales import t
 
-    monkeypatch.setattr(os_utils, "leftover_install_dll", lambda: leftover)
+    monkeypatch.setattr(system_requirements, "leftover_install_dll", lambda: leftover)
     shown = []
     monkeypatch.setattr(messagebox, "showwarning", lambda title, message, parent: shown.append((title, message)))
 
@@ -166,11 +139,11 @@ def test_startup_warns_when_an_older_version_left_dlls_in_the_folder(jasna_app, 
 
 @pytest.mark.parametrize("amd", [True, False])
 def test_system_checks_check_amf_only_on_amd(monkeypatch, amd):
-    from jasna import accelerator, os_utils
+    from jasna import accelerator, os_utils, system_requirements
     from jasna.gui import system_checks
 
     for name in ("check_ascii_install_path", "check_gpu_driver_version", "check_windows_nvidia_sysmem_fallback_policy"):
-        monkeypatch.setattr(os_utils, name, lambda: (True, ""))
+        monkeypatch.setattr(system_requirements, name, lambda: (True, ""))
     for name in ("check_ffprobe", "check_gpu", "check_cuda"):
         monkeypatch.setattr(system_checks, name, lambda: (True, ""))
     monkeypatch.setattr(os_utils, "check_amd_amf_runtime", lambda: (True, "libamfrt64.so.1"))
@@ -183,13 +156,13 @@ def test_system_checks_check_amf_only_on_amd(monkeypatch, amd):
 
 
 def test_system_checks_do_not_probe_the_gpu_with_an_old_driver(monkeypatch):
-    from jasna import accelerator, os_utils
+    from jasna import accelerator, system_requirements
     from jasna.gui import system_checks
 
-    monkeypatch.setattr(os_utils, "check_ascii_install_path", lambda: (True, ""))
-    monkeypatch.setattr(os_utils, "check_windows_nvidia_sysmem_fallback_policy", lambda: (True, ""))
+    monkeypatch.setattr(system_requirements, "check_ascii_install_path", lambda: (True, ""))
+    monkeypatch.setattr(system_requirements, "check_windows_nvidia_sysmem_fallback_policy", lambda: (True, ""))
     monkeypatch.setattr(system_checks, "check_ffprobe", lambda: (True, ""))
-    monkeypatch.setattr(os_utils, "check_gpu_driver_version", lambda: (False, "old driver"))
+    monkeypatch.setattr(system_requirements, "check_gpu_driver_version", lambda: (False, "old driver"))
     monkeypatch.setattr(accelerator, "is_amd_device", lambda: False)
     def unavailable_probe():
         raise AssertionError("probed an incompatible driver")

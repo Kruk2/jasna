@@ -16,12 +16,16 @@ from jasna.gui.ltx_models import (
     trial_only,
 )
 from jasna.gui.settings_sections.widgets import (
-    ValueOptionMenu,
+    Row,
     add_setting_label,
+    bind_edits,
     create_slider_value_label,
     get_tooltip,
-    Row,
     layout_rows,
+    option_menu,
+    parse_int,
+    set_entry_text,
+    set_widgets_enabled,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.ltx.model_files import LTX_MODELS
@@ -40,10 +44,7 @@ SIMPLE_LTX_MODELS = ("distilled2", "distilled4", "distilled")
 
 
 def parse_seed(text: str) -> int:
-    try:
-        return int(text.strip())
-    except ValueError:
-        return LTX_DEFAULT_SEED
+    return parse_int(text, LTX_DEFAULT_SEED)
 
 
 class _ModelCard(ctk.CTkFrame):
@@ -90,8 +91,8 @@ class _ModelCard(ctk.CTkFrame):
 
 
 class RestorationModelSection:
-    def __init__(self, parent, widgets: dict, on_modified, on_model_changed, *, ltx_models: LtxModels):
-        self._widgets = widgets
+    def __init__(self, parent, on_modified, on_model_changed, *, ltx_models: LtxModels):
+        self._widgets = {}
         self._on_modified = on_modified
         self._on_model_changed = on_model_changed
         self._ltx_models = ltx_models
@@ -102,7 +103,7 @@ class RestorationModelSection:
 
         self.frame = inner = ctk.CTkFrame(parent, fg_color="transparent")
 
-        self._model = self._widgets["restoration_model"] = ctk.StringVar(value="basicvsrpp")
+        self._model = ctk.StringVar(value="basicvsrpp")
         self._cards_frame = ctk.CTkFrame(inner, fg_color="transparent")
         self._cards_frame.pack(fill="x")
         self._cards_frame.grid_columnconfigure((0, 1), weight=1, uniform="model")
@@ -123,17 +124,12 @@ class RestorationModelSection:
         self._ltx_options = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
         model_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         add_setting_label(model_row, "ltx_model", in_card=True)
-        self._ltx_model = self._widgets["ltx_model"] = ValueOptionMenu(
+        self._ltx_model = self._widgets["ltx_model"] = option_menu(
             model_row,
-            options={model: t(f"ltx_model_{model}") for model in LTX_MODELS},
-            command=lambda _model: self._on_ltx_choice_changed(),
-            fg_color=Colors.BG_PANEL,
-            button_color=Colors.BG_PANEL,
-            button_hover_color=Colors.BORDER_LIGHT,
-            dropdown_fg_color=Colors.BG_CARD,
-            dropdown_hover_color=Colors.PRIMARY,
-            text_color=Colors.TEXT_PRIMARY,
+            {model: t(f"ltx_model_{model}") for model in LTX_MODELS},
+            lambda _model: self._on_ltx_choice_changed(),
             width=260,
+            background=Colors.BG_PANEL,
         )
         self._ltx_model.pack(side="right", padx=12, pady=8)
         Tooltip(self._ltx_model, get_tooltip("ltx_model"))
@@ -159,7 +155,7 @@ class RestorationModelSection:
             seed_row, width=120, fg_color=Colors.BG_PANEL, text_color=Colors.TEXT_PRIMARY, border_color=Colors.BORDER_LIGHT,
         )
         self._widgets["ltx_seed"].pack(side="right", pady=8)
-        self._widgets["ltx_seed"].bind("<KeyRelease>", lambda _event: self._on_modified())
+        bind_edits(self._widgets["ltx_seed"], self._on_modified)
         Tooltip(self._widgets["ltx_seed"], get_tooltip("ltx_seed"))
 
         self._fast_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
@@ -249,17 +245,12 @@ class RestorationModelSection:
     def _vae_row(self, key: str):
         row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         add_setting_label(row, key, in_card=True)
-        self._widgets[key] = ValueOptionMenu(
+        self._widgets[key] = option_menu(
             row,
-            options={choice: t(f"ltx_vae_{choice}") for choice in get_args(LtxVaeName)},
-            command=lambda _choice: self._on_vae_changed(),
-            fg_color=Colors.BG_PANEL,
-            button_color=Colors.BG_PANEL,
-            button_hover_color=Colors.BORDER_LIGHT,
-            dropdown_fg_color=Colors.BG_CARD,
-            dropdown_hover_color=Colors.PRIMARY,
-            text_color=Colors.TEXT_PRIMARY,
+            {choice: t(f"ltx_vae_{choice}") for choice in get_args(LtxVaeName)},
+            lambda _choice: self._on_vae_changed(),
             width=160,
+            background=Colors.BG_PANEL,
         )
         self._widgets[key].pack(side="right", padx=12, pady=8)
         self._widgets[key].set_value("auto")
@@ -279,27 +270,24 @@ class RestorationModelSection:
         return self._widgets["ltx_fast"].get() == 1
 
     def _set_fast(self, fast: bool) -> None:
-        if fast:
-            self._widgets["ltx_fast"].select()
-        else:
-            self._widgets["ltx_fast"].deselect()
+        self._widgets["ltx_fast"].set(fast)
 
     def _set_auto_split(self, enabled: bool, percent: int) -> None:
-        if enabled:
-            self._widgets["ltx_auto_split"].select()
-        else:
-            self._widgets["ltx_auto_split"].deselect()
+        self._widgets["ltx_auto_split"].set(enabled)
         self._widgets["ltx_auto_split_percent"].set(percent)
         self._widgets["ltx_auto_split_val"].configure(text=f"{percent}%")
-        self._widgets["ltx_auto_split_percent"].configure(state="normal" if enabled else "disabled")
+        self._lock_auto_split_percent()
+
+    def _lock_auto_split_percent(self) -> None:
+        unlocked = self._enabled and self._auto_split()
+        self._widgets["ltx_auto_split_percent"].configure(state="normal" if unlocked else "disabled")
 
     def _auto_split(self) -> bool:
         return self._widgets["ltx_auto_split"].get() == 1
 
     def _on_auto_split_toggled(self) -> None:
-        enabled = self._auto_split()
-        self._widgets["ltx_auto_split_percent"].configure(state="normal" if enabled else "disabled")
-        self._on_model_changed(self._model.get(), enabled)
+        self._lock_auto_split_percent()
+        self._on_model_changed(self._model.get(), self._auto_split())
         self._on_modified()
 
     def _on_auto_split_percent(self, value: float) -> None:
@@ -310,10 +298,7 @@ class RestorationModelSection:
         return self._widgets["ltx_trial"].get() == 1
 
     def set_trial(self, trial: bool) -> None:
-        if trial:
-            self._widgets["ltx_trial"].select()
-        else:
-            self._widgets["ltx_trial"].deselect()
+        self._widgets["ltx_trial"].set(trial)
         self._refresh_widgets()
 
     def _on_card_selected(self, value: str) -> None:
@@ -340,8 +325,7 @@ class RestorationModelSection:
         self._on_modified()
 
     def _set_seed(self, seed: int) -> None:
-        self._widgets["ltx_seed"].delete(0, "end")
-        self._widgets["ltx_seed"].insert(0, str(seed))
+        set_entry_text(self._widgets["ltx_seed"], str(seed))
 
     def unavailable_reason(self) -> str | None:
         """Why the chosen LTX model cannot restore right now (None when it can)."""
@@ -436,19 +420,18 @@ class RestorationModelSection:
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
+        set_widgets_enabled(
+            (self._widgets[key] for key in ("ltx_seed", "ltx_fast", "ltx_large_canvas", "ltx_auto_split", "ltx_overlap")),
+            enabled,
+        )
+        self._lock_auto_split_percent()
         self._refresh_widgets()
 
     def apply(self, preset) -> None:
         self._set_seed(preset.ltx_seed)
         self._set_fast(preset.ltx_fast)
-        if preset.ltx_large_canvas:
-            self._widgets["ltx_large_canvas"].select()
-        else:
-            self._widgets["ltx_large_canvas"].deselect()
-        if preset.ltx_trial:
-            self._widgets["ltx_trial"].select()
-        else:
-            self._widgets["ltx_trial"].deselect()
+        self._widgets["ltx_large_canvas"].set(preset.ltx_large_canvas)
+        self._widgets["ltx_trial"].set(preset.ltx_trial)
         self._set_auto_split(preset.ltx_auto_split, preset.ltx_auto_split_percent)
         self._set_overlap(preset.ltx_overlap)
         self._ltx_model.set_value(preset.ltx_model)
@@ -461,7 +444,7 @@ class RestorationModelSection:
 
     def collect(self) -> dict:
         return {
-            "restoration_model": self._widgets["restoration_model"].get(),
+            "restoration_model": self._model.get(),
             "ltx_model": self._widgets["ltx_model"].get_value(),
             "ltx_seed": parse_seed(self._widgets["ltx_seed"].get()),
             "ltx_fast": self._widgets["ltx_fast"].get() == 1,

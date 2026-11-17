@@ -1,21 +1,9 @@
 from __future__ import annotations
 
-import sys
-import types
-
 import pytest
+import torch
 
 from jasna.gui.system_checks import check_gpu
-
-
-def _fake_torch(is_available: bool, capability: tuple[int, int]):
-    return types.SimpleNamespace(
-        cuda=types.SimpleNamespace(
-            is_available=lambda: is_available,
-            get_device_capability=lambda device=0: capability,
-            get_device_name=lambda device=0: "Fake GPU",
-        )
-    )
 
 
 @pytest.mark.parametrize(
@@ -29,11 +17,12 @@ def _fake_torch(is_available: bool, capability: tuple[int, int]):
         (False, (7, 5), False, ["compatible GPU"]),
     ],
 )
-def test_check_gpu_requires_cuda_compute_7_5(monkeypatch, is_available, capability, passed, message_parts):
-    import jasna.accelerator as accelerator
-
-    monkeypatch.setitem(sys.modules, "torch", _fake_torch(is_available, capability))
-    monkeypatch.setattr(accelerator, "vendor_for_device", lambda _device: accelerator.AcceleratorVendor.NVIDIA)
+def test_check_gpu_requires_cuda_compute_7_5(
+    monkeypatch, cuda_capability, is_available, capability, passed, message_parts
+):
+    cuda_capability(capability)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: is_available)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda device=None: "Fake GPU")
 
     result, message = check_gpu()
 
@@ -42,9 +31,9 @@ def test_check_gpu_requires_cuda_compute_7_5(monkeypatch, is_available, capabili
 
 
 def test_check_gpu_names_unsupported_amd_arch(monkeypatch):
-    from jasna import os_utils
+    from jasna import system_requirements
 
-    monkeypatch.setattr(os_utils, "check_supported_gpu", lambda: (False, ("arch_unsupported", "gfx1103")))
+    monkeypatch.setattr(system_requirements, "check_supported_gpu", lambda: (False, ("arch_unsupported", "gfx1103")))
     passed, msg = check_gpu()
     assert passed is False
     assert "gfx1103" in msg
@@ -52,9 +41,9 @@ def test_check_gpu_names_unsupported_amd_arch(monkeypatch):
 
 
 def test_check_gpu_names_unsupported_datacenter_gpu(monkeypatch):
-    from jasna import os_utils
+    from jasna import system_requirements
 
-    monkeypatch.setattr(os_utils, "check_supported_gpu", lambda: (False, ("datacenter_unsupported", "NVIDIA H100 80GB")))
+    monkeypatch.setattr(system_requirements, "check_supported_gpu", lambda: (False, ("datacenter_unsupported", "NVIDIA H100 80GB")))
     passed, msg = check_gpu()
     assert passed is False
     assert "NVIDIA H100 80GB" in msg

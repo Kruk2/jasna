@@ -13,7 +13,7 @@ import webbrowser
 from tkinterdnd2 import TkinterDnD
 
 from jasna import __version__
-from jasna import os_utils, startup_timing, update_check
+from jasna import os_utils, startup_timing, system_requirements, update_check
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui.branding import (
     HEADER_LOGO_SIZE,
@@ -23,7 +23,7 @@ from jasna.gui.branding import (
 from jasna.gui import scaling
 from jasna.gui import activation_worker
 from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
-from jasna.gui.components import StatusPill, KofiButton, UnifansButton, XianyuButton, XianyuQrDialog, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, CloseWhileProcessingDialog, Tooltip, OptionsDialog, grab_modal
+from jasna.gui.components import StatusPill, KofiButton, UnifansButton, XianyuButton, XianyuQrDialog, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, CloseWhileProcessingDialog, Tooltip, OptionsDialog
 from jasna.gui.icons import create_icon
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
@@ -61,11 +61,11 @@ def _warm_up_cuda() -> tuple[AcceleratorVendor, bool, bool]:
     An unsupported GPU gets no kernel launch; the system check reports it instead.
     Returns (GPU vendor, Blackwell GPU, frame generation support) for the GPU-specific options;
     CPU without a supported GPU."""
-    from jasna.os_utils import check_supported_gpu
+    from jasna.system_requirements import check_supported_gpu
     from jasna.accelerator import supports_frame_generation, supports_nvfp4, vendor_for_device
 
     if vendor_for_device() is AcceleratorVendor.AMD:
-        driver_ok, _ = os_utils.check_gpu_driver_version()
+        driver_ok, _ = system_requirements.check_gpu_driver_version()
         if driver_ok is False:
             return AcceleratorVendor.CPU, False, False
     gpu_ok, _ = check_supported_gpu()
@@ -117,7 +117,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._processor: Processor | None = None
         self._job_start_times: dict[int, float] = {}
         self._processing_start_time: float = 0.0
-        self._preview_gpu_busy = False
+        self._preview_gpu_owners: set[object] = set()
         self._video_player_dialog = None
         self._closing_after_player = False
         self._queue_restored = False
@@ -458,11 +458,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         messagebox.showwarning(t("windhawk_warning_title"), message, parent=self)
 
     def _warn_if_installed_on_hard_disk(self):
-        if os_utils.install_on_hard_disk():
+        if system_requirements.install_on_hard_disk():
             self._log_panel.warning(t("hard_disk_warning"))
 
     def _warn_if_older_version_files_left(self):
-        leftover = os_utils.leftover_install_dll()
+        leftover = system_requirements.leftover_install_dll()
         if leftover is None:
             return
         from tkinter import messagebox
@@ -660,7 +660,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             
     def _on_jobs_changed(self):
         jobs = self._queue_panel.get_jobs()
-        self._control_bar.update_progress(queue_total=len(jobs))
+        self._control_bar.set_queue_total(len(jobs))
         self._update_start_button_state()
         self._save_queue()
 
@@ -678,6 +678,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._preset_manager.set_last_output_pattern(pattern)
 
     def _open_interactive_image_restore(self):
+        if self._preview_gpu_busy or (
+            self._processor is not None and self._processor.is_running()
+        ):
+            return
         from tkinter import filedialog
 
         files = filedialog.askopenfilenames(
@@ -692,14 +696,20 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
         from jasna.gui.interactive_image_restore import InteractiveImageRestoreDialog
 
-        InteractiveImageRestoreDialog(
-            self,
-            [Path(f) for f in files],
-            self._settings_panel.get_settings(),
-            self._queue_panel.get_output_folder(),
-            self._queue_panel.get_output_pattern(),
-            on_log=lambda level, message: self._log_panel.add_log(level, message),
-        )
+        self._set_preview_gpu_busy(InteractiveImageRestoreDialog, True)
+        try:
+            InteractiveImageRestoreDialog(
+                self,
+                [Path(f) for f in files],
+                self._settings_panel.get_settings(),
+                self._queue_panel.get_output_folder(),
+                self._queue_panel.get_output_pattern(),
+                on_log=lambda level, message: self._log_panel.add_log(level, message),
+                on_stopped=lambda: self._set_preview_gpu_busy(InteractiveImageRestoreDialog, False),
+            )
+        except Exception:
+            self._set_preview_gpu_busy(InteractiveImageRestoreDialog, False)
+            raise
 
     def _open_video_player(self, path: Path | None = None):
         if self._preview_gpu_busy or (
@@ -708,7 +718,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             return
         from jasna.gui.video_player import VideoPlayerDialog
 
-        self._set_preview_gpu_busy(True)
+        self._set_preview_gpu_busy(VideoPlayerDialog, True)
         try:
             self._video_player_dialog = VideoPlayerDialog(
                 self,
@@ -718,12 +728,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             )
         except Exception:
             self._video_player_dialog = None
-            self._set_preview_gpu_busy(False)
+            self._set_preview_gpu_busy(VideoPlayerDialog, False)
             raise
 
     def _video_player_closed(self):
+        from jasna.gui.video_player import VideoPlayerDialog
+
         self._video_player_dialog = None
-        self._set_preview_gpu_busy(False)
+        self._set_preview_gpu_busy(VideoPlayerDialog, False)
         if self._closing_after_player:
             self._closing_after_player = False
             self.after(0, self._on_close)
@@ -753,8 +765,17 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             border_color=Colors.BORDER_LIGHT if disabled else Colors.PLAYER_BORDER,
         )
 
-    def _set_preview_gpu_busy(self, busy: bool) -> None:
-        self._preview_gpu_busy = bool(busy)
+    @property
+    def _preview_gpu_busy(self) -> bool:
+        return bool(self._preview_gpu_owners)
+
+    def _set_preview_gpu_busy(self, owner: object, busy: bool) -> None:
+        """Record that ``owner`` (a preview, scan or player, called from any thread) holds or gave
+        back the GPU; it stays busy while any owner holds it."""
+        if busy:
+            self._preview_gpu_owners.add(owner)
+        else:
+            self._preview_gpu_owners.discard(owner)
         self._main_thread.post(self._update_start_button_state)
         
     def _show_toast(self, message: str, type_: str = "info"):
@@ -826,27 +847,13 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             return
 
         try:
-            from jasna.gui.engine_preflight import run_engine_preflight
+            from jasna.gui.engine_preflight import first_run_warning, run_engine_preflight
 
             preflight = run_engine_preflight(settings)
-            missing_keys = [r.key for r in preflight.missing]
-
-            def _engine_name(key: str) -> str:
-                if key == "rfdetr":
-                    return t("engine_name_rfdetr")
-                if key == "yolo":
-                    return t("engine_name_yolo")
-                if key == "basicvsrpp":
-                    return t("engine_name_basicvsrpp")
-                return key
-
             if preflight.should_warn_first_run_slow:
                 from tkinter import messagebox
 
-                missing_lines = "\n".join(f"- {_engine_name(k)}" for k in missing_keys)
-                msg = t("engine_first_run_body")
-                if missing_lines:
-                    msg += "\n\n" + t("engine_first_run_missing") + "\n" + missing_lines
+                msg = first_run_warning([requirement.key for requirement in preflight.missing])
                 messagebox.showinfo(t("engine_first_run_title"), msg)
                 self._log_panel.warning(msg)
         except Exception as e:
@@ -1075,12 +1082,8 @@ def route_gui_logs(gui_handler: logging.Handler) -> None:
 
 def run_gui():
     """Entry point to run the GUI application."""
-    from jasna._frozen import patch_frozen_torch
-    patch_frozen_torch()
-    from jasna.engine_paths import configure_torch_compile_cache
-    configure_torch_compile_cache()
-    from jasna.accelerator import configure_rocm_process_env
-    configure_rocm_process_env()
+    from jasna.bootstrap import configure_process
+    configure_process()
 
     import logging
     # Set up basic logging - will be connected to GUI after app creation

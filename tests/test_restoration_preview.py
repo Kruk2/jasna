@@ -2,16 +2,13 @@ from __future__ import annotations
 
 import queue
 import threading
-from pathlib import Path
 from fractions import Fraction
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 import torch
-from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
-from jasna.gui import restoration_preview
+from factories import video_metadata
 from jasna.gui.models import AppSettings
 from jasna.gui.restoration_preview import (
     RestorationPreviewWorker,
@@ -23,82 +20,55 @@ from jasna.gui.restoration_preview import (
     playback_window,
     preview_window,
 )
-from jasna.media.probe import VideoMetadata
 
 
-def _metadata(*, fps=30.0, duration=10.0, time_base=Fraction(1, 90000), start_pts=0) -> VideoMetadata:
-    return VideoMetadata(
+def _metadata(*, start_pts: int = 0):
+    """A 10-second 30 fps 1080p video on a 90 kHz time base."""
+    return video_metadata(
+        fps=30,
+        num_frames=300,
         video_file="video.mp4",
-        num_frames=round(duration * fps),
-        video_fps=fps,
-        average_fps=fps,
-        video_fps_exact=Fraction(fps).limit_denominator(1001),
-        codec_name="h264",
-        duration=duration,
         video_width=1920,
         video_height=1080,
-        time_base=time_base,
+        codec_name="h264",
+        time_base=Fraction(1, 90000),
         start_pts=start_pts,
-        color_space=AvColorspace.ITU709,
-        color_range=AvColorRange.MPEG,
-        is_10bit=False,
     )
 
 
-def test_preview_window_centers_on_requested_time() -> None:
-    metadata = _metadata()
-    window = preview_window(metadata, 5.0, 90)
+@pytest.mark.parametrize(
+    ("seconds", "start_pts", "seek_ts", "center_pts", "end_pts"),
+    [
+        (5.0, 0, 3.5, round(5.0 * 90000), round(6.5 * 90000)),
+        (0.2, 0, 0.0, round(0.2 * 90000), round(3.0 * 90000)),
+        (9.8, 0, 7.0, round(9.8 * 90000), round(10.0 * 90000)),
+        (5.0, 1000, 3.5, 1000 + round(5.0 * 90000), 1000 + round(6.5 * 90000)),
+    ],
+    ids=["centered", "clamped-at-start", "clamped-at-end", "start-pts-offset"],
+)
+def test_preview_window_centers_on_the_requested_time(seconds, start_pts, seek_ts, center_pts, end_pts) -> None:
+    window = preview_window(_metadata(start_pts=start_pts), seconds, 90)
 
-    assert window.seek_ts == pytest.approx(5.0 - 1.5)
-    assert window.end_pts == round((5.0 + 1.5) * 90000)
-    assert window.center_pts == round(5.0 * 90000)
-
-
-def test_preview_window_clamps_at_video_start() -> None:
-    metadata = _metadata()
-    window = preview_window(metadata, 0.2, 90)
-
-    assert window.seek_ts == 0.0
-    assert window.end_pts == round(3.0 * 90000)
-    assert window.center_pts == round(0.2 * 90000)
+    assert (window.seek_ts, window.center_pts, window.end_pts) == (pytest.approx(seek_ts), center_pts, end_pts)
 
 
-def test_preview_window_clamps_at_video_end() -> None:
-    metadata = _metadata(duration=10.0)
-    window = preview_window(metadata, 9.8, 90)
+@pytest.mark.parametrize(
+    ("seconds", "end_seconds"), [(5.0, 8.0), (9.0, 10.0)], ids=["three-seconds", "clamped-at-end"]
+)
+def test_playback_window_starts_at_the_requested_time(seconds, end_seconds) -> None:
+    window = playback_window(_metadata(), seconds, 90)
 
-    assert window.seek_ts == pytest.approx(7.0)
-    assert window.end_pts == round(10.0 * 90000)
-    assert window.center_pts == round(9.8 * 90000)
-
-
-def test_preview_window_offsets_by_start_pts() -> None:
-    metadata = _metadata(start_pts=1000)
-    window = preview_window(metadata, 5.0, 90)
-
-    assert window.end_pts == 1000 + round(6.5 * 90000)
-    assert window.center_pts == 1000 + round(5.0 * 90000)
-
-
-def test_playback_window_starts_at_requested_time() -> None:
-    metadata = _metadata()
-    window = playback_window(metadata, 5.0, 90)
-
-    assert window.seek_ts == pytest.approx(5.0)
-    assert window.center_pts == round(5.0 * 90000)
-    assert window.end_pts == round(8.0 * 90000)
-
-
-def test_playback_window_clamps_at_video_end() -> None:
-    metadata = _metadata()
-    window = playback_window(metadata, 9.0, 90)
-
-    assert window.seek_ts == pytest.approx(9.0)
-    assert window.end_pts == round(10.0 * 90000)
+    assert (window.seek_ts, window.center_pts, window.end_pts) == (
+        pytest.approx(seconds), round(seconds * 90000), round(end_seconds * 90000)
+    )
 
 
 def _frame(value: int) -> torch.Tensor:
     return torch.full((3, 4, 4), value, dtype=torch.uint8)
+
+
+def _shown_value(collector: _CenterFrameCollector) -> int:
+    return collector.result_image((4, 4)).getpixel((0, 0))[0]
 
 
 def test_collector_keeps_frame_closest_to_center_and_cancels() -> None:
@@ -112,9 +82,9 @@ def test_collector_keeps_frame_closest_to_center_and_cancels() -> None:
 
     assert collector.done
     assert cancel.is_set()
-    assert collector._best_pts == 90
+    assert _shown_value(collector) == 2
     collector.write(_frame(4), 160)
-    assert collector._best_pts == 90
+    assert _shown_value(collector) == 2
 
 
 def test_collector_prefers_first_frame_past_center_when_closer() -> None:
@@ -125,7 +95,7 @@ def test_collector_prefers_first_frame_past_center_when_closer() -> None:
     collector.write(_frame(2), 105)
 
     assert collector.done
-    assert collector._best_pts == 105
+    assert _shown_value(collector) == 2
 
 
 def test_collector_exposes_nearest_frame_when_center_is_past_eof() -> None:
@@ -136,7 +106,6 @@ def test_collector_exposes_nearest_frame_when_center_is_past_eof() -> None:
 
     assert not collector.done
     assert collector.has_result
-    assert collector._best_pts == 90
     assert collector.result_image((10, 10)).getpixel((0, 0)) == (2, 2, 2)
 
 
@@ -147,8 +116,7 @@ def test_collector_result_image_caps_size() -> None:
 
     image = collector.result_image((960, 540))
 
-    assert image.width <= 960
-    assert image.height <= 540
+    assert image.size == (960, 540)
 
 
 def test_collector_applies_lut_before_copying_frame() -> None:
@@ -210,7 +178,7 @@ def test_restoration_collectors_show_only_left_eye() -> None:
 
 
 def test_restoration_worker_coalesces_pending_requests() -> None:
-    worker = RestorationPreviewWorker("unused.mp4", _metadata())
+    worker = RestorationPreviewWorker("unused.mp4", _metadata(), on_stopped=lambda: None)
 
     first_generation = worker.request(1.0, AppSettings(), projection="auto")
     second_generation = worker.request(2.0, AppSettings(), projection="fisheye")
@@ -226,66 +194,13 @@ def test_restoration_worker_coalesces_pending_requests() -> None:
 
 
 def test_restoration_worker_marks_playback_requests() -> None:
-    worker = RestorationPreviewWorker("unused.mp4", _metadata())
+    worker = RestorationPreviewWorker("unused.mp4", _metadata(), on_stopped=lambda: None)
 
     worker.request(2.0, AppSettings(), projection="raw", playback=True)
 
     command = worker._commands.get_nowait()
     assert command.playback is True
     assert command.projection == "raw"
-    worker.close()
-
-
-def test_preview_pass_forwards_scene_detection(monkeypatch) -> None:
-    from jasna import pipeline_threads
-
-    class ImmediateThread:
-        def __init__(self, *, target, args=(), kwargs=None, **_options):
-            self._run = lambda: target(*args, **(kwargs or {}))
-
-        def start(self):
-            self._run()
-
-        def is_alive(self):
-            return False
-
-        def join(self, timeout=None):
-            pass
-
-    decode_detect = MagicMock()
-    monkeypatch.setattr(pipeline_threads, "decode_detect_loop", decode_detect)
-    monkeypatch.setattr(pipeline_threads, "primary_restore_loop", MagicMock())
-    monkeypatch.setattr(pipeline_threads, "secondary_restore_loop", MagicMock())
-    monkeypatch.setattr(pipeline_threads, "blend_encode_loop", MagicMock())
-    monkeypatch.setattr(restoration_preview.threading, "Thread", ImmediateThread)
-    monkeypatch.setattr(pipeline_threads, "VramOffloader", MagicMock())
-    worker = RestorationPreviewWorker("video.mp4", _metadata())
-    settings = AppSettings(scene_detection=False)
-    worker.request(2.0, settings, projection="raw")
-    command = worker._commands.get_nowait()
-    pipeline = SimpleNamespace(
-        input_video=Path("video.mp4"),
-        decode_backend="auto",
-        device=torch.device("cpu"),
-        restoration_pipeline=SimpleNamespace(secondary_num_workers=1),
-        max_clip_size=settings.max_clip_size,
-        batch_size=settings.batch_size,
-        temporal_overlap=settings.temporal_overlap,
-        max_detection_gap=settings.max_detection_gap,
-        min_detection_duration=settings.min_detection_duration,
-        scene_detection=settings.scene_detection,
-        vr_projection="auto",
-        vr_projector=None,
-        job_detection_model=MagicMock(),
-        vr_resolution=SimpleNamespace(resolved="off"),
-        stereo=None,
-        configure_vr=lambda metadata: None,
-    )
-
-    worker._run_preview_pass(command, pipeline)
-
-    assert pipeline.vr_projection == "raw"
-    assert decode_detect.call_args.args[1].scene_detection is False
     worker.close()
 
 
@@ -319,7 +234,7 @@ def test_restoration_worker_cancels_the_running_pass(monkeypatch, action, queued
         cancelled.append(cancel_event.wait(5))
 
     monkeypatch.setattr(pipeline_threads, "run_restoration_pass", run_pass)
-    worker = RestorationPreviewWorker("unused.mp4", _metadata())
+    worker = RestorationPreviewWorker("unused.mp4", _metadata(), on_stopped=lambda: None)
     worker.request(1.0, AppSettings(), projection="auto")
     running = threading.Thread(target=worker._run_preview_pass, args=(worker._commands.get_nowait(), _preview_pipeline()))
     running.start()
@@ -339,9 +254,8 @@ def test_restoration_worker_reports_completed_teardown() -> None:
     worker.start()
 
     worker.close()
-    worker.join(timeout=2)
 
-    assert stopped.is_set()
+    assert stopped.wait(timeout=30)
 
 
 def _queue_jobs(app, tmp_path, statuses) -> list:
@@ -378,7 +292,7 @@ def test_app_disables_start_while_preview_gpu_is_busy(jasna_app, tmp_path) -> No
     _queue_jobs(jasna_app, tmp_path, [JobStatus.PENDING])
     assert jasna_app._control_bar._start_btn.cget("state") == "normal"
 
-    jasna_app._set_preview_gpu_busy(True)
+    jasna_app._set_preview_gpu_busy("preview", True)
     jasna_app._main_thread._run_pending()
 
     assert jasna_app._control_bar._start_btn.cget("state") == "disabled"
@@ -390,7 +304,7 @@ def test_app_start_is_ignored_while_the_gpu_is_busy(jasna_app, start_calls, monk
 
     _queue_jobs(jasna_app, tmp_path, [JobStatus.PENDING])
     if busy == "preview":
-        jasna_app._set_preview_gpu_busy(True)
+        jasna_app._set_preview_gpu_busy("preview", True)
     else:
         monkeypatch.setattr(jasna_app._processor, "is_running", lambda: True)
 

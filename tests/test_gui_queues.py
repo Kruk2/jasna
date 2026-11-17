@@ -1,8 +1,7 @@
 import queue
 import threading
 
-
-from jasna.gui.queues import MainThreadCalls, drain, replace_pending
+from jasna.gui.queues import MainThreadCalls, replace_pending
 
 
 def test_replace_pending_keeps_only_the_newest_command() -> None:
@@ -11,16 +10,6 @@ def test_replace_pending_keeps_only_the_newest_command() -> None:
     replace_pending(pending, "second")
 
     assert pending.get_nowait() == "second"
-    assert pending.empty()
-
-
-def test_drain_empties_the_queue() -> None:
-    pending: queue.Queue = queue.Queue()
-    for item in range(3):
-        pending.put(item)
-
-    drain(pending)
-
     assert pending.empty()
 
 
@@ -34,8 +23,8 @@ def test_main_thread_calls_run_worker_posts_on_the_tk_thread(tk_root) -> None:
         tk_root.update()
     assert ran_on == [threading.main_thread()]
 
+    scheduled = set(tk_root.tk.splitlist(tk_root.tk.call("after", "info")))
     calls.close()
-    calls.post(lambda: ran_on.append(threading.current_thread()))
-    tk_root.after(20, tk_root.quit)
-    tk_root.mainloop()
-    assert len(ran_on) == 1
+    still_scheduled = set(tk_root.tk.splitlist(tk_root.tk.call("after", "info")))
+    assert still_scheduled < scheduled
+    assert len(scheduled - still_scheduled) == 1

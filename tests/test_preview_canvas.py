@@ -144,6 +144,23 @@ def test_dragging_pans_only_while_zoomed(shown_canvas, tk_root) -> None:
     assert canvas.view.is_reset
 
 
+def test_redrawing_a_same_size_frame_updates_the_shown_tk_image_in_place(tk_root) -> None:
+    frames = [Image.new("RGB", (400, 200), "red")]
+    canvas = PreviewCanvas(tk_root, source=lambda: frames[-1], pan_button=1)
+    canvas.place(x=0, y=0, width=400, height=200)
+    tk_root.update()
+    canvas.redraw()
+    (item,) = canvas.find_all()
+    shown_image = canvas.itemcget(item, "image")
+
+    frames.append(Image.new("RGB", (400, 200), "blue"))
+    canvas.redraw()
+
+    (item,) = canvas.find_all()
+    assert canvas.itemcget(item, "image") == shown_image
+    assert shown_pixel(canvas, 10, 100) == (0, 0, 255)
+
+
 def test_message_replaces_the_image_until_a_redraw(shown_canvas) -> None:
     canvas, _ = shown_canvas
 

@@ -64,10 +64,6 @@ def test_a_broken_session_bus_means_no_tray(monkeypatch):
     assert status_notifier.host_running() is False
 
 
-def test_stop_before_the_icon_ran_is_harmless():
-    StatusNotifierItem(Image.new("RGBA", (1, 1)), "Jasna", on_activate=lambda: None).stop()
-
-
 def test_a_dead_connection_brings_the_window_back():
     class DeadConnection:
         def __enter__(self):

@@ -334,6 +334,10 @@ class CompactSwitch(tk.Label):
         self._selected = False
         self._refresh_image()
 
+    def set(self, selected: bool) -> None:
+        self._selected = selected
+        self._refresh_image()
+
     def get(self) -> int:
         return int(self._selected)
 

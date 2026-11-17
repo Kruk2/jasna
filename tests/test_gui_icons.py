@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import tkinter as tk
 from unittest.mock import MagicMock
 
 import pytest
 
-from jasna.gui.settings_sections import widgets as settings_widgets
 from jasna.gui.icons import CompactSwitch, NativeIconButton, render_icon, render_toggle
 from jasna.gui.theme import Colors
 
@@ -93,13 +91,3 @@ def test_native_icon_button_keeps_image_and_disabled_state(tk_root) -> None:
     button.configure(state="normal")
     button.invoke()
     command.assert_called_once_with()
-
-
-def test_slider_value_uses_native_label_without_ctk_canvas(tk_root) -> None:
-    label = settings_widgets.create_slider_value_label(tk_root, Colors.BG_PANEL)
-
-    assert isinstance(label, tk.Label)
-    assert tk_root.tk.splitlist(label.cget("font")) == (
-        settings_widgets.Fonts.FAMILY,
-        f"-{settings_widgets.Fonts.SIZE_NORMAL}",
-    )

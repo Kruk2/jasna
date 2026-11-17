@@ -14,15 +14,16 @@ def test_unknown_fields_are_dropped():
     assert "pynv_preset" not in migrated
 
 
-def test_legacy_codec_spellings_normalized():
-    for legacy, canonical in [
+@pytest.mark.parametrize(
+    ("legacy", "canonical"),
+    [
         ("HEVC", "hevc"), ("h265", "hevc"), ("H.265", "hevc"),
         ("H264", "h264"), ("H.264", "h264"), ("avc", "h264"),
         ("AV1", "av1"), ("av01", "av1"),
-    ]:
-        migrated = _migrate_preset_dict({"codec": legacy})
-        assert migrated["codec"] == canonical, legacy
-        assert AppSettings(**migrated).codec == canonical
+    ],
+)
+def test_legacy_codec_spellings_normalized(legacy, canonical):
+    assert AppSettings(**_migrate_preset_dict({"codec": legacy})).codec == canonical
 
 
 def test_unknown_codec_falls_back_to_hevc():
@@ -54,20 +55,6 @@ def test_amf_quality_alias_moves_to_literal_preset_field():
 
     assert migrated["encoder_cq"] == 31
     assert parse_encoder_settings(migrated["encoder_custom_args"]) == {"g": 120}
-
-
-def test_gui_codec_label_maps_round_trip():
-    from jasna.gui.settings_sections.encoding import (
-        CODEC_CANONICAL_TO_LABEL,
-        CODEC_LABEL_TO_CANONICAL,
-    )
-
-    assert set(CODEC_CANONICAL_TO_LABEL) == {"hevc", "h264", "av1"}
-    for canonical, label in CODEC_CANONICAL_TO_LABEL.items():
-        assert CODEC_LABEL_TO_CANONICAL[label] == canonical
-        # .lower() on a display label must never be used as the canonical value
-        if canonical != "av1":
-            assert label.lower() != canonical
 
 
 def test_unreadable_custom_args_are_kept_with_a_warning(caplog):

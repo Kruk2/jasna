@@ -91,10 +91,10 @@ class SegmentEditor(ctk.CTkToplevel):
         job: JobItem,
         get_settings: Callable[[], AppSettings],
         is_gpu_busy: Callable[[], bool],
-        set_preview_gpu_busy: Callable[[bool], None],
+        set_preview_gpu_busy: Callable[[object, bool], None],
         ltx_unavailable_reason: str | None,
         on_saved: Callable[[tuple[SegmentRange, ...]], None],
-        on_closed: Callable[[], None] | None = None,
+        on_closed: Callable[[], None],
     ) -> None:
         super().__init__(master)
         self._job = job
@@ -116,7 +116,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview_source: Image.Image | None = None
         self._preview_generation = 0
         self._preview_stereo = "off"
-        self.vr_resolution = None
+        self._vr_resolution = None
         self._vr_projection = job.vr_projection or "auto"
         self._restore_active = False
         self._restore_after: str | None = None
@@ -167,9 +167,7 @@ class SegmentEditor(ctk.CTkToplevel):
         _, chrome_margin = scaling.to_physical(self, 0, 72)
         height = min(max(min_height, screen_h - work_margin), max(1, screen_h - chrome_margin))
         width = min(max(1, screen_w - side_margin), max(min_width, round(height * 1060 / 720)))
-        x = rect[0] + max(0, (screen_w - width) // 2)
-        y = rect[1] + max(0, (screen_h - height) // 2)
-        scaling.apply_geometry(self, width, height, x, y)
+        scaling.apply_geometry(self, width, height, *scaling.centered_position((width, height), rect, rect))
         logical_width, logical_height = scaling.to_logical(self, width, height)
         scaling.apply_minsize(self, min(900, logical_width), min(640, logical_height))
 
@@ -441,10 +439,10 @@ class SegmentEditor(ctk.CTkToplevel):
         projection_control = ctk.CTkFrame(preview_options, fg_color="transparent")
         projection_control.pack(side="right", padx=(0, 16))
         projection_label_text = t("segments_vr_projection")
-        if self.vr_resolution.is_stereo:
+        if self._vr_resolution.is_stereo:
             projection_label_text = t(
                 "segments_vr_projection_resolved",
-                projection=projection_names[self.vr_resolution.projection],
+                projection=projection_names[self._vr_resolution.projection],
             )
         self._vr_projection_label = ctk.CTkLabel(
             projection_control,
@@ -467,7 +465,7 @@ class SegmentEditor(ctk.CTkToplevel):
             dropdown_hover_color=Colors.PRIMARY,
             text_color=Colors.TEXT_PRIMARY,
             width=150,
-            state="normal" if self.vr_resolution.is_stereo else "disabled",
+            state="normal" if self._vr_resolution.is_stereo else "disabled",
         )
         self._vr_projection_menu.pack(side="left")
         self._vr_projection_menu.set_value(self._vr_projection)
@@ -685,7 +683,7 @@ class SegmentEditor(ctk.CTkToplevel):
             video_path=self._job.path,
             metadata=self._metadata,
             state=self._state,
-            ltx_blocked_reason=self._ltx_blocked_reason(),
+            ltx_blocked_reason=self._ltx_unavailable_reason,
             keyframe_index=lambda: self._keyframe_index,
             base_settings=self._get_settings,
             video_settings=lambda: replace(self._current_video_settings(), vr_projection=self._vr_projection),
@@ -694,7 +692,7 @@ class SegmentEditor(ctk.CTkToplevel):
             is_gpu_busy=self._is_gpu_busy,
             scanning=self._scanning,
             claim_gpu=self._claim_gpu_for_seed,
-            release_gpu=lambda: self._set_preview_gpu_busy(False),
+            release_gpu=lambda: self._set_preview_gpu_busy(self._seeds, False),
             on_started=self._on_seed_started,
             on_cancelled=self._on_seed_cancelled,
             on_show_frames=self._show_ltx_frames,
@@ -706,10 +704,6 @@ class SegmentEditor(ctk.CTkToplevel):
         if index is None:
             return None
         return index.keyframe_seconds()
-
-    def _ltx_blocked_reason(self) -> str | None:
-        """Locale key saying why a range cannot use LTX here, or None when it can."""
-        return self._ltx_unavailable_reason
 
     def _selected_restoration(self) -> SegmentRestoration:
         model = self._range_model.get()
@@ -755,7 +749,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._inspector.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 4))
         restoration = selected.restoration
         self._range_model.set(restoration.model)
-        blocked = self._ltx_blocked_reason()
+        blocked = self._ltx_unavailable_reason
         locked = self._scanning()
         self._model_radios["basicvsrpp"].configure(state="disabled" if locked else "normal")
         self._model_radios["ltx"].configure(
@@ -782,7 +776,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._restoration_worker.close()
             self._restoration_worker = None
         self._set_playing(False)
-        self._set_preview_gpu_busy(True)
+        self._set_preview_gpu_busy(self._seeds, True)
 
     def _on_seed_started(self) -> None:
         self._refresh_all()
@@ -832,13 +826,13 @@ class SegmentEditor(ctk.CTkToplevel):
                 else settings.detection_score_threshold
             ),
             stereo=self._preview_stereo,
-            ltx_seed=None if self._ltx_blocked_reason() is not None else self._job_ltx_seed,
+            ltx_seed=None if self._ltx_unavailable_reason is not None else self._job_ltx_seed,
             keyframes=self._keyframe_seconds,
             base_settings=self._get_settings,
             current_seconds=lambda: self._current,
             is_gpu_busy=self._is_gpu_busy,
             claim_gpu=self._claim_gpu_for_scan,
-            release_gpu=lambda: self._set_preview_gpu_busy(False),
+            release_gpu=lambda: self._set_preview_gpu_busy(self._scan_panel, False),
             on_lock_changed=self._on_scan_lock_changed,
             on_ranges_added=self._on_scan_ranges_added,
             on_preview_changed=self._preview.redraw,
@@ -968,14 +962,8 @@ class SegmentEditor(ctk.CTkToplevel):
                 event = self._preview_worker.events.get_nowait()
                 if isinstance(event, PreviewLoaded):
                     if self._state is None:
-                        from jasna.vr180 import resolve_vr_mode
-
-                        self.vr_resolution = resolve_vr_mode(
-                            self._get_settings().vr_mode,
-                            event.metadata,
-                            self._job.path,
-                        )
-                        self._preview_stereo = self.vr_resolution.resolved
+                        self._vr_resolution = event.vr_resolution
+                        self._preview_stereo = event.vr_resolution.resolved
                         self._build_editor(event.metadata)
                 elif isinstance(event, PreviewKeyframes):
                     self._keyframe_index = event.index
@@ -1022,11 +1010,10 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview_source = event.image
         if self._restore_active and self._playing and self._restored_clip:
             self._show_restored_clip_frame(self._current)
-        elif not self._restore_active:
+        elif not self._restore_active or self._seeds.ltx_range_at_playhead() is not None:
             self._preview.redraw()
         self._time_label.configure(text=self._time_text())
-        self._timeline.reveal(self._current)
-        self._refresh_timeline()
+        self._timeline.set_playhead(self._current)
         if self._playing:
             delay = max(10, round(1000 / min(60.0, self._state.fps)))
             self._next_frame_after = self.after(delay, self._request_next_frame)
@@ -1079,8 +1066,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._set_playing(False)
         self._current = state.snap(seconds)
         self._time_label.configure(text=self._time_text())
-        self._timeline.reveal(self._current)
-        self._refresh_timeline()
+        self._timeline.set_playhead(self._current)
         self._preview_generation = self._preview_worker.seek(self._current)
         self._prepare_restoration_after_seek()
 
@@ -1091,8 +1077,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._set_playing(False)
             self._current = state.snap(current - 1 / state.fps)
             self._time_label.configure(text=self._time_text())
-            self._timeline.reveal(self._current)
-            self._refresh_timeline()
+            self._timeline.set_playhead(self._current)
             self._preview_generation = self._preview_worker.previous_frame(current)
             self._prepare_restoration_after_seek()
             return
@@ -1174,17 +1159,17 @@ class SegmentEditor(ctk.CTkToplevel):
     def _ensure_restoration_worker(self) -> None:
         if self._restoration_worker is None:
             self._seeds.release()
-            self._set_preview_gpu_busy(True)
+            worker = RestorationPreviewWorker(
+                self._job.path,
+                self._metadata,
+                on_stopped=lambda: self._set_preview_gpu_busy(worker, False),
+            )
+            self._set_preview_gpu_busy(worker, True)
             try:
-                self._restoration_worker = RestorationPreviewWorker(
-                    self._job.path,
-                    self._metadata,
-                    on_stopped=lambda: self._set_preview_gpu_busy(False),
-                )
-                self._restoration_worker.start()
+                worker.start()
+                self._restoration_worker = worker
             except Exception:
-                self._restoration_worker = None
-                self._set_preview_gpu_busy(False)
+                self._set_preview_gpu_busy(worker, False)
                 self._restore_active = False
                 self._restore_toggle.deselect()
                 self._preview.redraw()
@@ -1275,6 +1260,7 @@ class SegmentEditor(ctk.CTkToplevel):
             t("segments_restore_restoring"),
             Colors.STATUS_PENDING,
         )
+        self._ensure_restoration_worker()
         self._restore_generation = self._restoration_worker.request(
             start_seconds,
             self._standard_preview_settings(),
@@ -1369,7 +1355,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._restoration_worker.close()
             self._restoration_worker = None
         self._set_playing(False)
-        self._set_preview_gpu_busy(True)
+        self._set_preview_gpu_busy(self._scan_panel, True)
 
     def _lockable_widgets(self) -> tuple:
         return (
@@ -1536,7 +1522,7 @@ class SegmentEditor(ctk.CTkToplevel):
     def _timeline_adjust(self, index: int, start: float, end: float) -> None:
         state = self._require_state()
         state.select(index)
-        result = state.adjust_selected(start, end)
+        result = state.replace_selected(start, end)
         self._set_edit_result_notice(result.merged_count)
         self._refresh_all()
 
@@ -1722,7 +1708,6 @@ class SegmentEditor(ctk.CTkToplevel):
                 text=t("segments_workload_full", duration=format_timestamp(state.duration, milliseconds=False)),
                 text_color=Colors.TEXT_PRIMARY,
             )
-            self._refresh_timeline()
             self._update_apply_state()
             return
         codec = canonical_codec(self._metadata.codec_name)
@@ -1789,7 +1774,7 @@ class SegmentEditor(ctk.CTkToplevel):
                 text=self._edit_notice,
                 text_color=Colors.STATUS_WARNING if self._edit_notice_warning else Colors.STATUS_ERROR,
             )
-        elif self._ltx_blocked_reason() is not None and any(
+        elif self._ltx_unavailable_reason is not None and any(
             segment.restoration.model == "ltx" for segment in self._state.segments
         ):
             self._notice.configure(text=t("segments_ltx_ranges_unavailable"), text_color=Colors.STATUS_WARNING)
@@ -1805,7 +1790,7 @@ class SegmentEditor(ctk.CTkToplevel):
     def _save(self) -> None:
         state = self._require_state()
         if not self._job.try_set_video_options(
-            state.output_segments,
+            state.segments,
             detection_model=self._scan_panel.detection_model,
             detection_score_threshold=self._scan_panel.threshold,
             vr_projection=self._vr_projection,
@@ -1815,7 +1800,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._refresh_notice()
             return
         self._saved = True
-        self._on_saved(state.output_segments)
+        self._on_saved(state.segments)
         self._finish_close()
 
     def request_close(self) -> None:
@@ -1854,8 +1839,7 @@ class SegmentEditor(ctk.CTkToplevel):
         if self._scan_panel is not None:
             self._scan_panel.close()
         self.grab_release()
-        if self._on_closed is not None:
-            self._on_closed()
+        self._on_closed()
         self.destroy()
 
     def join_seed_worker(self, timeout: float) -> None:
@@ -1870,14 +1854,14 @@ class SegmentEditor(ctk.CTkToplevel):
         self.bind("<Delete>", lambda event: self._shortcut(event, self._delete_selected))
         self.bind("<Left>", lambda event: self._shortcut_step(event, -1))
         self.bind("<Right>", lambda event: self._shortcut_step(event, 1))
-        self.bind("<Control-z>", lambda event: self._shortcut(event, self._undo, allow_entry=False))
-        self.bind("<Control-y>", lambda event: self._shortcut(event, self._redo, allow_entry=False))
+        self.bind("<Control-z>", lambda event: self._shortcut(event, self._undo))
+        self.bind("<Control-y>", lambda event: self._shortcut(event, self._redo))
         self.bind("<Escape>", lambda _event: self.request_close())
 
-    def _shortcut(self, event, action: Callable[[], None], *, allow_entry: bool = False):
+    def _shortcut(self, event, action: Callable[[], None]):
         if self._state is None or self._scanning():
             return "break"
-        if not allow_entry and self._is_text_entry(event.widget):
+        if self._is_text_entry(event.widget):
             return None
         action()
         return "break"
@@ -1885,7 +1869,7 @@ class SegmentEditor(ctk.CTkToplevel):
     def _shortcut_step(self, event, direction: int):
         if self._state is None or self._scanning() or self._is_text_entry(event.widget):
             return None
-        if int(getattr(event, "state", 0)) & 0x0001:
+        if event.state & 0x0001:
             self._seek(self._current + direction)
         else:
             self._step(direction)

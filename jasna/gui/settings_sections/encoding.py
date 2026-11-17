@@ -8,31 +8,27 @@ from jasna.gui.components import Tooltip
 from jasna.gui.icons import CompactSwitch, create_icon
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
-    add_setting_label,
-    ValueOptionMenu,
     SLIDER_WIDTH,
-    create_slider_value_label,
     Row,
-    get_tooltip,
+    add_setting_label,
+    bind_edits,
+    create_slider_value_label,
     layout_rows,
+    option_menu,
+    set_entry_text,
+    set_widgets_enabled,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.media.encoder_settings import encoder_cq_spec, resolve_cq
 from jasna.session_config import DEFAULT_CODEC
 
-# Display labels contain punctuation ("H.264 (AVC)"), so canonical values come
-# from these maps, never from .lower() on the label.
-CODEC_LABEL_TO_CANONICAL = {
-    "HEVC (H.265)": "hevc",
-    "H.264 (AVC)": "h264",
-    "AV1": "av1",
-}
-CODEC_CANONICAL_TO_LABEL = {v: k for k, v in CODEC_LABEL_TO_CANONICAL.items()}
+CODEC_CANONICAL_TO_LABEL = {"hevc": "HEVC (H.265)", "h264": "H.264 (AVC)", "av1": "AV1"}
+_PATH_ENTRIES = ("lut_path", "encoder_custom_args", "working_directory")
 
 
 class EncodingSection:
-    def __init__(self, parent, widgets: dict, on_modified):
-        self._widgets = widgets
+    def __init__(self, parent, on_modified):
+        self._widgets = {}
         self._on_modified = on_modified
 
         self.frame = inner = ctk.CTkFrame(parent, fg_color="transparent")
@@ -44,34 +40,20 @@ class EncodingSection:
             conflict_row, text="⚠️", text_color=Colors.STATUS_WARNING, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL)
         )
         Tooltip(self._widgets["conflict_warning"], t("file_conflict_overwrite_warning"))
-        self._widgets["file_conflict"] = ValueOptionMenu(
+        self._widgets["file_conflict"] = option_menu(
             conflict_row,
-            options={
-                "auto_rename": t("file_conflict_auto_rename"),
-                "overwrite": t("file_conflict_overwrite"),
-                "skip": t("file_conflict_skip"),
-            },
-            command=self._on_file_conflict_changed,
-            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
-            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
-            dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
+            {value: t(f"file_conflict_{value}") for value in ("auto_rename", "overwrite", "skip")},
+            self._on_file_conflict_changed,
             width=140,
         )
         self._widgets["file_conflict"].pack(side="right")
 
         progress_conflict_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(progress_conflict_row, "saved_progress_conflict")
-        self._widgets["saved_progress_conflict"] = ValueOptionMenu(
+        self._widgets["saved_progress_conflict"] = option_menu(
             progress_conflict_row,
-            options={
-                "ask": t("saved_progress_conflict_ask"),
-                "start_over": t("saved_progress_conflict_start_over"),
-                "skip": t("saved_progress_conflict_skip"),
-            },
-            command=lambda _value: self._on_modified(),
-            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
-            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
-            dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
+            {value: t(f"saved_progress_conflict_{value}") for value in ("ask", "start_over", "skip")},
+            lambda _value: self._on_modified(),
             width=140,
         )
         self._widgets["saved_progress_conflict"].pack(side="right")
@@ -81,14 +63,7 @@ class EncodingSection:
         row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         add_setting_label(row1, "codec")
-        self._widgets["codec"] = ValueOptionMenu(
-            row1,
-            options=CODEC_CANONICAL_TO_LABEL,
-            command=self._on_codec_changed,
-            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
-            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY, width=120,
-        )
+        self._widgets["codec"] = option_menu(row1, CODEC_CANONICAL_TO_LABEL, self._on_codec_changed, width=120)
         self._widgets["codec"].pack(side="right")
         self._active_codec = DEFAULT_CODEC
         self._cq_vendor = vendor_for_device()
@@ -128,28 +103,13 @@ class EncodingSection:
             sharpen_row, from_=0.0, to=1.0, number_of_steps=20,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
             width=SLIDER_WIDTH,
-            command=lambda v: self._widgets["sharpen_strength_val"].configure(text=f"{v:.2f}")
+            command=self._on_sharpen_slider,
         )
         self._widgets["sharpen_strength"].pack(side="right", padx=(0, 8))
 
         # Optional exact 60/59.94 -> 30/29.97 frame-rate retargeting.
         retarget_row = ctk.CTkFrame(inner, fg_color="transparent")
-        retarget_label = ctk.CTkLabel(
-            retarget_row,
-            text=t("retarget_high_fps"),
-            text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-        )
-        retarget_label.pack(side="left")
-        retarget_tip = ctk.CTkLabel(
-            retarget_row,
-            text="ⓘ",
-            text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            cursor="hand2",
-        )
-        retarget_tip.pack(side="left", padx=4)
-        Tooltip(retarget_tip, get_tooltip("retarget_high_fps"))
+        add_setting_label(retarget_row, "retarget_high_fps")
         self._widgets["retarget_high_fps"] = CompactSwitch(
             retarget_row,
             self._on_modified,
@@ -159,35 +119,16 @@ class EncodingSection:
 
         frame_generation_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(frame_generation_row, "frame_generation")
-        self._widgets["frame_generation"] = ValueOptionMenu(
-            frame_generation_row,
-            options={"none": t("frame_generation_off"), "2x": "2x"},
-            command=lambda _value: self._on_modified(),
-            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
-            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY, width=120,
+        self._widgets["frame_generation"] = option_menu(
+            frame_generation_row, {"none": t("frame_generation_off"), "2x": "2x"}, lambda _value: self._on_modified(), width=120
         )
         self._widgets["frame_generation"].pack(side="right")
         self._frame_generation_supported = True
+        self._enabled = True
 
         # Fragmented MP4: output stays playable while it is written.
         fmp4_row = ctk.CTkFrame(inner, fg_color="transparent")
-        fmp4_label = ctk.CTkLabel(
-            fmp4_row,
-            text=t("fmp4"),
-            text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-        )
-        fmp4_label.pack(side="left")
-        fmp4_tip = ctk.CTkLabel(
-            fmp4_row,
-            text="ⓘ",
-            text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            cursor="hand2",
-        )
-        fmp4_tip.pack(side="left", padx=4)
-        Tooltip(fmp4_tip, get_tooltip("fmp4"))
+        add_setting_label(fmp4_row, "fmp4")
         self._widgets["fmp4"] = CompactSwitch(
             fmp4_row,
             self._on_modified,
@@ -206,12 +147,7 @@ class EncodingSection:
         )
         self._widgets["lut_path"].pack(side="left", fill="x", expand=True, padx=(0, 4))
 
-        lut_browse_btn = ctk.CTkButton(
-            lut_input_row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
-            fg_color=Colors.BG_CARD, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
-            command=self._browse_lut_path,
-        )
-        lut_browse_btn.pack(side="right")
+        self._browse_button(lut_input_row, self._browse_lut_path)
 
         args_label_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(args_label_row, "custom_args", "encoder_custom_args")
@@ -228,11 +164,9 @@ class EncodingSection:
             text_color=Colors.TEXT_PRIMARY, placeholder_text=t("working_directory_placeholder"),
         )
         self._widgets["working_directory"].pack(side="left", fill="x", expand=True, padx=(0, 4))
-        ctk.CTkButton(
-            working_dir_input_row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
-            fg_color=Colors.BG_CARD, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
-            command=self._browse_working_directory,
-        ).pack(side="right")
+        self._browse_button(working_dir_input_row, self._browse_working_directory)
+        for key in _PATH_ENTRIES:
+            bind_edits(self._widgets[key], self._on_modified)
 
         row_gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
         label_gap = dict(fill="x", pady=(Sizing.PADDING_SMALL, 0))
@@ -252,23 +186,48 @@ class EncodingSection:
             Row(working_dir_input_row, input_gap, "expert"),
         ]
 
+    @staticmethod
+    def _browse_button(row, command) -> None:
+        ctk.CTkButton(
+            row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
+            fg_color=Colors.BG_CARD, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
+            command=command,
+        ).pack(side="right")
+
     def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
         layout_rows(self._rows, level, standard=standard, ltx=ltx)
         return True
 
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = enabled
+        set_widgets_enabled(
+            (self._widgets[key] for key in (
+                "file_conflict", "saved_progress_conflict", "codec", "encoder_cq", "sharpen_strength",
+                "retarget_high_fps", "fmp4", *_PATH_ENTRIES,
+            )),
+            enabled,
+        )
+        self._lock_frame_generation()
+
     def set_frame_generation_support(self, supported: bool) -> None:
         """Frame generation needs an RTX 40-series or newer GPU; its tooltip says so."""
         self._frame_generation_supported = supported
-        menu = self._widgets["frame_generation"]
         if not supported:
-            menu.set_value("none")
-        menu.configure(state="normal" if supported else "disabled")
+            self._widgets["frame_generation"].set_value("none")
+        self._lock_frame_generation()
+
+    def _lock_frame_generation(self) -> None:
+        unlocked = self._enabled and self._frame_generation_supported
+        self._widgets["frame_generation"].configure(state="normal" if unlocked else "disabled")
+
+    def _set_path(self, key: str, path: str) -> None:
+        set_entry_text(self._widgets[key], path)
+        self._on_modified()
 
     def _browse_working_directory(self):
         directory = filedialog.askdirectory(title=t("dialog_select_working_directory"))
         if directory:
-            self._widgets["working_directory"].delete(0, "end")
-            self._widgets["working_directory"].insert(0, directory)
+            self._set_path("working_directory", directory)
 
     def _on_file_conflict_changed(self, value: str):
         if value == "overwrite":
@@ -293,6 +252,10 @@ class EncodingSection:
         self._widgets["encoder_cq_val"].configure(text=str(cq))
         self._on_modified()
 
+    def _on_sharpen_slider(self, value: float) -> None:
+        self._widgets["sharpen_strength_val"].configure(text=f"{value:.2f}")
+        self._on_modified()
+
     def _on_cq_changed(self, value: float):
         cq = int(value)
         self._cq_values[self._active_codec] = cq
@@ -305,8 +268,7 @@ class EncodingSection:
             filetypes=[("Cube LUT", "*.cube"), ("All files", "*.*")],
         )
         if filepath:
-            self._widgets["lut_path"].delete(0, "end")
-            self._widgets["lut_path"].insert(0, filepath)
+            self._set_path("lut_path", filepath)
 
     def apply(self, preset):
         self._widgets["file_conflict"].set_value(preset.file_conflict)
@@ -330,27 +292,17 @@ class EncodingSection:
         )
         self._widgets["encoder_cq"].set(cq)
         self._widgets["encoder_cq_val"].configure(text=str(cq))
-        for key in ("encoder_custom_args", "working_directory"):
-            self._widgets[key].delete(0, "end")
-            self._widgets[key].insert(0, getattr(preset, key) or "")
+        for key in _PATH_ENTRIES:
+            set_entry_text(self._widgets[key], getattr(preset, key) or "")
         self._widgets["sharpen_strength"].set(preset.sharpen_strength)
         self._widgets["sharpen_strength_val"].configure(
             text=f"{preset.sharpen_strength:.2f}"
         )
-        if preset.retarget_high_fps:
-            self._widgets["retarget_high_fps"].select()
-        else:
-            self._widgets["retarget_high_fps"].deselect()
+        self._widgets["retarget_high_fps"].set(preset.retarget_high_fps)
         self._widgets["frame_generation"].set_value(
             preset.frame_generation if self._frame_generation_supported else "none"
         )
-        if preset.fmp4:
-            self._widgets["fmp4"].select()
-        else:
-            self._widgets["fmp4"].deselect()
-
-        self._widgets["lut_path"].delete(0, "end")
-        self._widgets["lut_path"].insert(0, preset.lut_path or "")
+        self._widgets["fmp4"].set(preset.fmp4)
 
     def collect(self) -> dict:
         return {

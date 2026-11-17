@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 import customtkinter as ctk
 import pytest
 
-from jasna.gui import app as app_module
 from jasna.gui import components, job_list_item
 from jasna.gui.components import StatusPill, grab_modal
 from jasna.gui.job_list_item import JobListItem

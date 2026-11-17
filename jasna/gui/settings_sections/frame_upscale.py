@@ -10,42 +10,22 @@ from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
     SLIDER_WIDTH,
     Row,
-    ValueOptionMenu,
     add_setting_label,
     create_slider_value_label,
     layout_rows,
+    option_menu,
+    set_widgets_enabled,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.session_config import UPSCALE_HEIGHTS, Dlss5PresetName, Dlss5StyleName
+from jasna.session_config import UPSCALE_HEIGHTS, Dlss5PresetName, Dlss5StyleName, RtxLevelName, RtxQualityName
+from jasna.session_factory import upscale_models_for
 
-_RTX_LEVELS = ("low", "medium", "high", "ultra")
-
-
-def offered_upscale_models(vendor: AcceleratorVendor) -> tuple[str, ...]:
-    """The AI networks run on NVIDIA and AMD; RTX Super Res only on NVIDIA, DLSS 5 only on
-    NVIDIA under Windows."""
-    if vendor is AcceleratorVendor.NVIDIA:
-        dlss5 = ("dlss5",) if sys.platform == "win32" else ()
-        return ("none", "span", "realplksr", "rtx-super-res", *dlss5)
-    if vendor is AcceleratorVendor.AMD:
-        return ("none", "span", "realplksr")
-    return ("none",)
-
-
-def _menu(row, options: dict[str, str], command, width: int) -> ValueOptionMenu:
-    menu = ValueOptionMenu(
-        row, options=options, command=command,
-        fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
-        button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
-        dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY, width=width,
-    )
-    menu.pack(side="right")
-    return menu
+_RTX_KEYS = ("upscale_rtx_quality", "upscale_rtx_denoise", "upscale_rtx_deblur")
 
 
 class FrameUpscaleSection:
-    def __init__(self, parent, widgets: dict, on_modified):
-        self._widgets = widgets
+    def __init__(self, parent, on_modified):
+        self._widgets = {}
         self._on_modified = on_modified
         self._vendor = AcceleratorVendor.NVIDIA
         self._level = "simple"
@@ -58,7 +38,7 @@ class FrameUpscaleSection:
 
         model_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(model_row, "upscale_model")
-        self._widgets["upscale_model"] = _menu(
+        self._widgets["upscale_model"] = self._menu(
             model_row,
             {
                 "none": t("upscale_off"),
@@ -77,7 +57,7 @@ class FrameUpscaleSection:
 
         height_row = ctk.CTkFrame(card, fg_color="transparent")
         add_setting_label(height_row, "upscale_height")
-        self._widgets["upscale_height"] = _menu(
+        self._widgets["upscale_height"] = self._menu(
             height_row,
             {str(height): t(f"upscale_height_{height}") for height in UPSCALE_HEIGHTS},
             lambda _value: self._on_modified(),
@@ -95,22 +75,19 @@ class FrameUpscaleSection:
         )
         self._widgets["upscale_strength"].pack(side="right", padx=(0, 8))
 
-        levels = {level: t(f"rtx_level_{level}") for level in _RTX_LEVELS}
         rtx_rows = []
-        for key, options in (
-            ("upscale_rtx_quality", levels),
-            ("upscale_rtx_denoise", {"none": t("rtx_level_none"), **levels}),
-            ("upscale_rtx_deblur", {"none": t("rtx_level_none"), **levels}),
-        ):
+        for key, levels in zip(_RTX_KEYS, (get_args(RtxQualityName), get_args(RtxLevelName), get_args(RtxLevelName))):
             row = ctk.CTkFrame(card, fg_color="transparent")
             add_setting_label(row, key)
-            self._widgets[key] = _menu(row, options, lambda _value: self._on_modified(), width=140)
+            self._widgets[key] = self._menu(
+                row, {level: t(f"rtx_level_{level}") for level in levels}, lambda _value: self._on_modified(), width=140
+            )
             rtx_rows.append(row)
         self._rtx_rows = tuple(rtx_rows)
 
         dlss5_preset_row = ctk.CTkFrame(card, fg_color="transparent")
         add_setting_label(dlss5_preset_row, "upscale_dlss5_preset")
-        self._widgets["upscale_dlss5_preset"] = _menu(
+        self._widgets["upscale_dlss5_preset"] = self._menu(
             dlss5_preset_row,
             {preset: t("dlss5_preset_default") if preset == "default" else preset.upper()
              for preset in get_args(Dlss5PresetName)},
@@ -119,7 +96,7 @@ class FrameUpscaleSection:
         )
         dlss5_style_row = ctk.CTkFrame(card, fg_color="transparent")
         add_setting_label(dlss5_style_row, "upscale_dlss5_style")
-        self._widgets["upscale_dlss5_style"] = _menu(
+        self._widgets["upscale_dlss5_style"] = self._menu(
             dlss5_style_row,
             {style: t(f"dlss5_style_{style}") for style in get_args(Dlss5StyleName)},
             lambda _value: self._on_modified(),
@@ -148,6 +125,15 @@ class FrameUpscaleSection:
             Row(heading, dict(fill="x", pady=(Sizing.PADDING_SMALL, Sizing.PADDING_SMALL)), "simple"),
             Row(model_row, dict(fill="x", pady=(0, Sizing.PADDING_SMALL)), "simple"),
         ]
+
+    @staticmethod
+    def _menu(row, options: dict[str, str], command, *, width: int):
+        menu = option_menu(row, options, command, width=width, background=Colors.BG_PANEL)
+        menu.pack(side="right")
+        return menu
+
+    def _offered_models(self) -> tuple[str, ...]:
+        return upscale_models_for(self._vendor, sys.platform)
 
     def _on_model_changed(self, _value: str) -> None:
         self._layout_card()
@@ -180,24 +166,32 @@ class FrameUpscaleSection:
         self._layout_card()
         return True
 
+    def set_enabled(self, enabled: bool) -> None:
+        set_widgets_enabled(
+            (self._widgets[key] for key in (
+                "upscale_model", "upscale_height", "upscale_strength", *_RTX_KEYS,
+                "upscale_dlss5_preset", "upscale_dlss5_style", "upscale_dlss5_intensity",
+            )),
+            enabled,
+        )
+
     def set_gpu_support(self, vendor: AcceleratorVendor) -> None:
         self._vendor = vendor
         menu = self._widgets["upscale_model"]
-        offered = offered_upscale_models(vendor)
+        offered = self._offered_models()
         menu.offer(offered)
         if menu.get_value() not in offered:
             menu.set_value("none")
             self._layout_card()
 
     def apply(self, preset) -> None:
-        model = preset.upscale_model if preset.upscale_model in offered_upscale_models(self._vendor) else "none"
+        model = preset.upscale_model if preset.upscale_model in self._offered_models() else "none"
         self._widgets["upscale_model"].set_value(model)
         self._widgets["upscale_height"].set_value(str(preset.upscale_height))
         self._widgets["upscale_strength"].set(preset.upscale_strength)
         self._widgets["upscale_strength_val"].configure(text=f"{preset.upscale_strength:.2f}")
-        self._widgets["upscale_rtx_quality"].set_value(preset.upscale_rtx_quality)
-        self._widgets["upscale_rtx_denoise"].set_value(preset.upscale_rtx_denoise)
-        self._widgets["upscale_rtx_deblur"].set_value(preset.upscale_rtx_deblur)
+        for key in _RTX_KEYS:
+            self._widgets[key].set_value(getattr(preset, key))
         self._widgets["upscale_dlss5_preset"].set_value(preset.upscale_dlss5_preset)
         self._widgets["upscale_dlss5_style"].set_value(preset.upscale_dlss5_style)
         self._widgets["upscale_dlss5_intensity"].set(preset.upscale_dlss5_intensity)
@@ -209,9 +203,7 @@ class FrameUpscaleSection:
             "upscale_model": self._widgets["upscale_model"].get_value(),
             "upscale_height": int(self._widgets["upscale_height"].get_value()),
             "upscale_strength": round(float(self._widgets["upscale_strength"].get()), 2),
-            "upscale_rtx_quality": self._widgets["upscale_rtx_quality"].get_value(),
-            "upscale_rtx_denoise": self._widgets["upscale_rtx_denoise"].get_value(),
-            "upscale_rtx_deblur": self._widgets["upscale_rtx_deblur"].get_value(),
+            **{key: self._widgets[key].get_value() for key in _RTX_KEYS},
             "upscale_dlss5_preset": self._widgets["upscale_dlss5_preset"].get_value(),
             "upscale_dlss5_style": self._widgets["upscale_dlss5_style"].get_value(),
             "upscale_dlss5_intensity": round(float(self._widgets["upscale_dlss5_intensity"].get()), 2),

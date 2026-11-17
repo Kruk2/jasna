@@ -7,7 +7,7 @@ window taller than the screen with an un-shrinkable minimum on Windows.
 """
 from __future__ import annotations
 
-from types import SimpleNamespace
+import tkinter as tk
 
 import customtkinter as ctk
 import pytest
@@ -41,12 +41,16 @@ def _resize_main_window(app, monkeypatch, *, screen=None, factor=None) -> tuple[
     return requested[-1], minimum[-1]
 
 
-def test_fit_size_caps_an_oversized_window():
-    assert scaling.fit_size((1800, 1320), (1920, 1080), (60, 120)) == (1800, 960)
-
-
-def test_fit_size_leaves_a_window_that_already_fits():
-    assert scaling.fit_size((1200, 880), (1920, 1080), (40, 80)) == (1200, 880)
+@pytest.mark.parametrize(
+    ("size", "screen", "margin", "expected"),
+    [
+        ((1800, 1320), (1920, 1080), (60, 120), (1800, 960)),
+        ((1200, 880), (1920, 1080), (40, 80), (1200, 880)),
+    ],
+    ids=["oversized-window-capped", "fitting-window-kept"],
+)
+def test_fit_size_caps_only_an_oversized_window(size, screen, margin, expected):
+    assert scaling.fit_size(size, screen, margin) == expected
 
 
 def test_centered_position_keeps_an_oversized_window_on_screen():
@@ -69,11 +73,10 @@ def test_centered_position_clamps_into_the_given_monitor_rect():
     assert scaling.centered_position((400, 300), (2400, -100, 200, 100), bounds) == (2560, 0)
 
 
-def test_screen_rect_falls_back_to_the_full_screen_off_windows(monkeypatch):
+def test_screen_rect_falls_back_to_the_full_screen_off_windows(monkeypatch, tk_root):
     monkeypatch.setattr(scaling.sys, "platform", "linux")
-    window = SimpleNamespace(winfo_screenwidth=lambda: 1920, winfo_screenheight=lambda: 1080)
 
-    assert scaling.screen_rect(window) == (0, 0, 1920, 1080)
+    assert scaling.screen_rect(tk_root) == (0, 0, tk_root.winfo_screenwidth(), tk_root.winfo_screenheight())
 
 
 @pytest.mark.parametrize("dpi", [2.5, 3.0])
@@ -213,10 +216,11 @@ def test_native_icon_button_scales_at_hidpi(hidpi, tk_root) -> None:
     assert int(button.cget("height")) == int(32 * hidpi)
 
 
-@pytest.mark.parametrize("hidpi", [1.25, 1.5], indirect=True)
-def test_slider_value_label_font_scales_at_hidpi(hidpi, tk_root) -> None:
+@pytest.mark.parametrize("hidpi", [1.0, 1.25, 1.5], indirect=True)
+def test_slider_value_label_is_a_native_label_whose_font_scales_at_hidpi(hidpi, tk_root) -> None:
     label = create_slider_value_label(tk_root, Colors.BG_PANEL)
 
+    assert isinstance(label, tk.Label)
     expected_size = round(Fonts.SIZE_NORMAL * hidpi)
     assert tk_root.tk.splitlist(label.cget("font")) == (Fonts.FAMILY, f"-{expected_size}")
 

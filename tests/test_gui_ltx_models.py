@@ -6,7 +6,7 @@ from tkinter import messagebox
 
 import pytest
 
-from factories import ltx_models, write_sparse_file
+from factories import CallsAtOnce, ltx_models, write_sparse_file
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui import ltx_models as ltx_models_module
 from jasna.gui.locales import t
@@ -30,11 +30,6 @@ pytestmark = pytest.mark.usefixtures("nvidia_vendor")
 NVIDIA, AMD, CPU = AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD, AcceleratorVendor.CPU
 
 
-class _NowCalls:
-    def post(self, callback) -> None:
-        callback()
-
-
 def _install(directory: Path, model: str, *, fast: bool) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     for name in bundle_names(model, fast=fast):
@@ -51,13 +46,15 @@ def downloadable(monkeypatch):
     monkeypatch.setattr(ltx_models_module, "protection_available", lambda: True)
 
 
-def test_model_key_names_each_model_choice() -> None:
-    assert model_key("basicvsrpp", "undistilled") == "basicvsrpp"
-    assert model_key("ltx", "distilled") == "ltx_distilled"
-    assert model_key("ltx", "distilled4") == "ltx_distilled4"
-    assert model_key("ltx", "distilled1") == "ltx_distilled1"
-    assert model_key("ltx", "distilled2") == "ltx_distilled2"
-    assert model_key("ltx", "undistilled") == "ltx_undistilled"
+@pytest.mark.parametrize(
+    ("restoration_model", "ltx_model"), [("basicvsrpp", "undistilled"), *(("ltx", model) for model in model_files.LTX_MODELS)]
+)
+def test_every_model_choice_has_a_name_and_a_tooltip(restoration_model, ltx_model) -> None:
+    from jasna.gui.locales import EN
+
+    key = model_key(restoration_model, ltx_model)
+
+    assert f"model_{key}" in EN and f"tip_model_{key}" in EN
 
 
 def test_availability_without_downloads(tmp_path) -> None:
@@ -78,11 +75,11 @@ def test_availability_without_downloads(tmp_path) -> None:
 
 
 def test_ltx_is_unavailable_on_an_old_linux_kernel(tmp_path, monkeypatch) -> None:
-    from jasna import os_utils
+    from jasna import system_requirements
 
     _install(tmp_path, "distilled", fast=False)
     state = read_install_state(tmp_path, "auto", "auto")
-    monkeypatch.setattr(os_utils, "old_linux_kernel_for_ltx", lambda: "5.4.0-216-generic")
+    monkeypatch.setattr(system_requirements, "old_linux_kernel_for_ltx", lambda: "5.4.0-216-generic")
 
     assert card_unavailable_reason(NVIDIA) == "model_ltx_needs_newer_linux"
     assert run_unavailable_reason(state, "distilled", False, NVIDIA, trial=False) == "model_ltx_needs_newer_linux"
@@ -107,7 +104,7 @@ def test_amd_uses_normal_licensed_model_downloads(tmp_path, downloadable) -> Non
 
 def test_vae_choice_decides_which_files_a_model_needs(tmp_path) -> None:
     _install(tmp_path, "distilled1", fast=False)
-    models = LtxModels(tmp_path, _NowCalls(), lambda: None)
+    models = LtxModels(tmp_path, CallsAtOnce(), lambda: None)
     assert models.state.installed("distilled1", False)
     assert not ltx_models_module.license_missing(tmp_path, "distilled1", False, "auto", "auto")
 
@@ -139,7 +136,7 @@ def test_ensure_asks_and_downloads_the_missing_files(tmp_path, monkeypatch, down
     asked = _answer(monkeypatch, yes=True)
     downloads = _fake_download(monkeypatch, error=None)
     changes: list[int | None] = []
-    models = LtxModels(tmp_path, _NowCalls(), lambda: changes.append(models.percent))
+    models = LtxModels(tmp_path, CallsAtOnce(), lambda: changes.append(models.percent))
     ready: list[bool] = []
 
     assert models.ensure("undistilled", False, on_ready=lambda: ready.append(True))
@@ -153,7 +150,7 @@ def test_ensure_asks_and_downloads_the_missing_files(tmp_path, monkeypatch, down
 def test_ensure_does_nothing_when_the_user_declines(tmp_path, monkeypatch, downloadable) -> None:
     _answer(monkeypatch, yes=False)
     downloads = _fake_download(monkeypatch, error=None)
-    models = LtxModels(tmp_path, _NowCalls(), lambda: None)
+    models = LtxModels(tmp_path, CallsAtOnce(), lambda: None)
 
     assert not models.ensure("distilled", False, on_ready=lambda: pytest.fail("not downloaded"))
     assert downloads == [] and not models.downloading
@@ -161,18 +158,16 @@ def test_ensure_does_nothing_when_the_user_declines(tmp_path, monkeypatch, downl
 
 @pytest.mark.parametrize("fast,old_size", [(False, 13_368_048_749), (True, 7_733_294_997)])
 def test_ensure_warns_before_replacing_models_from_older_release(
-    tmp_path, monkeypatch, downloadable, fast, old_size, sparse_ltx_downloads
+    tmp_path, monkeypatch, downloadable, fast, old_size, sparse_ltx_downloads, gui_language
 ):
-    from jasna.gui.locales import EN
-
+    gui_language("en")
     monkeypatch.setattr(model_files, "is_frozen", lambda: True)
-    monkeypatch.setattr(ltx_models_module, "t", lambda key, **values: EN[key].format(**values))
     names = bundle_names("distilled2", fast=fast)
     for index, name in enumerate(names):
         write_sparse_file(tmp_path / (name + ".enc"), old_size if index == 0 else model_files.LTX_DOWNLOADS[name].size_bytes)
     asked = _answer(monkeypatch, yes=False)
     downloads = _fake_download(monkeypatch, error=None)
-    models = LtxModels(tmp_path, _NowCalls(), lambda: None)
+    models = LtxModels(tmp_path, CallsAtOnce(), lambda: None)
 
     assert not models.ensure("distilled2", fast, on_ready=lambda: pytest.fail("download declined"))
     assert len(asked) == 1 and "needs updating" in asked[0]
@@ -186,7 +181,7 @@ def test_ensure_shows_the_download_error(tmp_path, monkeypatch, downloadable) ->
     _fake_download(monkeypatch, error="checksum failed")
     errors: list[str] = []
     monkeypatch.setattr(messagebox, "showerror", lambda _title, message: errors.append(message))
-    models = LtxModels(tmp_path, _NowCalls(), lambda: None)
+    models = LtxModels(tmp_path, CallsAtOnce(), lambda: None)
 
     assert models.ensure("distilled", False, on_ready=lambda: pytest.fail("download failed"))
     assert errors == [t("ltx_download_failed", message="checksum failed")]
@@ -196,7 +191,7 @@ def test_ensure_shows_the_download_error(tmp_path, monkeypatch, downloadable) ->
 def test_ensure_skips_installed_models_and_unavailable_downloads(tmp_path, monkeypatch) -> None:
     _answer(monkeypatch, yes=True)
     _install(tmp_path, "distilled", fast=False)
-    models = LtxModels(tmp_path, _NowCalls(), lambda: None)
+    models = LtxModels(tmp_path, CallsAtOnce(), lambda: None)
 
     assert models.ensure("distilled", False, on_ready=lambda: None)
     assert not models.ensure("undistilled", False, on_ready=lambda: None)
@@ -469,18 +464,12 @@ def test_start_with_a_trial_skips_the_license_offer(ltx_installed, jasna_app, mo
     assert len(validated) == 1
 
 
-def test_trial_session_config_and_key(monkeypatch, tmp_path) -> None:
-    from jasna.gui.video_session import video_session_config, video_session_key
+def test_a_trial_never_reuses_the_session_of_a_real_run() -> None:
+    from jasna.gui.video_session import video_session_key
 
-    detection_path = tmp_path / "rfdetr-v6.onnx"
-    detection_path.touch()
-    monkeypatch.setattr("jasna.mosaic.detection_registry.require_detection_model_weights", lambda _name: detection_path)
     real = replace(AppSettings(), restoration_model="ltx")
-    trial = replace(real, ltx_trial=True)
 
-    assert video_session_config(trial, codec="hevc", encoder_settings={}).ltx_trial is True
-    assert video_session_config(real, codec="hevc", encoder_settings={}).ltx_trial is False
-    assert video_session_key(trial) != video_session_key(real)
+    assert video_session_key(replace(real, ltx_trial=True)) != video_session_key(real)
 
 
 def test_a_trial_seed_preview_never_reuses_a_real_prepared_range() -> None:
@@ -530,7 +519,7 @@ def test_ensure_explains_a_driver_mismatch_instead_of_downloading(tmp_path, monk
     monkeypatch.setattr(messagebox, "showerror", lambda _title, message: errors.append(message))
     mismatch = DriverLibraryMismatch("/usr/local/cuda-13.4/compat/lib.real/libcuda.so.615.65.02", "615.65.02", "610.57.04")
     monkeypatch.setattr(ltx_models_module, "ltx_driver_mismatch", lambda: mismatch)
-    models = LtxModels(tmp_path, _NowCalls(), lambda: None)
+    models = LtxModels(tmp_path, CallsAtOnce(), lambda: None)
 
     assert not models.ensure("distilled", False, on_ready=lambda: pytest.fail("not downloaded"))
 

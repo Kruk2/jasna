@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import fields, replace
 
@@ -12,7 +13,7 @@ from jasna.gui.settings_sections.encoding import EncodingSection
 from jasna.gui.settings_sections.frame_upscale import FrameUpscaleSection
 from jasna.gui.settings_sections.image_restoration import ImageRestorationSection
 from jasna.gui.settings_sections.post_export import PostExportSection
-from jasna.gui.settings_sections.processing import ProcessingSection, decode_backends
+from jasna.gui.settings_sections.processing import ProcessingSection
 from jasna.gui.settings_sections.restoration_model import RestorationModelSection
 from jasna.gui.settings_sections.secondary import SecondarySection
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
@@ -141,11 +142,11 @@ def test_frame_generation_is_off_and_locked_on_a_gpu_without_it(panel_factory) -
     panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=False, frame_generation=False)
 
     assert panel.get_settings().frame_generation == "none"
-    assert panel._widgets["frame_generation"].cget("state") == "disabled"
+    assert _widget(panel, "frame_generation").cget("state") == "disabled"
     _apply(panel, replace(AppSettings(), frame_generation="2x"))
     assert panel.get_settings().frame_generation == "none"
     panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=False, frame_generation=True)
-    assert panel._widgets["frame_generation"].cget("state") == "normal"
+    assert _widget(panel, "frame_generation").cget("state") == "normal"
 
 
 @pytest.mark.parametrize(
@@ -165,7 +166,7 @@ def test_upscale_models_follow_the_gpu(panel_factory, monkeypatch, vendor, platf
 
     panel.set_gpu_support(vendor=vendor, blackwell=False, frame_generation=False)
 
-    menu = panel._widgets["upscale_model"]
+    menu = _widget(panel, "upscale_model")
     assert list(menu.cget("values")) == [menu._value_to_label[value] for value in offered]
     assert panel.get_settings().upscale_model == ("rtx-super-res" if "rtx-super-res" in offered else "none")
 
@@ -186,7 +187,7 @@ def test_upscale_options_show_for_the_chosen_model(
 
     def visible(key: str) -> bool:
         show_window(window)
-        return bool(panel._widgets[key].winfo_ismapped())
+        return bool(_widget(panel, key).winfo_ismapped())
 
     _apply(panel, replace(AppSettings(), upscale_model=model))
 
@@ -202,7 +203,7 @@ def test_sections_collect_every_setting_except_runtime_ones(panel_factory) -> No
 
     collected = {key for section in panel._sections for key in section.collect()}
 
-    runtime_only = {"batch_size", "tvai_args", "vr_projection", "output_folder", "output_pattern"}
+    runtime_only = {"tvai_args", "vr_projection"}
     assert collected == {f.name for f in fields(AppSettings)} - runtime_only
 
 
@@ -226,38 +227,36 @@ def test_switching_detection_model_applies_recommended_threshold(_detection_sect
     panel, detection = _detection_section_panel
 
     detection._on_detection_model_changed("rfdetr-v6-large")
-    assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.40)
+    assert _widget(panel, "detection_score_threshold").get() == pytest.approx(0.40)
 
     detection._on_detection_model_changed("rfdetr-v6")
-    assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.35)
+    assert _widget(panel, "detection_score_threshold").get() == pytest.approx(0.35)
 
 
-def test_apply_reverts_missing_model_to_default_recommended(_detection_section_panel) -> None:
+@pytest.mark.parametrize(
+    ("model", "threshold", "shown_model", "shown_threshold"),
+    [("rfdetr-v5", 0.6, "rfdetr-v6", 0.35), ("rfdetr-v6-large", 0.55, "rfdetr-v6-large", 0.55)],
+    ids=["missing-reverts-to-default", "installed-kept"],
+)
+def test_apply_keeps_an_installed_model_and_reverts_a_missing_one(
+    _detection_section_panel, model, threshold, shown_model, shown_threshold
+) -> None:
     panel, detection = _detection_section_panel
 
-    detection.apply(AppSettings(detection_model="rfdetr-v5", detection_score_threshold=0.6))
+    detection.apply(AppSettings(detection_model=model, detection_score_threshold=threshold))
 
-    assert panel._widgets["detection_model"].get() == "rfdetr-v6"
-    assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.35)
-
-
-def test_apply_keeps_installed_model_and_threshold(_detection_section_panel) -> None:
-    panel, detection = _detection_section_panel
-
-    detection.apply(AppSettings(detection_model="rfdetr-v6-large", detection_score_threshold=0.55))
-
-    assert panel._widgets["detection_model"].get() == "rfdetr-v6-large"
-    assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.55)
+    assert _widget(panel, "detection_model").get() == shown_model
+    assert _widget(panel, "detection_score_threshold").get() == pytest.approx(shown_threshold)
 
 
 def test_codec_change_switches_cq_range_and_remembers_each_codec_value(panel_factory) -> None:
     panel = panel_factory()
     encoding = next(section for section in panel._sections if isinstance(section, EncodingSection))
-    slider = panel._widgets["encoder_cq"]
+    slider = _widget(panel, "encoder_cq")
     encoding.apply(AppSettings(codec="hevc", encoder_cq=30))
 
     encoding._on_codec_changed("h264")
-    assert (slider.cget("to"), slider.get(), panel._widgets["encoder_cq_val"].cget("text")) == (51, 25, "25")
+    assert (slider.cget("to"), slider.get(), _widget(panel, "encoder_cq_val").cget("text")) == (51, 25, "25")
     slider.set(26)
     encoding._on_cq_changed(26.0)
 
@@ -305,12 +304,12 @@ def test_settings_panel_get_settings_is_locale_independent(panel_factory, gui_la
     panel = panel_factory()
 
     assert panel.get_settings() == replace(AppSettings(), encoder_cq=28)
-    assert panel._saved_preset_settings == panel.get_settings()
+    assert panel._preset_bar._saved == panel.get_settings()
 
 
 def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty_in_steps_of_ten(_processing_section_panel) -> None:
     panel, _processing = _processing_section_panel
-    slider = panel._widgets["max_clip_size"]
+    slider = _widget(panel, "max_clip_size")
 
     slider.set(10)
     assert slider.get() == 10
@@ -322,13 +321,13 @@ def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty_in_steps_of_ten(
 
 def test_temporal_filter_sliders_stay_below_max_clip_size(_processing_section_panel) -> None:
     panel, processing = _processing_section_panel
-    sliders = [panel._widgets[key] for key in ("max_detection_gap", "min_detection_duration")]
+    sliders = [_widget(panel, key) for key in ("max_detection_gap", "min_detection_duration")]
     for slider in sliders:
         slider.set(10)
 
     processing._on_max_clip_size_slider(10)
     assert [(slider.cget("to"), slider.get()) for slider in sliders] == [(9, 9), (9, 9)]
-    assert panel._widgets["max_detection_gap_val"].cget("text") == "9"
+    assert _widget(panel, "max_detection_gap_val").cget("text") == "9"
 
     processing._on_max_clip_size_slider(90)
     assert [(slider.cget("to"), slider.get()) for slider in sliders] == [(10, 9), (10, 9)]
@@ -339,10 +338,10 @@ def test_only_queue_wide_post_export_action_stays_editable_while_processing(pane
 
     panel.set_enabled(False)
 
-    assert panel._widgets["post_export_action"].cget("state") == "normal"
-    assert panel._widgets["post_export_command"].cget("state") == "normal"
-    assert panel._widgets["post_export_video_command"].cget("state") == "disabled"
-    assert panel._widgets["max_clip_size"].cget("state") == "disabled"
+    assert _widget(panel, "post_export_action").cget("state") == "normal"
+    assert _widget(panel, "post_export_command").cget("state") == "normal"
+    assert _widget(panel, "post_export_video_command").cget("state") == "disabled"
+    assert _widget(panel, "max_clip_size").cget("state") == "disabled"
 
 
 def test_parse_seed_falls_back_to_default() -> None:
@@ -365,26 +364,26 @@ def test_ltx_hides_standard_only_settings_and_restores_them(panel_factory) -> No
     panel = panel_factory(True)
     panel.set_view("expert")
     processing = _section(panel, ProcessingSection).frame
-    clip_row = panel._widgets["max_clip_size"].master
-    overlap_row = panel._widgets["temporal_overlap"].master
-    ltx_overlap_row = panel._widgets["ltx_overlap"].master
+    clip_row = _widget(panel, "max_clip_size").master
+    overlap_row = _widget(panel, "temporal_overlap").master
+    ltx_overlap_row = _widget(panel, "ltx_overlap").master
     assert _shown(processing) and _shown(clip_row) and _shown(overlap_row)
 
     _select_ltx(panel)
 
     assert panel.get_settings().restoration_model == "ltx"
-    assert _shown(processing) and _shown(panel._widgets["fp16_mode"].master)
+    assert _shown(processing) and _shown(_widget(panel, "fp16_mode").master)
     assert not _shown(clip_row) and not _shown(overlap_row)
-    assert not _shown(panel._widgets["compile_basicvsrpp"].master)
+    assert not _shown(_widget(panel, "compile_basicvsrpp").master)
     assert _shown(ltx_overlap_row)
     assert _shown(panel._model_section._ltx_options)
 
     panel.set_view("advanced")
     assert not _shown(processing) and not _shown(ltx_overlap_row)
 
-    panel._widgets["ltx_auto_split"]._toggle()
+    _widget(panel, "ltx_auto_split")._toggle()
     assert _shown(processing) and _shown(overlap_row)
-    panel._widgets["ltx_auto_split"]._toggle()
+    _widget(panel, "ltx_auto_split")._toggle()
     assert not _shown(processing)
 
     panel._model_section._cards["basicvsrpp"].radio.invoke()
@@ -400,12 +399,12 @@ def test_ltx_offers_only_rtx_super_res_unless_auto_split(panel_factory) -> None:
     panel.show_tab("upscale")
 
     assert panel._secondary_section.frame.winfo_manager()
-    assert radios["tvai"].cget("state") == panel._widgets["rtx_scale"].cget("state") == "disabled"
+    assert radios["tvai"].cget("state") == _widget(panel, "rtx_scale").cget("state") == "disabled"
     assert radios["rtx-super-res"].cget("state") == "normal"
     assert panel._secondary_section._ltx_only_note.winfo_manager()
 
-    panel._widgets["ltx_auto_split"]._toggle()
-    assert radios["tvai"].cget("state") == panel._widgets["rtx_scale"].cget("state") == "normal"
+    _widget(panel, "ltx_auto_split")._toggle()
+    assert radios["tvai"].cget("state") == _widget(panel, "rtx_scale").cget("state") == "normal"
     assert not panel._secondary_section._ltx_only_note.winfo_manager()
 
 
@@ -418,7 +417,7 @@ def test_ltx_clears_an_unavailable_secondary_restorer(panel_factory, monkeypatch
     monkeypatch.setattr(engine_paths, "UNET4X_ONNX_PATH", model)
     panel = panel_factory(True)
     if auto_split:
-        panel._widgets["ltx_auto_split"]._toggle()
+        _widget(panel, "ltx_auto_split")._toggle()
     panel._secondary_section._engine_radios["unet-4x"].invoke()
 
     _select_ltx(panel)
@@ -460,6 +459,8 @@ def test_amd_secondary_choices_and_busy_state(panel_factory, monkeypatch, tmp_pa
 
 
 def test_amd_offers_only_the_decoders_it_can_use_and_drops_vali(panel_factory) -> None:
+    from jasna.gui.locales import t
+
     panel = panel_factory()
     _apply(panel, replace(AppSettings(), decode_backend="vali"))
 
@@ -468,8 +469,7 @@ def test_amd_offers_only_the_decoders_it_can_use_and_drops_vali(panel_factory) -
     assert panel.get_settings().decode_backend == "auto"
     _apply(panel, replace(AppSettings(), decode_backend="vali"))
     assert panel.get_settings().decode_backend == "auto"
-    assert decode_backends(AcceleratorVendor.NVIDIA)[1:] == ("vali", "pyav-hw", "pyav-sw")
-    assert decode_backends(AcceleratorVendor.AMD) == ("auto", "pyav-sw")
+    assert _widget(panel, "decode_backend").cget("values") == [t("decode_backend_auto"), t("decode_backend_pyav_sw")]
 
 
 def test_ltx_without_model_files_runs_as_a_trial(panel_factory, monkeypatch) -> None:
@@ -579,25 +579,25 @@ def test_simple_view_hides_tuning_rows_and_keeps_their_values(panel_factory) -> 
     panel.set_view("simple")
 
     assert panel.get_settings() == _NON_DEFAULT_SETTINGS
-    assert _shown(panel._widgets["codec"].master) and _shown(panel._widgets["file_conflict"].master)
-    assert _shown(panel._widgets["post_export_command"].master)
-    assert not _shown(panel._widgets["sharpen_strength"].master)
-    assert not _shown(panel._widgets["saved_progress_conflict"].master)
-    assert not _shown(panel._widgets["post_export_video_command"])
+    assert _shown(_widget(panel, "codec").master) and _shown(_widget(panel, "file_conflict").master)
+    assert _shown(_widget(panel, "post_export_command").master)
+    assert not _shown(_widget(panel, "sharpen_strength").master)
+    assert not _shown(_widget(panel, "saved_progress_conflict").master)
+    assert not _shown(_widget(panel, "post_export_video_command"))
     assert not _shown(_section(panel, DetectionSection).frame)
 
     panel.set_view("advanced")
     panel.show_tab("output")
 
-    assert _shown(panel._widgets["sharpen_strength"].master)
-    assert not _shown(panel._widgets["post_export_video_command"])
-    assert not _shown(panel._widgets["working_directory"].master)
+    assert _shown(_widget(panel, "sharpen_strength").master)
+    assert not _shown(_widget(panel, "post_export_video_command"))
+    assert not _shown(_widget(panel, "working_directory").master)
 
     panel.set_view("expert")
 
-    assert _shown(panel._widgets["post_export_video_command"])
-    assert _shown(panel._widgets["working_directory"].master)
-    assert _shown(panel._widgets["encoder_custom_args"])
+    assert _shown(_widget(panel, "post_export_video_command"))
+    assert _shown(_widget(panel, "working_directory").master)
+    assert _shown(_widget(panel, "encoder_custom_args"))
 
 
 def test_simple_view_keeps_the_ltx_model_choice_and_hides_its_tuning(panel_factory) -> None:
@@ -605,16 +605,16 @@ def test_simple_view_keeps_the_ltx_model_choice_and_hides_its_tuning(panel_facto
     _select_ltx(panel)
 
     panel.set_view("simple")
-    assert _shown(panel._widgets["ltx_model"].master)
-    assert not _shown(panel._widgets["ltx_seed"].master)
-    assert not _shown(panel._widgets["ltx_auto_split"].master)
+    assert _shown(_widget(panel, "ltx_model").master)
+    assert not _shown(_widget(panel, "ltx_seed").master)
+    assert not _shown(_widget(panel, "ltx_auto_split").master)
 
     panel.set_view("advanced")
-    assert not _shown(panel._widgets["ltx_seed"].master)
-    assert _shown(panel._widgets["ltx_auto_split"].master)
+    assert not _shown(_widget(panel, "ltx_seed").master)
+    assert _shown(_widget(panel, "ltx_auto_split").master)
 
     panel.set_view("expert")
-    assert _shown(panel._widgets["ltx_seed"].master)
+    assert _shown(_widget(panel, "ltx_seed").master)
 
 
 @pytest.mark.parametrize(
@@ -644,8 +644,8 @@ def test_simple_view_shows_restored_areas_with_the_tvai_path(panel_factory) -> N
     panel._secondary_section._engine_radios["tvai"].invoke()
 
     assert [type(section) for section in panel._sections if _shown(section.frame)] == [FrameUpscaleSection, SecondarySection]
-    assert _shown(panel._widgets["tvai_ffmpeg_path"].master)
-    assert not _shown(panel._widgets["tvai_model"].master)
+    assert _shown(_widget(panel, "tvai_ffmpeg_path").master)
+    assert not _shown(_widget(panel, "tvai_model").master)
 
 
 def _offered_tabs(panel) -> list[str]:
@@ -703,7 +703,7 @@ def test_simple_view_offers_three_ltx_models_and_keeps_another_chosen_one(panel_
 
     _apply(panel, AppSettings(restoration_model="ltx", ltx_model=chosen))
 
-    assert panel._widgets["ltx_model"].cget("values") == [t(f"ltx_model_{model}") for model in offered]
+    assert _widget(panel, "ltx_model").cget("values") == [t(f"ltx_model_{model}") for model in offered]
     assert panel.get_settings().ltx_model == chosen
 
 
@@ -717,7 +717,7 @@ def test_running_a_command_after_the_queue_is_an_expert_choice(panel_factory, vi
     panel = panel_factory()
     panel.set_view(view)
 
-    assert panel._widgets["post_export_action"].cget("values") == [t(f"post_export_{value}") for value in offered]
+    assert _widget(panel, "post_export_action").cget("values") == [t(f"post_export_{value}") for value in offered]
 
 
 @pytest.mark.parametrize(
@@ -730,5 +730,82 @@ def test_detection_timing_and_tvai_workers_are_expert_rows(panel_factory, view, 
     if view != "simple":
         panel.show_tab("detection")
 
-    assert _shown(panel._widgets["max_detection_gap"].master) is shown
-    assert _shown(panel._widgets["tvai_workers"].master) is shown
+    assert _shown(_widget(panel, "max_detection_gap").master) is shown
+    assert _shown(_widget(panel, "tvai_workers").master) is shown
+
+
+def _widget(panel, key: str):
+    return next(section._widgets[key] for section in panel._sections if key in section._widgets)
+
+
+def _preset_label(panel) -> str:
+    return panel._preset_bar._dropdown.get()
+
+
+def test_the_gpus_detection_batch_size_does_not_mark_the_preset_modified(panel_factory, monkeypatch) -> None:
+    import torch
+
+    monkeypatch.setattr(torch.version, "hip", "7.0")
+    panel = panel_factory()
+
+    panel.set_gpu_support(vendor=AcceleratorVendor.AMD, blackwell=False, frame_generation=False)
+
+    assert _preset_label(panel) == "🔒 Default"
+
+
+@pytest.mark.parametrize("key", ["frame_generation", "ltx_auto_split_percent", "image_restore_download_btn"])
+def test_finishing_a_run_keeps_locked_settings_locked(panel_factory, monkeypatch, key) -> None:
+    monkeypatch.setattr("jasna.restorer.sd15_download.bundle_present", lambda _directory: True)
+    panel = panel_factory()
+    panel.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=False, frame_generation=False)
+
+    panel.set_enabled(False)
+    panel.set_enabled(True)
+
+    assert _widget(panel, key).cget("state") == "disabled"
+
+
+def _change_like_a_user(widget) -> None:
+    import customtkinter as ctk
+
+    if isinstance(widget, ctk.CTkSlider):
+        value = widget.cget("from_") if widget.get() == widget.cget("to") else widget.cget("to")
+        widget.set(value)
+        widget.cget("command")(value)
+    elif isinstance(widget, ctk.CTkOptionMenu):
+        widget._dropdown_callback(next(label for label in widget.cget("values") if label != widget.get()))
+    elif isinstance(widget, ctk.CTkEntry):
+        widget.insert("end", "1")
+        # Tk delivers generated key events only to a visible, focused window, so run the
+        # key-release binding itself with blank event fields.
+        widget.tk.eval(re.sub(r"%\S", "0", widget._entry.bind("<KeyRelease>")))
+    elif isinstance(widget, ctk.CTkRadioButton):
+        widget.invoke()
+    else:
+        widget.toggle()
+
+
+_USER_CHANGES = {
+    "secondary restorer": lambda panel: panel._secondary_section._engine_radios["tvai"],
+    "tvai denoise": lambda panel: panel._secondary_section._tvai_denoise_switch,
+    **{
+        key: (lambda key: lambda panel: _widget(panel, key))(key)
+        for key in (
+            "tvai_ffmpeg_path", "tvai_model", "tvai_scale", "tvai_workers",
+            "rtx_scale", "rtx_quality", "rtx_denoise", "rtx_deblur",
+            "detection_score_threshold", "sharpen_strength", "lut_path", "encoder_custom_args",
+            "working_directory", "image_restore_strength", "image_restore_seed",
+        )
+    },
+}
+
+
+@pytest.mark.parametrize("change", _USER_CHANGES)
+def test_every_setting_the_user_changes_marks_the_preset_modified(panel_factory, change) -> None:
+    from jasna.gui.locales import t
+
+    panel = panel_factory()
+
+    _change_like_a_user(_USER_CHANGES[change](panel))
+
+    assert _preset_label(panel) == t("preset_modified", name="🔒 Default")

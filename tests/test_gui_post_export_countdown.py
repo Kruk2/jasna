@@ -13,7 +13,7 @@ from jasna.gui.models import AppSettings
 
 def _use_settings(app, settings: AppSettings) -> None:
     app._preset_manager.create_preset("test", settings)
-    app._settings_panel._apply_preset("test")
+    app._settings_panel._preset_bar.load("test")
 
 
 def _countdown_dialogs(app) -> list[ShutdownCountdownDialog]:

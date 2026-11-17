@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -10,12 +12,14 @@ from jasna.gui.models import AppSettings
 
 
 @pytest.fixture(autouse=True)
-def _use_nvidia_preflight_by_default(monkeypatch):
+def _nvidia_preflight_in_an_empty_model_folder(monkeypatch, tmp_path):
     import jasna.accelerator as accelerator
     from jasna.mosaic import detection_registry
 
     for module in (accelerator, detection_registry):
         monkeypatch.setattr(module, "is_amd_device", lambda _device=None: False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "model_weights").mkdir()
 
 
 def _touch(path: Path) -> None:
@@ -23,16 +27,15 @@ def _touch(path: Path) -> None:
     path.write_text("x", encoding="utf-8")
 
 
-def test_engine_preflight_defers_torch_import() -> None:
-    import jasna.gui.engine_preflight as module
+def test_engine_preflight_import_does_not_load_torch() -> None:
+    code = "import sys\nimport jasna.gui.engine_preflight\nassert 'torch' not in sys.modules\n"
 
-    assert "torch" not in module.__dict__
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
 
 
-def test_preflight_detects_missing_engines(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
-
+def test_preflight_detects_missing_engines() -> None:
     settings = AppSettings()
     res = run_engine_preflight(settings)
 
@@ -43,10 +46,7 @@ def test_preflight_detects_missing_engines(monkeypatch, tmp_path: Path) -> None:
     assert {r.key for r in res.missing} == {"rfdetr", "basicvsrpp"}
 
 
-def test_preflight_no_warning_when_all_expected_engines_exist(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
-
+def test_preflight_no_warning_when_all_expected_engines_exist() -> None:
     settings = AppSettings()
     first = run_engine_preflight(settings)
     for req in first.requirements:
@@ -58,16 +58,9 @@ def test_preflight_no_warning_when_all_expected_engines_exist(monkeypatch, tmp_p
     assert res.missing == ()
 
 
-def test_preflight_uses_fixed_batch_path_for_rfdetr_v5(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
-
+def test_preflight_uses_fixed_batch_path_for_rfdetr_v5() -> None:
     settings = AppSettings(
         detection_model="rfdetr-v5",
-        batch_size=8,
         compile_basicvsrpp=False,
     )
 
@@ -80,10 +73,7 @@ def test_preflight_uses_fixed_batch_path_for_rfdetr_v5(
     assert ".bs1-" not in requirement.paths[0].name
 
 
-def test_preflight_basicvsrpp_missing_then_found(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
-
+def test_preflight_basicvsrpp_missing_then_found() -> None:
     settings = AppSettings(max_clip_size=60, compile_basicvsrpp=True, fp16_mode=True)
     res = run_engine_preflight(settings)
 
@@ -100,12 +90,9 @@ def test_preflight_basicvsrpp_missing_then_found(monkeypatch, tmp_path: Path) ->
     assert len(basic_req2.missing_paths) == 0
 
 
-def test_preflight_unet4x_encrypted_engine_satisfies(monkeypatch, tmp_path: Path) -> None:
+def test_preflight_unet4x_encrypted_engine_satisfies(monkeypatch) -> None:
     """Frozen builds ship the encrypted unet-4x engine (.enc); preflight must accept it
     instead of always looking for the plaintext engine and warning about compilation."""
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
-
     import jasna.engine_paths as ep
     monkeypatch.setattr(ep, "unet4x_plaintext_available", lambda: False)
 
@@ -124,10 +111,7 @@ def test_preflight_unet4x_encrypted_engine_satisfies(monkeypatch, tmp_path: Path
     assert unet_req2.paths == (enc_engine,)
 
 
-def test_preflight_uses_yolo_engine_name_when_selected(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
-
+def test_preflight_uses_yolo_engine_name_when_selected() -> None:
     settings = AppSettings(detection_model="lada-yolo-v4")
     res = run_engine_preflight(settings)
 
@@ -136,19 +120,12 @@ def test_preflight_uses_yolo_engine_name_when_selected(monkeypatch, tmp_path: Pa
     assert "rfdetr" not in keys
 
     yolo_req = next(r for r in res.requirements if r.key == "yolo")
-    suffix = ".fp16.win.engine" if os.name == "nt" else ".fp16.linux.engine"
+    suffix = ".bs4.fp16.win.engine" if os.name == "nt" else ".bs4.fp16.linux.engine"
     assert yolo_req.paths == (Path("model_weights") / f"lada_mosaic_detection_model_v4_fast{suffix}",)
 
 
 @pytest.mark.parametrize("secondary", ["none", "unet-4x"])
-def test_amd_preflight_has_no_engine_requirements(
-    monkeypatch,
-    tmp_path: Path,
-    secondary,
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
-
+def test_amd_preflight_has_no_engine_requirements(monkeypatch, secondary) -> None:
     import jasna.accelerator as accelerator
 
     # AMD runs RF-DETR (rfdetr torch model) and YOLO through PyTorch and skips
@@ -162,10 +139,20 @@ def test_amd_preflight_has_no_engine_requirements(
     assert result.should_warn_first_run_slow is False
 
 
-def test_ltx_preflight_skips_standard_model_engines(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
-
+def test_ltx_preflight_skips_standard_model_engines() -> None:
     settings = AppSettings(restoration_model="ltx", secondary_restoration="unet-4x")
 
     assert {r.key for r in run_engine_preflight(settings).requirements} == {"rfdetr"}
+
+
+@pytest.mark.parametrize("language", ["en", "zh", "ja", "ko", "th"])
+def test_first_run_warning_names_every_missing_engine_in_the_ui_language(gui_language, language) -> None:
+    from jasna.gui.engine_preflight import first_run_warning
+    from jasna.gui.locales import t
+
+    gui_language(language)
+
+    message = first_run_warning(("rfdetr", "yolo", "basicvsrpp", "unet_4x"))
+
+    assert message.startswith(t("engine_first_run_body"))
+    assert "_" not in message.split(t("engine_first_run_missing"))[1]

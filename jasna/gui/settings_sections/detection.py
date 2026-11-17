@@ -1,42 +1,41 @@
 """Mosaic detection settings section."""
 
+from typing import get_args
+
 import customtkinter as ctk
 
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
+    SLIDER_WIDTH,
     Row,
     add_setting_label,
-    ValueOptionMenu,
-    SLIDER_WIDTH,
     create_slider_value_label,
     layout_rows,
+    option_menu,
+    set_widgets_enabled,
 )
 from jasna.gui.theme import Colors, Sizing
-from jasna.session_config import DEFAULT_DETECTION_MODEL_NAME
+from jasna.session_config import DEFAULT_DETECTION_MODEL_NAME, VrModeName
 
 TEMPORAL_FILTER_SLIDER_MAX = 10
+_TEMPORAL_FILTERS = ("max_detection_gap", "min_detection_duration")
 
 
 class DetectionSection:
-    def __init__(self, parent, widgets: dict, on_modified):
-        self._widgets = widgets
+    def __init__(self, parent, on_modified):
+        from jasna.mosaic.detection_registry import detection_model_choices
+
+        self._widgets = {}
         self._on_modified = on_modified
 
         self.frame = inner = ctk.CTkFrame(parent, fg_color="transparent")
 
         model_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(model_row, "detection_model")
-
-        from jasna.mosaic.detection_registry import detection_model_choices
-        available_models = detection_model_choices()
-        self._widgets["detection_model"] = ctk.CTkOptionMenu(
-            model_row, values=available_models,
-            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
-            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
-            dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
-            width=160,
-            command=self._on_detection_model_changed,
+        self._models = detection_model_choices()
+        self._widgets["detection_model"] = option_menu(
+            model_row, {model: model for model in self._models}, self._on_detection_model_changed, width=160
         )
         self._widgets["detection_model"].pack(side="right")
 
@@ -47,34 +46,21 @@ class DetectionSection:
         self._widgets["detection_score_threshold"] = ctk.CTkSlider(
             threshold_row, from_=0.0, to=1.0, number_of_steps=20,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=SLIDER_WIDTH, command=lambda v: self._widgets["detection_threshold_val"].configure(text=f"{v:.2f}")
+            width=SLIDER_WIDTH, command=self._on_threshold_slider,
         )
         self._widgets["detection_score_threshold"].pack(side="right", padx=(0, 8))
 
         vr_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(vr_row, "vr_mode")
-        self._widgets["vr_mode"] = ValueOptionMenu(
+        self._widgets["vr_mode"] = option_menu(
             vr_row,
-            options={
-                "auto": t("vr_mode_auto"),
-                "off": t("vr_mode_off"),
-                "sbs": t("vr_mode_sbs"),
-                "sbs-fisheye": t("vr_mode_sbs_fisheye"),
-                "tb": t("vr_mode_tb"),
-            },
-            command=lambda _value: self._on_modified(),
-            fg_color=Colors.BG_CARD,
-            button_color=Colors.BG_CARD,
-            button_hover_color=Colors.BORDER_LIGHT,
-            dropdown_fg_color=Colors.BG_CARD,
-            dropdown_hover_color=Colors.PRIMARY,
-            text_color=Colors.TEXT_PRIMARY,
+            {mode: t(f"vr_mode_{mode.replace('-', '_')}") for mode in get_args(VrModeName)},
+            lambda _value: self._on_modified(),
             width=180,
         )
         self._widgets["vr_mode"].pack(side="right")
 
-        gap_row = self._filter_slider_row(inner, "max_detection_gap")
-        mindur_row = self._filter_slider_row(inner, "min_detection_duration")
+        gap_row, mindur_row = (self._filter_slider_row(inner, key) for key in _TEMPORAL_FILTERS)
         scene_row = ctk.CTkFrame(inner, fg_color="transparent")
         scene_frame = ctk.CTkFrame(scene_row, fg_color=Colors.BG_CARD, corner_radius=6)
         scene_frame.pack(fill="x")
@@ -101,7 +87,7 @@ class DetectionSection:
             row, from_=0, to=TEMPORAL_FILTER_SLIDER_MAX,
             number_of_steps=TEMPORAL_FILTER_SLIDER_MAX,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=SLIDER_WIDTH, command=lambda v: self._on_slider_change(key, int(v))
+            width=SLIDER_WIDTH, command=lambda v: self._on_filter_slider(key, int(v))
         )
         self._widgets[key].pack(side="right", padx=(0, 8))
         return row
@@ -109,44 +95,64 @@ class DetectionSection:
     def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
         return layout_rows(self._rows, level, standard=standard, ltx=ltx)
 
-    def _on_slider_change(self, key: str, value: int):
+    def set_enabled(self, enabled: bool) -> None:
+        set_widgets_enabled(
+            (self._widgets[key] for key in (
+                "detection_model", "detection_score_threshold", "vr_mode", *_TEMPORAL_FILTERS, "scene_detection"
+            )),
+            enabled,
+        )
+
+    def limit_to_clip_size(self, max_clip_size: int) -> None:
+        """A detection gap or minimum duration cannot span a whole clip."""
+        limit = max(0, min(TEMPORAL_FILTER_SLIDER_MAX, max_clip_size - 1))
+        for key in _TEMPORAL_FILTERS:
+            slider = self._widgets[key]
+            slider.configure(to=limit, number_of_steps=max(1, limit))
+            self._set_filter(key, min(int(slider.get()), limit))
+
+    def _set_filter(self, key: str, value: int) -> None:
+        self._widgets[key].set(value)
         self._widgets[f"{key}_val"].configure(text=str(value))
+
+    def _on_filter_slider(self, key: str, value: int):
+        self._widgets[f"{key}_val"].configure(text=str(value))
+        self._on_modified()
+
+    def _set_threshold(self, threshold: float) -> None:
+        self._widgets["detection_score_threshold"].set(threshold)
+        self._widgets["detection_threshold_val"].configure(text=f"{threshold:.2f}")
+
+    def _on_threshold_slider(self, value: float) -> None:
+        self._widgets["detection_threshold_val"].configure(text=f"{value:.2f}")
         self._on_modified()
 
     def _on_detection_model_changed(self, value: str):
         from jasna.mosaic.detection_registry import recommended_score_threshold
 
-        threshold = recommended_score_threshold(value)
-        self._widgets["detection_score_threshold"].set(threshold)
-        self._widgets["detection_threshold_val"].configure(text=f"{threshold:.2f}")
+        self._set_threshold(recommended_score_threshold(value))
         self._on_modified()
 
     def apply(self, preset):
         det_model = preset.detection_model
         det_threshold = preset.detection_score_threshold
-        choices = self._widgets["detection_model"].cget("values")
-        if det_model not in choices:
+        if det_model not in self._models:
             from jasna.mosaic.detection_registry import recommended_score_threshold
-            det_model = DEFAULT_DETECTION_MODEL_NAME if DEFAULT_DETECTION_MODEL_NAME in choices else choices[0]
+
+            det_model = DEFAULT_DETECTION_MODEL_NAME if DEFAULT_DETECTION_MODEL_NAME in self._models else self._models[0]
             det_threshold = recommended_score_threshold(det_model)
-        self._widgets["detection_model"].set(det_model)
-        self._widgets["detection_score_threshold"].set(det_threshold)
-        self._widgets["detection_threshold_val"].configure(text=f"{det_threshold:.2f}")
+        self._widgets["detection_model"].set_value(det_model)
+        self._set_threshold(det_threshold)
         self._widgets["vr_mode"].set_value(preset.vr_mode)
-        for key in ("max_detection_gap", "min_detection_duration"):
-            self._widgets[key].set(getattr(preset, key))
-            self._widgets[f"{key}_val"].configure(text=str(getattr(preset, key)))
-        if preset.scene_detection:
-            self._widgets["scene_detection"].select()
-        else:
-            self._widgets["scene_detection"].deselect()
+        for key in _TEMPORAL_FILTERS:
+            self._set_filter(key, getattr(preset, key))
+        self._widgets["scene_detection"].set(preset.scene_detection)
 
     def collect(self) -> dict:
         return {
-            "detection_model": self._widgets["detection_model"].get(),
+            "detection_model": self._widgets["detection_model"].get_value(),
             "detection_score_threshold": float(self._widgets["detection_score_threshold"].get()),
             "vr_mode": self._widgets["vr_mode"].get_value(),
-            "max_detection_gap": int(self._widgets["max_detection_gap"].get()),
-            "min_detection_duration": int(self._widgets["min_detection_duration"].get()),
+            **{key: int(self._widgets[key].get()) for key in _TEMPORAL_FILTERS},
             "scene_detection": self._widgets["scene_detection"].get() == 1,
         }

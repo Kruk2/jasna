@@ -5,118 +5,63 @@ import pytest
 
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, AppSettings, JobItem, JobStatus
 from jasna.gui.processor import Processor, ProgressUpdate
-from factories import no_resume_conflict
+from factories import no_resume_conflict, video_metadata
 
 pytestmark = pytest.mark.usefixtures("no_gpu_cleanup", "tk_garbage_collected")
 
 
-class _FakePipeline:
-    def __init__(self):
-        self.cancel_requested = False
-        self.completed = False
-
-    def cancel(self):
-        self.cancel_requested = True
-
-
-def _processor_with_job(tmp_path, run_pipeline):
-    job = JobItem(path=tmp_path / "clip.mp4")
-    updates: list[ProgressUpdate] = []
-    processor = Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append)
-    processor._run_pipeline = run_pipeline
-    processor._jobs = [job]
-    processor._settings = AppSettings()
-    processor._output_folder = str(tmp_path)
-    processor._output_pattern = "{original}_restored.mp4"
-    return processor, job, updates
-
-
-def _run_queue(processor, job, tmp_path, settings, output_pattern=DEFAULT_OUTPUT_PATTERN):
-    processor.start([job], settings, str(tmp_path), output_pattern)
+def _run_queue(processor, jobs, tmp_path, settings, output_pattern="{original}_restored.mp4"):
+    processor.start(jobs, settings, str(tmp_path), output_pattern)
     processor.join()
     assert not processor.is_running()
 
 
-def test_stopped_job_leaves_processing_state(tmp_path):
-    from jasna.gui.processor import ProcessingStopped
+def test_stop_cancels_the_running_job_and_leaves_it_queued(tmp_path, fake_job_pipelines):
+    started, release = threading.Event(), threading.Event()
 
-    started = threading.Event()
-    release = threading.Event()
-
-    def fake_run_pipeline(job_id, input_path, output_path, **kwargs):
+    def restore(_pipeline):
         started.set()
         release.wait(5)
-        if processor._stop_event.is_set():
-            raise ProcessingStopped("Processing stopped")
 
-    processor, job, updates = _processor_with_job(tmp_path, fake_run_pipeline)
-
-    worker = threading.Thread(target=processor._run, daemon=True)
-    worker.start()
+    fake_job_pipelines.restore = restore
+    job = JobItem(path=tmp_path / "clip.mp4")
+    updates: list[ProgressUpdate] = []
+    processor = Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append)
+    processor.start([job], AppSettings(), str(tmp_path), "{original}_restored.mp4")
     assert started.wait(5)
     assert job.status is JobStatus.PROCESSING
 
     processor.stop()
     release.set()
-    worker.join(5)
+    processor.join()
 
-    assert not worker.is_alive()
+    assert not processor.is_running()
+    assert fake_job_pipelines.built[0].cancel_requested
+    assert len(fake_job_pipelines.built) == 1  # a job left pending must not be picked up again
     assert job.status is JobStatus.PENDING
     assert updates[-1].status is JobStatus.PENDING
 
 
-def test_completed_job_stays_completed(tmp_path):
-    processor, job, updates = _processor_with_job(
-        tmp_path,
-        lambda job_id, input_path, output_path, **kwargs: None,
-    )
+def test_completed_job_stays_completed(tmp_path, fake_job_pipelines):
+    job = JobItem(path=tmp_path / "clip.mp4")
+    updates: list[ProgressUpdate] = []
 
-    processor._run()
+    _run_queue(Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append), [job], tmp_path, AppSettings())
 
     assert job.status is JobStatus.COMPLETED
     assert job.output_path == tmp_path / "clip_restored.mp4"
     assert updates[-1].status is JobStatus.COMPLETED
 
 
-def test_stop_cancels_the_running_pipeline(tmp_path):
-    processor, _job, _updates = _processor_with_job(
-        tmp_path,
-        lambda *args, **kwargs: None,
-    )
-    pipeline = _FakePipeline()
-    processor._current_pipeline = pipeline
-
-    processor.stop()
-
-    assert pipeline.cancel_requested
-
-
-def test_interrupted_pipeline_marks_job_pending(tmp_path):
-    from jasna.gui.processor import ProcessingStopped
-
-    runs = []
-
-    def fake_run_pipeline(job_id, input_path, output_path, **kwargs):
-        runs.append(job_id)
-        raise ProcessingStopped("Processing stopped")
-
-    processor, job, updates = _processor_with_job(tmp_path, fake_run_pipeline)
-
-    processor._run()
-
-    assert runs == [job.id]  # a job left pending must not be picked up again
-
-    assert job.status is JobStatus.PENDING
-    assert updates[-1].status is JobStatus.PENDING
-
-
-def test_failing_job_still_marked_error(tmp_path):
-    def fake_run_pipeline(job_id, input_path, output_path, **kwargs):
+def test_failing_job_still_marked_error(tmp_path, fake_job_pipelines):
+    def restore(_pipeline):
         raise RuntimeError("boom")
 
-    processor, job, updates = _processor_with_job(tmp_path, fake_run_pipeline)
+    fake_job_pipelines.restore = restore
+    job = JobItem(path=tmp_path / "clip.mp4")
+    updates: list[ProgressUpdate] = []
 
-    processor._run()
+    _run_queue(Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append), [job], tmp_path, AppSettings())
 
     assert job.status is JobStatus.ERROR
     assert updates[-1].status is JobStatus.ERROR
@@ -133,44 +78,24 @@ def test_failing_job_still_marked_error(tmp_path):
     ],
 )
 def test_outdated_progress_never_holds_up_videos_queued_after_it(
-    tmp_path, monkeypatch, choice, queued_after, answer, asked, replaced
+    tmp_path, fake_job_pipelines, choice, queued_after, answer, asked, replaced
 ):
     """#755: a question about outdated saved progress must not stall an unattended queue."""
     from concurrent.futures import Future
-    from unittest.mock import MagicMock
-
-    import torch
 
     from jasna.job_resume import ResumeMismatchError
 
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir()
-    (tmp_path / "model_weights" / "rfdetr-v6.onnx").touch()
     saved = tmp_path / "saved-progress"
     saved.mkdir()
     jobs = [JobItem(path=tmp_path / f"clip{index}.mp4") for index in range(1 + queued_after)]
     for job in jobs:
         job.path.touch()
 
-    class SavedProgressPipeline:
-        cancel_requested = False
-        completed = True
+    def restore(pipeline):
+        if pipeline.input_path == jobs[0].path and saved.exists():
+            raise ResumeMismatchError(saved)
 
-        def __init__(self, input_path):
-            self.input_path = input_path
-
-        def run(self):
-            if self.input_path == jobs[0].path and saved.exists():
-                raise ResumeMismatchError(saved)
-
-    monkeypatch.setattr(
-        "jasna.gui.processor.build_job_pipeline",
-        lambda _config, _session, input_path, *_a, **_k: SavedProgressPipeline(input_path),
-    )
-    monkeypatch.setattr(
-        "jasna.gui.processor.build_video_session", lambda *_a, **_k: MagicMock(device=torch.device("cpu"))
-    )
-    monkeypatch.setattr("jasna.engine_compiler.ensure_engines_compiled", lambda *_a, **_k: None)
+    fake_job_pipelines.restore = restore
     questions: list[Path] = []
 
     def answer_question(directory):
@@ -199,7 +124,6 @@ def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conf
     when ranges keep a source codec other than the chosen one."""
     import importlib
     from fractions import Fraction
-    from types import SimpleNamespace
     from unittest.mock import MagicMock
 
     import torch
@@ -209,10 +133,7 @@ def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conf
     from jasna.pipeline import Pipeline
     from jasna.segments import SegmentRange
 
-    metadata = SimpleNamespace(
-        codec_name="hevc", duration=6.0, num_frames=180, time_base=Fraction(1, 30),
-        video_width=1920, video_height=1080, sample_aspect_ratio=Fraction(1, 1),
-    )
+    metadata = video_metadata(fps=30, num_frames=180, video_width=1920, video_height=1080)
     for target, value in {
         "jasna.media.probe.get_video_meta_data": lambda *_a: metadata,
         "jasna.pipeline.get_video_meta_data": lambda *_a: metadata,
@@ -246,25 +167,25 @@ def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conf
     monkeypatch.setattr(Pipeline, "validate_metadata", lambda *_a: None)
     monkeypatch.setattr(Pipeline, "configure_vr", lambda *_a: None)
 
-    processor, job, _updates = _processor_with_job(tmp_path, None)
-    del processor._run_pipeline
     monkeypatch.setattr(
         "jasna.gui.processor.build_video_session", lambda *_a, **_k: MagicMock(device=torch.device("cpu"))
     )
-    processor._prepare_job_detector = MagicMock()
+    monkeypatch.setattr("jasna.engine_compiler.ensure_engines_compiled", lambda *_a, **_k: None)
+    job = JobItem(path=tmp_path / "clip.mp4")
     job.path.touch()
     if ranges in ("editor", "basicvsrpp_editor"):
         job.segments = (SegmentRange(2.5, 3.0),)
-    processor._settings = AppSettings(
+    settings = AppSettings(
         restoration_model="basicvsrpp" if ranges == "basicvsrpp_editor" else "ltx", ltx_auto_split=ranges == "auto_split", codec="av1", encoder_cq=38,
         vr_mode="off", file_conflict=file_conflict,
     )
+    processor = Processor(on_resume_conflict=no_resume_conflict)
 
-    processor._run()
+    _run_queue(processor, [job], tmp_path, settings)
     assert job.status is JobStatus.PENDING
     output = tmp_path / "clip_restored.mp4"
     output.touch()
-    processor._run()
+    _run_queue(processor, [job], tmp_path, settings)
 
     assert resumed == [False, True]
     assert job.status is JobStatus.COMPLETED
@@ -326,21 +247,6 @@ def test_resume_confirmation_is_posted_to_main_thread_and_can_be_cancelled(jasna
         assert answer.result() is True
 
 
-@pytest.mark.parametrize("cancel_requested,completed,expected", [
-    (False, True, False),
-    (True, False, True),
-    (True, True, False),
-])
-def test_pipeline_stop_detection(cancel_requested, completed, expected):
-    from jasna.gui.processor import _pipeline_was_stopped
-
-    pipeline = _FakePipeline()
-    pipeline.cancel_requested = cancel_requested
-    pipeline.completed = completed
-
-    assert _pipeline_was_stopped(pipeline) is expected
-
-
 @pytest.mark.parametrize("queue_finished", [False, True])
 def test_only_a_finished_queue_is_reported_as_completed(jasna_app, queue_finished):
     bar = jasna_app._control_bar
@@ -353,28 +259,37 @@ def test_only_a_finished_queue_is_reported_as_completed(jasna_app, queue_finishe
     assert ("All jobs completed" in [message for _, _, message in jasna_app._log_panel._entries]) is queue_finished
 
 
-def test_a_failed_license_check_fails_that_job_and_stops_the_queue(tmp_path, caplog):
+def test_changing_the_queue_keeps_the_running_jobs_progress(jasna_app, tmp_path):
+    bar = jasna_app._control_bar
+    bar.update_progress("clip.mp4", 40.0, queue_current=1, queue_total=1)
+    later = tmp_path / "later.mp4"
+    later.touch()
+
+    jasna_app._queue_panel.add_jobs([JobItem(path=later)])
+
+    texts = (bar._filename_label.cget("text"), bar._percent_label.cget("text"), bar._queue_progress.cget("text"))
+    assert texts == ("clip.mp4", "40%", "1 / 1")
+
+
+def test_a_failed_license_check_fails_that_job_and_stops_the_queue(tmp_path, fake_job_pipelines, caplog):
     from jasna.gui.locales import t
     from jasna.license_api import LicenseCheckStopped
 
     class ConnectionLost(LicenseCheckStopped):
         code = "expired"
 
-    runs = []
-
-    def fake_run_pipeline(job_id, input_path, output_path, **kwargs):
-        runs.append(job_id)
+    def restore(_pipeline):
         raise ConnectionLost("lost the connection")
 
-    processor, job, updates = _processor_with_job(tmp_path, fake_run_pipeline)
-    later = JobItem(path=tmp_path / "later.mp4")
-    processor._jobs.append(later)
+    fake_job_pipelines.restore = restore
+    job, later = JobItem(path=tmp_path / "clip.mp4"), JobItem(path=tmp_path / "later.mp4")
+    updates: list[ProgressUpdate] = []
     completions = []
-    processor._on_complete = completions.append
+    processor = Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append, on_complete=completions.append)
 
-    processor._run()
+    _run_queue(processor, [job, later], tmp_path, AppSettings())
 
-    assert runs == [job.id]
+    assert [pipeline.input_path for pipeline in fake_job_pipelines.built] == [job.path]
     assert job.status is JobStatus.ERROR and later.status is JobStatus.PENDING
     assert updates[-1].message == t("license_problem_expired")
     assert updates[-1].license_problem == "expired"
@@ -384,10 +299,8 @@ def test_a_failed_license_check_fails_that_job_and_stops_the_queue(tmp_path, cap
     ]
 
 
-def test_a_range_job_that_reencodes_the_whole_video_offers_stop_not_pause(tmp_path, monkeypatch):
+def test_a_range_job_that_reencodes_the_whole_video_offers_stop_not_pause(tmp_path, fake_job_pipelines, monkeypatch):
     from unittest.mock import MagicMock
-
-    import torch
 
     import jasna.gui.processor as processor_module
     from jasna.segments import SegmentRange
@@ -396,52 +309,44 @@ def test_a_range_job_that_reencodes_the_whole_video_offers_stop_not_pause(tmp_pa
     monkeypatch.setattr(
         processor_module, "plan_segment_job", MagicMock(return_value=MagicMock(reencodes_whole_video=True))
     )
-    monkeypatch.setattr(
-        processor_module, "build_job_pipeline", MagicMock(return_value=MagicMock(cancel_requested=False))
-    )
-    monkeypatch.setattr(
-        "jasna.gui.processor.build_video_session", lambda *_a, **_k: MagicMock(device=torch.device("cpu"))
-    )
-    monkeypatch.setattr("jasna.engine_compiler.ensure_engines_compiled", lambda *_a, **_k: None)
     updates: list[ProgressUpdate] = []
     processor = Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append)
     job = JobItem(path=tmp_path / "clip.mp4", segments=(SegmentRange(2.5, 3.0),))
     job.path.touch()
 
-    _run_queue(processor, job, tmp_path, AppSettings())
+    _run_queue(processor, [job], tmp_path, AppSettings())
 
     assert job.status is JobStatus.COMPLETED
     assert [update.resumable for update in updates if update.resumable is not None] == [True, False]
 
 
-def test_rerun_replaces_the_output_its_stopped_run_left(tmp_path):
-    from jasna.gui.processor import ProcessingStopped
+def test_rerun_replaces_the_output_its_stopped_run_left(tmp_path, fake_job_pipelines):
+    def restore(pipeline):
+        pipeline.output_path.touch()
+        if len(fake_job_pipelines.built) == 1:
+            pipeline.cancel()
 
-    outputs: list[Path] = []
-
-    def run_pipeline(job_id, input_path, output_path, **kwargs):
-        outputs.append(output_path)
-        output_path.touch()
-        if len(outputs) == 1:
-            raise ProcessingStopped("Processing stopped")
-
-    processor, job, _updates = _processor_with_job(tmp_path, run_pipeline)
+    fake_job_pipelines.restore = restore
+    job = JobItem(path=tmp_path / "clip.mp4")
     job.path.touch()
+    processor = Processor(on_resume_conflict=no_resume_conflict)
 
-    _run_queue(processor, job, tmp_path, AppSettings(file_conflict="skip"))
+    _run_queue(processor, [job], tmp_path, AppSettings(file_conflict="skip"))
     assert job.status is JobStatus.PENDING
-    _run_queue(processor, job, tmp_path, AppSettings(file_conflict="skip"))
+    _run_queue(processor, [job], tmp_path, AppSettings(file_conflict="skip"))
 
-    assert outputs == [tmp_path / "clip_restored.mp4"] * 2
+    assert [pipeline.output_path for pipeline in fake_job_pipelines.built] == [tmp_path / "clip_restored.mp4"] * 2
     assert job.status is JobStatus.COMPLETED
 
 
-def test_overwrite_never_writes_over_the_input(tmp_path):
-    outputs: list[Path] = []
-    processor, job, _updates = _processor_with_job(tmp_path, lambda _id, _input, output, **_kw: outputs.append(output))
+def test_overwrite_never_writes_over_the_input(tmp_path, fake_job_pipelines):
+    job = JobItem(path=tmp_path / "clip.mp4")
     job.path.touch()
 
-    _run_queue(processor, job, tmp_path, AppSettings(file_conflict="overwrite"), output_pattern="{original}.mp4")
+    _run_queue(
+        Processor(on_resume_conflict=no_resume_conflict), [job], tmp_path,
+        AppSettings(file_conflict="overwrite"), output_pattern="{original}.mp4",
+    )
 
-    assert outputs == [tmp_path / "clip (1).mp4"]
+    assert [pipeline.output_path for pipeline in fake_job_pipelines.built] == [tmp_path / "clip (1).mp4"]
     assert job.status is JobStatus.COMPLETED

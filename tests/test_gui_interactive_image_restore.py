@@ -54,3 +54,33 @@ def test_interactive_output_never_overwrites(tmp_path: Path) -> None:
     output = interactive_output_path(source, "", "{original}_restored.mp4")
 
     assert output == tmp_path / "input_restored (2).png"
+
+
+def test_interactive_restore_does_not_open_while_a_job_runs(jasna_app, monkeypatch) -> None:
+    from tkinter import filedialog
+
+    asked: list[dict] = []
+    monkeypatch.setattr(filedialog, "askopenfilenames", lambda **options: asked.append(options) or ())
+    monkeypatch.setattr(jasna_app._processor, "is_running", lambda: True)
+
+    jasna_app._open_interactive_image_restore()
+
+    assert asked == []
+
+
+def test_interactive_restore_holds_the_gpu_until_its_worker_stops(jasna_app, monkeypatch) -> None:
+    from tkinter import filedialog
+
+    from jasna.gui import interactive_image_restore
+
+    opened: list[dict] = []
+    monkeypatch.setattr(filedialog, "askopenfilenames", lambda **_options: ("image.png",))
+    monkeypatch.setattr(
+        interactive_image_restore, "InteractiveImageRestoreDialog", lambda *_args, **options: opened.append(options)
+    )
+
+    jasna_app._open_interactive_image_restore()
+
+    assert jasna_app._preview_gpu_busy
+    opened[0]["on_stopped"]()
+    assert not jasna_app._preview_gpu_busy

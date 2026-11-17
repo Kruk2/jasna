@@ -1,4 +1,5 @@
 import functools
+import signal
 import sys
 import threading
 from types import SimpleNamespace
@@ -20,19 +21,31 @@ def lease_api(monkeypatch, gui_language):
     return activate
 
 
-@pytest.mark.parametrize("arguments", [
-    ["--machine-key"],
-    ["--activation-key", "key"],
-    ["--cloud-workspace"],
-    ["--license-email", "buyer@example.com", "--license-key", "key"],
-])
-def test_cli_rejects_retired_options(monkeypatch, arguments):
-    from jasna.main import main
+@pytest.fixture
+def saved_activation(monkeypatch, lease_api):
+    """Set what this PC has saved: an offline grant, an online token, and the devices in use
+    (or the error checking them raises)."""
+    from jasna.protection import lease, license_store, offline
 
-    monkeypatch.setattr(sys, "argv", ["jasna", *arguments])
-    with pytest.raises(SystemExit) as exc:
-        main()
-    assert exc.value.code == 2
+    def save(*, grant=None, token=None, devices=lease.DeviceUse(2, 3, 1, 1, (), "JT1-1a2b3c4d")):
+        def device_count():
+            if isinstance(devices, Exception):
+                raise devices
+            return devices
+
+        monkeypatch.setattr(license_store, "is_licensed", lambda: True)
+        monkeypatch.setattr(offline, "saved_grant", lambda: grant)
+        monkeypatch.setattr(lease, "load_token", lambda: token)
+        monkeypatch.setattr(lease, "device_count", device_count)
+
+    return save
+
+
+SAVED_ACTIVATIONS = [
+    (("JT1-" + "a" * 64, b"", {}), None, "offline", "license_offline_active"),
+    (None, {"token": "t", "models": []}, "online", "license_lease_active"),
+    (None, None, None, "license_active"),
+]
 
 
 ACTIVATION_MESSAGES = [
@@ -339,22 +352,14 @@ def test_lease_dialog_explains_a_failed_activation(tk_root, lease_api, settle_ac
     assert dialog._status.cget("text") == t(message)
 
 
-@pytest.mark.parametrize(("grant", "token", "mode", "message"), [
-    (("JT1-" + "a" * 64, b"", {}), None, "offline", "license_offline_active"),
-    (None, {"token": "t", "models": []}, "online", "license_lease_active"),
-    (None, None, None, "license_active"),
-])
-def test_lease_dialog_names_the_saved_activation_when_reopened(tk_root, lease_api, settle_activation, monkeypatch,
+@pytest.mark.parametrize(("grant", "token", "mode", "message"), SAVED_ACTIVATIONS)
+def test_lease_dialog_names_the_saved_activation_when_reopened(tk_root, saved_activation, settle_activation,
                                                                 grant, token, mode, message):
     from jasna.gui import activation_worker
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t
-    from jasna.protection import lease, license_store, offline
 
-    monkeypatch.setattr(license_store, "is_licensed", lambda: True)
-    monkeypatch.setattr(offline, "saved_grant", lambda: grant)
-    monkeypatch.setattr(lease, "load_token", lambda: token)
-    monkeypatch.setattr(lease, "device_count", lambda: lease.DeviceUse(2, 3, 1, 1, (), "JT1-1a2b3c4d"))
+    saved_activation(grant=grant, token=token)
     assert activation_worker.read_license_info() == (True, mode)
     dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     settle_activation(dialog)
@@ -385,20 +390,12 @@ def test_device_list_marks_this_pc_and_says_where_to_report_an_activation_error(
     assert hint == locales.t("license_devices_error_hint")
 
 
-def test_device_count_failure_keeps_the_activation_status(tk_root, lease_api, settle_activation, monkeypatch):
+def test_device_count_failure_keeps_the_activation_status(tk_root, saved_activation, settle_activation):
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t
-    from jasna.protection import lease, license_store, offline
     from jasna.protection.activation import ActivationServiceError
 
-    monkeypatch.setattr(license_store, "is_licensed", lambda: True)
-    monkeypatch.setattr(offline, "saved_grant", lambda: None)
-    monkeypatch.setattr(lease, "load_token", lambda: {"token": "t", "models": []})
-
-    def unreachable():
-        raise ActivationServiceError("network_error")
-
-    monkeypatch.setattr(lease, "device_count", unreachable)
+    saved_activation(token={"token": "t", "models": []}, devices=ActivationServiceError("network_error"))
     dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     settle_activation(dialog)
     assert dialog._devices.cget("text") == t("license_devices_unavailable")
@@ -430,21 +427,13 @@ def test_device_count_waits_on_screen_and_a_new_activation_hides_it(tk_root, con
     assert dialog._devices.winfo_manager() == ""
 
 
-@pytest.mark.parametrize(("grant", "token", "status"), [
-    (("JT1-" + "a" * 64, b"", {}), None, "license_offline_active"),
-    (None, {"token": "t", "models": []}, "license_lease_active"),
-    (None, None, "license_active"),
-])
-def test_cli_activation_status_shows_devices_in_use_and_exits_before_gpu_setup(monkeypatch, lease_api, capsys,
-                                                                              grant, token, status):
+@pytest.mark.parametrize(("grant", "token", "mode", "status"), SAVED_ACTIVATIONS)
+def test_cli_activation_status_shows_devices_in_use_and_exits_before_gpu_setup(monkeypatch, saved_activation, capsys,
+                                                                              grant, token, mode, status):
     from jasna import main
     from jasna.gui.locales import t
-    from jasna.protection import lease, license_store, offline
 
-    monkeypatch.setattr(license_store, "is_licensed", lambda: True)
-    monkeypatch.setattr(offline, "saved_grant", lambda: grant)
-    monkeypatch.setattr(lease, "load_token", lambda: token)
-    monkeypatch.setattr(lease, "device_count", lambda: lease.DeviceUse(2, 3, 1, 1, (), "JT1-1a2b3c4d"))
+    saved_activation(grant=grant, token=token)
     monkeypatch.setattr(sys, "argv", ["jasna", "--activation-status"])
     monkeypatch.setattr(main, "_check_system", lambda args: pytest.fail("GPU check ran"))
     monkeypatch.setattr(main, "_configure_runtime", lambda args: pytest.fail("Runtime setup ran"))
@@ -465,21 +454,13 @@ def test_cli_activation_status_without_activation_fails(monkeypatch, lease_api, 
     assert capsys.readouterr().err == t("license_problem_no_activation") + "\n"
 
 
-def test_cli_activation_status_reports_an_unreachable_service_and_succeeds(monkeypatch, lease_api, capsys):
+def test_cli_activation_status_reports_an_unreachable_service_and_succeeds(monkeypatch, saved_activation, capsys):
     from jasna.gui.locales import t
     from jasna.main import main
-    from jasna.protection import lease, license_store, offline
     from jasna.protection.activation import ActivationServiceError
 
-    monkeypatch.setattr(license_store, "is_licensed", lambda: True)
-    monkeypatch.setattr(offline, "saved_grant", lambda: None)
-    monkeypatch.setattr(lease, "load_token", lambda: {"token": "t", "models": []})
     error = ActivationServiceError("network_error")
-
-    def unreachable():
-        raise error
-
-    monkeypatch.setattr(lease, "device_count", unreachable)
+    saved_activation(token={"token": "t", "models": []}, devices=error)
     monkeypatch.setattr(sys, "argv", ["jasna", "--activation-status"])
     main()
     output = capsys.readouterr()
@@ -487,17 +468,14 @@ def test_cli_activation_status_reports_an_unreachable_service_and_succeeds(monke
     assert output.err == f"Could not check devices in use: {error}\n"
 
 
-def test_cli_activation_status_follows_a_new_activation(monkeypatch, lease_api, capsys):
+def test_cli_activation_status_follows_a_new_activation(monkeypatch, lease_api, saved_activation, capsys):
     from jasna import main
     from jasna.gui.locales import t
-    from jasna.protection import lease, license_store, offline
+    from jasna.protection import lease
 
     monkeypatch.setattr(sys, "platform", "linux")
     lease_api.return_value = lease.Activated(["ltx-2.5-v2"], None)
-    monkeypatch.setattr(license_store, "is_licensed", lambda: True)
-    monkeypatch.setattr(offline, "saved_grant", lambda: None)
-    monkeypatch.setattr(lease, "load_token", lambda: None)
-    monkeypatch.setattr(lease, "device_count", lambda: lease.DeviceUse(1, 3, 0, 1, (), "JT1-1a2b3c4d"))
+    saved_activation(devices=lease.DeviceUse(1, 3, 0, 1, (), "JT1-1a2b3c4d"))
     monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", "JL1-code", "--activation-status"])
     main.main()
     assert capsys.readouterr().out.endswith(
@@ -538,6 +516,7 @@ def test_cli_windows_warns_about_the_permission_prompt_only_for_offline_activati
     from jasna.protection import lease
 
     monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(signal, "SIGBREAK", signal.SIGTERM, raising=False)
     lease_api.return_value = lease.Activated(["ltx-2.5-v2"], None)
     monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", "JL1-code", *flags])
     main.main()

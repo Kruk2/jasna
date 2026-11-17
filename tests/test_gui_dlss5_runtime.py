@@ -7,11 +7,7 @@ import pytest
 from jasna.gui import dlss5_runtime as dlss5_runtime_module
 from jasna.gui.dlss5_runtime import Dlss5Runtime
 from jasna.upscale import dlss5
-
-
-class _NowCalls:
-    def post(self, call) -> None:
-        call()
+from factories import CallsAtOnce
 
 
 @pytest.fixture
@@ -45,7 +41,7 @@ def test_the_runtime_is_downloaded_after_the_user_agrees(monkeypatch, runtime_di
     asked = _answer(monkeypatch, yes=True)
     downloads = _fake_download(monkeypatch, runtime_dir, error=None)
     changes: list[int | None] = []
-    runtime = Dlss5Runtime(_NowCalls(), lambda: changes.append(runtime.percent))
+    runtime = Dlss5Runtime(CallsAtOnce(), lambda: changes.append(runtime.percent))
     ready: list[bool] = []
 
     assert not runtime.installed()
@@ -59,7 +55,7 @@ def test_the_runtime_is_downloaded_after_the_user_agrees(monkeypatch, runtime_di
 def test_nothing_is_downloaded_when_the_user_declines(monkeypatch, runtime_dir) -> None:
     _answer(monkeypatch, yes=False)
     downloads = _fake_download(monkeypatch, runtime_dir, error=None)
-    runtime = Dlss5Runtime(_NowCalls(), lambda: None)
+    runtime = Dlss5Runtime(CallsAtOnce(), lambda: None)
 
     runtime.ensure(on_ready=lambda: pytest.fail("not downloaded"))
 
@@ -71,7 +67,7 @@ def test_a_failed_download_is_shown_and_the_job_does_not_start(monkeypatch, runt
     _fake_download(monkeypatch, runtime_dir, error="connection reset")
     errors: list[str] = []
     monkeypatch.setattr(messagebox, "showerror", lambda _title, message: errors.append(message))
-    runtime = Dlss5Runtime(_NowCalls(), lambda: None)
+    runtime = Dlss5Runtime(CallsAtOnce(), lambda: None)
 
     runtime.ensure(on_ready=lambda: pytest.fail("download failed"))
 

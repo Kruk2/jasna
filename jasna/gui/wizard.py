@@ -9,7 +9,7 @@ import webbrowser
 
 import customtkinter as ctk
 
-from jasna import os_utils
+from jasna import system_requirements
 from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import get_locale, t
@@ -22,7 +22,7 @@ _CHECKS_TIMEOUT_SECONDS = 30.0
 
 _HELP_URLS = {
     "sysmem": "https://docs.cognex.com/deep-learning_420/web/EN/deep-learning/Content/Topics/optimization/gpu-disable-shared.htm?TocPath=Optimization%20Guidelines%7CNVIDIA%C2%AE%20GPU%20Guidelines%7C_____6",
-    "amf": os_utils.AMD_DRIVER_URL if sys.platform == "win32" else os_utils.AMF_LINUX_INSTALL_URL,
+    "amf": system_requirements.AMD_DRIVER_URL if sys.platform == "win32" else system_requirements.AMF_LINUX_INSTALL_URL,
 }
 
 

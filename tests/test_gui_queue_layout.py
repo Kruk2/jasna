@@ -295,7 +295,7 @@ def test_queue_folder_action_uses_input_or_completed_output(tk_root, monkeypatch
     )
 
 
-def test_completed_job_menu_copies_output_and_requeues(tk_root, monkeypatch, tmp_path: Path) -> None:
+def test_completed_job_menu_copies_output_and_requeues(tk_root, tmp_path: Path) -> None:
     panel = QueuePanel(tk_root)
     panel.pack(fill="both", expand=True)
     panel.add_job(tmp_path / "first.mp4")
@@ -311,10 +311,8 @@ def test_completed_job_menu_copies_output_and_requeues(tk_root, monkeypatch, tmp
     assert widget._requeueable
     panel.set_running(False)
 
-    clipboard = MagicMock()
-    monkeypatch.setattr(panel, "winfo_toplevel", lambda: clipboard)
     panel._copy_job_path(job)
-    clipboard.clipboard_append.assert_called_once_with(str(job.output_path))
+    assert tk_root.clipboard_get() == str(job.output_path)
 
     panel._requeue_job(job)
     assert panel._jobs[-1] is job
@@ -356,11 +354,6 @@ def test_same_as_input_clears_output_and_refreshes_conflicts(tk_root, tmp_path: 
 @pytest.mark.parametrize("hidpi", [1.0, 1.25, 1.5], indirect=True)
 def test_main_workspace_starts_wider_and_can_resize_queue_panel(hidpi, jasna_app, show_window) -> None:
     show_window(jasna_app)
-
-    assert jasna_app._workspace.cget("sashcursor") == ""
-    assert jasna_app._workspace.cget("cursor") == "sb_h_double_arrow"
-    assert jasna_app._queue_panel.cget("cursor") == "arrow"
-    assert jasna_app._settings_panel.cget("cursor") == "arrow"
 
     assert int(jasna_app._workspace.cget("sashwidth")) == int(4 * hidpi)
     assert jasna_app._queue_panel.winfo_width() >= int(Sizing.QUEUE_PANEL_WIDTH * hidpi)

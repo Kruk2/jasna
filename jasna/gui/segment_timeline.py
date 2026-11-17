@@ -16,6 +16,7 @@ _MAIN_BOTTOM = 58
 _OVERVIEW_TOP = 78
 _OVERVIEW_BOTTOM = 90
 _HANDLE_HIT_PX = 8
+_PLAYHEAD_TAG = "playhead"
 
 
 def segment_fill(segment: SegmentRange) -> str:
@@ -142,12 +143,14 @@ class SegmentTimeline(ctk.CTkFrame):
         self._view_end = self.duration
         self._redraw_timeline()
 
-    def reveal(self, seconds: float) -> None:
-        seconds = min(self.duration, max(0.0, float(seconds)))
-        if self._view_start <= seconds <= self._view_end:
+    def set_playhead(self, seconds: float) -> None:
+        """Move the playhead, scrolling the view to it when it is outside."""
+        self._playhead = min(self.duration, max(0.0, float(seconds)))
+        if self._view_start <= self._playhead <= self._view_end:
+            self._draw_playhead(max(2 * _PAD_X + 1, self._canvas.winfo_width()))
             return
         span = self._view_end - self._view_start
-        self._set_view(seconds - span / 2, seconds + span / 2)
+        self._set_view(self._playhead - span / 2, self._playhead + span / 2)
 
     def _redraw_timeline(self) -> None:
         canvas = self._canvas
@@ -209,28 +212,35 @@ class SegmentTimeline(ctk.CTkFrame):
                     outline="",
                 )
 
-        playhead_x = self._time_to_x(self._playhead, width)
-        if _PAD_X <= playhead_x <= width - _PAD_X:
-            canvas.create_line(
-                playhead_x,
-                18,
-                playhead_x,
-                _MAIN_BOTTOM + 6,
-                fill="#f8fafc",
-                width=2,
-            )
-            canvas.create_polygon(
-                playhead_x - 5,
-                18,
-                playhead_x + 5,
-                18,
-                playhead_x,
-                24,
-                fill="#f8fafc",
-                outline="",
-            )
-
+        self._draw_playhead(width)
         self._draw_overview(width)
+
+    def _draw_playhead(self, width: int) -> None:
+        canvas = self._canvas
+        canvas.delete(_PLAYHEAD_TAG)
+        playhead_x = self._time_to_x(self._playhead, width)
+        if not _PAD_X <= playhead_x <= width - _PAD_X:
+            return
+        canvas.create_line(
+            playhead_x,
+            18,
+            playhead_x,
+            _MAIN_BOTTOM + 6,
+            fill="#f8fafc",
+            width=2,
+            tags=_PLAYHEAD_TAG,
+        )
+        canvas.create_polygon(
+            playhead_x - 5,
+            18,
+            playhead_x + 5,
+            18,
+            playhead_x,
+            24,
+            fill="#f8fafc",
+            outline="",
+            tags=_PLAYHEAD_TAG,
+        )
 
     def _draw_ticks(self, width: int) -> None:
         for index in range(5):
@@ -398,10 +408,10 @@ class SegmentTimeline(ctk.CTkFrame):
     def _on_wheel(self, event, *, delta: int | None = None) -> str:
         if not self._enabled:
             return "break"
-        wheel_delta = delta if delta is not None else int(getattr(event, "delta", 0))
+        wheel_delta = delta if delta is not None else event.delta
         if not wheel_delta:
             return "break"
-        if int(getattr(event, "state", 0)) & 0x0001:
+        if event.state & 0x0001:
             direction = -1 if wheel_delta > 0 else 1
             span = self._view_end - self._view_start
             self._set_view(

@@ -9,7 +9,7 @@ from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
 from jasna.gui.log_export import export_log_entries_txt, log_timestamp
 from jasna.gui.log_filter import should_include_log_entry
-from jasna.gui.settings_sections.widgets import ValueOptionMenu
+from jasna.gui.settings_sections.widgets import option_menu
 
 _MAX_LOG_ENTRIES = 5000
 
@@ -28,7 +28,7 @@ class LogPanel(ctk.CTkFrame):
         self.pack_propagate(False)
         
         self._entries: deque[tuple[str, str, str]] = deque(maxlen=_MAX_LOG_ENTRIES)  # (timestamp, level, message)
-        self._filter_level = "all"
+        self._filter_level = "info"
         self._filter_changed_callback: Callable[[str], None] | None = None
         
         self._build_toolbar()
@@ -56,28 +56,22 @@ class LogPanel(ctk.CTkFrame):
         )
         filter_icon.pack(side="left", padx=(8, 2))
         
-        self._filter_dropdown = ValueOptionMenu(
+        self._filter_dropdown = option_menu(
             toolbar,
-            options={
+            {
                 "debug": t("filter_debug"),
                 "info": t("filter_info"),
                 "warning": t("filter_warn"),
                 "error": t("filter_error"),
             },
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            fg_color=Colors.BG_PANEL,
-            button_color=Colors.BG_PANEL,
-            button_hover_color=Colors.BORDER_LIGHT,
-            dropdown_fg_color=Colors.BG_PANEL,
-            dropdown_hover_color=Colors.PRIMARY,
-            text_color=Colors.TEXT_PRIMARY,
+            self._on_filter_changed,
             width=100,
+            background=Colors.BG_PANEL,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
             height=24,
-            command=self._on_filter_changed,
         )
         self._filter_dropdown.pack(side="left")
-        self._filter_dropdown.set_value("info")
-        self._filter_level = "info"
+        self._filter_dropdown.set_value(self._filter_level)
         
         # Right side buttons
         self._export_btn = ctk.CTkButton(
@@ -175,6 +169,3 @@ class LogPanel(ctk.CTkFrame):
         
     def error(self, message: str):
         self.add_log("ERROR", message)
-        
-    def debug(self, message: str):
-        self.add_log("DEBUG", message)

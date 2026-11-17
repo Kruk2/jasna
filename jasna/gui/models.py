@@ -151,7 +151,6 @@ class AppSettings:
     ltx_vae_decoder: str = "auto"  # auto, full, half, max
 
     # Basic processing
-    batch_size: int = 4
     max_clip_size: int = DEFAULT_MAX_CLIP_SIZE
     temporal_overlap: int = DEFAULT_TEMPORAL_OVERLAP
     vr_mode: str = "auto"
@@ -217,8 +216,6 @@ class AppSettings:
     post_export_video_command: str = ""
     
     # Output
-    output_folder: str = ""
-    output_pattern: str = DEFAULT_OUTPUT_PATTERN
     file_conflict: str = "auto_rename"  # auto_rename, overwrite, skip
     saved_progress_conflict: str = "ask"  # ask, start_over, skip
     working_directory: str = ""  # empty = same directory as the output video

@@ -20,10 +20,9 @@ class Dlss5Runtime:
 
     @staticmethod
     def installed() -> bool:
-        from jasna.upscale.dlss5 import DLSS5_RUNTIME_FILES, dlss5_runtime_dir
+        from jasna.upscale.dlss5 import dlss5_runtime_dir, missing_runtime_files
 
-        directory = dlss5_runtime_dir()
-        return all((directory / name).is_file() for name in DLSS5_RUNTIME_FILES)
+        return not missing_runtime_files(dlss5_runtime_dir())
 
     def ensure(self, *, on_ready: Callable[[], None]) -> None:
         """Ask to download the missing runtime; ``on_ready`` runs after the download succeeds."""

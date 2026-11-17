@@ -19,7 +19,7 @@ def _r(start: float, end: float, restoration: SegmentRestoration = STANDARD) -> 
 def test_empty_editor_means_full_video() -> None:
     state = SegmentEditorState(duration=10, fps=30, segments=(), default_restoration=STANDARD)
 
-    assert state.output_segments == ()
+    assert state.segments == ()
     assert not state.dirty
 
 
@@ -28,7 +28,7 @@ def test_add_snaps_to_frames_and_selects_new_range() -> None:
 
     state.add(1.04, 2.06)
 
-    assert state.output_segments == (_r(1.0, 2.1),)
+    assert state.segments == (_r(1.0, 2.1),)
     assert state.selected_segment == _r(1.0, 2.1)
     assert state.selected_duration == pytest.approx(1.1)
 
@@ -87,11 +87,11 @@ def test_clearing_all_ranges_means_full_video() -> None:
 
     assert state.clear()
 
-    assert state.output_segments == ()
+    assert state.segments == ()
     assert state.dirty
     assert state.undo()
 
-    assert state.output_segments == original
+    assert state.segments == original
     assert not state.dirty
 
 
@@ -130,7 +130,7 @@ def test_moving_a_range_keeps_its_restoration() -> None:
     )
     state.select(0)
 
-    state.adjust_selected(1.5, 3)
+    state.replace_selected(1.5, 3)
     state.select(0)
     state.replace_selected(0.5, 3)
 

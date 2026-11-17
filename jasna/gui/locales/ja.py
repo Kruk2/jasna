@@ -565,7 +565,6 @@ JA = {
         "wizard_title": "システムチェック",
         "wizard_subtitle": "Jasna に必要なものを確認中…",
         "wizard_checking": "確認中…",
-        "wizard_found": "検出：{path}",
         "wizard_not_found": "PATH に見つかりません",
         "wizard_all_passed": "✓ すべてのチェックに合格しました！準備完了です。",
         "wizard_required_failed": "✕ 必須チェックが失敗しました。Jasna を使用するには上記の問題を解決してください。",
@@ -682,6 +681,7 @@ JA = {
         "engine_name_rfdetr": "RF-DETR（検出）",
         "engine_name_yolo": "YOLO（検出）",
         "engine_name_basicvsrpp": "BasicVSR++（復元）",
+        "engine_name_unet_4x": "UNet 4x（拡大）",
         # About dialog
         "btn_close": "閉じる",
 
@@ -708,7 +708,6 @@ JA = {
         "wizard_check_driver": "GPU ドライバーバージョン",
         "wizard_check_sysmem": "NVIDIA のメモリフォールバック設定",
         "wizard_not_checked": "未確認",
-        "wizard_ascii_path_error": "パスに非ASCII文字が含まれています：{path}",
         "wizard_not_callable": "実行不可：{path}",
         "wizard_found_no_major": "{path} を検出しましたが、バージョンを読み取れません。",
         "wizard_found_bad_major": "{path} でバージョン {major} を検出しました。Jasna にはバージョン 8 が必要です。",
@@ -717,7 +716,6 @@ JA = {
         "wizard_gpu_compute_too_low": "Compute capability 7.5 以上が必要です（GPU: {major}.{minor}）",
         "wizard_gpu_arch_unsupported": "この AMD GPU（{arch}）はこのバージョンの Jasna では使えません",
         "wizard_gpu_datacenter_unsupported": "Jasna は A100・H100・B200 などのデータセンター向け GPU（{gpu}）には対応していません。RTX GPU を使ってください",
-        "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}、compute {major}.{minor}",
         "wizard_not_available": "利用不可",
         "wizard_sysmem_how_to_fix": "修正方法",

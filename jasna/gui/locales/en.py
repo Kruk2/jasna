@@ -565,7 +565,6 @@ EN = {
         "wizard_title": "System Check",
         "wizard_subtitle": "Checking what Jasna needs…",
         "wizard_checking": "Checking…",
-        "wizard_found": "Found: {path}",
         "wizard_not_found": "Not found in PATH",
         "wizard_all_passed": "✓ All checks passed! You're ready to go.",
         "wizard_required_failed": "✕ Required checks failed. Fix the issues above to use Jasna.",
@@ -682,6 +681,7 @@ EN = {
         "engine_name_rfdetr": "RF-DETR (detection)",
         "engine_name_yolo": "YOLO (detection)",
         "engine_name_basicvsrpp": "BasicVSR++ (restoration)",
+        "engine_name_unet_4x": "UNet 4x (upscaling)",
         # About dialog
         "btn_close": "Close",
 
@@ -708,7 +708,6 @@ EN = {
         "wizard_check_driver": "GPU Driver Version",
         "wizard_check_sysmem": "NVIDIA memory fallback setting",
         "wizard_not_checked": "Not checked",
-        "wizard_ascii_path_error": "Path contains non-ASCII characters: {path}",
         "wizard_not_callable": "Not callable: {path}",
         "wizard_found_no_major": "Found {path}, but couldn't read its version.",
         "wizard_found_bad_major": "Found version {major} at {path}. Jasna needs version 8.",
@@ -717,7 +716,6 @@ EN = {
         "wizard_gpu_compute_too_low": "Compute capability 7.5+ required (GPU: {major}.{minor})",
         "wizard_gpu_arch_unsupported": "This AMD GPU ({arch}) is not supported by this Jasna version",
         "wizard_gpu_datacenter_unsupported": "Jasna doesn't support data-center GPUs like A100, H100 or B200 ({gpu}). Use an RTX GPU",
-        "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "Not available",
         "wizard_sysmem_how_to_fix": "How to fix",

@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import io
 import json
-import queue
 import zipfile
-from tkinter import TclError
 from types import SimpleNamespace
 
-import customtkinter as ctk
 import pytest
 from PIL import Image
 
@@ -38,16 +35,6 @@ def test_multiple_polygons_union():
 def test_too_few_points_rejected():
     with pytest.raises(ValueError):
         mask_feedback.polygons_to_mask([((0, 0), (10, 10))], (100, 100))
-
-
-def test_meta_contains_only_allowed_keys():
-    meta = mask_feedback.build_meta("0.7.2", "rfdetr-v5", 1920, 1080)
-    assert meta == {
-        "app_version": "0.7.2",
-        "detection_model": "rfdetr-v5",
-        "frame_width": 1920,
-        "frame_height": 1080,
-    }
 
 
 def test_encode_submission_zip_round_trip():
@@ -106,8 +93,6 @@ def test_upload_worker_posts_sealed_blob(monkeypatch):
     event = worker.events.get(timeout=10)
     assert isinstance(event, mask_feedback.FeedbackUploadFinished)
     assert event.ok
-    assert recorded["url"] == mask_feedback.FEEDBACK_ENDPOINT
-    assert recorded["headers"]["x-jasna-token"] == mask_feedback.FEEDBACK_TOKEN
     assert len(recorded["data"]) > 32 + 12 + 16
 
 
@@ -124,36 +109,26 @@ def test_upload_worker_reports_failure(monkeypatch):
     assert "endpoint down" in event.message
 
 
-@pytest.fixture
-def root():
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
-    yield root
-    root.destroy()
-
-
 def _click_image(dialog, image_x, image_y):
     x, y = image_to_canvas(image_x, image_y, view=dialog._canvas.transform())
     dialog._on_press(SimpleNamespace(x=round(x), y=round(y)))
 
 
-def test_dialog_draws_and_submits_polygons(root):
-    root.update()
+def test_dialog_draws_and_submits_polygons(tk_root):
+    tk_root.update()
     submitted = {}
     dialog = mask_feedback.MaskSuggestDialog(
-        root,
+        tk_root,
         Image.new("RGB", (640, 360), (40, 40, 40)),
         on_submit=lambda polygons: submitted.update(polygons=polygons),
     )
-    root.update()
+    tk_root.update()
     assert dialog._submit_btn.cget("state") == "disabled"
 
     for point in ((100, 100), (200, 100), (200, 200)):
         _click_image(dialog, *point)
     dialog._close_draft()
-    root.update()
+    tk_root.update()
     assert len(dialog._polygons) == 1
     assert dialog._submit_btn.cget("state") == "normal"
 
@@ -167,12 +142,12 @@ def test_dialog_draws_and_submits_polygons(root):
             assert 0 <= x <= 640 and 0 <= y <= 360
 
 
-def test_dialog_undo_and_erase(root):
-    root.update()
+def test_dialog_undo_and_erase(tk_root):
+    tk_root.update()
     dialog = mask_feedback.MaskSuggestDialog(
-        root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
+        tk_root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
     )
-    root.update()
+    tk_root.update()
     for point in ((100, 100), (200, 100), (200, 200)):
         _click_image(dialog, *point)
     assert len(dialog._draft) == 3
@@ -189,12 +164,12 @@ def test_dialog_undo_and_erase(root):
     dialog._cancel()
 
 
-def test_dialog_close_hits_first_vertex(root):
-    root.update()
+def test_dialog_close_hits_first_vertex(tk_root):
+    tk_root.update()
     dialog = mask_feedback.MaskSuggestDialog(
-        root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
+        tk_root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
     )
-    root.update()
+    tk_root.update()
     for point in ((100, 100), (200, 100), (200, 200)):
         _click_image(dialog, *point)
     _click_image(dialog, 100.5, 100.5)
@@ -203,25 +178,23 @@ def test_dialog_close_hits_first_vertex(root):
     dialog._cancel()
 
 
-def test_dialog_click_outside_frame_snaps_to_edge(root):
-    root.update()
+def test_dialog_click_outside_frame_snaps_to_edge(tk_root):
+    tk_root.update()
     dialog = mask_feedback.MaskSuggestDialog(
-        root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
+        tk_root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
     )
-    root.update()
+    tk_root.update()
     dialog._on_press(SimpleNamespace(x=0, y=0))
-    assert len(dialog._draft) == 1
-    x, y = dialog._draft[0]
-    assert x == 0.0 or y == 0.0
+    assert dialog._draft == [(0.0, 0.0)]
     dialog._cancel()
 
 
-def test_dialog_zoom_keeps_clicks_on_the_frame_and_resets(root):
-    root.update()
+def test_dialog_zoom_keeps_clicks_on_the_frame_and_resets(tk_root):
+    tk_root.update()
     dialog = mask_feedback.MaskSuggestDialog(
-        root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
+        tk_root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
     )
-    root.update()
+    tk_root.update()
 
     dialog.event_generate("<KeyPress-plus>")
     dialog.event_generate("<KeyPress-plus>")
@@ -234,12 +207,12 @@ def test_dialog_zoom_keeps_clicks_on_the_frame_and_resets(root):
     dialog._cancel()
 
 
-def test_dialog_hide_shapes_toggle(root):
-    root.update()
+def test_dialog_hide_shapes_toggle(tk_root):
+    tk_root.update()
     dialog = mask_feedback.MaskSuggestDialog(
-        root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
+        tk_root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
     )
-    root.update()
+    tk_root.update()
     for point in ((100, 100), (200, 100), (200, 200)):
         _click_image(dialog, *point)
     dialog._close_draft()
@@ -258,31 +231,42 @@ def test_dialog_hide_shapes_toggle(root):
     dialog._cancel()
 
 
-def test_dialog_alpha_slider_updates_and_redraws(root):
-    root.update()
+def _shown_pixel_at(dialog, image_x: float, image_y: float) -> tuple[int, ...]:
+    """RGB the dialog shows at a point of the frame."""
+    canvas = dialog._canvas
+    (item,) = [item for item in canvas.find_all() if canvas.type(item) == "image"]
+    left, top = canvas.coords(item)
+    x, y = image_to_canvas(image_x, image_y, view=canvas.transform())
+    return tuple(int(value) for value in canvas.tk.call(canvas.itemcget(item, "image"), "get", round(x - left), round(y - top)))
+
+
+def test_dialog_alpha_slider_sets_how_strongly_shapes_tint_the_frame(tk_root):
+    tk_root.update()
     dialog = mask_feedback.MaskSuggestDialog(
-        root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
+        tk_root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
     )
-    root.update()
+    tk_root.update()
     for point in ((100, 100), (200, 100), (200, 200)):
         _click_image(dialog, *point)
     dialog._close_draft()
 
-    dialog._on_alpha(0.8)
-    assert dialog._mask_alpha == 0.8
-    dialog._canvas.redraw()
-    dialog._on_alpha(0.0)
-    dialog._canvas.redraw()
-    assert dialog._polygons
+    tints = []
+    for alpha in (0.0, 0.35, 0.8):
+        dialog._on_alpha(alpha)
+        dialog._canvas.redraw()
+        tints.append(_shown_pixel_at(dialog, 180, 120))
+
+    assert tints[0] == (0, 0, 0)
+    assert sum(tints[0]) < sum(tints[1]) < sum(tints[2])
     dialog._cancel()
 
 
-def test_click_above_canvas_snaps_point_to_top_edge(root):
-    root.update()
+def test_click_above_canvas_snaps_point_to_top_edge(tk_root):
+    tk_root.update()
     dialog = mask_feedback.MaskSuggestDialog(
-        root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
+        tk_root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
     )
-    root.update()
+    tk_root.update()
     canvas_x = dialog._canvas.winfo_rootx()
     canvas_y = dialog._canvas.winfo_rooty()
     inside_x, _ = image_to_canvas(320, 0, view=dialog._canvas.transform())

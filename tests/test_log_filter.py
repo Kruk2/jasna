@@ -22,6 +22,13 @@ def test_should_include_log_entry_respects_filter_level() -> None:
     assert should_include_log_entry(level="ERROR", filter_level="error")
 
 
+def test_critical_records_pass_every_filter() -> None:
+    assert all(
+        should_include_log_entry(level="CRITICAL", filter_level=filter_level)
+        for filter_level in ("debug", "info", "warning", "error")
+    )
+
+
 def test_runtime_log_level_for_filter_only_enables_debug_on_debug_filter() -> None:
     assert runtime_log_level_for_filter(filter_level="debug") == logging.DEBUG
     assert runtime_log_level_for_filter(filter_level="info") == logging.INFO

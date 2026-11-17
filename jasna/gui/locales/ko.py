@@ -565,7 +565,6 @@ KO = {
         "wizard_title": "시스템 점검",
         "wizard_subtitle": "Jasna에 필요한 항목을 확인하는 중…",
         "wizard_checking": "확인 중…",
-        "wizard_found": "발견: {path}",
         "wizard_not_found": "PATH에서 찾을 수 없음",
         "wizard_all_passed": "✓ 모든 점검을 통과했습니다! 사용할 준비가 되었습니다.",
         "wizard_required_failed": "✕ 필수 점검이 실패했습니다. Jasna를 사용하려면 위의 문제를 해결하세요.",
@@ -682,6 +681,7 @@ KO = {
         "engine_name_rfdetr": "RF-DETR (감지)",
         "engine_name_yolo": "YOLO (감지)",
         "engine_name_basicvsrpp": "BasicVSR++ (복원)",
+        "engine_name_unet_4x": "UNet 4x (업스케일)",
         # About dialog
         "btn_close": "닫기",
 
@@ -708,7 +708,6 @@ KO = {
         "wizard_check_driver": "GPU 드라이버 버전",
         "wizard_check_sysmem": "NVIDIA 메모리 폴백 설정",
         "wizard_not_checked": "확인되지 않음",
-        "wizard_ascii_path_error": "경로에 비ASCII 문자가 포함되어 있습니다: {path}",
         "wizard_not_callable": "호출 불가: {path}",
         "wizard_found_no_major": "{path}을(를) 찾았지만 버전을 읽을 수 없습니다.",
         "wizard_found_bad_major": "{path}에서 버전 {major}을(를) 찾았습니다. Jasna에는 버전 8이 필요합니다.",
@@ -717,7 +716,6 @@ KO = {
         "wizard_gpu_compute_too_low": "Compute capability 7.5 이상 필요 (GPU: {major}.{minor})",
         "wizard_gpu_arch_unsupported": "이 버전의 Jasna는 이 AMD GPU({arch})를 지원하지 않습니다",
         "wizard_gpu_datacenter_unsupported": "Jasna는 A100, H100, B200 같은 데이터센터 GPU({gpu})를 지원하지 않습니다. RTX GPU를 사용하세요",
-        "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "사용 불가",
         "wizard_sysmem_how_to_fix": "해결 방법",

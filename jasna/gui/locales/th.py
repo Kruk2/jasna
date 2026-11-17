@@ -565,7 +565,6 @@ TH = {
         "wizard_title": "ตรวจสอบระบบ",
         "wizard_subtitle": "กำลังตรวจสอบสิ่งที่ Jasna ต้องใช้…",
         "wizard_checking": "กำลังตรวจสอบ…",
-        "wizard_found": "พบ: {path}",
         "wizard_not_found": "ไม่พบใน PATH",
         "wizard_all_passed": "✓ ผ่านทุกรายการ! พร้อมใช้งานแล้ว",
         "wizard_required_failed": "✕ การตรวจสอบที่จำเป็นล้มเหลว แก้ไขปัญหาข้างต้นเพื่อใช้งาน Jasna",
@@ -682,6 +681,7 @@ TH = {
         "engine_name_rfdetr": "RF-DETR (ตรวจจับ)",
         "engine_name_yolo": "YOLO (ตรวจจับ)",
         "engine_name_basicvsrpp": "BasicVSR++ (ฟื้นฟู)",
+        "engine_name_unet_4x": "UNet 4x (อัปสเกล)",
         # About dialog
         "btn_close": "ปิด",
 
@@ -708,7 +708,6 @@ TH = {
         "wizard_check_driver": "เวอร์ชันไดรเวอร์ GPU",
         "wizard_check_sysmem": "การตั้งค่าหน่วยความจำสำรองของ NVIDIA",
         "wizard_not_checked": "ยังไม่ได้ตรวจสอบ",
-        "wizard_ascii_path_error": "เส้นทางมีอักขระที่ไม่ใช่ ASCII: {path}",
         "wizard_not_callable": "เรียกใช้ไม่ได้: {path}",
         "wizard_found_no_major": "พบ {path} แต่อ่านเวอร์ชันไม่ได้",
         "wizard_found_bad_major": "พบเวอร์ชัน {major} ที่ {path} Jasna ต้องใช้เวอร์ชัน 8",
@@ -717,7 +716,6 @@ TH = {
         "wizard_gpu_compute_too_low": "ต้องการ Compute capability 7.5+ (GPU: {major}.{minor})",
         "wizard_gpu_arch_unsupported": "Jasna เวอร์ชันนี้ไม่รองรับ AMD GPU นี้ ({arch})",
         "wizard_gpu_datacenter_unsupported": "Jasna ไม่รองรับ GPU สำหรับดาต้าเซ็นเตอร์ เช่น A100, H100 หรือ B200 ({gpu}) โปรดใช้ GPU RTX",
-        "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "ไม่พร้อมใช้งาน",
         "wizard_sysmem_how_to_fix": "วิธีแก้ไข",

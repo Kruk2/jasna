@@ -1,6 +1,7 @@
 """Shared widget helpers for the settings sections."""
 
 import tkinter as tk
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 import customtkinter as ctk
@@ -16,17 +17,23 @@ def get_tooltip(key: str) -> str:
     return t(f"tip_{key}")
 
 
+def add_info_icon(master, tooltip: str) -> ctk.CTkLabel:
+    """An ⓘ label showing ``tooltip`` on hover; the caller packs it."""
+    icon = ctk.CTkLabel(master, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+    Tooltip(icon, tooltip)
+    return icon
+
+
 def add_setting_label(row, label_key: str, tooltip_key: str | None = None, *, in_card: bool = False) -> None:
     """Pack a setting's name and its ⓘ tooltip icon at the left of ``row``."""
     label = ctk.CTkLabel(row, text=t(label_key), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-    tip = ctk.CTkLabel(row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+    tip = add_info_icon(row, get_tooltip(tooltip_key or label_key))
     if in_card:
         label.pack(side="left", padx=12, pady=8)
         tip.pack(side="left")
     else:
         label.pack(side="left")
         tip.pack(side="left", padx=4)
-    Tooltip(tip, get_tooltip(tooltip_key or label_key))
 
 
 # One slider length and one right-aligned value column keep the rows lined up.
@@ -81,6 +88,49 @@ class ValueOptionMenu(ctk.CTkOptionMenu):
         if label is None:
             label = next(iter(self._value_to_label.values()))
         self.set(label)
+
+
+def option_menu(
+    master, options: dict[str, str], command, *, width: int, background: str = Colors.BG_CARD, **style
+) -> ValueOptionMenu:
+    """A ``ValueOptionMenu`` in the settings look: ``background`` is the card colour on panel rows
+    and the panel colour inside cards."""
+    return ValueOptionMenu(
+        master,
+        options=options,
+        command=command,
+        fg_color=background,
+        button_color=background,
+        button_hover_color=Colors.BORDER_LIGHT,
+        dropdown_fg_color=background,
+        dropdown_hover_color=Colors.PRIMARY,
+        text_color=Colors.TEXT_PRIMARY,
+        width=width,
+        **style,
+    )
+
+
+def set_widgets_enabled(widgets: Iterable, enabled: bool) -> None:
+    state = "normal" if enabled else "disabled"
+    for widget in widgets:
+        widget.configure(state=state)
+
+
+def bind_edits(entry: ctk.CTkEntry, on_edit) -> None:
+    """Call ``on_edit()`` after each key the user types into ``entry``."""
+    entry.bind("<KeyRelease>", lambda _event: on_edit())
+
+
+def set_entry_text(entry: ctk.CTkEntry, text: str) -> None:
+    entry.delete(0, "end")
+    entry.insert(0, text)
+
+
+def parse_int(text: str, fallback: int) -> int:
+    try:
+        return int(text.strip())
+    except ValueError:
+        return fallback
 
 
 def pack_rows(rows: list[tuple[tk.Misc, dict]], hidden: tuple[tk.Misc, ...]) -> None:

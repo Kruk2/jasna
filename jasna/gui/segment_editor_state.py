@@ -52,10 +52,6 @@ class SegmentEditorState:
         self._initial = self._snapshot()
 
     @property
-    def output_segments(self) -> tuple[SegmentRange, ...]:
-        return self.segments
-
-    @property
     def selected_segment(self) -> SegmentRange | None:
         if self.selected_index is None:
             return None
@@ -73,15 +69,15 @@ class SegmentEditorState:
 
     @property
     def dirty(self) -> bool:
-        return self.output_segments != self._initial.segments
+        return self.segments != self._initial.segments
 
     @property
     def selected_duration(self) -> float:
-        return sum(segment.duration for segment in self.output_segments)
+        return sum(segment.duration for segment in self.segments)
 
     @property
     def ltx_duration(self) -> float:
-        return sum(segment.duration for segment in self.output_segments if segment.restoration.model == "ltx")
+        return sum(segment.duration for segment in self.segments if segment.restoration.model == "ltx")
 
     def snap(self, seconds: float) -> float:
         """Clamp a timestamp to the video and snap it to the nearest frame."""
@@ -142,11 +138,6 @@ class SegmentEditorState:
         self.selected_index = self._index_containing(replacement)
         self.clear_marks()
         return SegmentEditResult(replacement, max(0, overlaps))
-
-    def adjust_selected(self, start: float, end: float) -> SegmentEditResult:
-        """Replace the selected range; used by timeline handle dragging."""
-
-        return self.replace_selected(start, end)
 
     def add_many(self, ranges: tuple[SegmentRange, ...]) -> int:
         """Add several ranges as one undoable step; returns how many were new. A range

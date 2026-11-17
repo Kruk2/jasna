@@ -14,6 +14,7 @@ from jasna.gui.queues import replace_pending
 from jasna.media.container_utils import demux_video
 from jasna.media.probe import VideoMetadata, get_video_meta_data, resolve_video_start_pts
 from jasna.media.splice import KeyframeIndex, probe_keyframes
+from jasna.vr180 import VrModeResolution, resolve_vr_mode
 
 
 def _decode_video(container, stream) -> Iterator[av.VideoFrame]:
@@ -23,6 +24,7 @@ def _decode_video(container, stream) -> Iterator[av.VideoFrame]:
 @dataclass(frozen=True)
 class PreviewLoaded:
     metadata: VideoMetadata
+    vr_resolution: VrModeResolution
 
 
 @dataclass(frozen=True)
@@ -42,7 +44,6 @@ class PreviewFrame:
 class PreviewFullFrame:
     seconds: float
     image: Image.Image
-    generation: int
 
 
 @dataclass(frozen=True)
@@ -73,17 +74,12 @@ class _Previous:
 
 
 @dataclass(frozen=True)
-class _GrabFull:
-    generation: int
-
-
-@dataclass(frozen=True)
 class _Stop:
     pass
 
 
 PreviewEvent = PreviewLoaded | PreviewKeyframes | PreviewFrame | PreviewFullFrame | PreviewEnded | PreviewFailed
-_Command = _Seek | _Next | _Previous | _GrabFull | _Stop
+_Command = _Seek | _Next | _Previous | _Stop
 
 
 class SegmentPreviewWorker:
@@ -103,6 +99,7 @@ class SegmentPreviewWorker:
         self.events: queue.Queue[PreviewEvent] = queue.Queue()
         self._commands: queue.Queue[_Command] = queue.Queue(maxsize=1)
         self._closed = threading.Event()
+        self._grab_requested = threading.Event()
         self._generation = 0
         self._thread = threading.Thread(
             target=self._run,
@@ -129,11 +126,10 @@ class SegmentPreviewWorker:
         self._replace_command(_Previous(max(0.0, float(seconds)), self._generation))
         return self._generation
 
-    def grab_full(self) -> int:
-        """Emit the currently shown frame at native resolution."""
-
-        self._replace_command(_GrabFull(self._generation))
-        return self._generation
+    def grab_full(self) -> None:
+        """Emit the shown frame at native resolution, once there is one; seeks asked meanwhile
+        still run first."""
+        self._grab_requested.set()
 
     def close(self) -> None:
         if self._closed.is_set():
@@ -151,14 +147,9 @@ class SegmentPreviewWorker:
             metadata = get_video_meta_data(str(self.path))
             if float(metadata.duration) <= 0:
                 raise ValueError(f"Could not determine duration of {self.path.name}")
-            from jasna.vr180 import resolve_vr_mode
-
-            self._stereo = resolve_vr_mode(
-                self.vr_mode,
-                metadata,
-                self.path,
-            ).resolved
-            self.events.put(PreviewLoaded(metadata))
+            vr_resolution = resolve_vr_mode(self.vr_mode, metadata, self.path)
+            self._stereo = vr_resolution.resolved
+            self.events.put(PreviewLoaded(metadata, vr_resolution))
             threading.Thread(
                 target=self._probe_keyframes,
                 args=(metadata,),
@@ -173,22 +164,20 @@ class SegmentPreviewWorker:
                 decoded: Iterator[av.VideoFrame] | None = None
                 last_frame: av.VideoFrame | None = None
                 while not self._closed.is_set():
+                    if last_frame is not None and self._commands.empty() and self._grab_requested.is_set():
+                        self._grab_requested.clear()
+                        self.events.put(
+                            PreviewFullFrame(
+                                self._frame_seconds(last_frame, stream, start_pts),
+                                self._to_full_image(last_frame),
+                            )
+                        )
                     try:
                         command = self._commands.get(timeout=0.1)
                     except queue.Empty:
                         continue
                     if isinstance(command, _Stop):
                         break
-                    if isinstance(command, _GrabFull):
-                        if last_frame is not None:
-                            self.events.put(
-                                PreviewFullFrame(
-                                    self._frame_seconds(last_frame, stream, start_pts),
-                                    self._to_full_image(last_frame),
-                                    command.generation,
-                                )
-                            )
-                        continue
                     if isinstance(command, _Seek):
                         frame, decoded = self._seek(
                             container,

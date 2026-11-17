@@ -147,6 +147,24 @@ def test_grab_full_returns_native_resolution_of_shown_frame(tmp_path) -> None:
         worker.close()
 
 
+def test_grab_full_asked_before_a_seek_is_answered_with_the_sought_frame(tmp_path) -> None:
+    source = tmp_path / "preview.mp4"
+    _make_preview_source(source)
+    worker = SegmentPreviewWorker(source, max_size=(80, 80))
+    worker.start()
+
+    try:
+        _next_event(worker, PreviewLoaded)
+        worker.grab_full()
+        worker.seek(0.5)
+
+        full = _next_event(worker, PreviewFullFrame)
+        assert (full.image.width, full.image.height) == (160, 90)
+        assert full.seconds == 0.5
+    finally:
+        worker.close()
+
+
 @pytest.mark.parametrize(("vr_mode", "size"), [("sbs", (70, 80)), ("tb", (80, 22))])
 def test_preview_worker_shows_the_left_eye_of_explicit_vr(tmp_path, vr_mode, size) -> None:
     source = tmp_path / "vr-preview.mp4"

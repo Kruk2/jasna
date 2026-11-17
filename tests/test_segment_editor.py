@@ -20,10 +20,11 @@ from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.mosaic_scan import MosaicScanResult, ScanCompleted
 from jasna.gui.segment_editor import SegmentEditor
 from jasna.gui.restoration_preview import RestorationClip, RestorationFrame, RestoredClipFrame
-from jasna.ltx.restore import Cancelled
+from jasna.ltx.inference import Cancelled
 from jasna.media.splice import KeyframeIndex
 from jasna.segments import SegmentRange, SegmentRestoration
 from jasna.session_config import LTX_DEFAULT_MODEL
+from jasna.vr180 import resolve_vr_mode
 from factories import shown_message, shown_pixel
 
 
@@ -81,6 +82,7 @@ def _build_editor_with_ui(root, monkeypatch, *,
     settings: AppSettings = AppSettings(),
     job: JobItem | None = None,
     ltx_unavailable_reason: str | None = None,
+    set_preview_gpu_busy=None,
 ) -> SegmentEditor:
     worker = MagicMock()
     worker.events = queue.Queue()
@@ -93,11 +95,13 @@ def _build_editor_with_ui(root, monkeypatch, *,
         job or JobItem(path),
         lambda: settings,
         lambda: False,
-        MagicMock(),
+        set_preview_gpu_busy or MagicMock(),
         ltx_unavailable_reason,
         MagicMock(),
+        MagicMock(),
     )
-    worker.events.put(segment_editor.PreviewLoaded(metadata or _fake_metadata()))
+    metadata = metadata or _fake_metadata()
+    worker.events.put(segment_editor.PreviewLoaded(metadata, resolve_vr_mode(settings.vr_mode, metadata, path)))
     editor._poll_workers()
     root.update()
     assert editor._state is not None
@@ -152,6 +156,48 @@ def test_restored_playback_continues_with_the_next_window(restoring_editor) -> N
 
     assert worker.request.call_args.args[0] == pytest.approx(2.0 + 1 / 30)
     assert worker.request.call_args.kwargs["playback"] is True
+
+
+def test_play_right_after_a_seed_render_took_the_gpu_restarts_restored_playback(restoring_editor) -> None:
+    editor, worker = restoring_editor
+    editor._claim_gpu_for_seed()
+    editor._seek(2.0)
+
+    editor._toggle_play()
+
+    assert worker.request.call_args.args[0] == 2.0
+    assert worker.request.call_args.kwargs["playback"] is True
+
+
+def test_a_closed_restoration_worker_leaves_the_gpu_claimed_by_a_seed_render(build_editor, monkeypatch) -> None:
+    gpu_owners: set[object] = set()
+
+    def set_preview_gpu_busy(owner, busy):
+        (gpu_owners.add if busy else gpu_owners.discard)(owner)
+
+    stopped_callbacks = []
+    monkeypatch.setattr(
+        segment_editor,
+        "RestorationPreviewWorker",
+        lambda path, metadata, *, on_stopped: stopped_callbacks.append(on_stopped) or MagicMock(),
+    )
+    editor = build_editor(set_preview_gpu_busy=set_preview_gpu_busy)
+    editor._toggle_restoration_preview()
+    editor._claim_gpu_for_seed()
+
+    stopped_callbacks[0]()
+
+    assert gpu_owners
+
+
+def test_app_preview_gpu_stays_busy_until_every_owner_gave_it_back(jasna_app) -> None:
+    jasna_app._set_preview_gpu_busy("restore preview", True)
+    jasna_app._set_preview_gpu_busy("seed render", True)
+
+    jasna_app._set_preview_gpu_busy("restore preview", False)
+    assert jasna_app._preview_gpu_busy
+    jasna_app._set_preview_gpu_busy("seed render", False)
+    assert not jasna_app._preview_gpu_busy
 
 
 def test_preview_surface_selects_original_or_restored_from_toggle_state(build_editor) -> None:
@@ -380,7 +426,6 @@ def test_scan_completed_populates_detections_and_add_button(build_editor) -> Non
         masks=[None] * 4,
         sizes=(0.0,) * 4,
         stride=1.0,
-        duration=60.0,
         completed_until=3.0,
     )
     editor._scan_panel._threshold = 0.5
@@ -420,7 +465,6 @@ def test_scan_ltx_auto_split_adds_big_mosaics_as_ltx(build_editor) -> None:
         masks=torch.zeros((4, 90, 160), dtype=torch.uint8),
         sizes=(0.0, 0.05, 0.3, 0.0),
         stride=1.0,
-        duration=60.0,
         completed_until=3.0,
     )
     panel = editor._scan_panel
@@ -453,7 +497,6 @@ def test_scan_ltx_auto_split_is_hidden_when_ltx_cannot_run(build_editor) -> None
                 masks=torch.zeros((2, 90, 160), dtype=torch.uint8),
                 sizes=(0.0,) * 2,
                 stride=1.0,
-                duration=60.0,
                 completed_until=1.0,
             ),
             stopped=False,
@@ -482,7 +525,6 @@ def test_scan_finishes_without_ltx_split_when_ltx_cannot_run(build_editor) -> No
                 masks=torch.zeros((4, 90, 160), dtype=torch.uint8),
                 sizes=(0.0, 0.05, 0.3, 0.0),
                 stride=1.0,
-                duration=60.0,
                 completed_until=3.0,
             ),
             stopped=False,
@@ -506,7 +548,6 @@ def test_scan_threshold_updates_ranges_and_add_button(build_editor) -> None:
         masks=torch.zeros((3, 90, 160), dtype=torch.uint8),
         sizes=(0.0,) * 3,
         stride=1.0,
-        duration=60.0,
         completed_until=2.0,
     )
     editor._scan_panel._threshold = 0.5
@@ -535,7 +576,6 @@ def test_scan_overlay_respects_dynamic_threshold(build_editor) -> None:
         masks=torch.ones((1, 90, 160), dtype=torch.uint8),
         sizes=(0.0,) * 1,
         stride=1.0,
-        duration=10.0,
         completed_until=1.0,
     )
     image = Image.new("RGB", (160, 90), "black")
@@ -778,6 +818,34 @@ def test_restore_preview_renders_an_ltx_range_then_lets_the_user_compare_and_pic
     assert worker.closed
 
 
+def test_playback_over_a_rendered_ltx_range_shows_each_seed_frame(build_editor, tk_root, monkeypatch, tmp_path) -> None:
+    _FakeSeedWorker.instances = []
+    monkeypatch.setattr(segment_seed_panel, "LtxSeedPreviewWorker", _FakeSeedWorker)
+    monkeypatch.setattr(segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: 60.0)
+    job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
+    editor = build_editor(job=job)
+    editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+    editor._seek(1.0)
+    editor._toggle_restoration_preview()
+    frames = []
+    for seconds, color in ((1.0, "blue"), (1.5, "green")):
+        path = tmp_path / f"{seconds}.jpg"
+        Image.new("RGB", (160, 90), color).save(path)
+        frames.append(SeedFrame(seconds, path))
+    _FakeSeedWorker.instances[0].events.put(SeedReady(5, tuple(frames), 1))
+    editor._poll_workers()
+    tk_root.update()
+
+    editor._toggle_play()
+    editor._preview_worker.events.put(
+        segment_editor.PreviewFrame(1.5, Image.new("RGB", (160, 90), "red"), editor._preview_generation)
+    )
+    editor._poll_workers()
+
+    red, green, blue = shown_pixel(editor._preview, 0, 0)
+    assert green > 100 and red < 100 and blue < 100
+
+
 @pytest.mark.parametrize("answer", [False, True])
 def test_restore_preview_asks_before_a_long_ltx_render(build_editor, monkeypatch, tmp_path, answer) -> None:
     _FakeSeedWorker.instances = []
@@ -824,13 +892,14 @@ def test_closing_the_app_closes_the_segment_editor_and_its_seed_frames(jasna_app
     )
     _BlockingSeedRenderer.started.clear()
     panel = jasna_app._queue_panel
-    panel.set_segment_editor_context(AppSettings, lambda: False, lambda _busy: None, lambda: None)
+    panel.set_segment_editor_context(AppSettings, lambda: False, lambda _owner, _busy: None, lambda: None)
     work_dir = tmp_path / "videos"
     work_dir.mkdir()
     job = JobItem(work_dir / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     panel._edit_segments(job)
     editor = panel._segment_editor
-    preview.events.put(segment_editor.PreviewLoaded(_fake_metadata()))
+    metadata = _fake_metadata()
+    preview.events.put(segment_editor.PreviewLoaded(metadata, resolve_vr_mode("auto", metadata, job.path)))
     editor._poll_workers()
     editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
     editor._seek(1.5)
@@ -1016,6 +1085,22 @@ def test_ltx_render_button_enables_once_the_keyframes_arrive(build_editor, monke
     assert editor._seeds._render_btn.cget("state") == "normal"
 
 
+def test_ltx_render_estimate_is_worked_out_once_per_range(build_editor, monkeypatch, tmp_path) -> None:
+    estimated: list[SegmentRange] = []
+    monkeypatch.setattr(
+        segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: estimated.append(segment) or 60.0
+    )
+    job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
+    editor = build_editor(job=job)
+    editor._seek(1.5)
+    editor._restore_active = True
+
+    for _ in range(3):
+        editor._request_restoration_preview()
+
+    assert estimated == [job.segments[0]]
+
+
 def test_scan_says_it_loads_the_detection_model(build_editor, monkeypatch) -> None:
     worker = MagicMock(events=queue.Queue())
     monkeypatch.setattr(segment_scan_panel, "MosaicScanWorker", MagicMock(return_value=worker))
@@ -1044,7 +1129,6 @@ def test_scan_overlay_tags_each_mosaic_with_its_size(build_editor, auto, percent
         masks=mask,
         sizes=(0.5,),
         stride=1.0,
-        duration=10.0,
         completed_until=1.0,
     )
 
