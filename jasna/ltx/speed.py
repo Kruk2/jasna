@@ -159,7 +159,7 @@ def segment_estimate_seconds(
     from this GPU's learned rates when the profile has them, else 30 s plus 5x the range
     (an RTX 5090 run)."""
     from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
-    from jasna.ltx.plan import window_starts
+    from jasna.ltx.windows import window_starts
 
     starts = window_starts(frames, window_hop)
     window_frames = sum(min(WINDOW_FRAMES, frames - start) for start in starts)

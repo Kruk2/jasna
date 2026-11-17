@@ -82,7 +82,7 @@ def test_trial_session_uses_placeholders_without_files_or_license():
         patch("jasna.engine_compiler.ensure_engines_compiled"),
         patch("jasna.ltx.model_files.LtxModelFiles.from_dir", side_effect=AssertionError("reads model files")),
     ):
-        files = _ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
+        files = _ltx_model_files(config, torch.device("cuda:0"))
     assert files == LtxModelFiles.placeholder("undistilled", fast=False)
 
 

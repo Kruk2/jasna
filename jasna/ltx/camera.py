@@ -22,6 +22,7 @@ ZOOM_PER_WINDOW = 1.25
 ZOOM_LOG_STEP = math.log(ZOOM_PER_WINDOW) / (WINDOW_FRAMES - 1)
 LADA_BORDER_RATIO = 0.06
 LADA_MIN_BORDER = 20
+FEATHER_FRACTION = 0.028
 
 
 @dataclass(frozen=True)
@@ -214,3 +215,7 @@ def track_camera(boxes: Sequence[Box], *, frame_w: int, frame_h: int, feather: i
     if all(_edge_gap(crop.crop_box, box, frame_w, frame_h) >= feather for crop, box in zip(tight, boxes)):
         return tight
     return follow_camera(boxes, sides + 2 * feather, frame_w=frame_w, frame_h=frame_h, margin=feather)
+
+
+def feather_pixels(frame_h: int) -> int:
+    return max(1, int(round(FEATHER_FRACTION * frame_h)))

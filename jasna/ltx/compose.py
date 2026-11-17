@@ -21,7 +21,7 @@ import torch.nn.functional as F
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.ltx.camera import CropFrame
-from jasna.ltx.plan import Polygon
+from jasna.ltx.tracks import Polygon
 from jasna.media.cuda_kernel import Kernel, grid_size, has_precompiled_kernels
 from jasna.tracking.blending import dilate_ellipse, ellipse_row_reach
 from jasna.vr_projection import RegionProjector

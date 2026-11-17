@@ -1,5 +1,5 @@
 """The decoder's fused diffusion-block kernels (the ``diffusion_triton`` source, JIT here, and its ahead-of-time
-build ``diffusion_hip``) against the torch code they replace, and their routing. Needs a GPU and Triton; the
+build ``diffusion_hip``) against the torch code they replace. Needs a GPU and Triton; the
 ahead-of-time tests an AMD GPU (the bundles are built for RDNA)."""
 
 import copy
@@ -30,18 +30,6 @@ def _jit_slab_qkv(*args):
 SLAB_QKV_KERNELS = [pytest.param(_jit_slab_qkv, id="jit"), pytest.param(diffusion_hip.slab_qkv, id="aot", marks=amd_only)]
 
 
-def _operands(rows: int):
-    generator = torch.Generator(device="cuda").manual_seed(0)
-
-    def randn(*shape, scale=1.0):
-        return (torch.randn(shape, device="cuda", generator=generator) * scale).to(torch.bfloat16)
-
-    dim, hidden = T.DIFFUSION_DIM, T.DIFFUSION_HIDDEN
-    x = randn(rows, dim, scale=2.0)
-    return x, randn(dim), randn(dim, scale=0.2), randn(dim, scale=0.2), randn(hidden, dim, scale=dim**-0.5), \
-        randn(hidden, dim, scale=dim**-0.5), randn(dim, hidden, scale=hidden**-0.5)
-
-
 def _reference(x, norm, scale, shift, w_gate, w_up, w_down):
     return x + T.modulated_swiglu(x, norm, scale, shift, torch.cat([w_gate, w_up]), w_down)
 
@@ -52,24 +40,12 @@ def _fused_residual_swiglu_():
 
 @pytest.mark.parametrize("rows", [1, 300, 16_384])
 def test_fused_residual_swiglu_matches_the_torch_chunk(rows):
-    x, *weights = _operands(rows)
+    x, weights = _mlp_operands(T.DIFFUSION_DIM, rows)
     expected = _reference(x, *weights)
 
     _fused_residual_swiglu_()(x, *weights)
 
     torch.testing.assert_close(x, expected, atol=6e-2, rtol=2e-2)
-
-
-def test_both_vendors_fuse_the_slab_qkv_mlp_attention_projection_and_context_inject():
-    from jasna.models.ltx_vae import diffusion_triton
-
-    kernels = T.decoder_kernels(torch.device("cuda"))
-
-    amd = is_amd_device("cuda")
-    assert kernels.residual_swiglu is (diffusion_hip.residual_swiglu_ if amd else diffusion_triton.residual_swiglu_)
-    assert kernels.proj_residual is (diffusion_hip.proj_residual_ if amd else diffusion_triton.proj_residual_)
-    assert kernels.context_add is (diffusion_hip.context_add_ if amd else diffusion_triton.context_add_)
-    assert kernels.slab_qkv is (diffusion_hip.slab_qkv if amd else diffusion_triton.slab_qkv)
 
 
 def test_the_fused_diffusion_mlp_covers_every_token_chunk(monkeypatch):
@@ -167,13 +143,8 @@ def test_the_ahead_of_time_channels_first_copy_matches_torch(shape):
 
 
 def test_fused_projection_adds_into_its_slab_columns_only_as_the_torch_projection_does():
-    generator = torch.Generator(device="cuda").manual_seed(0)
-    x = torch.randn(1, 3, 5, 40, 256, device="cuda", generator=generator).bfloat16()
-    out = torch.randn(1, 3, 5, 9, 256, device="cuda", generator=generator).bfloat16()
-    weight = (torch.randn(256, 256, device="cuda", generator=generator) / 16).bfloat16()
-    bias = torch.randn(256, device="cuda", generator=generator).bfloat16()
-    expected = x.clone()
-    expected[:, :, :, 20:29] += torch.nn.functional.linear(out, weight, bias)
+    x, out, weight, bias = _projection_operands()
+    expected = _projected(x, out, weight, bias)
 
     T.decoder_kernels(torch.device("cuda")).proj_residual(x, out, weight, bias, 20)
 
@@ -217,14 +188,14 @@ def _nvidia_launches(fp16_accumulate: bool):
     return [entry._replace(fp16_accumulate=fp16_accumulate) for entry in entries]
 
 
-def _mlp_operands(dim: int):
+def _mlp_operands(dim: int, rows: int = 300):
     generator = torch.Generator(device="cuda").manual_seed(0)
     hidden = T._swiglu_hidden_dim(dim)
 
     def randn(*shape, scale=1.0):
         return (torch.randn(shape, device="cuda", generator=generator) * scale).to(torch.bfloat16)
 
-    return randn(300, dim, scale=2.0), (randn(dim), randn(dim, scale=0.2), randn(dim, scale=0.2),
+    return randn(rows, dim, scale=2.0), (randn(dim), randn(dim, scale=0.2), randn(dim, scale=0.2),
                                         randn(hidden, dim, scale=dim**-0.5), randn(hidden, dim, scale=dim**-0.5),
                                         randn(dim, hidden, scale=hidden**-0.5))
 

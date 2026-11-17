@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from factories import ReadObserver
+from factories import ReadObserver, block_store
 from jasna.ltx.blocks import BlockStore
 
 needs_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
@@ -23,7 +23,7 @@ def _blocks(count: int) -> list[dict[str, torch.Tensor]]:
 @pytest.mark.parametrize("resident", [0, 2, 5])
 def test_streamed_and_resident_blocks_hand_out_the_same_weights(resident):
     blocks = _blocks(5)
-    store = BlockStore([dict(b) for b in blocks], torch.device("cuda"), resident=resident)
+    store = block_store(blocks, torch.device("cuda"), resident=resident)
     for _ in range(3):
         for index, expected in enumerate(blocks):
             weights = store.acquire(index)
@@ -37,15 +37,8 @@ def test_streamed_and_resident_blocks_hand_out_the_same_weights(resident):
 @pytest.mark.parametrize("resident, warns", [(5, False), (3, True)])
 def test_streaming_blocks_from_ram_is_a_warning(resident, warns, caplog):
     with caplog.at_level("WARNING", logger="jasna.ltx.blocks"):
-        BlockStore(_blocks(5), torch.device("cuda"), resident=resident).close()
+        block_store(_blocks(5), torch.device("cuda"), resident=resident).close()
     assert any("2 of 5 transformer blocks stream from RAM" in r.getMessage() for r in caplog.records) is warns
-
-
-@needs_cuda
-def test_packed_blocks_are_released_from_the_input():
-    blocks = _blocks(3)
-    BlockStore(blocks, torch.device("cuda"), resident=1).close()
-    assert blocks == [{}, {}, {}]
 
 
 def test_file_order_groups_fill_a_stage_and_read_cpu_tensors_in_place():
@@ -89,7 +82,7 @@ def test_blocks_are_read_in_file_order(tmp_path):
 def test_streamed_blocks_are_page_locked_without_power_of_two_rounding():
     torch.cuda.init()
     before = torch.cuda.memory.host_memory_stats().get("allocated_bytes.current", 0)
-    store = BlockStore(_blocks(4), torch.device("cuda"), resident=1)
+    store = block_store(_blocks(4), torch.device("cuda"), resident=1)
     assert all(buffer.is_pinned() for buffer in store._host)
     assert torch.cuda.memory.host_memory_stats().get("allocated_bytes.current", 0) == before
     store.close()
@@ -114,7 +107,7 @@ def test_refused_page_locking_keeps_the_rest_in_regular_ram_without_unlocking(mo
     monkeypatch.setattr(blocks_module, "_unregister", unlocking_fails_at_the_windows_cap)
     blocks = _blocks(6)
     with caplog.at_level("WARNING", logger="jasna.ltx.blocks"):
-        store = BlockStore([dict(b) for b in blocks], torch.device("cuda"), resident=0)
+        store = block_store(blocks, torch.device("cuda"), resident=0)
     assert [buffer.is_pinned() for buffer in store._host] == [True, True, True, False, False, False]
     assert any("(CUDA error 2); 3 of 6 weight buffers use regular RAM" in r.getMessage() for r in caplog.records)
     for _ in range(2):
@@ -133,7 +126,7 @@ def test_page_locking_stops_at_the_budget_before_the_system_refuses(monkeypatch,
     import jasna.ltx.blocks as blocks_module
 
     blocks = _blocks(4)
-    block_bytes = BlockStore([dict(b) for b in blocks[:1]], torch.device("cuda"), resident=0)
+    block_bytes = block_store(blocks[:1], torch.device("cuda"), resident=0)
     one = block_bytes._host[0].nbytes
     block_bytes.close()
     registered = []
@@ -141,7 +134,7 @@ def test_page_locking_stops_at_the_budget_before_the_system_refuses(monkeypatch,
     monkeypatch.setattr(blocks_module, "_page_lock_budget", lambda: 2 * one + one // 2)
     monkeypatch.setattr(blocks_module, "_register", lambda buffer: registered.append(buffer) or register(buffer))
     with caplog.at_level("WARNING", logger="jasna.ltx.blocks"):
-        store = BlockStore([dict(b) for b in blocks], torch.device("cuda"), resident=0)
+        store = block_store(blocks, torch.device("cuda"), resident=0)
     assert len(registered) == 2
     assert [buffer.is_pinned() for buffer in store._host] == [True, True, False, False]
     assert any("about half the RAM); 2 of 4 weight buffers" in r.getMessage() for r in caplog.records)
@@ -177,5 +170,5 @@ def test_failed_load_reports_its_own_error_when_cleanup_also_fails(monkeypatch):
     monkeypatch.setattr(blocks_module, "_pin_while_allowed", refuse)
     monkeypatch.setattr(BlockStore, "close", cleanup_fails)
     with pytest.raises(RuntimeError, match="cuMemHostRegister failed") as raised:
-        BlockStore(_blocks(2), torch.device("cuda"), resident=0)
+        block_store(_blocks(2), torch.device("cuda"), resident=0)
     assert "out of memory" in str(raised.value.__cause__)

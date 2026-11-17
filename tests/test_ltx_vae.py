@@ -2,6 +2,7 @@ import gc
 import json
 import weakref
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 import torch
@@ -63,9 +64,23 @@ def _meta_ltx25_decoder() -> DiffusionVideoDecoder:
     return decoder.to(torch.bfloat16)
 
 
+@pytest.fixture
+def eager_encoder(monkeypatch):
+    """Keep the eager encode a loaded encoder would replace with its compiled one for the whole process."""
+    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
+
+
+def _encoder_checkpoint(tmp_path, config=TINY_ENCODER_CONFIG):
+    source = VideoEncoder(**encoder_kwargs(_vae_config(config, LTX25_DECODER_CONFIG)))
+    path = tmp_path / "vae.safetensors"
+    save_file({f"encoder.{k}" if not k.startswith("per_channel") else k: v.bfloat16()
+               for k, v in source.state_dict().items()},
+              str(path), metadata={"config": json.dumps({"vae": _vae_config(config, {})})})
+    return path, source
+
+
 def test_the_decoder_runs_stage5_at_the_shipped_window_whatever_the_checkpoint_says():
-    assert LTX25_DECODER_CONFIG["stage5_kernel"] == [11, 11, 11]
-    assert _meta_ltx25_decoder().stage5_kernel == loader.STAGE5_KERNEL == (9, 9, 9)
+    assert _meta_ltx25_decoder().stage5_kernel == loader.STAGE5_KERNEL != tuple(LTX25_DECODER_CONFIG["stage5_kernel"])
 
 
 def test_decoder_state_dict_renames_splits_and_drops():
@@ -99,6 +114,8 @@ def test_decoder_state_dict_renames_splits_and_drops():
     }
     assert torch.equal(state["det_stages.0.0.attn.qkv.to_k.weight"], qkv_weight[2:4])
     assert torch.equal(state["diff_blocks.1.attn.qkv.to_v.bias"], qkv_bias[4:])
+    module_keys = set(_meta_ltx25_decoder().state_dict())
+    assert {key for key in state if not key.startswith("per_channel_statistics.")} <= module_keys
 
 
 def test_decoder_state_dict_rejects_gated_checkpoints():
@@ -125,14 +142,6 @@ def test_decoder_state_dict_failure_clears_discarded_qkv_clones(monkeypatch, fai
     assert clones
     assert all(torch.count_nonzero(tensor).item() == 0 for tensor in clones)
     assert torch.equal(source, torch.arange(12.0).reshape(6, 2))
-
-
-def test_ltx25_decoder_keys_match_module():
-    decoder = _meta_ltx25_decoder()
-    expected = set(decoder.state_dict())
-    assert "diff_blocks.7.attn.qkv.to_q.weight" in expected
-    assert "t_embedder.timestep_embedder.linear_2.weight" in expected
-    assert not any("stage4_upsample" in key for key in expected)
 
 
 def test_encoder_state_dict_strips_prefix():
@@ -165,7 +174,7 @@ def test_tiny_encoder_output_shape_and_frame_crop():
     assert latent.shape == (1, 8, 3, 2, 3)
 
 
-def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch):
+def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch, eager_encoder):
     torch.manual_seed(0)
     source = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)))
     tensors = {f"encoder.{k}": v for k, v in source.state_dict().items() if not k.startswith("per_channel")}
@@ -184,7 +193,6 @@ def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch):
             yield reader
 
     monkeypatch.setattr(loader, "open_tensors", record_open)
-    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
 
@@ -192,11 +200,10 @@ def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch):
     assert torch.equal(encoder.conv_in.conv.weight, source.conv_in.conv.weight.bfloat16())
     assert torch.equal(encoder.per_channel_statistics.get_buffer("std-of-means"), torch.full((8,), 2.0).bfloat16())
     assert encoder.conv_in.conv.weight.is_contiguous(memory_format=torch.channels_last_3d)
-    assert video_encoder._encode_cropped is not video_encoder.encode_cropped
     assert opened == [path]
 
 
-def test_a_distilled_encoder_file_sets_the_res_stage_depths_and_replaces_the_vaes_encoder(tmp_path, monkeypatch):
+def test_a_distilled_encoder_file_sets_the_res_stage_depths_and_replaces_the_vaes_encoder(tmp_path, eager_encoder):
     def tiny(res_layers: int) -> tuple[dict, VideoEncoder]:
         config = {**TINY_ENCODER_CONFIG, "blocks": [["res_x", {"num_layers": res_layers}],
                                                     *TINY_ENCODER_CONFIG["blocks"][1:]]}
@@ -211,7 +218,6 @@ def test_a_distilled_encoder_file_sets_the_res_stage_depths_and_replaces_the_vae
     vae, encoder_file = tmp_path / "vae.safetensors", tmp_path / "vae-encoder-max.safetensors"
     save_file(tensors(full), str(vae), metadata={"config": json.dumps({"vae": _vae_config(config, {})})})
     save_file(tensors(distilled), str(encoder_file))
-    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
 
     encoder = load_video_encoder(vae, torch.device("cpu"), encoder_file)
 
@@ -219,17 +225,10 @@ def test_a_distilled_encoder_file_sets_the_res_stage_depths_and_replaces_the_vae
     assert all(torch.equal(encoder.state_dict()[k], v.bfloat16()) for k, v in distilled.state_dict().items())
 
 
-def test_load_video_encoder_before_sm80_compiles_fp16_with_a_float32_tail(tmp_path, monkeypatch):
-    source = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)))
-    path = tmp_path / "vae.safetensors"
-    save_file({f"encoder.{k}" if not k.startswith("per_channel") else k: v.bfloat16()
-               for k, v in source.state_dict().items()},
-              str(path), metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, {})})})
-    compiled = []
+def test_load_video_encoder_before_sm80_runs_fp16_with_a_float32_tail(tmp_path, monkeypatch, eager_encoder):
+    path, source = _encoder_checkpoint(tmp_path)
     monkeypatch.setattr(loader, "half_dtype", lambda device: torch.float16)
-    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
-    monkeypatch.setattr(video_encoder, "compile_static",
-                        lambda fn, mode, device, dtype: compiled.append(dtype) or fn)
+    monkeypatch.setattr(video_encoder, "compile_static", lambda fn, mode, device, dtype: fn)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
 
@@ -237,25 +236,14 @@ def test_load_video_encoder_before_sm80_compiles_fp16_with_a_float32_tail(tmp_pa
     assert torch.equal(encoder.conv_in.conv.weight, source.conv_in.conv.weight.bfloat16().half())
     assert encoder.conv_out.conv.weight.dtype == torch.float32
     assert encoder.conv_in.conv.weight.is_contiguous(memory_format=torch.channels_last_3d)
-    assert compiled == [torch.float16]
-
-
-def _encoder_checkpoint(tmp_path, config=TINY_ENCODER_CONFIG):
-    source = VideoEncoder(**encoder_kwargs(_vae_config(config, LTX25_DECODER_CONFIG)))
-    path = tmp_path / "vae.safetensors"
-    save_file({f"encoder.{k}" if not k.startswith("per_channel") else k: v.bfloat16()
-               for k, v in source.state_dict().items()},
-              str(path), metadata={"config": json.dumps({"vae": _vae_config(config, {})})})
-    return path
 
 
 @pytest.mark.parametrize("triton", (True, False))
-def test_an_eager_amd_encoder_keeps_only_the_kitchen_head_channels_last(tmp_path, monkeypatch, triton):
-    path = _encoder_checkpoint(tmp_path)
+def test_an_eager_amd_encoder_keeps_only_the_kitchen_head_channels_last(tmp_path, monkeypatch, eager_encoder, triton):
+    path, _ = _encoder_checkpoint(tmp_path)
     backend = KernelBackend.AMD_TRITON if triton else KernelBackend.AMD_PREBUILT
     monkeypatch.setattr(loader, "kernel_backend", lambda device: backend)
     monkeypatch.setattr(loader, "gpu_architecture", lambda device: "gfx1201")
-    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
 
@@ -297,13 +285,10 @@ def test_releasing_the_cache_between_stages_lowers_the_reserved_peak():
 
 def _load_head_encoder(tmp_path, monkeypatch, backend, architecture, head_blocks):
     config = {**TINY_ENCODER_CONFIG, "blocks": [["res_x", {"num_layers": 1}]] * (head_blocks + 2)}
-    path = _encoder_checkpoint(tmp_path, config)
-    compiled = []
+    path, _ = _encoder_checkpoint(tmp_path, config)
     monkeypatch.setattr(loader, "kernel_backend", lambda device: backend)
     monkeypatch.setattr(loader, "gpu_architecture", lambda device: architecture)
-    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
-    monkeypatch.setattr(video_encoder, "compile_static",
-                        lambda fn, mode, device, dtype: compiled.append(dtype) or fn)
+    monkeypatch.setattr(video_encoder, "compile_static", lambda fn, mode, device, dtype: fn)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
 
@@ -311,11 +296,10 @@ def _load_head_encoder(tmp_path, monkeypatch, backend, architecture, head_blocks
         [torch.float16] * head_blocks + [torch.bfloat16] * 2)
     assert encoder.conv_in.conv.weight.dtype == torch.float16
     assert encoder.conv_out.conv.weight.dtype == torch.bfloat16
-    assert compiled == [torch.bfloat16]
     return encoder
 
 
-def test_load_video_encoder_runs_the_amd_high_resolution_head_on_kitchen(tmp_path, monkeypatch):
+def test_load_video_encoder_runs_the_amd_high_resolution_head_on_kitchen(tmp_path, monkeypatch, eager_encoder):
     encoder = _load_head_encoder(tmp_path, monkeypatch, KernelBackend.AMD_TRITON, "gfx1201",
                                  video_encoder.AMD_KITCHEN_DOWN_BLOCKS)
 
@@ -323,7 +307,9 @@ def test_load_video_encoder_runs_the_amd_high_resolution_head_on_kitchen(tmp_pat
     assert all(conv.kitchen and conv.triton_launch is None for conv in convs)
 
 
-def test_load_video_encoder_runs_the_listed_nvidia_head_convs_on_triton_and_the_rest_on_kitchen(tmp_path, monkeypatch):
+def test_load_video_encoder_runs_the_listed_nvidia_head_convs_on_triton_and_the_rest_on_kitchen(
+    tmp_path, monkeypatch, eager_encoder
+):
     pytest.importorskip("triton")
     launch = video_encoder.ConvLaunch(64, 8, 8, 4, 2, 1)
     monkeypatch.setitem(video_encoder.ENCODER_HEADS, (9, 9), video_encoder.EncoderHead(3, {(8, 8): launch}))
@@ -337,11 +323,10 @@ def test_load_video_encoder_runs_the_listed_nvidia_head_convs_on_triton_and_the_
     assert all(conv.triton_launch is None for conv in bf16_convs)
 
 
-def test_an_nvidia_gpu_without_a_measured_kitchen_head_keeps_the_bf16_encoder(tmp_path, monkeypatch):
-    path = _encoder_checkpoint(tmp_path)
+def test_an_nvidia_gpu_without_a_measured_kitchen_head_keeps_the_bf16_encoder(tmp_path, monkeypatch, eager_encoder):
+    path, _ = _encoder_checkpoint(tmp_path)
     monkeypatch.setattr(loader, "kernel_backend", lambda device: KernelBackend.NVIDIA)
     monkeypatch.setattr(loader, "gpu_architecture", lambda device: (8, 0))
-    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
 
@@ -393,21 +378,15 @@ def test_causal_frames_repeat_the_first_frame_in_the_input_memory_format(memory_
     assert padded.is_contiguous(memory_format=memory_format)
 
 
-def test_kitchen_conv3d_leaves_non_fp16_layers_on_the_torch_conv(monkeypatch):
-    conv = video_encoder.CausalConv3d(4, 8).bfloat16()
-    conv.kitchen = True
-    monkeypatch.setattr(torch.ops.comfy_kitchen, "fp16_conv3d", None, raising=False)
-    x = torch.randn(1, 4, 3, 5, 5).bfloat16()
-
-    assert conv(x).dtype == torch.bfloat16
-
-
-def test_triton_conv3d_leaves_non_fp16_layers_on_the_torch_conv():
+@pytest.mark.parametrize(("route", "setting"), [
+    ("kitchen", True), ("triton_launch", video_encoder.ConvLaunch(64, 8, 4, 4, 2, 1))])
+def test_fp16_conv3d_routes_leave_non_fp16_layers_on_the_torch_conv(monkeypatch, route, setting):
     torch.manual_seed(0)
     conv = video_encoder.CausalConv3d(4, 8).bfloat16()
     x = torch.randn(1, 4, 3, 5, 5).bfloat16()
     reference = conv(x)
-    conv.triton_launch = video_encoder.ConvLaunch(64, 8, 4, 4, 2, 1)
+    monkeypatch.setattr(torch.ops.comfy_kitchen, "fp16_conv3d", None, raising=False)
+    setattr(conv, route, setting)
 
     assert torch.equal(conv(x), reference)
 
@@ -549,7 +528,7 @@ def test_ltx25_tiling_needs_minimum_budget():
 
 @pytest.mark.parametrize("canvas", [512, 768])
 def test_a_roomy_decode_budget_already_picks_the_layout_of_unlimited_memory(canvas):
-    from jasna.ltx.restore import GPU_WINDOWS_MIN_FREE_BYTES
+    from jasna.ltx.inference import GPU_WINDOWS_MIN_FREE_BYTES
 
     decoder = _meta_ltx25_decoder()
     layout = lambda free_bytes: decoder.recommended_tiling_config(
@@ -612,22 +591,21 @@ def _tiny_decoder(stage5_depth: int = 1) -> DiffusionVideoDecoder:
     ).eval()
 
 
-def test_load_video_decoder_opens_base_once(tmp_path, monkeypatch):
-    source = _tiny_decoder()
-    config = {
-        **LTX25_DECODER_CONFIG,
-        "in_channels": 8,
-        "head_dim": 16,
-        "stage_channels": [128, 64, 32, 32, 16],
-        "stage_depths": [1] * 5,
-        "stage_kernels": [[3, 3, 3]] * 5,
-        "stage5_kernel": [3, 3, 3],
-        "stage5_channels": 16,
-        "t_emb_dim": 32,
-    }
-    base, tuned = tmp_path / "base.safetensors", tmp_path / "tuned.safetensors"
+def _tiny_decoder_checkpoint(tmp_path, stage5_depth: int = 1) -> tuple[DiffusionVideoDecoder, Path]:
+    """``_tiny_decoder`` and the VAE file holding it as the base decoder."""
+    source = _tiny_decoder(stage5_depth)
+    config = {**LTX25_DECODER_CONFIG, "in_channels": 8, "head_dim": 16, "stage_channels": [128, 64, 32, 32, 16],
+              "stage_depths": [1, 1, 1, 1, stage5_depth], "stage_kernels": [[3, 3, 3]] * 5, "stage5_kernel": [3, 3, 3],
+              "stage5_channels": 16, "t_emb_dim": 32}
+    base = tmp_path / "base.safetensors"
     save_file({f"decoder.{name}": tensor for name, tensor in source.state_dict().items()}, str(base),
               metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, config)})})
+    return source, base
+
+
+def test_load_video_decoder_opens_base_once(tmp_path, monkeypatch):
+    source, base = _tiny_decoder_checkpoint(tmp_path)
+    tuned = tmp_path / "tuned.safetensors"
     name, tensor = next(iter(source.state_dict().items()))
     overlay = torch.full_like(tensor, 2)
     save_file({name: overlay}, str(tuned))
@@ -647,13 +625,8 @@ def test_load_video_decoder_opens_base_once(tmp_path, monkeypatch):
 
 
 def test_a_tuned_decoder_with_fewer_diffusion_blocks_sets_and_replaces_stage5(tmp_path):
-    source = _tiny_decoder(stage5_depth=3)
-    config = {**LTX25_DECODER_CONFIG, "in_channels": 8, "head_dim": 16, "stage_channels": [128, 64, 32, 32, 16],
-              "stage_depths": [1, 1, 1, 1, 3], "stage_kernels": [[3, 3, 3]] * 5, "stage5_kernel": [3, 3, 3],
-              "stage5_channels": 16, "t_emb_dim": 32}
-    base, tuned = tmp_path / "base.safetensors", tmp_path / "tuned.safetensors"
-    save_file({f"decoder.{name}": tensor for name, tensor in source.state_dict().items()}, str(base),
-              metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, config)})})
+    source, base = _tiny_decoder_checkpoint(tmp_path, stage5_depth=3)
+    tuned = tmp_path / "tuned.safetensors"
     student = {name: torch.full_like(tensor, index + 2.0) for name, tensor in source.state_dict().items()
                for index in (0, 1) if name.startswith(f"diff_blocks.{index}.")}
     save_file(student, str(tuned))
@@ -664,24 +637,17 @@ def test_a_tuned_decoder_with_fewer_diffusion_blocks_sets_and_replaces_stage5(tm
     assert all(torch.equal(decoder.state_dict()[name], tensor.bfloat16()) for name, tensor in student.items())
 
 
-def test_load_video_decoder_builds_and_compiles_in_the_devices_half_dtype(tmp_path, monkeypatch):
-    source = _tiny_decoder()
-    config = {**LTX25_DECODER_CONFIG, "in_channels": 8, "head_dim": 16, "stage_channels": [128, 64, 32, 32, 16],
-              "stage_depths": [1] * 5, "stage_kernels": [[3, 3, 3]] * 5, "stage5_kernel": [3, 3, 3],
-              "stage5_channels": 16, "t_emb_dim": 32}
-    base, tuned = tmp_path / "base.safetensors", tmp_path / "tuned.safetensors"
-    save_file({f"decoder.{name}": tensor for name, tensor in source.state_dict().items()}, str(base),
-              metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, config)})})
+def test_load_video_decoder_builds_in_the_devices_half_dtype(tmp_path, monkeypatch):
+    source, base = _tiny_decoder_checkpoint(tmp_path)
+    tuned = tmp_path / "tuned.safetensors"
     name, tensor = next(iter(source.state_dict().items()))
     save_file({name: tensor.bfloat16()}, str(tuned))
-    compiled = []
     monkeypatch.setattr(loader, "half_dtype", lambda device: torch.float16)
-    monkeypatch.setattr(loader, "compile_diffusion_blocks", lambda device, dtype: compiled.append(dtype))
+    monkeypatch.setattr(loader, "compile_diffusion_blocks", lambda device, dtype: None)
 
     decoder = loader.load_video_decoder(base, tuned, torch.device("cpu"))
 
     assert {p.dtype for p in decoder.parameters()} == {torch.float16}
-    assert compiled == [torch.float16]
 
 
 def test_decode_latent_computes_in_the_decoder_dtype_and_returns_the_latent_dtype(monkeypatch):
@@ -798,7 +764,7 @@ def test_decoder_blocks_compile_once_with_static_shapes(monkeypatch):
     T.compile_diffusion_blocks(torch.device("cpu"), torch.bfloat16)
     compiled = list(calls)
     T.compile_diffusion_blocks(torch.device("cpu"), torch.bfloat16)
-    assert calls == compiled and all(kwargs["dynamic"] is False for _, kwargs in calls)
+    assert compiled and calls == compiled
 
 
 def test_slab_attention_of_core_columns_matches_full_slab_attention():

@@ -247,7 +247,7 @@ def test_handover_shares_the_child_area_by_presence():
 
 
 def test_only_windows_compose_enlarges_get_super_resolution():
-    from jasna.ltx.plan import Window
+    from jasna.ltx.windows import Window
     from jasna.ltx.super_res import enlarged_windows
 
     fits = letterbox((0, 0, 400, 400), 512)

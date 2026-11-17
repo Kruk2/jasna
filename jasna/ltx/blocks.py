@@ -56,12 +56,6 @@ def _layout(specs: dict[str, tuple[torch.dtype, tuple[int, ...]]]) -> tuple[dict
     return layout, offset
 
 
-def _pack(tensors: dict[str, torch.Tensor], layout: dict[str, _Entry], buffer: torch.Tensor) -> None:
-    for name, tensor in tensors.items():
-        entry = layout[name]
-        buffer[entry.offset : entry.offset + entry.nbytes].copy_(tensor.contiguous().view(-1).view(torch.uint8))
-
-
 def _views(buffer: torch.Tensor, layout: dict[str, _Entry]) -> dict[str, torch.Tensor]:
     return {
         name: buffer[entry.offset : entry.offset + entry.nbytes].view(entry.dtype).view(entry.shape)
@@ -142,23 +136,52 @@ def _pin_while_allowed(buffers: list[torch.Tensor]) -> list[torch.Tensor]:
 
 
 class BlockStore:
-    """Hands out each block's weights on ``device`` in a fixed cyclic block order. Empties each
-    dict of ``blocks`` once packed, so loading never holds the weights twice in RAM."""
+    """Hands out each block's weights on ``device`` in a fixed cyclic block order."""
 
-    def __init__(self, blocks: list[dict[str, torch.Tensor]], device: torch.device, *, resident: int) -> None:
-        layouts = [_layout({name: (tensor.dtype, tuple(tensor.shape)) for name, tensor in block.items()})
-                   for block in blocks]
-        self._allocate(layouts, device, resident)
+    def __init__(self, layouts: list[tuple[dict[str, _Entry], int]], device: torch.device, *, resident: int) -> None:
+        """Empty block buffers for ``layouts`` (``_layout`` of each block), ``resident`` of them on ``device``."""
+        if resident < 0:
+            raise ValueError("Resident block count must not be negative")
+        self.device = device
+        self.count = len(layouts)
+        self.resident = min(resident, self.count)
+        self._layouts: list[dict[str, _Entry]] = []
+        self._resident: list[dict[str, torch.Tensor]] = []
+        self._resident_buffers: list[torch.Tensor] = []
+        self._host: list[torch.Tensor] = []
+        self._pinned: list[torch.Tensor] = []
+        self._slots: list[torch.Tensor] = []
+        streamed_bytes = [nbytes for _, nbytes in layouts[self.resident :]]
+        streamed = len(streamed_bytes)
         try:
-            for index, tensors in enumerate(blocks):
-                _pack(tensors, self._layouts[index], self._buffer(index))
-                tensors.clear()
+            for index, (layout, nbytes) in enumerate(layouts):
+                self._layouts.append(layout)
+                if index < self.resident:
+                    buffer = torch.empty(nbytes, dtype=torch.uint8, device=device)
+                    self._resident_buffers.append(buffer)
+                    self._resident.append(_views(buffer, layout))
+            for _ in range(min(2, streamed)):
+                self._slots.append(torch.empty(max(streamed_bytes), dtype=torch.uint8, device=device))
+            self._host.extend(torch.empty(nbytes, dtype=torch.uint8) for nbytes in streamed_bytes)
+            self._pinned = _pin_while_allowed(self._host)
+            self._slot_block = [-1] * len(self._slots)
+            self._copy_done = [torch.cuda.Event() for _ in self._slots]
+            self._compute_done = [torch.cuda.Event() for _ in self._slots]
+            self._copy_stream = torch.cuda.Stream(device) if self._slots else None
         except BaseException as primary:
             try:
                 self.close()
             except BaseException as cleanup:
                 raise primary from cleanup
             raise
+        logger.info("LTX blocks: %d resident, %d streamed", self.resident, streamed)
+        if streamed:
+            logger.warning(
+                "LTX: %d of %d transformer blocks stream from RAM (not enough free VRAM); "
+                "closing other programs that use the GPU makes LTX faster",
+                streamed,
+                self.count,
+            )
 
     @classmethod
     def from_reader(cls, reader, names: list[dict[str, str]], device: torch.device, *, resident: int) -> BlockStore:
@@ -166,8 +189,7 @@ class BlockStore:
         blocks pass through two pinned stages; one stage's copies run while the other is read."""
         specs = reader.tensor_specs()
         layouts = [_layout({name: specs[source] for name, source in block.items()}) for block in names]
-        store = cls.__new__(cls)
-        store._allocate(layouts, device, resident)
+        store = cls(layouts, device, resident=resident)
         try:
             store._read(reader, names)
         except BaseException as primary:
@@ -219,50 +241,6 @@ class BlockStore:
 
     def _buffer(self, index: int) -> torch.Tensor:
         return self._resident_buffers[index] if index < self.resident else self._host[index - self.resident]
-
-    def _allocate(self, layouts: list[tuple[dict[str, _Entry], int]], device: torch.device, resident: int) -> None:
-        if resident < 0:
-            raise ValueError("Resident block count must not be negative")
-        self.device = device
-        self.count = len(layouts)
-        self.resident = min(resident, self.count)
-        self._layouts: list[dict[str, _Entry]] = []
-        self._resident: list[dict[str, torch.Tensor]] = []
-        self._resident_buffers: list[torch.Tensor] = []
-        self._host: list[torch.Tensor] = []
-        self._pinned: list[torch.Tensor] = []
-        self._slots: list[torch.Tensor] = []
-        streamed_bytes = [nbytes for _, nbytes in layouts[self.resident :]]
-        streamed = len(streamed_bytes)
-        try:
-            for index, (layout, nbytes) in enumerate(layouts):
-                self._layouts.append(layout)
-                if index < self.resident:
-                    buffer = torch.empty(nbytes, dtype=torch.uint8, device=device)
-                    self._resident_buffers.append(buffer)
-                    self._resident.append(_views(buffer, layout))
-            for _ in range(min(2, streamed)):
-                self._slots.append(torch.empty(max(streamed_bytes), dtype=torch.uint8, device=device))
-            self._host.extend(torch.empty(nbytes, dtype=torch.uint8) for nbytes in streamed_bytes)
-            self._pinned = _pin_while_allowed(self._host)
-            self._slot_block = [-1] * len(self._slots)
-            self._copy_done = [torch.cuda.Event() for _ in self._slots]
-            self._compute_done = [torch.cuda.Event() for _ in self._slots]
-            self._copy_stream = torch.cuda.Stream(device) if self._slots else None
-        except BaseException as primary:
-            try:
-                self.close()
-            except BaseException as cleanup:
-                raise primary from cleanup
-            raise
-        logger.info("LTX blocks: %d resident, %d streamed", self.resident, streamed)
-        if streamed:
-            logger.warning(
-                "LTX: %d of %d transformer blocks stream from RAM (not enough free VRAM); "
-                "closing other programs that use the GPU makes LTX faster",
-                streamed,
-                self.count,
-            )
 
     def _slot_of(self, index: int) -> int | None:
         return self._slot_block.index(index) if index in self._slot_block else None

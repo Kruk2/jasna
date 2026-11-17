@@ -10,6 +10,7 @@ import torch.nn.functional as F
 
 pytest.importorskip("triton")
 
+from factories import ltx_block_inputs, ltx_block_weights
 from jasna.ltx import transformer as T
 from jasna.ltx import kernel_policy
 from jasna.ltx.kernel_policy import supports
@@ -198,9 +199,6 @@ def test_gated_fp4_quantization_is_the_native_gate_then_quantize_fp4_bit_for_bit
 
 
 def _quantized_block(dim: int, heads: int, fp4: bool, generator: torch.Generator) -> dict[str, torch.Tensor]:
-    def rand(*shape: int) -> torch.Tensor:
-        return (torch.randn(*shape, generator=generator) * 0.05).to(torch.bfloat16)
-
     def linear_weights(name: str, out_features: int, in_features: int) -> dict[str, torch.Tensor]:
         if fp4:
             block_scales = torch.full((out_features, in_features // 16), 1.0).to(torch.float8_e4m3fn)
@@ -214,19 +212,7 @@ def _quantized_block(dim: int, heads: int, fp4: bool, generator: torch.Generator
             f"{name}.scales": torch.full((out_features,), 4e-4),
         }
 
-    weights = {}
-    for attn in ("attn1", "attn2"):
-        for proj in ("to_q", "to_k", "to_v", "to_out.0"):
-            weights |= linear_weights(f"{attn}.{proj}", dim, dim)
-            weights[f"{attn}.{proj}.bias"] = rand(dim)
-        weights |= linear_weights(f"{attn}.to_gate_logits", heads, dim)
-        weights[f"{attn}.to_gate_logits.bias"] = rand(heads)
-        weights[f"{attn}.q_norm.weight"] = rand(dim) + 1
-        weights[f"{attn}.k_norm.weight"] = rand(dim) + 1
-    weights |= linear_weights("ff.net.0.proj", 4 * dim, dim)
-    weights |= linear_weights("ff.net.2", dim, 4 * dim)
-    weights["scale_shift_table"] = rand(9, dim)
-    weights["prompt_scale_shift_table"] = rand(2, dim)
+    weights = ltx_block_weights(dim, heads, generator, linear_weights)
     return {name: tensor.cuda() for name, tensor in weights.items()}
 
 
@@ -238,14 +224,8 @@ def test_block_forward_with_kernels_matches_the_torch_path(kernels, monkeypatch,
     generator = torch.Generator().manual_seed(0)
     dim, heads = 512, 16
     weights = _quantized_block(dim, heads, fp4, generator)
-    rope = T.build_rope(2, 4, 4, dim=dim, heads=heads, device=torch.device("cuda"))
-    cond = T.StepConditioning(
-        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to("cuda", torch.bfloat16),
-        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16, device="cuda"),
-        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to("cuda", torch.bfloat16),
-    )
-    x = torch.randn(1, 64, dim, generator=generator).to("cuda", torch.bfloat16)
-    context = torch.randn(1, 8, dim, generator=generator).to("cuda", torch.bfloat16)
+    x, cond, context, rope = ltx_block_inputs(dim, heads, generator, rows=64, context_rows=8, latent_shape=(2, 4, 4),
+                                              device="cuda")
     with_kernels = T.block_forward(weights, x, cond, T.prompt_key_value(weights, cond, context, heads=heads), rope, heads=heads)
     monkeypatch.setattr(T, "_quant_kernels", None)
     expected = T.block_forward(weights, x, cond, T.prompt_key_value(weights, cond, context, heads=heads), rope, heads=heads)
@@ -257,14 +237,8 @@ def test_shared_nvfp4_quantization_matches_quantizing_per_linear(kernels, monkey
     generator = torch.Generator().manual_seed(0)
     dim, heads = 512, 16
     weights = _quantized_block(dim, heads, True, generator)
-    rope = T.build_rope(2, 4, 4, dim=dim, heads=heads, device=torch.device("cuda"))
-    cond = T.StepConditioning(
-        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to("cuda", torch.bfloat16),
-        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16, device="cuda"),
-        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to("cuda", torch.bfloat16),
-    )
-    x = torch.randn(1, 64, dim, generator=generator).to("cuda", torch.bfloat16)
-    context = torch.randn(1, 8, dim, generator=generator).to("cuda", torch.bfloat16)
+    x, cond, context, rope = ltx_block_inputs(dim, heads, generator, rows=64, context_rows=8, latent_shape=(2, 4, 4),
+                                              device="cuda")
 
     def run() -> torch.Tensor:
         return T.block_forward(weights, x, cond, T.prompt_key_value(weights, cond, context, heads=heads), rope, heads=heads)
@@ -279,14 +253,9 @@ def test_one_prompt_pair_serves_every_window_and_the_perturbed_pass(kernels):
     generator = torch.Generator().manual_seed(0)
     dim, heads = 512, 16
     weights = _quantized_block(dim, heads, False, generator)
-    rope = T.build_rope(2, 4, 4, dim=dim, heads=heads, device=torch.device("cuda"))
-    cond = T.StepConditioning(
-        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to("cuda", torch.bfloat16),
-        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16, device="cuda"),
-        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to("cuda", torch.bfloat16),
-    )
-    context = torch.randn(1, 8, dim, generator=generator).to("cuda", torch.bfloat16)
-    windows = [torch.randn(1, 64, dim, generator=generator).to("cuda", torch.bfloat16) for _ in range(2)]
+    x, cond, context, rope = ltx_block_inputs(dim, heads, generator, rows=64, context_rows=8, latent_shape=(2, 4, 4),
+                                              device="cuda")
+    windows = [x, torch.randn(1, 64, dim, generator=generator).to("cuda", torch.bfloat16)]
     shared = T.prompt_key_value(weights, cond, context, heads=heads)
     for x in windows:
         for skip in (False, True):

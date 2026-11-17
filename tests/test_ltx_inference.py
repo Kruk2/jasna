@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import sys
 from pathlib import Path
@@ -9,9 +10,9 @@ import pytest
 import torch
 
 from factories import AnsweredReply
-from jasna.ltx import inference, restore
+from jasna import accelerator, license_api
+from jasna.ltx import compose_pass, inference
 from jasna.ltx.model_files import LtxModelFiles
-from jasna import license_api
 
 
 def _files(suffix: str = "") -> LtxModelFiles:
@@ -32,59 +33,109 @@ def test_frozen_trial_stays_local_and_mixed_trial_is_rejected(monkeypatch):
         inference.protected_bundle(LtxModelFiles(trial.transformer, Path("vae.enc"), Path("decoder.enc")))
 
 
-def test_protected_runtime_never_loads_models_in_parent(monkeypatch):
-    def forbidden(*_args):
-        pytest.fail("protected model loaded in the parent")
+def _backend(device: str = "cpu") -> inference.WorkerBackend:
+    return inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": device})
 
-    monkeypatch.setattr(inference, "load_video_encoder", forbidden)
-    monkeypatch.setattr(inference, "load_video_decoder", forbidden)
-    monkeypatch.setattr(inference, "LtxTransformer", forbidden)
+
+def _install_worker_client(monkeypatch, client, cancelled=RuntimeError) -> None:
+    """``client`` stands in for the protected ``WorkerClient`` the runtime starts."""
+    monkeypatch.setattr(license_api, "require_protection", lambda: None)
+    monkeypatch.setitem(sys.modules, "jasna.protection.ltx_worker", SimpleNamespace(WorkerClient=client, WorkerCancelled=cancelled))
+
+
+class _Encoder(torch.nn.Module):
+    def forward(self, pixels):
+        return torch.full((1, 128, 16, 1, 1), 0.5, dtype=torch.bfloat16)
+
+
+class _Transformer:
+    conditions = [None] * 8
+    blocks = inference.BlockLayout(40, 48)
+
+    def __init__(self, source, device, free_vram):
+        pass
+
+    def denoise_chain(self, references, seeds, window_hop, advance):
+        advance(8)
+        return [reference + 1 for reference in references]
+
+    def native_vram_bytes(self):
+        return 0
+
+    def close(self):
+        pass
+
+
+def test_protected_runtime_never_loads_models_in_parent(monkeypatch, allocator):
+    worker_side = []
+
+    class InProcessWorker:
+        """The protected worker, running a real ``WorkerBackend`` in this process."""
+
+        def __init__(self, config, cancel):
+            self.backend = inference.WorkerBackend(config)
+
+        def request(self, op, params, tensors, advance=None):
+            worker_side.append(True)
+            try:
+                return self.backend.dispatch(op, params, tensors, advance or (lambda _n: None))
+            finally:
+                worker_side.pop()
+
+        def send(self, op, params, tensors):
+            result = self.request(op, params, tensors)
+
+            class Reply:
+                def answered(self):
+                    pass
+
+                def result(self):
+                    return result
+
+            return Reply()
+
+        def close(self):
+            self.backend.close()
+
+    def in_worker_only(load):
+        def guarded(*args):
+            if not worker_side:
+                pytest.fail("protected model loaded in the parent")
+            return load(*args)
+        return guarded
+
+    monkeypatch.setattr(inference, "load_video_encoder", in_worker_only(lambda *_args: _Encoder()))
+    monkeypatch.setattr(inference, "load_video_decoder", in_worker_only(lambda *_args: torch.nn.Module()))
+    monkeypatch.setattr(inference, "TransformerSource", in_worker_only(lambda path: path))
+    monkeypatch.setattr(inference, "LtxTransformer", in_worker_only(_Transformer))
+    monkeypatch.setattr(inference, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.ones(1, 3, 121, 2, 2))
     monkeypatch.setattr(inference, "device_free_bytes", lambda device: 9 << 30)
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (9 << 30, 32 << 30))
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda device: None)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    _install_worker_client(monkeypatch, InProcessWorker)
     runtime = inference.ModelRuntime(_files(".enc"), torch.device("cpu"), threading.Event())
-    requests = []
     pixels = torch.zeros(1, 3, 121, 2, 2, dtype=torch.uint8)
     latent = torch.zeros(1, 128, 16, 1, 1, dtype=torch.bfloat16)
-    decoded = torch.zeros(121, 3, 2, 2, dtype=torch.uint8)
 
-    def request(op, params, tensors, advance=None):
-        requests.append((op, params, tensors))
-        if op == "load_transformer":
-            return {"steps": 8, "resident": 40, "count": 48}, []
-        if op == "encode":
-            return {}, [latent]
-        if op == "denoise_chain":
-            advance(8)
-            return {}, [latent]
-        if op == "decode":
-            return {}, [decoded]
-        return {}, []
-
-    monkeypatch.setattr(runtime, "request", request)
-    monkeypatch.setattr(runtime, "send", lambda op, params, tensors: AnsweredReply(request(op, params, tensors)[1]))
     encoder = runtime.load_encoder()
-    assert encoder.send(pixels).tensors()[0] is latent
+    assert torch.equal(encoder.send(pixels).tensors()[0], torch.full_like(latent, 0.5))
     assert runtime.load_encoder() is encoder
     runtime.unload_encoder()
     transformer = runtime.load_transformer()
     steps = []
-    assert transformer.denoise_chain([latent], [43], 104, steps.append) == [latent]
+    (denoised,) = transformer.denoise_chain([latent], [43], 104, steps.append)
+    assert torch.equal(denoised, latent + 1)
     assert steps == [8]
     assert len(transformer.conditions) == 8
     assert transformer.blocks == inference.BlockLayout(40, 48)
     assert not [value for value in vars(transformer).values() if isinstance(value, torch.Tensor)]
-    transformer.close()
+    runtime.unload_transformer()
     decoder = runtime.load_decoder()
-    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
-    reply, free = restore._send_window_decode(decoder, latent, 43, 512, lambda _canvas: 123)
-    assert reply.tensors()[0] is decoded and free == 123
+    reply, free = compose_pass._send_window_decode(decoder, latent, 43, 512, lambda _canvas: 123)
+    assert torch.equal(reply.tensors()[0], torch.full((121, 3, 2, 2), 255, dtype=torch.uint8)) and free == 123
     runtime.unload_decoder()
-    assert [op for op, _, _ in requests] == [
-        "load_encoder", "encode", "unload_encoder", "load_transformer", "denoise_chain",
-        "unload_transformer", "load_decoder", "decode", "unload_decoder",
-    ]
-    assert requests[3][1] == {"free_bytes": 9 << 30}
-    assert requests[4][1] == {"seeds": [43], "window_hop": 104}
-    assert requests[7][1] == {"seed": 43, "free_bytes": 123}
+    runtime.close()
 
 
 class _LoadClock:
@@ -101,7 +152,11 @@ class _LoadClock:
         return load
 
 
-def test_a_licensed_runtime_times_each_model_load_in_the_parent(monkeypatch):
+def _load_lines(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith("[timing] LTX model load")]
+
+
+def test_a_licensed_runtime_times_each_model_load_in_the_parent(monkeypatch, caplog):
     clock = _LoadClock(monkeypatch)
     seconds = {"load_encoder": 2.0, "prepare_transformer": 0.5, "load_transformer": 7.0, "load_decoder": 3.0}
 
@@ -113,15 +168,19 @@ def test_a_licensed_runtime_times_each_model_load_in_the_parent(monkeypatch):
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
     runtime = inference.ModelRuntime(_files(".enc"), torch.device("cpu"), threading.Event())
     monkeypatch.setattr(runtime, "request", request)
-    runtime.load_encoder()
-    runtime.prepare_transformer()
-    runtime.load_transformer()
-    runtime.load_decoder()
-    runtime.load_decoder()
-    assert runtime.load_seconds == {"encoder": 2.0, "transformer file": 0.5, "transformer": 7.0, "decoder": 3.0}
+    with caplog.at_level("INFO", logger=inference.logger.name):
+        runtime.load_encoder()
+        runtime.prepare_transformer()
+        runtime.load_transformer()
+        runtime.load_decoder()
+        runtime.load_decoder()
+    assert _load_lines(caplog) == [
+        "[timing] LTX model load: encoder 2.0s", "[timing] LTX model load: transformer file 0.5s",
+        "[timing] LTX model load: transformer 7.0s", "[timing] LTX model load: decoder 3.0s",
+    ]
 
 
-def test_a_local_runtime_times_the_same_model_loads(monkeypatch):
+def test_a_local_runtime_times_the_same_model_loads(monkeypatch, caplog):
     clock = _LoadClock(monkeypatch)
     monkeypatch.setattr(inference, "load_video_encoder", clock.taking(1.0, object()))
     monkeypatch.setattr(inference, "load_gpu_libraries_ahead", lambda device, dtype: None)
@@ -129,11 +188,15 @@ def test_a_local_runtime_times_the_same_model_loads(monkeypatch):
     monkeypatch.setattr(inference, "LtxTransformer", clock.taking(6.0, object()))
     monkeypatch.setattr(inference, "load_video_decoder", clock.taking(2.0, object()))
     runtime = inference.ModelRuntime(LtxModelFiles.placeholder("distilled", fast=False), torch.device("cpu"), threading.Event())
-    runtime.load_encoder()
-    runtime.prepare_transformer()
-    runtime.load_transformer()
-    runtime.load_decoder()
-    assert runtime.load_seconds == {"encoder": 1.0, "transformer file": 0.5, "transformer": 6.0, "decoder": 2.0}
+    with caplog.at_level("INFO", logger=inference.logger.name):
+        runtime.load_encoder()
+        runtime.prepare_transformer()
+        runtime.load_transformer()
+        runtime.load_decoder()
+    assert _load_lines(caplog) == [
+        "[timing] LTX model load: encoder 1.0s", "[timing] LTX model load: transformer file 0.5s",
+        "[timing] LTX model load: transformer 6.0s", "[timing] LTX model load: decoder 2.0s",
+    ]
 
 
 @pytest.mark.parametrize("models,protected,resuming,expected", [
@@ -165,7 +228,7 @@ def test_a_runtime_started_ahead_loads_the_encoder_before_the_encode_pass_asks_f
     assert requests == [("prepare_transformer", False), ("load_encoder", False)]
 
 
-def test_a_failed_start_ahead_fails_the_pass_that_waits_for_it_and_closing_only_logs_it(monkeypatch):
+def test_a_failed_start_ahead_fails_the_pass_that_waits_for_it_and_closing_only_logs_it(monkeypatch, caplog):
     runtime = inference.ModelRuntime(_files(".enc"), torch.device("cpu"), threading.Event())
 
     def request(op, params, tensors, advance=None):
@@ -175,7 +238,9 @@ def test_a_failed_start_ahead_fails_the_pass_that_waits_for_it_and_closing_only_
     runtime.start_ahead()
     with pytest.raises(RuntimeError, match="could not start"):
         runtime.load_encoder()
-    runtime.close()
+    with caplog.at_level(logging.DEBUG, logger=inference.logger.name):
+        runtime.close()
+    assert "could not start" in caplog.text
 
 
 def test_runtime_construction_and_unused_close_do_not_start_worker(monkeypatch):
@@ -197,7 +262,7 @@ def allocator(monkeypatch):
 
 
 def test_backend_rejects_inference_before_load_and_arbitrary_dispatch(allocator):
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend = _backend()
     for op in ("encode", "denoise_chain", "decode"):
         with pytest.raises(RuntimeError, match="is not loaded"):
             backend.dispatch(op, {}, [], lambda _n: None)
@@ -207,7 +272,7 @@ def test_backend_rejects_inference_before_load_and_arbitrary_dispatch(allocator)
 
 
 def test_backend_module_unload_wipes_parameters(monkeypatch, allocator):
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend = _backend()
     backend.encoder = torch.nn.Linear(2, 2)
     parameters = list(backend.encoder.parameters())
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
@@ -235,8 +300,7 @@ def test_runtime_reuses_transport_updates_cancel_and_translates_cancellation(mon
         def close(self):
             self.closed = True
 
-    monkeypatch.setattr(license_api, "require_protection", lambda: None)
-    monkeypatch.setitem(sys.modules, "jasna.protection.ltx_worker", SimpleNamespace(WorkerClient=Client, WorkerCancelled=WorkerCancelled))
+    _install_worker_client(monkeypatch, Client, WorkerCancelled)
     runtime = inference.ModelRuntime(_files(".enc"), torch.device("cuda:0"), threading.Event())
     runtime.request("load_encoder", {}, [])
     assert Path(clients[0].config["transformer"]).is_absolute()
@@ -245,7 +309,7 @@ def test_runtime_reuses_transport_updates_cancel_and_translates_cancellation(mon
     runtime.request("load_decoder", {}, [])
     assert len(clients) == 1 and clients[0].cancel is next_cancel
     next_cancel.set()
-    with pytest.raises(restore.Cancelled):
+    with pytest.raises(inference.Cancelled):
         runtime.request("load_transformer", {}, [])
     assert clients[0].closed and runtime._client is None
 
@@ -258,8 +322,7 @@ def test_runtime_reports_its_own_and_the_workers_peak_apart(monkeypatch):
         def request(self, op, params, tensors, advance=None):
             return ({"peak_vram_bytes": 9 << 30} if op == "stats" else {}), []
 
-    monkeypatch.setattr(license_api, "require_protection", lambda: None)
-    monkeypatch.setitem(sys.modules, "jasna.protection.ltx_worker", SimpleNamespace(WorkerClient=Client, WorkerCancelled=RuntimeError))
+    _install_worker_client(monkeypatch, Client)
     monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda device: 2 << 30)
     runtime = inference.ModelRuntime(_files(".enc"), torch.device("cuda:0"), threading.Event())
     assert runtime.peak_vram_bytes() == (2 << 30, None)
@@ -268,7 +331,7 @@ def test_runtime_reports_its_own_and_the_workers_peak_apart(monkeypatch):
 
 
 def test_worker_peak_vram_counts_the_native_block_store(monkeypatch, allocator):
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend = _backend()
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
 
     class Transformer:
@@ -300,7 +363,7 @@ def test_worker_peak_vram_does_not_add_the_freed_load_probe_to_the_blocks(monkey
 
     class Transformer:
         conditions = [None] * 8
-        blocks = SimpleNamespace(resident=48, count=48)
+        blocks = inference.BlockLayout(48, 48)
 
         def __init__(self, source, device, free_vram):
             allocator["peak"] = 15 * gib
@@ -311,7 +374,7 @@ def test_worker_peak_vram_does_not_add_the_freed_load_probe_to_the_blocks(monkey
 
     monkeypatch.setattr(inference, "TransformerSource", lambda path: path)
     monkeypatch.setattr(inference, "LtxTransformer", Transformer)
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend = _backend()
     backend.dispatch("load_transformer", {"free_bytes": 20 * gib}, [], lambda _n: None)
 
     stats, _ = backend.dispatch("stats", {}, [], lambda _n: None)
@@ -329,7 +392,7 @@ def test_operation_peak_counts_native_bytes_only_while_they_exist(torch_peak, to
 
 
 def test_worker_reports_denoise_progress_after_gpu_completion(monkeypatch, allocator):
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend = _backend()
     events = []
     monkeypatch.setattr(torch.cuda, "synchronize", lambda device: events.append(("synchronize", device)))
 
@@ -365,7 +428,7 @@ def test_worker_sizes_the_transformer_from_the_parents_device_wide_free_vram(mon
 
     class Transformer:
         conditions = [None] * 8
-        blocks = SimpleNamespace(resident=40, count=48)
+        blocks = inference.BlockLayout(40, 48)
 
         def __init__(self, path, device, free_vram):
             readers.append(free_vram)
@@ -375,19 +438,24 @@ def test_worker_sizes_the_transformer_from_the_parents_device_wide_free_vram(mon
 
     monkeypatch.setattr(inference, "TransformerSource", lambda path: path)
     monkeypatch.setattr(inference, "LtxTransformer", Transformer)
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend = _backend()
     backend.dispatch("load_transformer", {"free_bytes": 14 * gib}, [], lambda _n: None)
     worker_view["free"] = 25 * gib
     assert readers[0](torch.device("cpu")) == 9 * gib
 
 
 def test_local_transformer_reads_device_wide_free_vram(monkeypatch):
+    """On Windows CUDA's free figure misses every other process's VRAM; NVML's covers the device."""
     received = []
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(accelerator, "is_nvidia_device", lambda device: True)
+    monkeypatch.setattr(accelerator, "_nvml_free_bytes", lambda device: 5 << 30)
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (20 << 30, 32 << 30))
     monkeypatch.setattr(inference, "TransformerSource", lambda path: path)
     monkeypatch.setattr(inference, "LtxTransformer", lambda path, device, free_vram: received.append(free_vram))
     runtime = inference.ModelRuntime(LtxModelFiles.placeholder("distilled", fast=False), torch.device("cpu"), threading.Event())
     runtime.load_transformer()
-    assert received == [inference.device_free_bytes]
+    assert received[0](torch.device("cpu")) == 5 << 30
 
 
 class _TwoProcessGpu:
@@ -444,25 +512,25 @@ def test_worker_decodes_pick_the_layouts_of_local_decodes_while_the_worker_keeps
     worker_gpu = _TwoProcessGpu()
     monkeypatch.setattr(torch.cuda, "empty_cache", worker_gpu.empty_cache)
     monkeypatch.setattr(inference, "decode_latent", worker_gpu.decode)
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend = _backend()
     backend.decoder = object()
     decoder = inference.WorkerDecoder(_WorkerOnGpu(worker_gpu, backend))
     worker_caches = []
     for free in outside:
         worker_gpu.outside = free
-        reply, _ = restore._send_window_decode(decoder, latent, 1, 512, worker_gpu.free_bytes)
+        reply, _ = compose_pass._send_window_decode(decoder, latent, 1, 512, worker_gpu.free_bytes)
         reply.tensors()
         worker_caches.append(worker_gpu.cache["worker"])
 
     local_gpu = _TwoProcessGpu()
     monkeypatch.setattr(torch.cuda, "empty_cache", local_gpu.empty_cache)
-    monkeypatch.setattr(restore, "decode_latent", local_gpu.decode)
+    monkeypatch.setattr(inference, "decode_latent", local_gpu.decode)
     for free in outside:
         local_gpu.outside = free
-        restore._decode_window(object(), latent, 1, 512, local_gpu.free_bytes, torch.device("cpu"))
+        compose_pass._decode_window(object(), latent, 1, 512, local_gpu.free_bytes, torch.device("cpu"))
 
     def up_to_roomy(budgets):
-        return [min(free, restore.GPU_WINDOWS_MIN_FREE_BYTES) for free in budgets]
+        return [min(free, inference.GPU_WINDOWS_MIN_FREE_BYTES) for free in budgets]
 
     assert worker_caches == [1 << 30, 1 << 30, 0, 0, 1 << 30]
     assert up_to_roomy(worker_gpu.decoded_with) == up_to_roomy(local_gpu.decoded_with)
@@ -477,7 +545,7 @@ def test_worker_decode_returns_its_vram_before_the_parent_reads_the_next_budget(
     monkeypatch.setattr(
         inference, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.rand(1, 3, 33, 512, 512, device=device)
     )
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cuda"})
+    backend = _backend("cuda")
     backend.decoder = object()
     torch.cuda.empty_cache()
     reserved = torch.cuda.memory_reserved(device)
@@ -503,8 +571,7 @@ def test_parent_returns_its_cached_vram_before_the_worker_sizes_the_resident_blo
                 return {"steps": 4, "resident": 36, "count": 48}, []
             return {}, []
 
-    monkeypatch.setattr(license_api, "require_protection", lambda: None)
-    monkeypatch.setitem(sys.modules, "jasna.protection.ltx_worker", SimpleNamespace(WorkerClient=Client, WorkerCancelled=RuntimeError))
+    _install_worker_client(monkeypatch, Client)
     runtime = inference.ModelRuntime(_files(".enc"), device, threading.Event())
     torch.cuda.empty_cache()
     reserved = torch.cuda.memory_reserved(device)
@@ -528,7 +595,7 @@ def test_worker_opens_the_transformer_file_ahead_on_its_own_thread(monkeypatch, 
 
     class Transformer:
         conditions = [None] * 4
-        blocks = SimpleNamespace(resident=48, count=48)
+        blocks = inference.BlockLayout(48, 48)
 
         def __init__(self, source, device, free_vram):
             loaded.append(source)
@@ -543,7 +610,7 @@ def test_worker_opens_the_transformer_file_ahead_on_its_own_thread(monkeypatch, 
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
     monkeypatch.setattr(inference, "TransformerSource", Source)
     monkeypatch.setattr(inference, "LtxTransformer", Transformer)
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend = _backend()
     backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
     backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
     backend.dispatch("load_transformer", {"free_bytes": 8 << 30}, [], lambda _n: None)
@@ -561,10 +628,10 @@ def test_unused_transformer_file_opened_ahead_closes_with_the_worker_even_after_
 
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (8 << 30, 32 << 30))
     monkeypatch.setattr(inference, "TransformerSource", failing)
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend = _backend()
     backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
     backend.close()
-    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "encoder": "v.enc", "device": "cpu"})
+    backend = _backend()
     backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
     with pytest.raises(RuntimeError, match="synthetic license failure"):
         backend.dispatch("load_transformer", {"free_bytes": 8 << 30}, [], lambda _n: None)
@@ -585,10 +652,6 @@ def test_runtime_asks_the_worker_to_open_the_transformer_only_while_none_is_load
     runtime.load_transformer()
     runtime.prepare_transformer()
     assert requests == ["prepare_transformer", "load_transformer"]
-    local = inference.ModelRuntime(LtxModelFiles.placeholder("distilled", fast=False), torch.device("cpu"), threading.Event())
-    monkeypatch.setattr(local, "request", lambda *_args: pytest.fail("trial files have no worker"))
-    monkeypatch.setattr(inference, "TransformerSource", lambda path: SimpleNamespace(close=lambda: None))
-    local.prepare_transformer()
 
 
 def test_local_runtime_opens_the_transformer_file_ahead_once(monkeypatch):

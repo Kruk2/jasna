@@ -7,11 +7,16 @@ from jasna.ltx import speed
 from jasna.ltx.model_files import LtxModelFiles
 
 
-def test_profile_key_names_the_version_gpu_transformer_and_decode_budget():
-    assert (
-        speed.profile_key("RTX 5090", "m.safetensors", "segment")
-        == f"{__version__} | RTX 5090 | m.safetensors | decode segment"
-    )
+def test_profile_key_changes_with_the_version_gpu_transformer_and_decode_budget(monkeypatch):
+    base = speed.profile_key("RTX 5090", "m.safetensors", "segment")
+    others = {
+        speed.profile_key("RTX 4090", "m.safetensors", "segment"),
+        speed.profile_key("RTX 5090", "n.safetensors", "segment"),
+        speed.profile_key("RTX 5090", "m.safetensors", "frame"),
+    }
+    monkeypatch.setattr(speed, "__version__", f"{__version__}-next")
+    others.add(speed.profile_key("RTX 5090", "m.safetensors", "segment"))
+    assert len(others) == 4 and base not in others
 
 
 def test_a_trial_shares_the_key_of_the_model_it_stands_in_for(tmp_path):

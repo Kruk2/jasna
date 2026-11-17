@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from jasna.ltx.plan import Region
+from jasna.ltx.tracks import Region
 from jasna.mosaic.detections import Detections
 from jasna.tracking.blending import dilate_ellipse
 

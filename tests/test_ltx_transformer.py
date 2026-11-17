@@ -1,34 +1,16 @@
 import os
 import sys
 import types
+from pathlib import Path
 
 import pytest
 import torch
 
+from factories import ltx_block_inputs, ltx_block_weights
 from jasna.ltx import kernel_policy
 from jasna.ltx import transformer as T
-from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, WINDOW_HOP, shared_latents
+from jasna.ltx.windows import WINDOW_HOP, shared_latents, window_hop
 from jasna.ltx.sampler import fuse_overlaps, patchify, unpatchify
-
-
-def _block_weights(dim: int, heads: int, generator: torch.Generator) -> dict[str, torch.Tensor]:
-    def rand(*shape: int) -> torch.Tensor:
-        return (torch.randn(*shape, generator=generator) * 0.05).to(torch.bfloat16)
-
-    weights = {}
-    for attn in ("attn1", "attn2"):
-        for proj in ("to_q", "to_k", "to_v", "to_out.0"):
-            weights[f"{attn}.{proj}.weight"] = rand(dim, dim)
-            weights[f"{attn}.{proj}.bias"] = rand(dim)
-        weights[f"{attn}.to_gate_logits.weight"] = rand(heads, dim)
-        weights[f"{attn}.to_gate_logits.bias"] = rand(heads)
-        weights[f"{attn}.q_norm.weight"] = rand(dim) + 1
-        weights[f"{attn}.k_norm.weight"] = rand(dim) + 1
-    weights["ff.net.0.proj.weight"] = rand(4 * dim, dim)
-    weights["ff.net.2.weight"] = rand(dim, 4 * dim)
-    weights["scale_shift_table"] = rand(9, dim)
-    weights["prompt_scale_shift_table"] = rand(2, dim)
-    return weights
 
 
 def test_rotation_is_its_own_inverse():
@@ -59,15 +41,8 @@ def test_quantize_rows_pads_and_bounds():
 def test_block_matches_across_token_chunking(monkeypatch):
     generator = torch.Generator().manual_seed(0)
     dim, heads = 64, 4
-    weights = _block_weights(dim, heads, generator)
-    rope = T.build_rope(3, 2, 2, dim=dim, heads=heads, device=torch.device("cpu"))
-    cond = T.StepConditioning(
-        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to(torch.bfloat16),
-        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16),
-        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to(torch.bfloat16),
-    )
-    x = torch.randn(1, 24, dim, generator=generator).to(torch.bfloat16)
-    context = torch.randn(1, 5, dim, generator=generator).to(torch.bfloat16)
+    weights = ltx_block_weights(dim, heads, generator)
+    x, cond, context, rope = ltx_block_inputs(dim, heads, generator)
     prompt = T.prompt_key_value(weights, cond, context, heads=heads)
     whole = T.block_forward(weights, x, cond, prompt, rope, heads=heads)
     monkeypatch.setattr(T, "CHUNK_ROWS", 5)
@@ -80,15 +55,9 @@ def test_block_matches_across_token_chunking(monkeypatch):
 def test_fp16_prompt_attention_keeps_the_block_in_bf16():
     generator = torch.Generator().manual_seed(0)
     dim, heads = 64, 4
-    weights = _block_weights(dim, heads, generator)
-    rope = T.build_rope(3, 2, 2, dim=dim, heads=heads, device=torch.device("cpu"))
-    cond = T.StepConditioning(
-        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to(torch.bfloat16),
-        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16),
-        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to(torch.bfloat16),
-    )
-    x = torch.randn(1, 24, dim, generator=generator).to(torch.bfloat16)
-    prompt = T.prompt_key_value(weights, cond, torch.randn(1, 5, dim, generator=generator).to(torch.bfloat16), heads=heads)
+    weights = ltx_block_weights(dim, heads, generator)
+    x, cond, context, rope = ltx_block_inputs(dim, heads, generator)
+    prompt = T.prompt_key_value(weights, cond, context, heads=heads)
     bf16 = T.block_forward(weights, x, cond, prompt, rope, heads=heads)
     fp16 = T.block_forward(weights, x, cond, tuple(t.half() for t in prompt), rope, heads=heads)
     assert fp16.dtype == torch.bfloat16
@@ -124,7 +93,7 @@ def test_less_overlap_fuses_two_latent_frames():
     left = torch.randn(1, 16 * tokens_per_frame, 4)
     right = torch.randn(1, 16 * tokens_per_frame, 4)
     left_before, right_before = left.clone(), right.clone()
-    shared = shared_latents(LESS_OVERLAP_WINDOW_HOP)
+    shared = shared_latents(window_hop(17))
     fuse_overlaps([left, right], tokens_per_frame, shared, shared.ramp)
     assert torch.equal(right[:, 2:6], left[:, 28:32])
     assert torch.equal(right[:, 6:], right_before[:, 6:])
@@ -169,20 +138,13 @@ def test_quantize_fp4_reconstructs_within_fp4_error():
 def test_public_block_forward_runs_on_plain_tensors_without_the_protection_module(monkeypatch):
     generator = torch.Generator().manual_seed(0)
     dim, heads = 256, 2
-    weights = _block_weights(dim, heads, generator)
+    weights = ltx_block_weights(dim, heads, generator)
     for name in T.LINEAR_NAMES:
         weight = weights.pop(f"{name}.weight").float()
         codes, scales = T.quantize_rows(T.rotate(weight))
         weights[f"{name}.qdata"] = codes[: weight.shape[0]]
         weights[f"{name}.scales"] = scales[: weight.shape[0]]
-    rope = T.build_rope(3, 2, 2, dim=dim, heads=heads, device=torch.device("cpu"))
-    cond = T.StepConditioning(
-        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to(torch.bfloat16),
-        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16),
-        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to(torch.bfloat16),
-    )
-    x = torch.randn(1, 24, dim, generator=generator).to(torch.bfloat16)
-    context = torch.randn(1, 5, dim, generator=generator).to(torch.bfloat16)
+    x, cond, context, rope = ltx_block_inputs(dim, heads, generator)
     monkeypatch.setitem(sys.modules, "jasna.protection", None)
     out = T.block_forward(weights, x, cond, T.prompt_key_value(weights, cond, context, heads=heads), rope, heads=heads)
     assert out.shape == x.shape and torch.isfinite(out.float()).all()
@@ -288,15 +250,18 @@ def test_an_unwritable_compile_cache_is_a_warning(tmp_path, monkeypatch, caplog)
     assert "is not writable" in caplog.text
 
 
-def test_compile_cache_lives_in_model_weights_unless_set(monkeypatch):
-    from jasna.engine_paths import configure_torch_compile_cache, model_weights_dir
+def test_compile_cache_lives_in_model_weights_unless_set(monkeypatch, tmp_path):
+    from jasna import engine_paths
 
-    monkeypatch.delenv("TORCHINDUCTOR_CACHE_DIR", raising=False)
-    configure_torch_compile_cache()
-    assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == str((model_weights_dir() / "torch-compile-cache").resolve())
+    monkeypatch.setattr(engine_paths, "model_weights_dir", lambda: tmp_path / "model_weights")
+    # setenv first: delenv on an unset variable records nothing, so the value set below would outlive the test
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", "/recorded-for-restore")
+    monkeypatch.delenv("TORCHINDUCTOR_CACHE_DIR")
+    engine_paths.configure_torch_compile_cache()
+    assert Path(os.environ["TORCHINDUCTOR_CACHE_DIR"]).is_relative_to(tmp_path / "model_weights")
 
     monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", "/elsewhere")
-    configure_torch_compile_cache()
+    engine_paths.configure_torch_compile_cache()
     assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == "/elsewhere"
 
 
@@ -339,9 +304,9 @@ def test_packaged_amd_runs_the_int8_linears_on_comfy_kitchen_without_importing_t
     assert T.enable_quant_kernels(torch.device("cuda")) == "comfy-kitchen"
 
 
-def test_nvidia_without_triton_kernels_keeps_the_torch_linears(monkeypatch):
+def test_nvidia_without_triton_kernels_keeps_the_torch_linears(monkeypatch, cuda_capability):
     _without_triton(monkeypatch, None)
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (8, 9))
+    cuda_capability((8, 9))
     assert T.enable_quant_kernels(torch.device("cuda")) is None
 
 

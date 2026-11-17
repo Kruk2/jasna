@@ -55,8 +55,8 @@ def test_the_triton_na3d_on_fp16_inputs_is_as_close_to_fp32_windows_as_on_bf16(k
 
 
 @pytest.mark.parametrize("capability, kernel", [((7, 5), T._fp16_eager_na3d), ((8, 6), na_triton.na3d)])
-def test_gpus_without_triton_tensor_core_dots_use_the_fp16_eager_na3d(capability, kernel, monkeypatch):
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: capability)
+def test_gpus_without_triton_tensor_core_dots_use_the_fp16_eager_na3d(capability, kernel, cuda_capability):
+    cuda_capability(capability)
     assert T.decoder_kernels(torch.device("cuda")).na3d is kernel
 
 
@@ -107,14 +107,18 @@ def test_compiled_diffusion_block_matches_eager(dtype, monkeypatch):
     torch.testing.assert_close(compiled.float(), eager.float(), atol=5e-2, rtol=5e-2)
 
 
+SMALL_ENCODER_CONFIG = {"encoder": {
+    "in_channels": 3, "out_channels": 8, "patch_size": 4, "dims": 3, "norm_layer": "pixel_norm",
+    "latent_log_var": "constant", "spatial_padding_mode": "zeros",
+    "blocks": [["res_x", {"num_layers": 1}], ["compress_space_res", {"multiplier": 2}],
+               ["compress_time_res", {"multiplier": 2}], ["compress_all_res", {"multiplier": 2}],
+               ["res_x", {"num_layers": 1}]],
+}}
+
+
 def test_compiled_channels_last_encoder_matches_eager(monkeypatch):
-    config = {"encoder": {"in_channels": 3, "out_channels": 8, "patch_size": 4, "dims": 3, "norm_layer": "pixel_norm",
-                          "latent_log_var": "constant", "spatial_padding_mode": "zeros",
-                          "blocks": [["res_x", {"num_layers": 1}], ["compress_space_res", {"multiplier": 2}],
-                                     ["compress_time_res", {"multiplier": 2}], ["compress_all_res", {"multiplier": 2}],
-                                     ["res_x", {"num_layers": 1}]]}}
     torch.manual_seed(0)
-    encoder = video_encoder.VideoEncoder(**encoder_kwargs(config)).cuda().bfloat16().eval()
+    encoder = video_encoder.VideoEncoder(**encoder_kwargs(SMALL_ENCODER_CONFIG)).cuda().bfloat16().eval()
     pixels = torch.rand(1, 3, 17, 64, 96, device="cuda", dtype=torch.bfloat16) * 2 - 1
     monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
     with torch.inference_mode():
@@ -129,13 +133,8 @@ def test_compiled_channels_last_encoder_matches_eager(monkeypatch):
 
 
 def test_compiled_fp16_encoder_with_float32_tail_survives_large_activations(monkeypatch):
-    config = {"encoder": {"in_channels": 3, "out_channels": 8, "patch_size": 4, "dims": 3, "norm_layer": "pixel_norm",
-                          "latent_log_var": "constant", "spatial_padding_mode": "zeros",
-                          "blocks": [["res_x", {"num_layers": 1}], ["compress_space_res", {"multiplier": 2}],
-                                     ["compress_time_res", {"multiplier": 2}], ["compress_all_res", {"multiplier": 2}],
-                                     ["res_x", {"num_layers": 1}]]}}
     torch.manual_seed(0)
-    encoder = video_encoder.VideoEncoder(**encoder_kwargs(config)).cuda().eval()
+    encoder = video_encoder.VideoEncoder(**encoder_kwargs(SMALL_ENCODER_CONFIG)).cuda().eval()
     with torch.no_grad():
         encoder.conv_in.conv.weight.mul_(300)
     pixels = torch.rand(1, 3, 17, 64, 96, device="cuda") * 2 - 1

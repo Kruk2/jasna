@@ -7,10 +7,21 @@ import numpy as np
 import pytest
 import torch
 
+from factories import NullProgressBar, track_plan
 from jasna.ltx.compose import masked_median
 from jasna.media.cuda_kernel import has_precompiled_kernels
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+
+
+def _latents(directory, count: int):
+    """A segment's latent store holding ``count`` small window latents."""
+    from jasna.ltx.resume_files import LatentStore
+
+    store = LatentStore(directory, "denoised")
+    for index in range(count):
+        store.put(index, torch.zeros(1))
+    return store
 
 
 def test_masked_median_equals_quantile_without_a_host_sync():
@@ -32,18 +43,17 @@ def test_masked_median_equals_quantile_without_a_host_sync():
             assert torch.equal(median, expected)
 
 
-def test_compose_span_reads_and_decodes_on_threads_of_their_own_below_the_frame_loop_priority(monkeypatch):
-    import contextlib
+def test_compose_span_reads_and_decodes_on_threads_of_their_own_below_the_frame_loop_priority(monkeypatch, tmp_path):
     import threading
-    from types import SimpleNamespace
 
-    from jasna.ltx import restore
+    from jasna.ltx import compose_pass
+    from jasna.ltx import spans as ltx_spans
     from jasna.ltx.camera import CropFrame
-    from jasna.ltx.plan import TrackPlan, Window
+    from jasna.ltx.windows import Window
 
     device = torch.device("cuda:0")
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
-    plan = TrackPlan(0, 0, ((),) * 6, (1.0,) * 6, (Window(0, 0, 0, 6, (crop,) * 6, 0),), 3)
+    plan = track_plan([Window(0, 0, 0, 6, (crop,) * 6, 0)])
     reads, decodes, writes = [], [], []
 
     def decode(decoder, latent, seed, canvas, budget, device):
@@ -64,18 +74,13 @@ def test_compose_span_reads_and_decodes_on_threads_of_their_own_below_the_frame_
         reads.append(threading.current_thread() is threading.main_thread())
         yield torch.zeros(6, 3, 4, 4, dtype=torch.uint8, device=device), list(range(6))
 
-    monkeypatch.setattr(restore, "_decode_window", decode)
-    monkeypatch.setattr(restore, "composite_frame", lambda source, candidates, *, feather, projector: source)
-    bar = SimpleNamespace(
-        update=lambda n: None,
-        window=lambda canvas: contextlib.nullcontext(),
-        waiting=contextlib.nullcontext,
-        windows_done=lambda canvas, count: None,
-    )
-    span = restore.LtxSpan(frames, (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 0),), Writer)
-    restore.compose_span(
-        span, [[plan]], None, [SimpleNamespace(get=lambda index: index)], frame_h=64, batch_size=6,
-        budget=lambda canvas: 0, device=device, bar=bar, cancel=threading.Event(), super_res=None, projector=None,
+    monkeypatch.setattr(compose_pass, "_decode_window", decode)
+    monkeypatch.setattr(compose_pass, "composite_frame", lambda source, candidates, *, feather, projector: source)
+    span = ltx_spans.LtxSpan(frames, (ltx_spans.LtxSegment(*ltx_spans.WHOLE_VIDEO_PTS, 0),), Writer)
+    compose_pass.compose_span(
+        span, [[plan]], None, [_latents(tmp_path, 1)], frame_h=64, batch_size=6,
+        budget=lambda canvas: 0, device=device, bar=NullProgressBar(), cancel=threading.Event(), super_res=None,
+        projector=None,
     )
     assert reads == [False]
     assert decodes == [(False, 0)]
@@ -83,53 +88,45 @@ def test_compose_span_reads_and_decodes_on_threads_of_their_own_below_the_frame_
 
 
 def test_decoded_windows_stay_on_the_gpu_from_a_roomy_decode_budget_on(monkeypatch):
-    from jasna.ltx import restore
+    from jasna.ltx import compose_pass, inference
 
     device = torch.device("cuda")
     monkeypatch.setattr(
-        restore, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.zeros(1, 3, 6, 4, 4, device=device)
+        inference, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.zeros(1, 3, 6, 4, 4, device=device)
     )
 
     def decoded(free_bytes):
-        return restore._decode_window(None, torch.zeros(1, 128, 1, 1, 1), 0, 512, lambda canvas: free_bytes, device)
+        return compose_pass._decode_window(None, torch.zeros(1, 128, 1, 1, 1), 0, 512, lambda canvas: free_bytes, device)
 
-    assert decoded(restore.GPU_WINDOWS_MIN_FREE_BYTES).is_cuda
-    assert decoded(restore.GPU_WINDOWS_MIN_FREE_BYTES - 1).is_cpu
+    assert decoded(inference.GPU_WINDOWS_MIN_FREE_BYTES).is_cuda
+    assert decoded(inference.GPU_WINDOWS_MIN_FREE_BYTES - 1).is_cpu
 
 
 @pytest.mark.parametrize("roomy", [False, True], ids=["host-memory windows", "gpu windows"])
-def test_frames_take_decoded_windows_without_waiting_for_the_gpu(monkeypatch, roomy):
-    import contextlib
-    import threading
-    from types import SimpleNamespace
-
-    from jasna.ltx import restore
+def test_frames_take_decoded_windows_without_waiting_for_the_gpu(monkeypatch, tmp_path, roomy):
+    from jasna.ltx import compose_pass, inference
     from jasna.ltx.camera import CropFrame
-    from jasna.ltx.plan import TrackPlan, Window
+    from jasna.ltx.windows import Window
 
     device = torch.device("cuda")
     monkeypatch.setattr(
-        restore, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.zeros(1, 3, 6, 4, 4, device=device)
+        inference, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.zeros(1, 3, 6, 4, 4, device=device)
     )
-    budget = restore.GPU_WINDOWS_MIN_FREE_BYTES if roomy else 1
+    budget = inference.GPU_WINDOWS_MIN_FREE_BYTES if roomy else 1
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
-    plan = TrackPlan(0, 0, ((),) * 6, (1.0,) * 6, (Window(0, 0, 0, 6, (crop,) * 6, 0),), 3)
+    plan = track_plan([Window(0, 0, 0, 6, (crop,) * 6, 0)])
     canvases = []
 
     def composite(source, candidates, *, feather, projector):
         canvases.extend(candidate.canvas.device.type for candidate in candidates)
         return source
 
-    monkeypatch.setattr(restore, "composite_frame", composite)
-    bar = SimpleNamespace(
-        update=lambda n: None, window=lambda canvas: contextlib.nullcontext(), waiting=contextlib.nullcontext,
-        windows_done=lambda canvas, count: None,
-    )
+    monkeypatch.setattr(compose_pass, "composite_frame", composite)
     decodes = ThreadPoolExecutor(max_workers=1)
     try:
-        composer = restore._SegmentComposer(
-            [plan], None, SimpleNamespace(get=lambda index: torch.zeros(1)), seed=0, feather=1,
-            budget=lambda canvas: budget, device=device, bar=bar, decodes=decodes, receives=decodes, latent_reads=decodes,
+        composer = compose_pass._SegmentComposer(
+            [plan], None, _latents(tmp_path, 1), seed=0, feather=1,
+            budget=lambda canvas: budget, device=device, bar=NullProgressBar(), decodes=decodes, receives=decodes, latent_reads=decodes,
             stream=torch.cuda.Stream(device), super_res=None, projector=None,
         )
         composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))
@@ -145,23 +142,22 @@ def test_frames_take_decoded_windows_without_waiting_for_the_gpu(monkeypatch, ro
 
 
 @pytest.mark.parametrize(("held", "windows_read"), [("cpu", 3), ("cuda", 6)], ids=["host-memory windows", "gpu windows"])
-def test_composer_decodes_further_ahead_once_windows_wait_on_the_gpu(monkeypatch, held, windows_read):
-    import contextlib
+def test_composer_decodes_further_ahead_once_windows_wait_on_the_gpu(monkeypatch, tmp_path, held, windows_read):
     from concurrent.futures import Future
-    from types import SimpleNamespace
 
-    from jasna.ltx import restore
+    from jasna.ltx import compose_pass
     from jasna.ltx.camera import CropFrame
-    from jasna.ltx.plan import TrackPlan, Window
+    from jasna.ltx.plan import TrackPlan
+    from jasna.ltx.windows import Window
 
     device = torch.device("cuda")
-    monkeypatch.setattr(restore, "DECODE_AHEAD", 2)
-    monkeypatch.setattr(restore, "GPU_DECODE_AHEAD", 5)
+    monkeypatch.setattr(compose_pass, "DECODE_AHEAD", 2)
+    monkeypatch.setattr(compose_pass, "GPU_DECODE_AHEAD", 5)
     monkeypatch.setattr(
-        restore, "_decode_window",
+        compose_pass, "_decode_window",
         lambda decoder, latent, seed, canvas, budget, device: torch.zeros(13, 3, 4, 4, dtype=torch.uint8, device=held),
     )
-    monkeypatch.setattr(restore, "composite_frame", lambda source, candidates, *, feather, projector: source)
+    monkeypatch.setattr(compose_pass, "composite_frame", lambda source, candidates, *, feather, projector: source)
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
     plans = [
         TrackPlan(index, 0, ((),) * 103, (1.0,) * 103, (Window(index, index, start, 13, (crop,) * 13, index),), 10)
@@ -176,15 +172,11 @@ def test_composer_decodes_further_ahead_once_windows_wait_on_the_gpu(monkeypatch
             latent.set_result(read_latent(index))
             return latent
 
-    bar = SimpleNamespace(
-        update=lambda n: None, window=lambda canvas: contextlib.nullcontext(), waiting=contextlib.nullcontext,
-        windows_done=lambda canvas, count: None,
-    )
     decodes = ThreadPoolExecutor(max_workers=1)
     try:
-        composer = restore._SegmentComposer(
-            plans, None, SimpleNamespace(get=lambda index: index), seed=0, feather=1, budget=lambda canvas: 0,
-            device=device, bar=bar, decodes=decodes, receives=decodes, latent_reads=LatentReads(), stream=torch.cuda.Stream(device),
+        composer = compose_pass._SegmentComposer(
+            plans, None, _latents(tmp_path, len(plans)), seed=0, feather=1, budget=lambda canvas: 0,
+            device=device, bar=NullProgressBar(), decodes=decodes, receives=decodes, latent_reads=LatentReads(), stream=torch.cuda.Stream(device),
             super_res=None, projector=None,
         )
         composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8, device=device))
@@ -285,7 +277,7 @@ def compositing_caches_released():
 @pytest.mark.parametrize("height, width", [(360, 640), (1080, 1920), (2160, 3840)])
 def test_composite_on_the_compose_kernels_is_bit_identical_to_torch(height, width, compositing_caches_released):
     from jasna.ltx.compose import composite_on_kernels, composite_on_torch
-    from jasna.ltx.plan import feather_pixels
+    from jasna.ltx.camera import feather_pixels
 
     device = torch.device("cuda")
     rng = np.random.default_rng(height)

@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack, closing
 from pathlib import Path
 
@@ -23,8 +23,9 @@ from jasna._frozen import is_frozen
 from jasna.accelerator import allocatable_bytes
 from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore, gpu_refused_resident_blocks
+from jasna.ltx.host_tensors import read_host_tensors, zero_tensors
 from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors, open_tensors
-from jasna.ltx.plan import SharedLatents, shared_latents
+from jasna.ltx.windows import SharedLatents, shared_latents
 from jasna.tensor_utils import compile_static
 
 logger = logging.getLogger(__name__)
@@ -88,21 +89,6 @@ def _window_workspace_bytes(tokens: int) -> int:
     return 2 * tokens * 4096 * 2 * 10 + T.CHUNK_ROWS * 16384 * 4 * 3
 
 
-def _zero(tensors: Iterable[torch.Tensor]) -> None:
-    for tensor in tensors:
-        tensor.view(-1).view(torch.uint8).zero_()
-
-
-def _read_host_tensors(reader, names: tuple[str, ...], specs) -> dict[str, torch.Tensor]:
-    tensors = {name: torch.empty(specs[name][1], dtype=specs[name][0], device="cpu") for name in names}
-    try:
-        reader.read_tensors_into((names,), iter((tensors,)))
-    except BaseException:
-        _zero(tensors.values())
-        raise
-    return tensors
-
-
 def _to_device(tensors: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
     """``tensors`` on ``device``; the host copies left behind are zeroed, also when a copy fails."""
     result = {}
@@ -111,10 +97,10 @@ def _to_device(tensors: dict[str, torch.Tensor], device: torch.device) -> dict[s
             result[name] = tensor.to(device)
         return result
     except BaseException:
-        _zero(result.values())
+        zero_tensors(result.values())
         raise
     finally:
-        _zero(tensor for name, tensor in tensors.items() if result.get(name) is not tensor)
+        zero_tensors(tensor for name, tensor in tensors.items() if result.get(name) is not tensor)
 
 
 class TransformerSource:
@@ -129,15 +115,15 @@ class TransformerSource:
             self.handle = self._file.enter_context(open_tensors(path))
             self.sigmas, self.stg_scale = sampler_settings(self.handle.metadata())
             self.specs = self.handle.tensor_specs()
-            self.top = _read_host_tensors(
-                self.handle, tuple(name for name in self.specs if not name.startswith("blocks.")), self.specs
+            self.top = read_host_tensors(
+                self.handle, [name for name in self.specs if not name.startswith("blocks.")], self.specs
             )
         except BaseException:
             self._file.close()
             raise
 
     def close(self) -> None:
-        _zero(self.top.values())
+        zero_tensors(self.top.values())
         self.top = {}
         self._file.close()
 
@@ -206,9 +192,7 @@ class LtxTransformer:
                 self.context = self.top.pop("prompt_context")
                 for sigma in self.sigmas[:-1]:
                     self.conditions.append(T.step_conditioning(self.top, float(sigma), device))
-                for name in list(self.top):
-                    if name.startswith(_ADALN_PREFIXES):
-                        self.top.pop(name).view(-1).view(torch.uint8).zero_()
+                zero_tensors([self.top.pop(name) for name in list(self.top) if name.startswith(_ADALN_PREFIXES)])
                 names = [{k.split(".", 2)[2]: k for k in specs if k.startswith(f"blocks.{index}.")}
                          for index in range(T.NUM_BLOCKS)]
                 sizes = [sum(math.prod(specs[name][1]) * specs[name][0].itemsize for name in block.values())
@@ -247,10 +231,7 @@ class LtxTransformer:
             tensors.extend((condition.block_rows, condition.output_rows, condition.prompt_rows))
         if self.context is not None:
             tensors.append(self.context)
-        for tensor in tensors:
-            tensor.view(-1).view(torch.uint8).zero_()
-        if self.device.type == "cuda":
-            torch.cuda.synchronize(self.device)
+        zero_tensors(tensors)
         self.top.clear()
         self.conditions.clear()
         self.context = None

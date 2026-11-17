@@ -6,35 +6,9 @@ import pytest
 import torch
 
 from jasna.ltx.camera import PLAN_CANVAS, ZOOM_PER_WINDOW, CropFrame, letterbox, track_camera, zoom_crop_sides
-from jasna.ltx.plan import (
-    BLEND_FRAMES,
-    LARGE_CANVAS,
-    LEAD_IN_FRAMES,
-    LESS_OVERLAP_WINDOW_HOP,
-    MAX_GAP,
-    WINDOW_HOP,
-    Region,
-    RegionGroup,
-    Track,
-    TrackPlan,
-    Window,
-    build_tracks,
-    crossfade_weights,
-    filled_frames,
-    group_regions,
-    handover_leads,
-    handover_presence,
-    merge_continuations,
-    plan_summary,
-    plan_video,
-    plan_window_lines,
-    rejoin_across_cover,
-    restart_cameras,
-    shared_latents,
-    track_max_gap,
-    window_hop,
-    window_starts,
-)
+from jasna.ltx.plan import LARGE_CANVAS, TrackPlan, handover_presence, plan_summary, plan_video, plan_window_lines
+from jasna.ltx.tracks import BLEND_FRAMES, LEAD_IN_FRAMES, MAX_GAP, Region, RegionGroup, Track, build_tracks, filled_frames, group_regions, handover_leads, merge_continuations, rejoin_across_cover, restart_cameras, track_max_gap
+from jasna.ltx.windows import WINDOW_HOP, Window, crossfade_weights, shared_latents, window_hop, window_starts
 from jasna.ltx import regions as ltx_regions
 from jasna.ltx.regions import regions_per_frame
 from jasna.mosaic.detections import Detections
@@ -293,37 +267,35 @@ def test_filled_frames_interpolate_gaps():
     assert xs == pytest.approx([0, 10, 20, 30, 40])
 
 
-def test_window_starts_cover_with_hop():
-    assert window_starts(1, WINDOW_HOP) == [0]
-    assert window_starts(121, WINDOW_HOP) == [0]
-    assert window_starts(122, WINDOW_HOP) == [0, WINDOW_HOP]
-    assert window_starts(385, WINDOW_HOP) == [0, 88, 176, 264]
-    assert window_starts(386, WINDOW_HOP) == [0, 88, 176, 264, 352]
-
-
-def test_less_overlap_window_starts_step_104():
-    assert window_starts(121, LESS_OVERLAP_WINDOW_HOP) == [0]
-    assert window_starts(122, LESS_OVERLAP_WINDOW_HOP) == [0, 104]
-    assert window_starts(600, LESS_OVERLAP_WINDOW_HOP) == [0, 104, 208, 312, 416, 520]
+@pytest.mark.parametrize(("hop", "frames", "starts"), [
+    (WINDOW_HOP, 1, [0]),
+    (WINDOW_HOP, 121, [0]),
+    (WINDOW_HOP, 122, [0, 88]),
+    (WINDOW_HOP, 385, [0, 88, 176, 264]),
+    (WINDOW_HOP, 386, [0, 88, 176, 264, 352]),
+    (window_hop(17), 121, [0]),
+    (window_hop(17), 122, [0, 104]),
+    (window_hop(17), 600, [0, 104, 208, 312, 416, 520]),
+])
+def test_window_starts_cover_the_frames_with_hop(hop, frames, starts):
+    assert window_starts(frames, hop) == starts
 
 
 def test_window_hop_from_the_overlap_frames():
     assert (window_hop(33), window_hop(17)) == (88, 104)
 
 
-def test_default_hop_shares_four_latents():
-    shared = shared_latents(WINDOW_HOP)
-    assert (shared.left, shared.right) == (range(12, 16), range(1, 5))
-    assert shared.ramp == (0.2, 0.4, 0.6, 0.8)
+@pytest.mark.parametrize(("hop", "left", "right", "ramp"), [
+    (WINDOW_HOP, range(12, 16), range(1, 5), (0.2, 0.4, 0.6, 0.8)),
+    (window_hop(17), range(14, 16), range(1, 3), (1 / 3, 2 / 3)),
+])
+def test_hop_shares_latents_with_the_next_window(hop, left, right, ramp):
+    shared = shared_latents(hop)
+    assert (shared.left, shared.right) == (left, right)
+    assert shared.ramp == pytest.approx(ramp)
 
 
-def test_less_overlap_hop_shares_two_latents():
-    shared = shared_latents(LESS_OVERLAP_WINDOW_HOP)
-    assert (shared.left, shared.right) == (range(14, 16), range(1, 3))
-    assert shared.ramp == pytest.approx((1 / 3, 2 / 3))
-
-
-@pytest.mark.parametrize("hop", [WINDOW_HOP, LESS_OVERLAP_WINDOW_HOP])
+@pytest.mark.parametrize("hop", [WINDOW_HOP, window_hop(17)])
 def test_shared_latents_encode_the_same_frames(hop):
     def first_pixel(latent: int) -> int:
         return 0 if latent == 0 else 8 * latent - 7
@@ -335,9 +307,9 @@ def test_shared_latents_encode_the_same_frames(hop):
 
 def test_plan_windows_follow_the_hop():
     regions = [[_square(300, 300, 120)] for _ in range(300)]
-    (plan,) = plan_video(regions, set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=False, window_hop=LESS_OVERLAP_WINDOW_HOP, max_gap=MAX_GAP, min_duration=0)
+    (plan,) = plan_video(regions, set(), frame_w=1920, frame_h=1080, stereo=None, large_canvas=False, window_hop=window_hop(17), max_gap=MAX_GAP, min_duration=0)
     assert [w.start for w in plan.windows] == [0, 104, 208]
-    assert plan.window_hop == LESS_OVERLAP_WINDOW_HOP
+    assert plan.window_hop == window_hop(17)
 
 
 def test_crossfade_weights_partition_unity():
@@ -349,7 +321,7 @@ def test_crossfade_weights_partition_unity():
     assert np.allclose(total, 1.0)
 
 
-@pytest.mark.parametrize("hop", [WINDOW_HOP, LESS_OVERLAP_WINDOW_HOP])
+@pytest.mark.parametrize("hop", [WINDOW_HOP, window_hop(17)])
 def test_crossfade_hides_a_later_windows_unfused_lead_frames(hop):
     """A later window's free latent 0 sits in front of fused latents, and the decoder
     garbles the colour of that latent and the next one (#580): its first 9 frames get no weight."""
@@ -464,17 +436,13 @@ def test_frames_without_masks_trace_no_regions():
     assert regions_per_frame(Detections([np.zeros((0, 4))] * 2, [empty, empty]), 270, 480) == [[], []]
 
 
-def test_gap_polygons_map_points_exactly_as_float64_arithmetic():
-    polygon = np.array([[3, 7], [250, 9], [101, 333]], dtype=np.int32)
-    later = np.array([[11, 2], [301, 20], [140, 401]], dtype=np.int32)
+def test_gap_polygons_map_the_nearer_polygon_onto_the_interpolated_bounds_in_float64():
+    polygon = np.array([[0, 0], [100, 20], [40, 100]], dtype=np.int32)
+    later = np.array([[20, 20], [80, 30], [50, 80]], dtype=np.int32)
     track = Track(0, {0: RegionGroup((0.0, 0.0, 1.0, 1.0), (polygon,)), 2: RegionGroup((0.0, 0.0, 1.0, 1.0), (later,))})
     (mapped,) = filled_frames(track)[1].polygons
-    source = (3.0, 7.0, 250.0, 333.0)
-    extent = tuple(a + (b - a) * 0.5 for a, b in zip(source, (11.0, 2.0, 301.0, 401.0)))
-    scale_x = (extent[2] - extent[0]) / (source[2] - source[0])
-    scale_y = (extent[3] - extent[1]) / (source[3] - source[1])
-    expected = [[extent[0] + (x - source[0]) * scale_x, extent[1] + (y - source[1]) * scale_y] for x, y in polygon.tolist()]
-    assert mapped.dtype == np.float64 and mapped.tolist() == expected
+    assert mapped.dtype == np.float64
+    assert mapped.tolist() == [[10.0, 10.0], [90.0, 26.0], [42.0, 90.0]]
 
 
 def _random_video(seed: int, frames: int) -> tuple[list[list[Region]], set[int]]:

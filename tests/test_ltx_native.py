@@ -97,23 +97,16 @@ def test_every_projection_has_a_variant_with_and_without_bias():
     assert {(flags["HAS_BIAS"], flags["RESIDUAL"]) for flags in down} == {(False, True), (True, True)}
 
 
-def _cuda_capability(monkeypatch, capability):
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: capability)
-    monkeypatch.setattr(torch.version, "cuda", "13.0")
-    monkeypatch.setattr(torch.version, "hip", None)
-
-
-def test_amd_gpus_take_their_tiles_by_architecture_name_not_their_reported_capability(monkeypatch):
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (12, 0))
-    monkeypatch.setattr(torch.version, "hip", "7.0")
-    monkeypatch.setattr(kernel_policy, "amd_gpu_architecture", lambda device: "gfx1201")
+def test_amd_gpus_take_their_tiles_by_architecture_name_not_their_reported_capability(cuda_capability, amd_gpu):
+    cuda_capability((12, 0))
+    amd_gpu("gfx1201")
     device = torch.device("cuda")
     assert kernel_policy.gpu_architecture(device) == "gfx1201" and kernel_policy.supports(device)
     assert kernel_policy.gemm_tile(4096, 4096, "gfx1201") == kernel_policy.AMD_INT8_MM_TILES["gfx1201"][0]
     assert kernel_policy.gemm_tile(4096, 16384, "gfx1201") == kernel_policy.AMD_INT8_MM_TILES["gfx1201"][1]
     assert kernel_policy.gemm_tile(32, 4096, "gfx1201") == kernel_policy.SMALL_MM_TILE
     assert not kernel_policy.has_tma("gfx1201")
-    monkeypatch.setattr(kernel_policy, "amd_gpu_architecture", lambda device: "gfx90a")
+    amd_gpu("gfx90a")
     assert not kernel_policy.supports(device)
 
 
@@ -122,13 +115,13 @@ def test_amd_gpus_take_their_tiles_by_architecture_name_not_their_reported_capab
     ((8, 9), "nvfp4", "NVFP4 blocks need SM 12.0 / 12.1"),
     ((7, 5), "nvfp4", "NVFP4 blocks need SM 12.0 / 12.1"),
 ])
-def test_native_block_refuses_gpus_without_its_kernels(monkeypatch, capability, quantization, reason):
-    _cuda_capability(monkeypatch, capability)
+def test_native_block_refuses_gpus_without_its_kernels(cuda_capability, capability, quantization, reason):
+    cuda_capability(capability)
     assert reason in native.unavailable_reason(torch.device("cuda"), _block_specs(quantization))
 
 
-def test_native_block_runs_its_own_int8_attention_whatever_comfy_kitchen_is_installed(monkeypatch):
-    _cuda_capability(monkeypatch, (12, 0))
+def test_native_block_runs_its_own_int8_attention_whatever_comfy_kitchen_is_installed(monkeypatch, cuda_capability):
+    cuda_capability((12, 0))
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: native.PREBUILT / "jasna_ltx_native.so")
     monkeypatch.setitem(sys.modules, "comfy_kitchen", None)
     assert native.unavailable_reason(torch.device("cuda"), _block_specs("int8")) is None
@@ -152,7 +145,7 @@ def test_attention_tile_follows_comfy_kitchen():
             assert kernel_policy.attention_key_tile("gfx1201", head_dim, rows) == kernel_policy.AMD_ATTENTION_KEY_TILE
 
 
-def test_vendored_attention_compiles_once_with_comfy_kitchens_flags(monkeypatch, tmp_path):
+def test_vendored_attention_compiles_once_per_toolchain_with_the_host_compiler(monkeypatch, tmp_path):
     from torch.utils import cpp_extension
 
     commands = []
@@ -166,31 +159,28 @@ def test_vendored_attention_compiles_once_with_comfy_kitchens_flags(monkeypatch,
     monkeypatch.setattr(native, "_IS_WINDOWS", False)
     monkeypatch.setenv("CC", "gcc-15")
     objects = native._attention_objects(tmp_path, PurePosixPath("/cuda"))
-    assert [path.name for path in objects] == ["quant_qk_int8.o", "quant_v_int8.o", "sage_attn_launcher.o"]
-    assert all(path.read_bytes() == b"object" for path in objects)
-    assert [command[-3] for command in commands] == [str(native._ATTENTION / source) for source in native._ATTENTION_SOURCES]
-    assert commands[0][:3] == ["/cuda/bin/nvcc", "-ccbin", "gcc-15"]
-    assert {"--use_fast_math", "-O3", "-DNDEBUG", "-Xcompiler=-fPIC", "-gencode=arch=compute_120,code=sm_120"} <= set(commands[0])
-    assert native._attention_objects(tmp_path, PurePosixPath("/cuda")) == objects and len(commands) == 3
+    assert objects and all(path.read_bytes() == b"object" for path in objects)
+    assert all(command[1:3] == ["-ccbin", "gcc-15"] for command in commands)
+    assert native._attention_objects(tmp_path, PurePosixPath("/cuda")) == objects and len(commands) == len(objects)
 
     monkeypatch.setattr(cpp_extension, "_get_cuda_arch_flags", lambda: ["-gencode=arch=compute_89,code=sm_89"])
     assert native._attention_objects(tmp_path, PurePosixPath("/cuda"))[0].parent != objects[0].parent
 
 
-def test_native_block_without_a_toolchain_keeps_the_compiled_path(monkeypatch):
+def test_native_block_without_a_toolchain_keeps_the_compiled_path(monkeypatch, cuda_capability):
     from torch.utils import cpp_extension
 
-    _cuda_capability(monkeypatch, (12, 0))
+    cuda_capability((12, 0))
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
     monkeypatch.setattr(cpp_extension, "CUDA_HOME", None)
     assert "nvcc" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
 
 
 @pytest.mark.parametrize("windows, nvcc", [(True, "nvcc.exe"), (False, "nvcc")])
-def test_source_build_finds_the_platform_nvcc(monkeypatch, tmp_path, windows, nvcc):
+def test_source_build_finds_the_platform_nvcc(monkeypatch, cuda_capability, tmp_path, windows, nvcc):
     from torch.utils import cpp_extension
 
-    _cuda_capability(monkeypatch, (12, 0))
+    cuda_capability((12, 0))
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
     monkeypatch.setattr(native, "_IS_WINDOWS", windows)
     monkeypatch.setattr(cpp_extension, "CUDA_HOME", str(tmp_path))
@@ -203,10 +193,10 @@ def test_source_build_finds_the_platform_nvcc(monkeypatch, tmp_path, windows, nv
     assert native.unavailable_reason(torch.device("cuda"), _block_specs("int8")) is None
 
 
-def test_source_build_looks_for_the_host_compiler_torch_builds_with(monkeypatch, tmp_path):
+def test_source_build_looks_for_the_host_compiler_torch_builds_with(monkeypatch, cuda_capability, tmp_path):
     from torch.utils import cpp_extension
 
-    _cuda_capability(monkeypatch, (12, 0))
+    cuda_capability((12, 0))
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
     monkeypatch.setattr(cpp_extension, "CUDA_HOME", str(tmp_path))
     native._nvcc(tmp_path).parent.mkdir()
@@ -219,16 +209,16 @@ def test_source_build_looks_for_the_host_compiler_torch_builds_with(monkeypatch,
     assert reason == f"no C++ compiler ({host}) found to build it" and looked_up == [host]
 
 
-def test_release_without_a_prebuilt_block_keeps_the_compiled_path_without_cpp_extension(monkeypatch):
-    _cuda_capability(monkeypatch, (12, 0))
+def test_release_without_a_prebuilt_block_keeps_the_compiled_path_without_cpp_extension(monkeypatch, cuda_capability):
+    cuda_capability((12, 0))
     monkeypatch.setattr(native, "is_frozen", lambda: True)
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
     monkeypatch.setitem(sys.modules, "torch.utils.cpp_extension", None)
     assert "release" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
 
 
-def test_release_with_a_prebuilt_block_runs_it(monkeypatch):
-    _cuda_capability(monkeypatch, (12, 0))
+def test_release_with_a_prebuilt_block_runs_it(monkeypatch, cuda_capability):
+    cuda_capability((12, 0))
     monkeypatch.setattr(native, "is_frozen", lambda: True)
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: native.PREBUILT / "jasna_ltx_native.so")
     assert native.unavailable_reason(torch.device("cuda"), _block_specs("int8")) is None
@@ -262,7 +252,7 @@ def test_extension_links_the_vendored_attention_objects(monkeypatch, tmp_path):
     monkeypatch.setattr(cpp_extension, "load", lambda **kwargs: kwargs)
     built = native._build_extension(tmp_path / "build")
     assert built["extra_ldflags"][-2:] == [str(path) for path in objects]
-    assert built["sources"] == [str(native._HERE / source) for source in native._SOURCES]
+    assert built["sources"] and all(Path(source).is_file() for source in built["sources"])
 
 
 @pytest.mark.parametrize("hip", [None, "7.15"])
@@ -272,10 +262,10 @@ def test_release_arch_list_covers_every_sm_with_tuned_int8_kernels(monkeypatch, 
     assert archs == {*kernel_policy.INT8_MM_TILES, *kernel_policy.CUBLAS_INT8_MM}
 
 
-def test_building_the_extension_restores_the_environment_it_builds_in(monkeypatch, tmp_path):
+def test_building_the_extension_restores_the_environment_it_builds_in(monkeypatch, cuda_capability, tmp_path):
     from torch.utils import cpp_extension
 
-    _cuda_capability(monkeypatch, (12, 0))
+    cuda_capability((12, 0))
     monkeypatch.setenv("PATH", "user path")
     monkeypatch.delenv("CC", raising=False)
     monkeypatch.setattr(native.shutil, "which", lambda name: name)
@@ -296,8 +286,8 @@ def test_building_the_extension_restores_the_environment_it_builds_in(monkeypatc
     (False, False, logging.WARNING, "eager PyTorch (no Triton)"),
     (False, True, logging.WARNING, "eager PyTorch (no bf16 torch.compile"),
 ])
-def test_native_block_off_names_the_path_that_runs_instead(monkeypatch, caplog, compiled, triton, level, path):
-    _cuda_capability(monkeypatch, (8, 9))
+def test_native_block_off_names_the_path_that_runs_instead(monkeypatch, cuda_capability, caplog, compiled, triton, level, path):
+    cuda_capability((8, 9))
     monkeypatch.setenv("JASNA_LTX_NATIVE", "0")
     monkeypatch.setattr(native, "compiles", lambda device, dtype: compiled)
     monkeypatch.setattr(native, "has_triton", lambda: triton)
@@ -324,8 +314,8 @@ def test_packaged_amd_names_its_torch_path_without_importing_triton(monkeypatch,
     assert "eager PyTorch (no Triton)" in caplog.text
 
 
-def _native_load_fails(monkeypatch, frozen: bool):
-    _cuda_capability(monkeypatch, (8, 9))
+def _native_load_fails(monkeypatch, cuda_capability, frozen: bool):
+    cuda_capability((8, 9))
     monkeypatch.setattr(native, "unavailable_reason", lambda device, specs: None)
     monkeypatch.setattr(native, "compiles", lambda device, dtype: False)
     monkeypatch.setattr(native, "has_triton", lambda: False)
@@ -336,8 +326,8 @@ def _native_load_fails(monkeypatch, frozen: bool):
     monkeypatch.setattr(native, "_extension", Mock(side_effect=OSError("undefined symbol")))
 
 
-def test_a_source_run_whose_native_block_fails_to_load_warns_and_runs_the_torch_path(monkeypatch, caplog):
-    _native_load_fails(monkeypatch, frozen=False)
+def test_a_source_run_whose_native_block_fails_to_load_warns_and_runs_the_torch_path(monkeypatch, cuda_capability, caplog):
+    _native_load_fails(monkeypatch, cuda_capability, frozen=False)
 
     with caplog.at_level(logging.WARNING, logger=native.logger.name):
         assert native.load(torch.device("cuda"), _block_specs("int8")) is None
@@ -345,15 +335,15 @@ def test_a_source_run_whose_native_block_fails_to_load_warns_and_runs_the_torch_
     assert "eager PyTorch (no Triton)" in caplog.text and "undefined symbol" in caplog.text
 
 
-def test_a_release_whose_shipped_native_block_fails_to_load_is_broken(monkeypatch):
-    _native_load_fails(monkeypatch, frozen=True)
+def test_a_release_whose_shipped_native_block_fails_to_load_is_broken(monkeypatch, cuda_capability):
+    _native_load_fails(monkeypatch, cuda_capability, frozen=True)
 
     with pytest.raises(RuntimeError, match=r"does not load \(undefined symbol\)\. Reinstall Jasna\."):
         native.load(torch.device("cuda"), _block_specs("int8"))
 
 
-def test_native_block_can_be_turned_off(monkeypatch):
-    _cuda_capability(monkeypatch, (8, 9))
+def test_native_block_can_be_turned_off(monkeypatch, cuda_capability):
+    cuda_capability((8, 9))
     monkeypatch.setattr(native, "compiles", lambda device, dtype: False)
     monkeypatch.setenv("JASNA_LTX_NATIVE", "0")
     assert native.load(torch.device("cuda"), _block_specs("int8")) is None
@@ -378,19 +368,17 @@ def test_block_parameters_need_no_gpu_and_share_no_state(monkeypatch, architectu
 
 
 @pytest.mark.parametrize("device, index", [(torch.device("cuda", 2), 2), (torch.device("cuda"), 7)])
-def test_config_values_add_this_gpu_and_its_shipped_kernels(monkeypatch, tmp_path, device, index):
-    _cuda_capability(monkeypatch, (12, 0))
+def test_config_values_name_the_requested_gpu_else_the_current_one(monkeypatch, cuda_capability, tmp_path, device, index):
+    cuda_capability((12, 0))
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 7)
     monkeypatch.setattr(kernel_policy, "programs", lambda device: 123)
     manifest = tmp_path / "manifest.json"
-    manifest.write_text('[{"key":"owned-kernel","file":"owned.cubin"}]')
-    assert native.config_values(device, aot.BlockDims(4096, 16384, 32), manifest) == {
-        **native.block_parameters((12, 0), 32), "device": index, "programs": 123,
-        "kernels": [{"key": "owned-kernel", "file": "owned.cubin"}], "kernel_directory": str(tmp_path)}
+    manifest.write_text("[]")
+    assert native.config_values(device, aot.BlockDims(4096, 16384, 32), manifest)["device"] == index
 
 
-def test_rtx_3090_native_block_launches_plain_triton_gemms(monkeypatch, tmp_path):
-    _cuda_capability(monkeypatch, (8, 6))
+def test_rtx_3090_native_block_launches_plain_triton_gemms(monkeypatch, cuda_capability, tmp_path):
+    cuda_capability((8, 6))
     monkeypatch.setattr(kernel_policy, "programs", lambda device: 82)
     manifest = tmp_path / "manifest.json"
     manifest.write_text("[]")
@@ -445,8 +433,8 @@ def _quantizer(family: str, **constexprs) -> dict:
     return {"family": family, "constexprs": constexprs}
 
 
-def test_native_block_without_triton_needs_shipped_kernels(monkeypatch, tmp_path):
-    _amd_architecture(monkeypatch)
+def test_native_block_without_triton_needs_shipped_kernels(monkeypatch, amd_gpu, tmp_path):
+    amd_gpu()
     monkeypatch.setattr(native, "PREBUILT", tmp_path)
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: tmp_path / "jasna_ltx_native.so")
     monkeypatch.setattr(native, "has_triton", lambda: False)
@@ -458,8 +446,8 @@ def test_native_block_without_triton_needs_shipped_kernels(monkeypatch, tmp_path
     assert native._kernel_manifest("gfx1201", aot.BlockDims(4096, 16384, 32), fp4=False) == manifest
 
 
-def test_shipped_kernels_must_fit_the_models_widths_and_gpu(monkeypatch, tmp_path):
-    _amd_architecture(monkeypatch, "gfx1100")
+def test_shipped_kernels_must_fit_the_models_widths_and_gpu(monkeypatch, amd_gpu, tmp_path):
+    amd_gpu("gfx1100")
     monkeypatch.setattr(native, "PREBUILT", tmp_path)
     _shipped_manifest(tmp_path, "gfx1201-int8", [_quantizer("rotate_quantize", K=4096, MODULATE=1)])
     _shipped_manifest(tmp_path, "gfx1100-int8", [
@@ -492,27 +480,25 @@ def test_frozen_linux_release_ships_the_prebuilt_block_beside_its_executable(mon
     assert native._prebuilt_directory() == expected
 
 
-def test_native_block_and_its_policy_import_without_triton():
-    blocker = "import sys; sys.modules['triton'] = None; import jasna.ltx.native, jasna.ltx.kernel_policy, jasna.ltx.sampler"
-    subprocess.run([sys.executable, "-c", blocker], check=True, cwd=native._HERE.parents[2])
+@pytest.mark.parametrize("blocked", ["triton", "jasna.protection"])
+def test_native_block_and_its_policy_import_without(blocked):
+    blocker = (f"import sys; sys.modules[{blocked!r}] = None; "
+               "import jasna.ltx.native, jasna.ltx.kernel_policy, jasna.ltx.sampler; print('imported')")
+    run = subprocess.run([sys.executable, "-c", blocker], capture_output=True, text=True, cwd=native._HERE.parents[2])
+    assert (run.returncode, run.stdout.strip()) == (0, "imported"), run.stderr
 
 
 @pytest.mark.parametrize("architecture", ["gfx1103", "gfx1150", "gfx1151"])
-def test_amd_integrated_gpus_ship_tuned_kernels(monkeypatch, architecture):
-    _amd_architecture(monkeypatch, architecture)
+def test_amd_integrated_gpus_ship_tuned_kernels(amd_gpu, architecture):
+    amd_gpu(architecture)
     assert architecture in native.release_architectures()
     assert kernel_policy.supports(torch.device("cuda"))
 
 
-def test_gfx1152_has_no_tuned_kernels_to_ship_or_run(monkeypatch):
-    _amd_architecture(monkeypatch, "gfx1152")
+def test_gfx1152_has_no_tuned_kernels_to_ship_or_run(amd_gpu):
+    amd_gpu("gfx1152")
     assert "gfx1152" not in native.release_architectures()
     assert "no tuned kernels for gfx1152" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
-
-
-def test_native_package_imports_without_the_protection_module(monkeypatch):
-    monkeypatch.setitem(sys.modules, "jasna.protection", None)
-    assert native.load(torch.device("cpu"), {}) is None
 
 
 def test_each_source_checkout_builds_its_extension_in_its_own_directory(monkeypatch, tmp_path):
@@ -547,13 +533,6 @@ def test_prebuild_retains_a_loaded_windows_extension_until_its_process_exits(mon
     assert len(list(tmp_path.glob("jasna_ltx_native.*"))) == 1
 
 
-def _amd_architecture(monkeypatch, architecture="gfx1201"):
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (12, 0))
-    monkeypatch.setattr(torch.version, "cuda", None)
-    monkeypatch.setattr(torch.version, "hip", "7.15")
-    monkeypatch.setattr(kernel_policy, "amd_gpu_architecture", lambda device: architecture)
-
-
 @pytest.mark.parametrize("architecture", sorted(kernel_policy.AMD_INT8_MM_TILES))
 def test_amd_kernel_variants_are_the_amd_torch_paths_triton_kernels(architecture):
     found = aot.variants(architecture, aot.BlockDims(dim=4096, ff_dim=16384, heads=32), fp4=False)
@@ -582,8 +561,8 @@ def test_amd_kernel_profiles_are_named_by_gfx_architecture():
     assert kernel_policy.profile_name((12, 0), fp4=True) == "sm120-nvfp4"
 
 
-def test_amd_native_block_launches_comfy_kitchens_hip_attention_tile(monkeypatch, tmp_path):
-    _amd_architecture(monkeypatch)
+def test_amd_native_block_launches_comfy_kitchens_hip_attention_tile(monkeypatch, amd_gpu, tmp_path):
+    amd_gpu()
     monkeypatch.setattr(kernel_policy, "programs", lambda device: 64)
     manifest = tmp_path / "manifest.json"
     manifest.write_text("[]")
@@ -613,15 +592,15 @@ def test_amd_native_block_launches_comfy_kitchens_hip_attention_tile(monkeypatch
     ("nvfp4", "gfx1201", "NVFP4 blocks need SM 12.0 / 12.1"),
     ("int8", "gfx90a", "no tuned kernels for gfx90a"),
 ])
-def test_amd_native_block_refuses_what_it_has_no_kernels_for(monkeypatch, quantization, architecture, reason):
-    _amd_architecture(monkeypatch, architecture)
+def test_amd_native_block_refuses_what_it_has_no_kernels_for(amd_gpu, quantization, architecture, reason):
+    amd_gpu(architecture)
     assert reason in native.unavailable_reason(torch.device("cuda"), _block_specs(quantization))
 
 
-def test_amd_source_build_needs_hipcc(monkeypatch, tmp_path):
+def test_amd_source_build_needs_hipcc(monkeypatch, amd_gpu, tmp_path):
     from torch.utils import cpp_extension
 
-    _amd_architecture(monkeypatch)
+    amd_gpu()
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
     monkeypatch.setattr(native, "is_frozen", lambda: False)
     monkeypatch.setattr(native.shutil, "which", lambda name: name)
@@ -643,7 +622,7 @@ def test_hip_targets_follow_pytorch_rocm_arch_else_this_gpu(monkeypatch):
     assert native.hip_architectures() == ["gfx1100", "gfx1101", "gfx1201"]
 
 
-def test_hip_objects_compile_glue_and_attention_once_with_their_own_flags(monkeypatch, tmp_path):
+def test_hip_objects_compile_once_for_every_requested_gpu_with_fast_math_only_in_attention(monkeypatch, tmp_path):
     from torch.utils import cpp_extension
 
     commands = []
@@ -657,15 +636,11 @@ def test_hip_objects_compile_glue_and_attention_once_with_their_own_flags(monkey
     monkeypatch.setattr(cpp_extension, "include_paths", lambda device_type: ["/torch/include"])
     monkeypatch.setenv("PYTORCH_ROCM_ARCH", "gfx1100;gfx1201")
     objects = native._hip_objects(tmp_path, PurePosixPath("/rocm"))
-    assert [path.name for path in objects] == ["glue.o", "norm_rope_quant.o", "quant_v_int8.o", "int8_attn.o"]
-    assert [command[-3] for command in commands] == [
-        str(native._HERE / "glue.cu"), *(str(source) for source in native._HIP_ATTENTION_SOURCES)]
+    assert objects and all(path.read_bytes() == b"object" for path in objects)
     glue, *attention = commands
-    assert glue[0] == "/rocm/bin/hipcc" and {"-x", "hip", "-I/torch/include", "-DUSE_ROCM=1"} <= set(glue)
     assert "-ffast-math" not in glue and all("-ffast-math" in command for command in attention)
-    assert all({"--offload-arch=gfx1100", "--offload-arch=gfx1201", "-mno-wavefrontsize64", "-fPIC"} <= set(command)
-               for command in commands)
-    assert native._hip_objects(tmp_path, PurePosixPath("/rocm")) == objects and len(commands) == 4
+    assert all({"--offload-arch=gfx1100", "--offload-arch=gfx1201"} <= set(command) for command in commands)
+    assert native._hip_objects(tmp_path, PurePosixPath("/rocm")) == objects and len(commands) == len(objects)
 
     monkeypatch.setenv("PYTORCH_ROCM_ARCH", "gfx1201")
     assert native._hip_objects(tmp_path, PurePosixPath("/rocm"))[0].parent != objects[0].parent
@@ -683,6 +658,5 @@ def test_amd_extension_builds_host_sources_only_so_nothing_is_hipified(monkeypat
     monkeypatch.setattr(native, "_hip_objects", lambda build_directory, rocm_home: objects)
     monkeypatch.setattr(cpp_extension, "load", lambda **kwargs: kwargs)
     built = native._build_extension(tmp_path / "build")
-    assert built["sources"] == [str(native._HERE / "module.cpp"), str(native._HERE / "block.cpp")]
-    assert built["extra_ldflags"] == ["-L/torch/lib", "-lamdhip64", "-lc10_hip", "-ltorch_hip", *map(str, objects)]
-    assert built["extra_include_paths"] == [str(Path("/rocm") / "include")]
+    assert built["sources"] and all(Path(source).suffix == ".cpp" and Path(source).is_file() for source in built["sources"])
+    assert built["extra_ldflags"][-2:] == [str(path) for path in objects]

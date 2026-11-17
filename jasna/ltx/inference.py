@@ -15,6 +15,7 @@ import torch
 
 from jasna._frozen import is_frozen
 from jasna.accelerator import device_free_bytes, load_gpu_libraries_ahead
+from jasna.ltx.host_tensors import zero_tensors
 from jasna.ltx.model_files import LtxModelFiles, PlaceholderTensors
 from jasna.ltx.sampler import LtxTransformer, TransformerSource
 from jasna.models.ltx_vae import decode_latent, load_video_decoder, load_video_encoder
@@ -28,6 +29,26 @@ budget it was decoded with reaches this, so the ones held (~95 MB each at 512 px
 768) still leave every later decode the 14.75 GiB that decodes a 768 px window in one tile, so
 no tile layout changes, and each frame skips uploading its canvases. From it on, an allocator's
 cached blocks stay cached between decodes: freeing them could change neither."""
+
+
+class Cancelled(Exception):
+    """The job was cancelled during an LTX pass."""
+
+
+def vae_pixels(pixels: torch.Tensor, device: torch.device) -> torch.Tensor:
+    """uint8 pixels as the VAE encoder takes them: in [-1, 1], ``half_dtype(device)`` on ``device``."""
+    return pixels.to(device).float().div_(127.5).sub_(1.0).to(half_dtype(device))
+
+
+def decoded_frames(
+    decoder, latent: torch.Tensor, seed: int, free_bytes: int, device: torch.device
+) -> torch.Tensor:
+    """One window's latent decoded within ``free_bytes`` with noise from ``seed``, as uint8 ``[F, 3, S, S]``
+    on ``device``."""
+    generator = torch.Generator(device=device).manual_seed(seed)
+    video = decode_latent(decoder, latent.to(device), free_bytes, generator)
+    video = ((video + 1.0) / 2.0).clamp(0.0, 1.0)[0].float()
+    return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous()
 
 
 def protected_bundle(files: LtxModelFiles) -> bool:
@@ -72,9 +93,6 @@ class WorkerTransformer:
             "denoise_chain", {"seeds": list(seeds), "window_hop": window_hop}, list(references), advance
         )
         return tensors
-
-    def close(self) -> None:
-        self._runtime.unload_transformer()
 
 
 class WorkerDecoder:
@@ -135,16 +153,14 @@ class ModelRuntime:
         self._decoder = None
         self._transformer_source: TransformerSource | None = None
         self._ahead: Future[None] | None = None
-        self.load_seconds: dict[str, float] = {}
-        """Wall seconds of each model load (with a worker: its request, which also starts the
-        worker and checks the license when they come first), logged as each ends."""
 
     @contextmanager
     def _timed_load(self, model: str) -> Iterator[None]:
+        """Logs the wall seconds of one model load (with a worker: its request, which also starts
+        the worker and checks the license when they come first)."""
         started = time.monotonic()
         yield
-        self.load_seconds[model] = time.monotonic() - started
-        logger.info("[timing] LTX model load: %s %.1fs", model, self.load_seconds[model])
+        logger.info("[timing] LTX model load: %s %.1fs", model, time.monotonic() - started)
 
     def start_ahead(self) -> None:
         """Start the worker on a thread of its own: it takes its license grant, opens the
@@ -193,8 +209,6 @@ class ModelRuntime:
         try:
             return call()
         except WorkerCancelled:
-            from jasna.ltx.restore import Cancelled
-
             self._stop()
             raise Cancelled() from None
 
@@ -321,12 +335,6 @@ class ModelRuntime:
             return parent_peak, stats["peak_vram_bytes"]
         return parent_peak, None
 
-    def __enter__(self) -> ModelRuntime:
-        return self
-
-    def __exit__(self, *_exc) -> None:
-        self.close()
-
 
 def free_vram_beside_parent(device: torch.device, parent_free_bytes: int) -> Callable[[torch.device], int]:
     """Device-wide free VRAM inside the worker, from the parent's device-wide figure taken just
@@ -358,12 +366,10 @@ class WorkerBackend:
         self._prepared: Future[TransformerSource] | None = None
 
     def _unload_module(self, name: str) -> None:
-        from jasna.models.ltx_vae.loader import _clear_tensors
-
         model = getattr(self, name)
         if model is not None:
             setattr(self, name, None)
-            _clear_tensors(model.state_dict().values(), None)
+            zero_tensors(model.state_dict().values())
             del model
             torch.cuda.empty_cache()
 
@@ -394,8 +400,7 @@ class WorkerBackend:
         elif op == "encode":
             if self.encoder is None:
                 raise RuntimeError("LTX encoder is not loaded")
-            pixels = tensors[0].to(self.device).float().div_(127.5).sub_(1.0).to(half_dtype(self.device))
-            return {}, [self.encoder(pixels).to("cpu").contiguous()]
+            return {}, [self.encoder(vae_pixels(tensors[0], self.device)).to("cpu").contiguous()]
         elif op == "prepare_transformer":
             if self.transformer is None and self._prepared is None:
                 self._prepared = self._preparer.submit(TransformerSource, self.files.transformer)
@@ -428,7 +433,7 @@ class WorkerBackend:
         elif op == "decode":
             if self.decoder is None:
                 raise RuntimeError("LTX decoder is not loaded")
-            frames = self._decode_to_cpu(tensors[0], params["seed"], params["free_bytes"])
+            frames = decoded_frames(self.decoder, tensors[0], params["seed"], params["free_bytes"], self.device).to("cpu")
             if params["free_bytes"] < GPU_WINDOWS_MIN_FREE_BYTES:
                 # the parent's next budget reading counts this cache as used
                 torch.cuda.empty_cache()
@@ -454,14 +459,6 @@ class WorkerBackend:
             logger.debug("LTX transformer file opened ahead was never used; opening it had failed: %r", error)
             return
         source.close()
-
-    def _decode_to_cpu(self, latent: torch.Tensor, seed: int, free_bytes: int) -> torch.Tensor:
-        """Decoded window as uint8 ``[F, 3, S, S]`` on the CPU; its GPU copies are freed on return,
-        so the caller can hand that cache back before the parent reads the next window's budget."""
-        generator = torch.Generator(device=self.device).manual_seed(seed)
-        video = decode_latent(self.decoder, latent.to(self.device), free_bytes, generator)
-        video = ((video + 1.0) / 2.0).clamp(0.0, 1.0)[0].float()
-        return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous().to("cpu")
 
     def close(self) -> None:
         self._drop_prepared()

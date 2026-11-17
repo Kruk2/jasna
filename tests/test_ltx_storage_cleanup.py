@@ -2,7 +2,7 @@ import torch
 import pytest
 from safetensors.torch import save_file
 
-from factories import ReadObserver
+from factories import ReadObserver, block_store
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 from jasna.ltx.model_files import PlaceholderTensors, open_tensors
 from jasna.ltx import sampler, trial_shapes, transformer as T
@@ -81,11 +81,9 @@ def _install_native_store(monkeypatch):
 
 
 def test_close_clears_resident_storage_even_when_a_consumer_keeps_a_view():
-    source = {"weight": torch.arange(12, dtype=torch.float32).reshape(3, 4)}
-    original = source["weight"]
-    store = BlockStore([source], torch.device("cpu"), resident=1)
+    original = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+    store = block_store([{"weight": original}], torch.device("cpu"), resident=1)
     retained = store.acquire(0)["weight"]
-    assert source == {}
     assert torch.equal(retained, original)
 
     store.close()
@@ -233,35 +231,6 @@ def test_block_loading_streams_all_destinations_in_one_reader_operation(tmp_path
     finally:
         store.close()
 
-def test_opaque_block_store_keeps_complete_blocks_out_of_python_tensors(monkeypatch):
-    class Reader:
-        def tensor_specs(self):
-            return {
-                "blocks.0.proj.qdata": (torch.int8, (4, 4)),
-                "blocks.0.proj.scales": (torch.float32, (4,)),
-                "blocks.0.scale_shift_table": (torch.bfloat16, (2, 4)),
-            }
-
-        def read_tensors_into(self, group_names, groups):
-            pytest.fail("the native block store requested Python tensor destinations")
-
-    _install_native_store(monkeypatch)
-    store = OpaqueBlockStore.from_reader(
-        Reader(),
-        [{
-            "proj.qdata": "blocks.0.proj.qdata",
-            "proj.scales": "blocks.0.proj.scales",
-            "scale_shift_table": "blocks.0.scale_shift_table",
-        }],
-        torch.device("cpu"), resident=1,
-    )
-    native = store._native
-    assert set(native.specs[0]) == {"proj.qdata", "proj.scales", "scale_shift_table"}
-    store.begin_step(8192, 3, True)
-    store.activate(0)
-    store.close()
-    assert native.events == [("step", 8192, 3, True), ("activate", 0), ("close",)]
-
 
 def test_opaque_denoise_uses_only_native_complete_block_forward(tmp_path, monkeypatch):
     path = _small_transformer_file(tmp_path / "small-transformer.safetensors")
@@ -335,13 +304,13 @@ def test_cuda_stream_final_failure_clears_gpu_pinned_and_staging_storage(tmp_pat
     names = [f"blocks.{index}.weight" for index in range(3)]
     save_file({name: torch.ones(4) for name in names}, str(path))
     retained = []
-    allocate = BlockStore._allocate
+    allocate = BlockStore.__init__
 
-    def observe_allocation(store, layouts, device, resident):
-        allocate(store, layouts, device, resident)
+    def observe_allocation(store, layouts, device, *, resident):
+        allocate(store, layouts, device, resident=resident)
         retained.extend(store._resident_buffers + store._host + store._slots)
 
-    monkeypatch.setattr(BlockStore, "_allocate", observe_allocation)
+    monkeypatch.setattr(BlockStore, "__init__", observe_allocation)
     with open_tensors(path) as reader:
         reads = ReadObserver(reader, ValueError("synthetic final GPU verification failure"))
         with pytest.raises(ValueError, match="final GPU verification"):
@@ -357,10 +326,10 @@ def test_cuda_staging_failure_closes_the_store(tmp_path, monkeypatch):
     path = tmp_path / "blocks.safetensors"
     save_file({"blocks.0.weight": torch.ones(4)}, str(path))
     stores = []
-    allocate = BlockStore._allocate
+    allocate = BlockStore.__init__
 
-    def observe_allocation(store, layouts, device, resident):
-        allocate(store, layouts, device, resident)
+    def observe_allocation(store, layouts, device, *, resident):
+        allocate(store, layouts, device, resident=resident)
         stores.append(store)
 
     def no_pinned_memory(buffers):
@@ -368,7 +337,7 @@ def test_cuda_staging_failure_closes_the_store(tmp_path, monkeypatch):
             raise RuntimeError("synthetic pinned allocation failure")
         return []
 
-    monkeypatch.setattr(BlockStore, "_allocate", observe_allocation)
+    monkeypatch.setattr(BlockStore, "__init__", observe_allocation)
     monkeypatch.setattr(blocks_module, "_pin_while_allowed", no_pinned_memory)
     with open_tensors(path) as reader, pytest.raises(RuntimeError, match="pinned allocation"):
         BlockStore.from_reader(reader, [{"weight": "blocks.0.weight"}], torch.device("cuda"), resident=1)

@@ -11,6 +11,7 @@ import torch.nn.functional as F
 pytest.importorskip("triton")
 pytest.importorskip("comfy_kitchen")
 
+from factories import ltx_block_inputs
 from jasna.ltx import native
 from jasna.ltx import transformer as T
 from jasna.ltx.kernel_policy import supports
@@ -56,16 +57,9 @@ def block(request):
 
 def _inputs(weights: dict[str, torch.Tensor], rows: int, seed: int):
     generator = torch.Generator(device=DEVICE).manual_seed(seed)
-    dim = weights["scale_shift_table"].shape[1]
     side = CANVAS_SIDES[rows]
-    rope = T.build_rope(16, side, side, dim=dim, heads=T.HEADS, device=DEVICE)
-    cond = T.StepConditioning(
-        block_rows=(torch.randn(1, 2, 9, dim, generator=generator, device=DEVICE) * 0.1).to(torch.bfloat16),
-        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16, device=DEVICE),
-        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator, device=DEVICE) * 0.1).to(torch.bfloat16),
-    )
-    x = torch.randn(1, rows, dim, generator=generator, device=DEVICE).to(torch.bfloat16)
-    context = torch.randn(1, 1024, dim, generator=generator, device=DEVICE).to(torch.bfloat16)
+    x, cond, context, rope = ltx_block_inputs(weights["scale_shift_table"].shape[1], T.HEADS, generator, rows=rows,
+                                              context_rows=1024, latent_shape=(16, side, side), device=DEVICE)
     return x, cond, T.prompt_key_value(weights, cond, context), rope
 
 

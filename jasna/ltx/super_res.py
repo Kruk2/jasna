@@ -12,8 +12,9 @@ from collections.abc import Sequence
 import torch
 
 from jasna.ltx.camera import CropFrame
-from jasna.ltx.plan import Window
+from jasna.ltx.windows import Window
 from jasna.session_config import RtxLevelName, RtxQualityName
+from jasna.upscale.nvvfx_effects import SuperResChain, on_default_stream
 
 SUPER_RES_SCALE = 2
 
@@ -34,44 +35,36 @@ def upscaled_crop(crop: CropFrame) -> CropFrame:
 
 
 class LtxSuperRes:
-    """One RTX Super Res 2x upscaler per canvas size, made on first use."""
+    """One RTX Super Res 2x chain per canvas size, made on first use."""
 
     def __init__(
         self, *, device: torch.device, quality: RtxQualityName, denoise: RtxLevelName, deblur: RtxLevelName
     ) -> None:
         self._device = device
         self._quality = quality
-        self._denoise = None if denoise == "none" else denoise
-        self._deblur = None if deblur == "none" else deblur
-        self._upscalers = {}
+        self._denoise = denoise
+        self._deblur = deblur
+        self._chains: dict[int, SuperResChain] = {}
 
     def upscale(self, canvas: torch.Tensor) -> torch.Tensor:
         """uint8 ``[3, S, S]`` on the GPU to uint8 ``[3, 2S, 2S]``, ordered after the caller's stream."""
-        from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
-
-        current = torch.cuda.current_stream(self._device)
-        # nvvfx effects fail on any stream but the default one they load with.
-        default = torch.cuda.default_stream(self._device)
-        default.wait_stream(current)
-        with torch.cuda.stream(default):
+        with on_default_stream(self._device) as default:
             size = int(canvas.shape[-1])
-            upscaler = self._upscalers.get(size)
-            if upscaler is None:
-                upscaler = RtxSuperresSecondaryRestorer(
-                    device=self._device,
-                    scale=SUPER_RES_SCALE,
+            chain = self._chains.get(size)
+            if chain is None:
+                chain = SuperResChain(
+                    self._device,
+                    output_size=(size * SUPER_RES_SCALE, size * SUPER_RES_SCALE),
                     quality=self._quality,
                     denoise=self._denoise,
                     deblur=self._deblur,
-                    input_size=size,
                 )
-                self._upscalers[size] = upscaler
-            upscaled = upscaler.restore(canvas[None].float().div_(255.0), keep_start=0, keep_end=1)[0]
-        current.wait_stream(default)
-        upscaled.record_stream(current)
+                self._chains[size] = chain
+            upscaled = chain(canvas.float().div_(255.0), default.cuda_stream)
+        upscaled.record_stream(torch.cuda.current_stream(self._device))
         return upscaled
 
     def close(self) -> None:
-        for upscaler in self._upscalers.values():
-            upscaler.close()
-        self._upscalers.clear()
+        for chain in self._chains.values():
+            chain.close()
+        self._chains.clear()

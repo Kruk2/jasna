@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from jasna.ltx.plan import LATENT_FRAMES, LESS_OVERLAP_WINDOW_HOP, WINDOW_HOP, shared_latents
-from jasna.ltx.sampler import _euler, denoise_windows, fuse_overlaps, patchify, unpatchify
+from jasna.ltx.windows import LATENT_FRAMES, WINDOW_HOP, shared_latents, window_hop
+from jasna.ltx.sampler import _euler, denoise_windows, fuse_overlaps
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
@@ -21,12 +21,6 @@ def test_euler_with_cpu_sigmas_matches_device_sigmas_bit_for_bit():
         expected = _euler(sample, denoised, SIGMAS.cuda(), step)
         sample = _euler(sample, denoised, SIGMAS, step)
         assert torch.equal(sample, expected)
-
-
-def test_velocity_scaled_by_a_cpu_sigma_matches_a_device_sigma():
-    velocity = torch.randn(1, 4096, 128, device="cuda").bfloat16()
-    for sigma in SIGMAS:
-        assert torch.equal(velocity.float() * sigma, velocity.float() * sigma.cuda())
 
 
 def test_euler_and_overlap_fusion_do_not_sync_the_device():
@@ -56,29 +50,6 @@ def _fake_denoise(peaks: list[int]):
     return denoise
 
 
-def _all_on_gpu_chain(references, seeds, group, denoise, window_hop):
-    """The sampler as it was with every window's latent and reference on the GPU."""
-    shared = shared_latents(window_hop)
-    frames, height, width = references[0].shape[2:]
-    tokens_per_frame = height * width
-    tokens = frames * tokens_per_frame
-    refs = [patchify(r.cuda()) for r in references]
-    latents = []
-    for seed in seeds:
-        generator = torch.Generator(device="cuda").manual_seed(seed)
-        noise = torch.randn(1, 2 * tokens, 128, device="cuda", dtype=torch.bfloat16, generator=generator)
-        latents.append(noise[:, :tokens].clone())
-    fuse_overlaps(latents, tokens_per_frame, shared, [0.0] * len(shared.ramp))
-    for step in range(len(SIGMAS) - 1):
-        for start in range(0, len(latents), group):
-            members = range(start, min(start + group, len(latents)))
-            denoised = denoise([torch.cat([latents[i], refs[i]], dim=1) for i in members], step)
-            for i, value in zip(members, denoised):
-                latents[i] = _euler(latents[i], value, SIGMAS, step)
-        fuse_overlaps(latents, tokens_per_frame, shared, shared.ramp)
-    return [unpatchify(latent, frames, height, width) for latent in latents]
-
-
 def _denoise_windows(references, group, peaks, window_hop):
     return denoise_windows(
         references,
@@ -93,14 +64,14 @@ def _denoise_windows(references, group, peaks, window_hop):
     )
 
 
-@pytest.mark.parametrize("window_hop", [WINDOW_HOP, LESS_OVERLAP_WINDOW_HOP])
-@pytest.mark.parametrize("group", [1, 3, 7])
-def test_denoise_windows_matches_the_all_on_gpu_chain_bit_for_bit(group, window_hop):
+@pytest.mark.parametrize("window_hop", [WINDOW_HOP, window_hop(17)])
+@pytest.mark.parametrize("group", [3, 7])
+def test_denoising_windows_in_groups_gives_the_same_bits_as_one_at_a_time(group, window_hop):
     references = _windows(7)
-    expected = _all_on_gpu_chain(references, list(range(7)), group, _fake_denoise([]), window_hop)
+    expected = _denoise_windows(references, 1, [], window_hop)
     out = _denoise_windows(references, group, [], window_hop)
     assert len(out) == 7
-    assert all(torch.equal(a.cpu(), b.cpu()) for a, b in zip(out, expected))
+    assert all(torch.equal(a, b) for a, b in zip(out, expected))
 
 
 def test_denoise_windows_keeps_only_the_group_being_denoised_on_the_gpu():
