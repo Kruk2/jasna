@@ -31,6 +31,7 @@ import torch
 from torch.nn import functional as F
 
 from jasna.engine_paths import model_weights_dir
+from jasna.os_utils import atomic_write
 from jasna.upscale import Size, finish_frame
 
 DLSS5_RUNTIME_FILES = ("nvngx.dll", "dxgi.dll", "renodx-dlss5.addon64", "nvngx_dlss.dll", "nvngx_dlssnr.dll")
@@ -95,7 +96,7 @@ def extract_dlss5_runtime(release: Path, runtime_dir: Path) -> None:
     runtime_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(release) as archive:
         for name in DLSS5_RUNTIME_FILES:
-            with archive.open(_RELEASE_RUNTIME_FOLDER + name) as source, (runtime_dir / name).open("wb") as target:
+            with archive.open(_RELEASE_RUNTIME_FOLDER + name) as source, atomic_write(runtime_dir / name, "wb") as target:
                 shutil.copyfileobj(source, target, 1 << 22)
 
 

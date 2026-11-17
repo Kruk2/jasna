@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from jasna.engine_paths import get_onnx_tensorrt_engine_path
+from jasna.os_utils import atomic_write
 
 if TYPE_CHECKING:
     import tensorrt as trt
@@ -185,7 +186,7 @@ def compile_onnx_to_tensorrt_engine(
         workspace_gb=workspace_gb,
         dynamic_batch=dynamic_batch,
     )
-    return _save_engine(engine_path, engine_bytes)
+    return save_engine(engine_path, engine_bytes)
 
 
 def compile_onnx_bytes_to_encrypted_engine(
@@ -212,7 +213,7 @@ def compile_onnx_bytes_to_encrypted_engine(
         workspace_gb=workspace_gb,
         dynamic_batch=False,
     )
-    return _save_engine(engine_path, protected_model.encrypt_engine_bytes(model_id, engine_bytes))
+    return save_engine(engine_path, protected_model.encrypt_engine_bytes(model_id, engine_bytes))
 
 
 def _announce(message: str) -> None:
@@ -220,7 +221,9 @@ def _announce(message: str) -> None:
     logging.getLogger(__name__).info("%s", message)
 
 
-def _save_engine(engine_path: Path, engine_bytes: bytes) -> Path:
+def save_engine(engine_path: Path, engine_bytes: bytes) -> Path:
+    """Write a compiled engine whole or not at all: an engine file that exists counts as compiled."""
     engine_path.parent.mkdir(parents=True, exist_ok=True)
-    engine_path.write_bytes(engine_bytes)
+    with atomic_write(engine_path, "wb") as stream:
+        stream.write(engine_bytes)
     return engine_path

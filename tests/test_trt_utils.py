@@ -7,7 +7,7 @@ import pytest
 import torch
 from onnx import TensorProto, helper
 
-from jasna.trt import compile_onnx_to_tensorrt_engine, get_onnx_tensorrt_engine_path
+from jasna.trt import compile_onnx_to_tensorrt_engine, get_onnx_tensorrt_engine_path, save_engine
 from jasna.trt.trt_runner import TrtRunner
 
 needs_gpu = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
@@ -52,6 +52,16 @@ def test_engine_name_records_its_build_options(monkeypatch, options, name):
 def test_engine_name_needs_a_positive_batch(batch_size):
     with pytest.raises(ValueError, match="batch_size must be > 0"):
         get_onnx_tensorrt_engine_path("model.onnx", batch_size=batch_size)
+
+
+def test_an_engine_that_fails_to_write_does_not_count_as_compiled(tmp_path):
+    engine = tmp_path / "engines" / "model.engine"
+
+    with pytest.raises(TypeError):
+        save_engine(engine, "not bytes")
+
+    assert list(engine.parent.iterdir()) == []
+    assert save_engine(engine, b"engine").read_bytes() == b"engine"
 
 
 def test_an_existing_engine_is_reused_without_its_onnx(tmp_path):

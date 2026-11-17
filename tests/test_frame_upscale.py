@@ -499,6 +499,21 @@ def _release_zip(path: Path) -> bytes:
     return path.read_bytes()
 
 
+def test_a_runtime_file_that_fails_to_extract_is_not_left_as_installed(tmp_path):
+    import zipfile
+
+    from jasna.upscale import dlss5
+
+    damaged = _release_zip(tmp_path / "release.zip").replace(b"runtime dxgi.dll", b"runtime dxgi.dlL")
+    (tmp_path / "release.zip").write_bytes(damaged)
+    runtime = tmp_path / "dlss5"
+
+    with pytest.raises(zipfile.BadZipFile):
+        dlss5.extract_dlss5_runtime(tmp_path / "release.zip", runtime)
+
+    assert [path.name for path in runtime.iterdir()] == ["nvngx.dll"]
+
+
 @pytest.mark.parametrize("matches", [True, False])
 def test_the_dlss5_download_installs_only_the_runtime_of_the_expected_release(monkeypatch, tmp_path, matches):
     import hashlib

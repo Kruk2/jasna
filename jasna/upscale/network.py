@@ -74,7 +74,7 @@ def missing_network_engines(network: UpscaleNetwork, input_sizes: tuple[Size, ..
 
 
 def compile_network_engine(network: UpscaleNetwork, input_size: Size, device: torch.device, *, fp16: bool) -> Path:
-    from jasna.trt import build_engine_bytes
+    from jasna.trt import build_engine_bytes, save_engine
 
     width, height = input_size
     onnx = io.BytesIO()
@@ -86,9 +86,7 @@ def compile_network_engine(network: UpscaleNetwork, input_size: Size, device: to
     engine = build_engine_bytes(
         onnx.getvalue(), device, batch_size=None, fp16=fp16, workspace_gb=_ENGINE_WORKSPACE_GB, dynamic_batch=False
     )
-    path = network_engine_path(network, input_size, fp16=fp16)
-    path.write_bytes(engine)
-    return path
+    return save_engine(network_engine_path(network, input_size, fp16=fp16), engine)
 
 
 class NetworkFrameUpscaler:
