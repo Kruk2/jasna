@@ -101,30 +101,6 @@ def test_preserves_named_audio_layout(name):
     assert _normalized_audio_layout(layout) is layout
 
 
-def _source_stream(
-    index: int,
-    stream_type: str,
-    codec_name: str | None,
-    *,
-    metadata: dict[str, str] | None = None,
-    disposition: int = 0,
-):
-    codec_context = None
-    if codec_name is not None:
-        codec_context = SimpleNamespace(
-            name=codec_name,
-            sample_rate=48_000,
-            layout=av.AudioLayout("stereo"),
-        )
-    return SimpleNamespace(
-        index=index,
-        type=stream_type,
-        codec_context=codec_context,
-        metadata=dict(metadata or {}),
-        disposition=disposition,
-    )
-
-
 def _copier(src, dst, *, output_path=Path("result.mkv"), smart_fragment=False) -> SourceStreamCopier:
     return SourceStreamCopier(
         src, dst, output_path, video_index=0, creation_time=PROCESSED_AT, comment=None, smart_fragment=smart_fragment
@@ -133,62 +109,6 @@ def _copier(src, dst, *, output_path=Path("result.mkv"), smart_fragment=False) -
 
 def _bare_copier(dst) -> SourceStreamCopier:
     return _copier(SimpleNamespace(metadata={}), dst, smart_fragment=True)
-
-
-class TestSourceContainerPreservation:
-    def test_skips_streams_the_output_container_cannot_copy(self, caplog):
-        primary_video = _source_stream(0, "video", "h264")
-        subtitle = _source_stream(1, "subtitle", "pgssub")
-        attachment = _source_stream(2, "attachment", None)
-        src = SimpleNamespace(
-            streams=[primary_video, subtitle, attachment],
-            format=SimpleNamespace(name="matroska"),
-            demux=MagicMock(),
-            metadata={},
-            chapters=lambda: [],
-        )
-        dst = SimpleNamespace(
-            format=SimpleNamespace(name="mp4"),
-            supported_codecs=frozenset({"h264", "aac", "mov_text"}),
-            add_stream=MagicMock(),
-            add_stream_from_template=MagicMock(
-                side_effect=ValueError("mp4 does not support pgssub")
-            ),
-            metadata={},
-            set_chapters=MagicMock(),
-        )
-
-        copier = _copier(src, dst)
-
-        assert copier._pipes == {}
-        src.demux.assert_not_called()
-        assert "Skipping subtitle stream 1" in caplog.text
-        assert "Skipping attachment stream 2" in caplog.text
-
-    def test_does_not_copy_mp4_chapter_carrier_as_a_data_stream(self):
-        primary_video = _source_stream(0, "video", "h264")
-        chapter_carrier = _source_stream(1, "data", None)
-        chapter_carrier.name = "bin_data"
-        chapter_carrier.metadata["handler_name"] = "SubtitleHandler"
-        src = SimpleNamespace(
-            streams=[primary_video, chapter_carrier],
-            format=SimpleNamespace(name="mov,mp4,m4a,3gp,3g2,mj2"),
-            demux=MagicMock(),
-            metadata={},
-            chapters=lambda: [{"id": 0}],
-        )
-        dst = SimpleNamespace(
-            format=SimpleNamespace(name="mp4"),
-            add_stream=MagicMock(),
-            add_stream_from_template=MagicMock(),
-            metadata={},
-            set_chapters=MagicMock(),
-        )
-
-        _copier(src, dst)
-
-        dst.add_stream_from_template.assert_not_called()
-        src.demux.assert_not_called()
 
 
 class TestEncoderOptions:
@@ -590,17 +510,7 @@ class TestSourceStreamPump:
         source = write_double_adts_aac_source(tmp_path)
         destination = tmp_path / "result.mp4"
         with av.open(str(source)) as src, av.open(str(destination), "w") as dst:
-            in_stream = src.streams.audio[0]
-            out_stream = dst.add_stream_from_template(in_stream, opaque=True)
-            bitstream_filter = SourceStreamCopier._aac_copy_filter(
-                in_stream, out_stream, {"mp4"}
-            )
-            for packet in src.demux(in_stream):
-                dst.mux(
-                    SourceStreamCopier._copy_packets(
-                        packet, out_stream, bitstream_filter
-                    )
-                )
+            _copier(src, dst, output_path=destination).drain()
 
         with av.open(str(destination)) as result:
             assert sum(1 for _ in result.decode(audio=0)) > 1

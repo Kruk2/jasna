@@ -9,11 +9,10 @@ from pathlib import Path
 
 import av
 
-from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.container_utils import (
     CREATION_TIME,
-    is_mov_chapter_stream,
-    subtitle_transcode_codec,
+    log_stream_plan,
+    source_stream_plan,
     with_output_creation_time,
 )
 from jasna.settings_tag import with_source_comment
@@ -51,7 +50,6 @@ class SourceStreamCopier:
         self._dst = dst
         self._output_path = output_path
         self._smart_fragment = smart_fragment
-        self._chapters = ()
         self._copy_metadata(creation_time, comment)
         self._setup_streams(video_index, creation_time)
 
@@ -64,8 +62,7 @@ class SourceStreamCopier:
             self._dst.metadata["comment"] = with_source_comment(comment, self._src.metadata)
             logger.info("%s settings: %s", self._output_path.name, self._dst.metadata["comment"])
         if not self._smart_fragment:
-            self._chapters = self._src.chapters()
-            self._dst.set_chapters(self._chapters)
+            self._dst.set_chapters(self._src.chapters())
 
     def _setup_streams(self, video_index: int, creation_time: str) -> None:
         self._pipes: dict[int, tuple[str, object, object]] = {}
@@ -78,32 +75,17 @@ class SourceStreamCopier:
             return
 
         packet_streams = []
-        output_formats = set(self._dst.format.name.split(","))
-        source_formats = set(self._src.format.name.split(","))
-        for in_stream in self._src.streams:
-            if in_stream.index == video_index:
+        plan = source_stream_plan(
+            self._src,
+            video_index=video_index,
+            output_format=self._dst.format.name,
+            output_suffix=self._output_path.suffix,
+        )
+        log_stream_plan(plan, self._output_path.suffix)
+        for action in plan:
+            in_stream = action.stream
+            if action.kind == "skip":
                 continue
-            if is_mov_chapter_stream(
-                in_stream,
-                source_formats=source_formats,
-                chapters=self._chapters,
-            ):
-                continue
-            if in_stream.type == "attachment" and "matroska" not in output_formats:
-                logger.warning(
-                    "Skipping attachment stream %s: %s output does not support attachments",
-                    in_stream.index,
-                    self._output_path.suffix,
-                )
-                continue
-            if in_stream.codec_context is None and in_stream.type != "attachment":
-                logger.warning(
-                    "Skipping %s stream %s: it has no copyable codec",
-                    in_stream.type,
-                    in_stream.index,
-                )
-                continue
-
             source_audio_layout = (
                 in_stream.codec_context.layout
                 if in_stream.type == "audio"
@@ -114,18 +96,9 @@ class SourceStreamCopier:
                 if source_audio_layout is not None
                 else None
             )
-            if in_stream.type == "audio" and needs_audio_reencode(
-                in_stream.codec_context.name,
-                self._output_path.suffix,
-                self._dst.supported_codecs,
-            ):
-                logger.info(
-                    "re-encoding audio %s -> aac for %s",
-                    in_stream.codec_context.name,
-                    self._output_path.suffix,
-                )
+            if action.kind == "encode" and in_stream.type == "audio":
                 out_stream = self._dst.add_stream(
-                    "aac", rate=in_stream.codec_context.sample_rate
+                    action.codec, rate=in_stream.codec_context.sample_rate
                 )
                 out_stream.codec_context.layout = audio_layout
                 out_stream.bit_rate = 256_000
@@ -135,48 +108,27 @@ class SourceStreamCopier:
                     rate=in_stream.codec_context.sample_rate,
                 )
                 kind = "transcode"
+            elif action.kind == "encode":
+                out_stream = self._dst.add_stream(action.codec)
+                subtitle_time_base = in_stream.time_base or Fraction(1, 1_000)
+                out_stream.time_base = subtitle_time_base
+                out_stream.codec_context.time_base = subtitle_time_base
+                out_stream.codec_context.subtitle_header = b""
+                processor = None
+                kind = "subtitle_transcode"
             else:
-                try:
-                    out_stream = self._dst.add_stream_from_template(
-                        in_stream, opaque=True
-                    )
-                except ValueError as exc:
-                    transcode_codec = subtitle_transcode_codec(
-                        in_stream.codec_context.name,
-                        output_formats=output_formats,
-                        supported_codecs=self._dst.supported_codecs,
-                    )
-                    if in_stream.type != "subtitle" or transcode_codec is None:
-                        logger.warning(
-                            "Skipping %s stream %s: %s",
-                            in_stream.type,
-                            in_stream.index,
-                            exc,
-                        )
-                        continue
-                    logger.info(
-                        "re-encoding subtitle %s -> %s for %s",
-                        in_stream.codec_context.name,
-                        transcode_codec,
-                        self._output_path.suffix,
-                    )
-                    out_stream = self._dst.add_stream(transcode_codec)
-                    subtitle_time_base = in_stream.time_base or Fraction(1, 1_000)
-                    out_stream.time_base = subtitle_time_base
-                    out_stream.codec_context.time_base = subtitle_time_base
-                    out_stream.codec_context.subtitle_header = b""
-                    processor = None
-                    kind = "subtitle_transcode"
-                else:
-                    if (
-                        audio_layout is not None
-                        and audio_layout is not source_audio_layout
-                    ):
-                        out_stream.codec_context.layout = audio_layout
-                    processor = self._aac_copy_filter(
-                        in_stream, out_stream, output_formats
-                    )
-                    kind = "copy"
+                out_stream = self._dst.add_stream_from_template(in_stream, opaque=True)
+                if (
+                    audio_layout is not None
+                    and audio_layout is not source_audio_layout
+                ):
+                    out_stream.codec_context.layout = audio_layout
+                processor = (
+                    av.bitstream.BitStreamFilterContext("aac_adtstoasc", in_stream)
+                    if action.kind == "copy_adts_to_asc"
+                    else None
+                )
+                kind = "copy"
 
             out_stream.metadata.update(with_output_creation_time(in_stream.metadata, creation_time))
             out_stream.disposition = in_stream.disposition
@@ -187,17 +139,6 @@ class SourceStreamCopier:
 
         if packet_streams:
             self._packets = self._src.demux(packet_streams)
-
-    @staticmethod
-    def _aac_copy_filter(in_stream, out_stream, output_formats):
-        if (
-            in_stream.type == "audio"
-            and in_stream.codec_context.name == "aac"
-            and output_formats & {"mp4", "mov"}
-            and out_stream.codec_context.extradata
-        ):
-            return av.bitstream.BitStreamFilterContext("aac_adtstoasc", in_stream)
-        return None
 
     def _produce_packets(self, in_packet) -> list:
         kind, out_stream, processor = self._pipes[in_packet.stream.index]

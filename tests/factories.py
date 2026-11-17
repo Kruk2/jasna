@@ -682,6 +682,24 @@ def write_dated_source(path: Path) -> Path:
     return path
 
 
+def write_unknown_codec_audio_source(path: Path) -> Path:
+    """H.264 + AAC + PCM MKV whose PCM track names a codec FFmpeg does not know, so the
+    track opens as audio without a codec context."""
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+            # 384 px wide: the narrowest frame hevc_amf encodes.
+            "-f", "lavfi", "-i", "testsrc2=size=384x256:rate=12:duration=1",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+            "-map", "0:v:0", "-map", "1:a:0", "-map", "1:a:0",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a:0", "aac", "-c:a:1", "pcm_s16le", str(path),
+        ],
+        check=True,
+    )
+    path.write_bytes(path.read_bytes().replace(b"A_PCM/INT/LIT", b"A_JASNA/UNKNO"))
+    return path
+
+
 def write_transport_stream_with_empty_end(path: Path) -> Path:
     """Two-second 12 fps H.264 MPEG-TS followed by 17 MB of zeros, like an unfinished download.
     ffprobe looks for the last timestamps only in the final 16 MB, so it reports no duration."""

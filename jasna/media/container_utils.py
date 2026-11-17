@@ -1,15 +1,104 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from io import BytesIO
+from typing import Literal
 
 import av
 from av.codec.codec import Properties
 
+from jasna.media.audio_utils import needs_audio_reencode
+
+logger = logging.getLogger(__name__)
 
 _MOV_FORMATS = frozenset({"mov", "mp4", "m4a", "3gp", "3g2", "mj2"})
 MOV_SUFFIXES = frozenset({".mp4", ".mov"})
 CREATION_TIME = "creation_time"
+
+
+@dataclass(frozen=True)
+class StreamAction:
+    """What an output does with one source stream: ``copy`` it (``copy_adts_to_asc``: through
+    FFmpeg's ``aac_adtstoasc`` filter), ``encode`` it to ``codec``, or ``skip`` it for ``reason``."""
+
+    stream: av.stream.Stream
+    kind: Literal["copy", "copy_adts_to_asc", "encode", "skip"]
+    codec: str | None = None
+    reason: str | None = None
+
+
+def source_stream_plan(
+    source: av.container.InputContainer,
+    *,
+    video_index: int,
+    output_format: str,
+    output_suffix: str,
+) -> list[StreamAction]:
+    """The action for every stream of ``source`` an ``output_format`` output carries besides the
+    video at ``video_index``. A MOV chapter track is left out: the muxer rebuilds it from the chapters."""
+    source_formats = set(source.format.name.split(","))
+    chapters = source.chapters()
+    # A copy needs what PyAV's add_stream_from_template accepts, which is wider than
+    # supported_codecs for muxers that cannot say (MPEG-TS), so ask a throwaway output.
+    with av.open(BytesIO(), "w", format=output_format) as probe:
+        return [
+            _stream_action(stream, probe, output_suffix)
+            for stream in source.streams
+            if stream.index != video_index
+            and not is_mov_chapter_stream(stream, source_formats=source_formats, chapters=chapters)
+        ]
+
+
+def _stream_action(
+    stream: av.stream.Stream,
+    probe: av.container.OutputContainer,
+    output_suffix: str,
+) -> StreamAction:
+    output_formats = set(probe.format.name.split(","))
+    if stream.type == "attachment" and "matroska" not in output_formats:
+        return StreamAction(stream, "skip", reason=f"{output_suffix} output does not support attachments")
+    if stream.codec_context is None and stream.type != "attachment":
+        return StreamAction(stream, "skip", reason="it has no copyable codec")
+    if stream.type == "audio" and needs_audio_reencode(
+        stream.codec_context.name, output_suffix, probe.supported_codecs
+    ):
+        return StreamAction(stream, "encode", codec="aac")
+    try:
+        probe.add_stream_from_template(stream, opaque=True)
+    except ValueError as exc:
+        transcode_codec = subtitle_transcode_codec(
+            stream.codec_context.name,
+            output_formats=output_formats,
+            supported_codecs=probe.supported_codecs,
+        )
+        if stream.type != "subtitle" or transcode_codec is None:
+            return StreamAction(stream, "skip", reason=str(exc))
+        return StreamAction(stream, "encode", codec=transcode_codec)
+    if (
+        stream.type == "audio"
+        and stream.codec_context.name == "aac"
+        and output_formats & {"mp4", "mov"}
+        and stream.codec_context.extradata
+    ):
+        return StreamAction(stream, "copy_adts_to_asc")
+    return StreamAction(stream, "copy")
+
+
+def log_stream_plan(plan: list[StreamAction], output_suffix: str) -> None:
+    for action in plan:
+        if action.kind == "skip":
+            logger.warning("Skipping %s stream %s: %s", action.stream.type, action.stream.index, action.reason)
+        elif action.kind == "encode":
+            logger.info(
+                "re-encoding %s %s -> %s for %s",
+                action.stream.type,
+                action.stream.codec_context.name,
+                action.codec,
+                output_suffix,
+            )
 
 
 def is_mov_chapter_stream(

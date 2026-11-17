@@ -36,6 +36,7 @@ from factories import (
     write_hrd_timing_sei_source,
     write_variable_frame_rate_source,
     write_non_utf8_metadata_source,
+    write_unknown_codec_audio_source,
 )
 
 COMMENT = '{"jasna":"test","schema":1}'
@@ -644,6 +645,40 @@ def test_final_mux_skips_mp4_timecode_stream_without_codec(tmp_path: Path) -> No
         assert len(container.streams.video) == 1
         assert len(container.streams.audio) == 1
         assert container.streams.video[0].metadata["timecode"] == "00:00:00:00"
+
+
+@pytest.mark.parametrize("suffix", [".mkv", ".mp4"])
+def test_final_mux_skips_audio_stream_without_codec(tmp_path: Path, suffix: str) -> None:
+    source = write_unknown_codec_audio_source(tmp_path / "source.mkv")
+    with av.open(str(source)) as container:
+        assert [stream.codec_context is None for stream in container.streams.audio] == [False, True]
+    assembled = tmp_path / "assembled.mkv"
+    _ffmpeg("-i", str(source), "-map", "0:v:0", "-c:v", "copy", str(assembled))
+    output = tmp_path / f"output{suffix}"
+
+    mux_final_output(assembled, source, output, codec="h264", comment=COMMENT)
+
+    with av.open(str(output)) as container:
+        assert [stream.codec_context.name for stream in container.streams.audio] == ["aac"]
+
+
+def test_final_mux_copies_transport_stream_aac_into_mp4(tmp_path: Path) -> None:
+    source = tmp_path / "source.ts"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=12:duration=1",
+        "-f", "lavfi", "-i", "sine=frequency=1000:duration=1",
+        "-c:v", "libx264", "-c:a", "aac", str(source),
+    )
+    assembled = tmp_path / "assembled.ts"
+    _ffmpeg("-i", str(source), "-map", "0:v:0", "-c:v", "copy", str(assembled))
+    output = tmp_path / "output.mp4"
+
+    mux_final_output(assembled, source, output, codec="h264", comment=COMMENT)
+
+    with av.open(str(output)) as container:
+        audio = container.streams.audio[0]
+        assert audio.codec_context.name == "aac"
+        assert sum(frame.samples for frame in container.decode(audio)) / audio.sample_rate == pytest.approx(1.0, abs=0.1)
 
 
 def test_final_mux_copies_double_adts_aac_into_mp4(tmp_path: Path) -> None:

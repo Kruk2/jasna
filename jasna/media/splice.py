@@ -7,7 +7,6 @@ import subprocess
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from fractions import Fraction
-from io import BytesIO
 from pathlib import Path
 from typing import Literal
 
@@ -16,13 +15,13 @@ import av
 from jasna.accelerator import AcceleratorVendor
 from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.media.probe import VideoMetadata, resolve_video_start_pts
-from jasna.media.audio_utils import aac_reencode_args, needs_audio_reencode
+from jasna.media.audio_utils import aac_reencode_args
 from jasna.media.container_utils import (
     CREATION_TIME,
     MOV_SUFFIXES,
-    is_mov_chapter_stream,
+    log_stream_plan,
     output_creation_time,
-    subtitle_transcode_codec,
+    source_stream_plan,
 )
 from jasna.os_utils import find_executable, resolve_executable, subprocess_no_window_kwargs
 from jasna.segments import SegmentRange, normalize_segments
@@ -743,9 +742,6 @@ def mux_final_output(
         ".mov": "mov",
         ".mp4": "mp4",
     }[destination.suffix.lower()]
-    with av.open(BytesIO(), "w", format=output_format) as probe:
-        supported_codecs = probe.supported_codecs
-
     with av.open(str(source), metadata_errors="replace") as container:
         comment = with_source_comment(comment, container.metadata)
         log.info("%s settings: %s", destination.name, comment)
@@ -758,65 +754,16 @@ def mux_final_output(
             "-i", str(source),
             "-map", "0:v:0",
         ]
-        copied_streams = []
-        transcoded_subtitles = {}
-        source_formats = set(container.format.name.split(","))
-        source_chapters = container.chapters()
-        for stream in container.streams:
-            if stream.index == primary_video.index:
-                continue
-            if is_mov_chapter_stream(
-                stream,
-                source_formats=source_formats,
-                chapters=source_chapters,
-            ):
-                continue
-            if stream.type == "audio":
-                copied_streams.append(stream)
-                continue
-            if stream.type == "attachment":
-                if output_format == "matroska":
-                    copied_streams.append(stream)
-                else:
-                    log.warning(
-                        "Skipping attachment stream %s: %s output does not support attachments",
-                        stream.index,
-                        destination.suffix,
-                    )
-                continue
-            codec_name = (
-                stream.codec_context.name
-                if stream.codec_context is not None
-                else None
-            )
-            if codec_name in supported_codecs:
-                copied_streams.append(stream)
-                continue
-            transcode_codec = subtitle_transcode_codec(
-                codec_name,
-                output_formats={output_format},
-                supported_codecs=supported_codecs,
-            )
-            if stream.type == "subtitle" and transcode_codec is not None:
-                copied_streams.append(stream)
-                transcoded_subtitles[stream.index] = transcode_codec
-                log.info(
-                    "re-encoding subtitle %s -> %s for %s",
-                    codec_name,
-                    transcode_codec,
-                    destination.suffix,
-                )
-                continue
-            log.warning(
-                "Skipping %s stream %s: %s output does not support %s",
-                stream.type,
-                stream.index,
-                destination.suffix,
-                codec_name or "codec-less streams",
-            )
-
-        for stream in copied_streams:
-            args += ["-map", f"1:{stream.index}"]
+        plan = source_stream_plan(
+            container,
+            video_index=primary_video.index,
+            output_format=output_format,
+            output_suffix=destination.suffix,
+        )
+        log_stream_plan(plan, destination.suffix)
+        carried = [action for action in plan if action.kind != "skip"]
+        for action in carried:
+            args += ["-map", f"1:{action.stream.index}"]
 
         creation_time = output_creation_time(datetime.now(timezone.utc))
         args += [
@@ -827,32 +774,24 @@ def mux_final_output(
             "-map_chapters", "1",
             "-c", "copy",
         ]
-        for output_index, stream in enumerate(copied_streams, start=1):
+        for output_index, action in enumerate(carried, start=1):
             args += [
                 f"-map_metadata:s:{output_index}",
-                f"1:s:{stream.index}",
+                f"1:s:{action.stream.index}",
             ]
-        for output_index, stream in enumerate([primary_video, *copied_streams]):
+        for output_index, stream in enumerate([primary_video, *(action.stream for action in carried)]):
             if CREATION_TIME in stream.metadata:
                 args += [f"-metadata:s:{output_index}", f"{CREATION_TIME}={creation_time}"]
-        audio_streams = [
-            stream for stream in copied_streams if stream.type == "audio"
-        ]
-        for output_index, stream in enumerate(audio_streams):
-            name = stream.codec_context.name
-            if needs_audio_reencode(name, destination.suffix, supported_codecs):
+        audio = [action for action in carried if action.stream.type == "audio"]
+        for output_index, action in enumerate(audio):
+            if action.kind == "encode":
                 args += aac_reencode_args(output_index)
-            else:
-                args += [f"-c:a:{output_index}", "copy"]
-                if name == "aac" and destination.suffix.lower() in MOV_SUFFIXES:
-                    args += [f"-bsf:a:{output_index}", "aac_adtstoasc"]
-        subtitle_streams = [
-            stream for stream in copied_streams if stream.type == "subtitle"
-        ]
-        for output_index, stream in enumerate(subtitle_streams):
-            transcode_codec = transcoded_subtitles.get(stream.index)
-            if transcode_codec is not None:
-                args += [f"-c:s:{output_index}", transcode_codec]
+            elif action.kind == "copy_adts_to_asc":
+                args += [f"-bsf:a:{output_index}", "aac_adtstoasc"]
+        subtitles = [action for action in carried if action.stream.type == "subtitle"]
+        for output_index, action in enumerate(subtitles):
+            if action.kind == "encode":
+                args += [f"-c:s:{output_index}", action.codec]
     if destination.suffix.lower() in MOV_SUFFIXES:
         tag = {"h264": "avc3", "hevc": "hev1", "av1": "av01"}[codec]
         args += ["-tag:v:0", tag, "-movflags", "+faststart"]

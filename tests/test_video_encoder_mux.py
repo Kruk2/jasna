@@ -26,7 +26,12 @@ from jasna.media.video_decoder import VideoReader
 from jasna.media.video_encoder import VideoEncoder
 from jasna.os_utils import resolve_executable
 
-from factories import creation_times, write_dated_source, write_non_utf8_metadata_source
+from factories import (
+    creation_times,
+    write_dated_source,
+    write_non_utf8_metadata_source,
+    write_unknown_codec_audio_source,
+)
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
@@ -466,6 +471,17 @@ def test_source_with_timecode_track_muxes(tmp_path):
         assert len(output.streams.audio) == 1
         assert sum(1 for _ in output.decode(video=0)) == 24
         assert output.streams.video[0].metadata["timecode"] == "01:00:00:00"
+
+
+@pytest.mark.parametrize("suffix", [".mkv", ".mp4"])
+def test_audio_stream_without_codec_is_left_out(tmp_path, suffix):
+    src = write_unknown_codec_audio_source(tmp_path / "src.mkv")
+    dst = tmp_path / f"out{suffix}"
+
+    _transcode(src, dst)
+
+    with av.open(str(dst)) as output:
+        assert [stream.codec_context.name for stream in output.streams.audio] == ["aac"]
 
 
 def test_count_only_stereo_pcm_copies_to_mp4_with_explicit_layout(tmp_path):
