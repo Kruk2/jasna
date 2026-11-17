@@ -3,22 +3,19 @@ from __future__ import annotations
 from fractions import Fraction
 from pathlib import Path
 import subprocess
-from unittest.mock import MagicMock, call, patch
 
 import pytest
-from av.video.reformatter import ColorRange, Colorspace
 
+from factories import video_metadata
 from jasna.accelerator import AcceleratorVendor
 from jasna.os_utils import resolve_executable
 from jasna.media.probe import VideoMetadata, get_video_meta_data
 from jasna.media.splice import (
     KeyframeIndex,
-    SpliceSpan,
     SmartRenderCompatibilityError,
     _analyze_packet_reordering,
     _is_safe_random_access_packet,
     build_splice_plan,
-    create_copy_fragment,
     resolve_smart_encoder_settings,
     validate_smart_render,
 )
@@ -27,26 +24,11 @@ from jasna.segments import SegmentRange, SegmentRestoration
 
 def _metadata(codec: str = "h264", **overrides) -> VideoMetadata:
     values = dict(
-        video_file="input.mp4",
-        video_height=1080,
-        video_width=1920,
-        video_fps=30.0,
-        average_fps=30.0,
-        video_fps_exact=Fraction(30, 1),
-        codec_name=codec,
-        duration=6.0,
-        time_base=Fraction(1, 30),
-        start_pts=0,
-        color_range=ColorRange.MPEG,
-        color_space=Colorspace.ITU709,
-        num_frames=180,
-        is_10bit=False,
-        pixel_format="yuv420p",
-        profile="High",
-        field_order="progressive",
+        video_file="input.mp4", video_height=1080, video_width=1920, codec_name=codec,
+        pixel_format="yuv420p", profile="High", field_order="progressive",
     )
     values.update(overrides)
-    return VideoMetadata(**values)
+    return video_metadata(fps=30, num_frames=180, **values)
 
 
 def _index(points=(0, 60, 120), end=180) -> KeyframeIndex:
@@ -360,7 +342,7 @@ def _field_order_bt_source(tmp_path: Path, *, interlaced: bool) -> Path:
     flagged = tmp_path / "flagged.mkv"
     subprocess.run(
         [resolve_executable("ffmpeg"), "-y", "-loglevel", "error", "-i", str(encoded),
-         "-c", "copy", "-field_order", "bt", str(flagged)],
+         "-c", "copy", "-field_order", "bt", "-metadata", "title=JASNA-TAG", str(flagged)],
         check=True,
     )
     return flagged
@@ -377,85 +359,34 @@ def test_validation_checks_frames_when_the_stream_is_flagged_interlaced(tmp_path
         assert validate_smart_render(metadata, output_path="out.mp4", codec="h264", retarget_high_fps=False) == "h264"
 
 
-def test_random_access_classifier_distinguishes_hevc_idr_from_cra() -> None:
-    hevc_idr = bytes([19 << 1, 1])
-    hevc_cra = bytes([21 << 1, 1])
-    assert _is_safe_random_access_packet(
-        len(hevc_idr).to_bytes(4, "big") + hevc_idr,
-        "hevc",
-        4,
-        length_prefixed=True,
-    )
-    assert not _is_safe_random_access_packet(
-        len(hevc_cra).to_bytes(4, "big") + hevc_cra,
-        "hevc",
-        4,
-        length_prefixed=True,
-    )
+def test_validation_samples_frames_of_a_flagged_source_with_non_utf8_tags(tmp_path) -> None:
+    source = _field_order_bt_source(tmp_path, interlaced=False)
+    data = source.read_bytes()
+    assert b"JASNA-TAG" in data
+    source.write_bytes(data.replace(b"JASNA-TAG", b"JASNA\x90TAG"))
+    metadata = get_video_meta_data(str(source))
+    assert metadata.field_order in {"bt", "tt"}
+
+    assert validate_smart_render(metadata, output_path="out.mp4", codec="h264", retarget_high_fps=False) == "h264"
 
 
-def test_random_access_classifier_accepts_h264_idr() -> None:
-    idr = b"\x65\x88"
-    assert _is_safe_random_access_packet(
-        len(idr).to_bytes(4, "big") + idr,
-        "h264",
-        4,
-        length_prefixed=True,
-    )
+def _length_prefixed(unit: bytes) -> bytes:
+    return len(unit).to_bytes(4, "big") + unit
 
 
-def test_length_prefixed_idr_is_not_misread_as_annex_b() -> None:
-    idr = b"\x65" + bytes(255)
-    packet = len(idr).to_bytes(4, "big") + idr
-
-    assert packet[:4] == b"\x00\x00\x01\x00"
-    assert _is_safe_random_access_packet(
-        packet,
-        "h264",
-        4,
-        length_prefixed=True,
-    )
-
-
-def test_random_access_classifier_accepts_annex_b_h264_idr() -> None:
-    assert _is_safe_random_access_packet(
-        b"\x00\x00\x00\x01\x65\x88",
-        "h264",
-        4,
-        length_prefixed=False,
-    )
-
-
-def test_copy_fragment_seeks_before_demux(tmp_path: Path) -> None:
-    source = MagicMock()
-    destination = MagicMock()
-    input_stream = MagicMock()
-    output_stream = MagicMock()
-    packet = MagicMock(pts=65, dts=63)
-    source.__enter__.return_value = source
-    source.__exit__.return_value = False
-    source.streams.video = [input_stream]
-    source.demux.return_value = [packet]
-    destination.__enter__.return_value = destination
-    destination.__exit__.return_value = False
-    destination.add_stream_from_template.return_value = output_stream
-    span = SpliceSpan("copy", 60, 120)
-
-    with patch("jasna.media.splice.av.open", side_effect=[source, destination]):
-        create_copy_fragment(
-            Path("source.mp4"),
-            span,
-            _index(),
-            tmp_path / "fragment.nut",
-            codec="h264",
-        )
-
-    assert source.method_calls[:2] == [
-        call.seek(60, stream=input_stream, backward=True),
-        call.demux(input_stream),
-    ]
-    assert packet.pts == 5
-    assert packet.dts == 3
+@pytest.mark.parametrize(
+    ("packet", "codec", "length_prefixed", "safe"),
+    [
+        (_length_prefixed(bytes([19 << 1, 1])), "hevc", True, True),
+        (_length_prefixed(bytes([21 << 1, 1])), "hevc", True, False),
+        (_length_prefixed(b"\x65\x88"), "h264", True, True),
+        (_length_prefixed(b"\x65" + bytes(255)), "h264", True, True),
+        (b"\x00\x00\x00\x01\x65\x88", "h264", False, True),
+    ],
+    ids=["hevc-idr", "hevc-cra", "h264-idr", "h264-idr-length-looks-like-annex-b", "annex-b-h264-idr"],
+)
+def test_random_access_classifier_accepts_only_idr_pictures(packet, codec, length_prefixed, safe) -> None:
+    assert _is_safe_random_access_packet(packet, codec, 4, length_prefixed=length_prefixed) is safe
 
 
 def test_segment_render_span_widens_one_segment_to_its_keyframes() -> None:

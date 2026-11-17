@@ -89,6 +89,38 @@ class TestSeekBehavior:
         )
         assert first_seconds < start_seconds + seek_ts + 0.5
 
+    @pytest.mark.parametrize("backend", ["vali", "pyav-hw", "pyav-sw"])
+    def test_every_backend_seeks_to_the_target_of_a_stream_starting_late(self, tmp_path, backend):
+        if backend == "vali" and torch.version.hip is not None:
+            pytest.skip("VALI decodes with NVDEC")
+        import subprocess
+
+        import av
+        from jasna.os_utils import resolve_executable
+
+        # Video starting 1.4 s in, with a keyframe every second, so one lies within that distance past the target.
+        source = tmp_path / "late-start.mp4"
+        subprocess.run(
+            [resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+             "-f", "lavfi", "-i", "testsrc2=size=256x256:rate=12:duration=6",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-bf", "3", "-g", "12", "-keyint_min", "12",
+             "-x264-params", "scenecut=0", "-output_ts_offset", "1.4", str(source)],
+            check=True,
+        )
+        metadata = get_video_meta_data(str(source))
+        assert metadata.start_pts * metadata.time_base >= 1
+        seek_ts = 2.25
+        target_pts = metadata.start_pts + round(seek_ts / metadata.time_base)
+        with av.open(str(source)) as container:
+            expected = [frame.pts for frame in container.decode(video=0) if frame.pts >= target_pts]
+
+        with VideoReader(
+            str(source), batch_size=8, device=torch.device("cuda:0"), metadata=metadata, decode_backend=backend
+        ) as reader:
+            pts = [int(p) for _, batch_pts in reader.frames(seek_ts=seek_ts) for p in batch_pts]
+
+        assert pts == expected
+
     @pytest.mark.parametrize("backend", ["auto", "vali", "pyav-hw", "pyav-sw"])
     @pytest.mark.parametrize("seek_ts", [None, 0.0])
     def test_every_backend_reads_exactly_the_shown_frames_of_a_mid_gop_cut(self, tmp_path, backend, seek_ts):

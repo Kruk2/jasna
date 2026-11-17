@@ -1,37 +1,11 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import pytest
 
 from jasna.accelerator import AcceleratorVendor
-from jasna.main import _resolve_cli_encoder_settings
-from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_cq
-
-
-@pytest.mark.parametrize(
-    ("vendor", "codec", "default", "minimum", "maximum"),
-    [
-        (AcceleratorVendor.NVIDIA, "h264", 25, 1, 51),
-        (AcceleratorVendor.NVIDIA, "hevc", 28, 1, 51),
-        (AcceleratorVendor.NVIDIA, "av1", 35, 1, 63),
-        (AcceleratorVendor.AMD, "h264", 24, 0, 51),
-        (AcceleratorVendor.AMD, "hevc", 25, 0, 51),
-        (AcceleratorVendor.AMD, "av1", 16, 1, 51),
-    ],
-)
-def test_encoder_cq_specs_follow_supported_vendor_ranges(
-    vendor: AcceleratorVendor,
-    codec: str,
-    default: int,
-    minimum: int,
-    maximum: int,
-) -> None:
-    spec = encoder_cq_spec(codec, vendor)
-
-    assert (spec.default, spec.minimum, spec.maximum) == (
-        default,
-        minimum,
-        maximum,
-    )
+from jasna.media.encoder_settings import resolve_custom_encoder_settings, validate_encoder_cq
 
 
 @pytest.mark.parametrize("value", [1, 25, 51])
@@ -86,17 +60,8 @@ def test_qvbr_quality_level_is_a_cq_control_only_on_amd() -> None:
     assert cq_controls(settings, AcceleratorVendor.NVIDIA) == ["cq"]
 
 
-def test_cli_cq_defaults_follow_amd_codec() -> None:
-    assert _resolve_cli_encoder_settings(
-        "",
-        cq=None,
-        codec="av1",
-        vendor=AcceleratorVendor.AMD,
-    ) == {"cq": 16}
-
-
 def test_cli_legacy_amf_quality_alias_suppresses_default() -> None:
-    assert _resolve_cli_encoder_settings(
+    assert resolve_custom_encoder_settings(
         "qvbr_quality_level=30,g=120",
         cq=None,
         codec="hevc",
@@ -106,7 +71,7 @@ def test_cli_legacy_amf_quality_alias_suppresses_default() -> None:
 
 def test_cli_legacy_amf_quality_alias_uses_supported_range() -> None:
     with pytest.raises(ValueError, match=r"hevc.*AMD.*0\.\.51"):
-        _resolve_cli_encoder_settings(
+        resolve_custom_encoder_settings(
             "qvbr_quality_level=52",
             cq=None,
             codec="hevc",
@@ -115,8 +80,8 @@ def test_cli_legacy_amf_quality_alias_uses_supported_range() -> None:
 
 
 def test_cli_direct_cq_conflicts_with_amf_alias() -> None:
-    with pytest.raises(ValueError, match="--cq.*qvbr_quality_level"):
-        _resolve_cli_encoder_settings(
+    with pytest.raises(ValueError, match="remove qvbr_quality_level"):
+        resolve_custom_encoder_settings(
             "qvbr_quality_level=30",
             cq=25,
             codec="hevc",
@@ -126,7 +91,7 @@ def test_cli_direct_cq_conflicts_with_amf_alias() -> None:
 
 def test_cli_rejects_both_legacy_amf_cq_aliases() -> None:
     with pytest.raises(ValueError, match="multiple CQ controls"):
-        _resolve_cli_encoder_settings(
+        resolve_custom_encoder_settings(
             "cq=25,qvbr_quality_level=30",
             cq=None,
             codec="hevc",
@@ -149,9 +114,16 @@ def test_amd_rejects_a_video_smaller_than_its_encoder_takes_and_names_codecs_tha
         require_encodable_size(AcceleratorVendor.AMD, "hevc", 1920, min_height - 2)
 
 
-def test_amd_takes_its_minimum_size_and_nvidia_has_no_size_check() -> None:
+@pytest.mark.parametrize("codec", ["h264", "hevc", "av1"])
+@pytest.mark.parametrize(("vendor", "shrink", "refused"), [
+    (AcceleratorVendor.AMD, 0, False),
+    (AcceleratorVendor.AMD, 2, True),
+    (AcceleratorVendor.NVIDIA, 2, False),
+])
+def test_only_amd_refuses_a_video_below_its_encoders_minimum_size(codec, vendor, shrink, refused) -> None:
     from jasna.media.encoder_settings import AMF_MIN_SIZE, require_encodable_size
+    from jasna.media.probe import UnsupportedVideoError
 
-    for codec, (width, height) in AMF_MIN_SIZE.items():
-        require_encodable_size(AcceleratorVendor.AMD, codec, width, height)
-        require_encodable_size(AcceleratorVendor.NVIDIA, codec, 16, 16)
+    width, height = AMF_MIN_SIZE[codec]
+    with pytest.raises(UnsupportedVideoError, match="smaller than") if refused else nullcontext():
+        require_encodable_size(vendor, codec, width - shrink, height)

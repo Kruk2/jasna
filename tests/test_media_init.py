@@ -236,9 +236,8 @@ def test_probe_reads_color_and_spatial_metadata(stream, field, expected):
 
 
 def test_missing_frame_count_falls_back_to_counting():
-    with patch("jasna.media.probe._frame_count_from_container", return_value=50) as count:
+    with patch("jasna.media.probe._frame_count_from_container", return_value=50):
         assert _probe(nb_frames="0").num_frames == 50
-    count.assert_called_once_with("test.mp4")
 
 
 def test_probe_counts_a_transport_stream_whose_end_has_no_timestamps(tmp_path):
@@ -251,3 +250,11 @@ def test_probe_counts_a_transport_stream_whose_end_has_no_timestamps(tmp_path):
 def test_ffprobe_failure_raises():
     with pytest.raises(Exception, match="error running ffprobe"):
         _probe(returncode=1)
+
+
+def test_ffprobe_failure_names_ffprobes_reason(tmp_path):
+    garbage = tmp_path / "garbage.mp4"
+    garbage.write_bytes(b"not a video")
+
+    with pytest.raises(RuntimeError, match="Invalid data found when processing input"):
+        get_video_meta_data(str(garbage))

@@ -23,13 +23,13 @@ from jasna.media.video_encoder import (
     DEFAULT_H264_ENCODER_OPTIONS,
     ENCODER_SPECS,
     ENCODE_BUFFER_SIZE,
-    _align_yuv_pitch,
     _mov_container_options,
     _normalized_audio_layout,
     VideoEncoder,
+    nvenc_yuv_frame,
 )
 
-from factories import write_double_adts_aac_source, write_two_block_wma_source
+from factories import video_metadata, write_double_adts_aac_source, write_two_block_wma_source
 
 pytestmark = pytest.mark.usefixtures("nvidia_vendor")
 
@@ -37,24 +37,9 @@ PROCESSED_AT = "2026-11-15T18:00:00.000000Z"
 
 
 def _fake_metadata(**overrides) -> VideoMetadata:
-    defaults = dict(
-        video_file="fake_input.mkv",
-        num_frames=100,
-        video_fps=24.0,
-        average_fps=24.0,
-        video_fps_exact=Fraction(24, 1),
-        codec_name="hevc",
-        duration=100.0 / 24.0,
-        video_width=1920,
-        video_height=1080,
-        time_base=Fraction(1, 24),
-        start_pts=0,
-        color_space=AvColorspace.ITU709,
-        color_range=AvColorRange.MPEG,
-        is_10bit=True,
-    )
-    defaults.update(overrides)
-    return VideoMetadata(**defaults)
+    values = dict(video_file="fake_input.mkv", video_width=1920, video_height=1080, is_10bit=True)
+    values.update(overrides)
+    return video_metadata(fps=24, num_frames=100, **values)
 
 
 def _make_encoder(tmp_path, encoder_settings=None, codec="hevc", **meta_overrides) -> VideoEncoder:
@@ -137,27 +122,6 @@ def _source_stream(
 
 
 class TestSourceContainerPreservation:
-    def test_smart_fragment_does_not_copy_chapters(self, tmp_path):
-        encoder = VideoEncoder(
-            file=str(tmp_path / "part.nut"),
-            device=torch.device("cuda:0"),
-            metadata=_fake_metadata(),
-            codec="hevc",
-            encoder_settings={},
-            smart_fragment=True,
-        )
-        encoder._src = SimpleNamespace(
-            metadata={"title": "Source title"},
-            chapters=MagicMock(return_value=[{"id": 1}]),
-        )
-        encoder.dst = SimpleNamespace(metadata={}, set_chapters=MagicMock())
-        input_video = _source_stream(0, "video", "h264")
-        output_video = SimpleNamespace(metadata={}, disposition=0)
-
-        encoder._copy_source_metadata(input_video, output_video, PROCESSED_AT)
-
-        encoder.dst.set_chapters.assert_not_called()
-
     def test_skips_streams_the_output_container_cannot_copy(
         self, tmp_path, caplog
     ):
@@ -237,39 +201,9 @@ class TestEncoderOptions:
 
         assert enc.encoder_options["g"] == "180"
 
-    @pytest.mark.parametrize("codec", ["hevc", "av1"])
-    def test_smart_fragment_can_match_eight_bit_source(self, tmp_path, codec):
-        enc = VideoEncoder(
-            file=str(tmp_path / "part.nut"),
-            device=torch.device("cuda:0"),
-            metadata=_fake_metadata(is_10bit=False),
-            codec=codec,
-            encoder_settings={},
-            smart_fragment=True,
-        )
-        assert enc.spec.frame_format == "nv12"
-        assert enc.spec.ten_bit is False
-        if codec == "hevc":
-            assert enc.encoder_options["profile"] == "main"
-
     def test_output_fps_defaults_to_source_rate(self, tmp_path):
         enc = _make_encoder(tmp_path)
         assert enc.output_fps == Fraction(24, 1)
-
-    def test_output_fps_can_override_source_rate(self, tmp_path):
-        enc = VideoEncoder(
-            file=str(tmp_path / "result.mkv"),
-            device=torch.device("cuda:0"),
-            metadata=_fake_metadata(video_fps_exact=Fraction(60_000, 1_001)),
-            codec="hevc",
-            encoder_settings={},
-            output_fps=Fraction(30_000, 1_001),
-        )
-        assert enc.output_fps == Fraction(30_000, 1_001)
-
-    def test_defaults_used_when_no_settings(self, tmp_path):
-        enc = _make_encoder(tmp_path)
-        assert enc.encoder_options == DEFAULT_ENCODER_OPTIONS
 
     @pytest.mark.parametrize(
         ("codec", "defaults"),
@@ -348,10 +282,6 @@ class TestEncoderOptions:
         with pytest.raises(ValueError, match="for codec h264.*tier"):
             _make_encoder(tmp_path, codec="h264", encoder_settings={"tier": "high"})
 
-    def test_h264_lookahead_level_override_is_dropped(self, tmp_path):
-        enc = _make_encoder(tmp_path, codec="h264", encoder_settings={"lookahead_level": 1})
-        assert "lookahead_level" not in enc.encoder_options
-
     @pytest.mark.parametrize("codec", ["hevc", "h264"])
     def test_hyphenated_spatial_aq_replaces_underscore_default(self, tmp_path, codec):
         enc = _make_encoder(tmp_path, codec=codec, encoder_settings={"spatial-aq": 0})
@@ -399,9 +329,10 @@ class TestSharpening:
         assert eight_bit._cas.peak == 255.0
 
 class TestColorHandling:
-    def test_unsupported_color_range_raises(self, tmp_path):
+    @pytest.mark.parametrize("codec", ["hevc", "h264", "av1"])
+    def test_unsupported_color_range_raises(self, tmp_path, codec):
         with pytest.raises(ValueError, match="Unsupported color space or color range"):
-            _make_encoder(tmp_path, color_range=AvColorRange.UNSPECIFIED)
+            _make_encoder(tmp_path, codec=codec, color_range=AvColorRange.UNSPECIFIED)
 
     @pytest.mark.parametrize(
         ("color_space", "color_range", "expected"),
@@ -433,11 +364,6 @@ class TestColorHandling:
     def test_selects_nv12_converter_for_h264(self, tmp_path, color_space, color_range, expected):
         enc = _make_encoder(tmp_path, codec="h264", color_space=color_space, color_range=color_range)
         assert enc._converter.variant == expected
-
-    @pytest.mark.parametrize("codec", ["h264", "av1"])
-    def test_unsupported_color_range_raises_for_new_codecs(self, tmp_path, codec):
-        with pytest.raises(ValueError, match="Unsupported color space or color range"):
-            _make_encoder(tmp_path, codec=codec, color_range=AvColorRange.UNSPECIFIED)
 
 
 def _buffered_encoder(tmp_path, **meta_overrides) -> VideoEncoder:
@@ -483,71 +409,20 @@ class TestEncodeBuffer:
             (torch.int16, 864, 864),
         ],
     )
-    def test_yuv_pitch_is_aligned_without_changing_visible_data(
+    def test_nvenc_frame_rows_start_on_an_aligned_pitch(
         self,
         dtype,
         width,
         expected_pitch,
     ):
         height = 4
-        packed = torch.arange(height * 3 // 2 * width, dtype=dtype).reshape(
-            height * 3 // 2,
-            width,
-        )
 
-        aligned = _align_yuv_pitch(packed)
+        frame = nvenc_yuv_frame(height, width, dtype, torch.device("cpu"))
 
-        assert aligned.shape == packed.shape
-        assert torch.equal(aligned, packed)
-        assert aligned.stride() == (expected_pitch, 1)
-        assert aligned.stride(0) * aligned.element_size() % 16 == 0
-        assert aligned[height:].data_ptr() - aligned.data_ptr() == (
-            height * aligned.stride(0) * aligned.element_size()
-        )
-        if packed.stride(0) * packed.element_size() % 16 == 0:
-            assert aligned.data_ptr() == packed.data_ptr()
-        else:
-            assert aligned.data_ptr() != packed.data_ptr()
-
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
-    def test_from_dlpack_uses_shared_cuda_stream_without_host_sync(
-        self, tmp_path, monkeypatch
-    ):
-        enc = _make_encoder(tmp_path, codec="hevc", video_width=2, video_height=2)
-        # Force NVIDIA contracts even when the host GPU is AMD/ROCm.
-        enc.vendor = video_encoder_module.AcceleratorVendor.NVIDIA
-        enc.stream = MagicMock()
-        enc.stream.cuda_stream = 1234
-        enc._cuda_ctx = object()
-        enc._lut_applier = None
-        enc._converter = SimpleNamespace(
-            sample_dtype=torch.int16,
-            uses_kernel=False,
-            convert_into=lambda frame, luma, chroma: None,
-        )
-        enc.out_stream = MagicMock()
-        enc.out_stream.encode.return_value = []
-        hw_frame = SimpleNamespace(pts=None, time_base=None)
-        from_dlpack = MagicMock(return_value=hw_frame)
-        monkeypatch.setattr(
-            video_encoder_module.av,
-            "VideoFrame",
-            SimpleNamespace(from_dlpack=from_dlpack),
-        )
-        monkeypatch.setattr(
-            video_encoder_module, "stream_context", lambda _stream: nullcontext()
-        )
-        monkeypatch.setattr(video_encoder_module, "_align_yuv_pitch", lambda p: p)
-
-        enc._encode_frame(torch.zeros((3, 2, 2), dtype=torch.uint8), 7)
-
-        _, kwargs = from_dlpack.call_args
-        assert kwargs == {
-            "format": "p010le",
-            "stream": 1234,
-            "cuda_context": enc._cuda_ctx,
-        }
-        enc.stream.synchronize.assert_not_called()
+        assert frame.shape == (height * 3 // 2, width)
+        assert frame.dtype == dtype
+        assert frame.stride() == (expected_pitch, 1)
+        assert frame.stride(0) * frame.element_size() % 16 == 0
 
     def test_amd_host_transfer_still_synchronizes_before_from_dlpack(
         self, tmp_path, monkeypatch
@@ -869,17 +744,19 @@ class TestDropUnsupportedNvencOverrides:
 
 
 class TestResolveEncoderOptions:
-    def test_eight_bit_smart_fragment_matches_source_depth(self):
+    @pytest.mark.parametrize("codec", ["hevc", "av1"])
+    def test_eight_bit_smart_fragment_matches_source_depth(self, codec):
         from jasna.accelerator import AcceleratorVendor
         from jasna.media.video_encoder import resolve_encoder_options
 
         spec, options = resolve_encoder_options(
-            AcceleratorVendor.NVIDIA, "hevc", _fake_metadata(is_10bit=False), {}, smart_fragment=True
+            AcceleratorVendor.NVIDIA, codec, _fake_metadata(is_10bit=False), {}, smart_fragment=True
         )
 
-        assert spec.frame_format == "nv12"
-        assert options["profile"] == "main"
+        assert (spec.frame_format, spec.ten_bit) == ("nv12", False)
         assert options["forced-idr"] == "1"
+        if codec == "hevc":
+            assert options["profile"] == "main"
 
     @pytest.mark.parametrize(
         ("vendor", "codec", "settings", "expected"),

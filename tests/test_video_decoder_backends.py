@@ -9,10 +9,11 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
+from av.codec.context import ThreadType
 
 import jasna.media.video_decoder as module
 from jasna.accelerator import AcceleratorVendor
-from factories import video_metadata, write_unbounded_reorder_h264_source
+from factories import video_metadata, write_dated_source, write_unbounded_reorder_h264_source
 
 TEST_CLIP = Path("assets/test_clip1_1080p.mp4")
 
@@ -73,35 +74,19 @@ def test_forced_vali_backend_requires_nvidia(monkeypatch) -> None:
         reader.__enter__()
 
 
-def test_auto_backend_skips_vali_on_amd(monkeypatch) -> None:
-    vali_factory = MagicMock()
-    monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
-    monkeypatch.setattr(module.av, "open", MagicMock(return_value=_fake_container(False)))
-    reader = _reader(monkeypatch, AcceleratorVendor.AMD)
-    amf_setup = MagicMock()
-    monkeypatch.setattr(reader, "_setup_amf_decoder", amf_setup)
-    reader.__enter__()
-    vali_factory.assert_not_called()
-    amf_setup.assert_called_once()
+@pytest.mark.parametrize("vendor", [AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD])
+def test_pyav_sw_backend_decodes_on_the_cpu_without_hardware_decoders(monkeypatch, caplog, tmp_path, vendor) -> None:
+    source = write_dated_source(tmp_path / "source.mp4")
+    monkeypatch.setattr(module, "vendor_for_device", lambda _device: vendor)
+    monkeypatch.setattr(module, "current_stream", lambda _device: None)
+    reader = module.VideoReader(str(source), 4, torch.device("cuda:0"), _metadata(), decode_backend="pyav-sw")
 
+    with caplog.at_level("INFO", logger=module.__name__), reader:
+        context = reader.video_stream.codec_context
+        decoding = (context.thread_type, context.is_hwaccel)
 
-def test_pyav_sw_backend_skips_hwaccel_and_amf(monkeypatch) -> None:
-    vali_factory = MagicMock()
-    monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
-    for vendor in (AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD):
-        container = _fake_container(False)
-        monkeypatch.setattr(module.av, "open", MagicMock(return_value=container))
-        reader = _reader(monkeypatch, vendor, "pyav-sw")
-        amf_setup = MagicMock()
-        monkeypatch.setattr(reader, "_setup_amf_decoder", amf_setup)
-        nvdec_setup = MagicMock()
-        monkeypatch.setattr(reader, "_setup_nvdec_decoder", nvdec_setup)
-        reader.__enter__()
-        vali_factory.assert_not_called()
-        amf_setup.assert_not_called()
-        nvdec_setup.assert_not_called()
-        assert module.av.open.call_args.kwargs == {"metadata_errors": "replace"}
-        assert container.streams.video[0].codec_context.thread_type == "AUTO"
+    assert decoding == (ThreadType.AUTO, False)
+    assert "AMF" not in caplog.text and "NVDEC" not in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -148,17 +133,23 @@ def test_frames_before_the_stream_start_are_dropped_before_the_stride() -> None:
         (Fraction(1, 10_000_000), 0, 15_066_374_667, 333_333),
         (Fraction(1, 10_000_000), 6_666_667, 40_666_667, 333_333),
         (Fraction(1, 90_000), 0, 135_135, 3003),
+        (Fraction(1, 90_000), 126_000, 396_396, 3003),
+        (Fraction(1, 90_000), -6006, 135_135, 3003),
         (Fraction(1, 1000), 0, 4067, 33),
     ],
 )
-def test_vali_seek_lands_on_the_span_first_frame(
+def test_vali_seek_starts_decoding_at_or_before_the_span_first_frame(
     time_base, start_pts, keyframe_pts, frame_duration
 ) -> None:
     seek_ts = float((keyframe_pts - start_pts) * time_base)
     seconds = module._vali_seek_seconds(seek_ts, start_pts, time_base)
-    # VALI's TsFromTime: round to whole µs, then rescale to the stream time base.
-    target_pts = round(Fraction(round(seconds * 1_000_000), 1_000_000) / time_base)
-    assert keyframe_pts - frame_duration < target_pts <= keyframe_pts
+    # VALI's TsFromTime rounds to whole µs and rescales to the stream time base; its seek adds
+    # the stream start for the file seek, and it skips decoded frames below the bare value.
+    vali_pts = round(Fraction(round(seconds * 1_000_000), 1_000_000) / time_base)
+    file_seek_pts, skip_below_pts = vali_pts + start_pts, vali_pts
+    assert file_seek_pts <= keyframe_pts
+    assert skip_below_pts <= keyframe_pts
+    assert keyframe_pts - frame_duration < max(file_seek_pts, skip_below_pts)
 
 
 class _FakeVali:

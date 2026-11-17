@@ -1,5 +1,6 @@
 """Unit tests for NV12/P010 -> planar RGB uint8 conversion (BT.709/BT.601, limited/full range)."""
 import numpy as np
+import pytest
 import torch
 from av.video.reformatter import Colorspace as AvColorspace
 
@@ -58,22 +59,21 @@ def _p010_to_planes(p010: torch.Tensor, h: int, w: int) -> tuple[torch.Tensor, t
     return y, uv
 
 
-def test_round_trip_uniform_colors_bt709():
-    for rgb in [(200, 30, 60), (10, 250, 128), (128, 128, 128), (255, 255, 255), (0, 0, 0)]:
-        img = torch.empty(3, 8, 8, dtype=torch.uint8)
-        for c, val in enumerate(rgb):
-            img[c] = val
-        y, uv = _p010_to_planes(RgbToYuvConverter("p010_bt709_limited", device=CPU).convert(img), 8, 8)
-        out = YuvToRgbConverter(8, 8, AvColorspace.ITU709, False, True, CPU).convert(y, uv)
-        assert (out.to(torch.int16) - img.to(torch.int16)).abs().max() <= 2
-
-
-def test_round_trip_uniform_colors_bt601():
-    img = torch.empty(3, 8, 8, dtype=torch.uint8)
-    for c, val in enumerate((60, 180, 240)):
-        img[c] = val
-    y, uv = _p010_to_planes(RgbToYuvConverter("p010_bt601_limited", device=CPU).convert(img), 8, 8)
-    out = YuvToRgbConverter(8, 8, AvColorspace.ITU601, False, True, CPU).convert(y, uv)
+@pytest.mark.parametrize(
+    ("variant", "space", "rgb"),
+    [
+        ("p010_bt709_limited", AvColorspace.ITU709, (200, 30, 60)),
+        ("p010_bt709_limited", AvColorspace.ITU709, (10, 250, 128)),
+        ("p010_bt709_limited", AvColorspace.ITU709, (128, 128, 128)),
+        ("p010_bt709_limited", AvColorspace.ITU709, (255, 255, 255)),
+        ("p010_bt709_limited", AvColorspace.ITU709, (0, 0, 0)),
+        ("p010_bt601_limited", AvColorspace.ITU601, (60, 180, 240)),
+    ],
+)
+def test_round_trip_keeps_uniform_colors(variant, space, rgb):
+    img = torch.tensor(rgb, dtype=torch.uint8)[:, None, None].expand(3, 8, 8).contiguous()
+    y, uv = _p010_to_planes(RgbToYuvConverter(variant, device=CPU).convert(img), 8, 8)
+    out = YuvToRgbConverter(8, 8, space, False, True, CPU).convert(y, uv)
     assert (out.to(torch.int16) - img.to(torch.int16)).abs().max() <= 2
 
 

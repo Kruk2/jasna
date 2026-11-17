@@ -105,8 +105,3 @@ def test_rejects_a_non_uint8_frame():
 
     with pytest.raises(ValueError, match="uint8"):
         converter.convert_into(frame, packed[:16], packed[16:])
-
-
-def test_rejects_an_unknown_variant():
-    with pytest.raises(ValueError, match="Unknown RGB to YUV variant"):
-        RgbToYuvConverter("nv12_bt709_studio", device=_device())

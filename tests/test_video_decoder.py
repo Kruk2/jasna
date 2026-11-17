@@ -1,14 +1,16 @@
 import gc
+import inspect
 import logging
-import weakref
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import av
 import pytest
 import torch
 
-from factories import video_metadata
+from factories import video_metadata, write_dated_source
+from jasna.accelerator import AcceleratorVendor
+from jasna.media import video_decoder
+from jasna.media.probe import get_video_meta_data
 from jasna.media.video_decoder import (
     CORRUPT_PACKET_TOLERANCE,
     VideoReader,
@@ -77,29 +79,21 @@ def test_other_ffmpeg_errors_raise_video_decode_error():
         reader._decode_packet(packet, 0)
 
 
-@pytest.mark.usefixtures("nvidia_vendor")
-def test_backend_dispatch_releases_outer_first_group_reference(monkeypatch):
-    class Frame:
-        format = SimpleNamespace(name="cuda")
+def test_backend_dispatch_releases_outer_first_group_reference(monkeypatch, tmp_path):
+    source = write_dated_source(tmp_path / "source.mp4")
+    monkeypatch.setattr(video_decoder, "vendor_for_device", lambda _device: AcceleratorVendor.NVIDIA)
+    monkeypatch.setattr(video_decoder, "current_stream", lambda _device: None)
+    reader = VideoReader(str(source), 4, torch.device("cuda:0"), get_video_meta_data(str(source)), decode_backend="pyav-sw")
 
-    reader = _reader()
-    reader.video_stream = SimpleNamespace(start_time=0)
-    calls = 0
+    def software_backend(decoded, group):
+        dispatchers = [
+            holder for holder in gc.get_referrers(group)
+            if inspect.isgenerator(holder) and holder.gi_code.co_name == "_decoded_batches"
+        ]
+        yield not dispatchers, []
 
-    def read_group(decoded):
-        nonlocal calls
-        calls += 1
-        return [Frame()] if calls == 1 else []
+    monkeypatch.setattr(reader, "_frames_software", software_backend)
+    with reader:
+        released, _ = next(reader.frames())
 
-    def hardware_backend(decoded, group):
-        frame_ref = weakref.ref(group[0])
-        group = []
-        gc.collect()
-        yield frame_ref() is None, []
-
-    monkeypatch.setattr(reader, "_decoded_frames", lambda seek_ts: iter(()))
-    monkeypatch.setattr(reader, "_read_group", read_group)
-    monkeypatch.setattr(reader, "_frames_hardware", hardware_backend)
-
-    released, _ = next(reader.frames())
-    assert released, "outer dispatch retained the first NVDEC surface group"
+    assert released, "outer dispatch retained the first decoded group"

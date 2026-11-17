@@ -61,6 +61,9 @@ class KeyframeIndex:
     end_pts: int
     max_b_frames: int = 0
     uses_b_references: bool = False
+    monotonic_dts: bool = False
+    """Every video packet has a dts no later than its pts and no earlier than the packet
+    before it, so once a packet's dts reaches a time no later packet shows anything earlier."""
 
     def seconds_for_pts(self, pts: int) -> float:
         return float((int(pts) - self.start_pts) * self.time_base)
@@ -199,7 +202,7 @@ def validate_smart_render(
 
 def _sampled_frames_are_progressive(metadata: VideoMetadata) -> bool:
     """A container can flag a progressive stream as interlaced; the frames themselves decide."""
-    with av.open(metadata.video_file) as container:
+    with av.open(metadata.video_file, metadata_errors="replace") as container:
         stream = container.streams.video[0]
         for fraction in _FIELD_ORDER_SAMPLE_POINTS:
             container.seek(metadata.start_pts + int(metadata.duration * fraction / metadata.time_base), stream=stream)
@@ -329,6 +332,8 @@ def resolve_smart_encoder_settings(
 def probe_keyframes(path: str | Path, metadata: VideoMetadata) -> KeyframeIndex:
     keyframes: list[int] = []
     packet_pts: list[int] = []
+    previous_dts: int | None = None
+    monotonic_dts = True
     with av.open(str(path), metadata_errors="replace") as container:
         stream = container.streams.video[0]
         codec = canonical_codec(metadata.codec_name)
@@ -338,6 +343,9 @@ def probe_keyframes(path: str | Path, metadata: VideoMetadata) -> KeyframeIndex:
         frame_ticks = max(1, round(1 / (metadata.mean_fps * time_base)))
         packets_end: int | None = None
         for packet in container.demux(stream):
+            if packet.size:
+                monotonic_dts = monotonic_dts and _dts_in_order(packet, previous_dts)
+                previous_dts = packet.dts
             if packet.pts is not None:
                 packet_pts.append(int(packet.pts))
                 packet_end = int(packet.pts) + (int(packet.duration) if packet.duration else frame_ticks)
@@ -376,7 +384,14 @@ def probe_keyframes(path: str | Path, metadata: VideoMetadata) -> KeyframeIndex:
         int(end_pts),
         max_b_frames=max_b_frames,
         uses_b_references=uses_b_references,
+        monotonic_dts=monotonic_dts,
     )
+
+
+def _dts_in_order(packet: av.Packet, previous_dts: int | None) -> bool:
+    if packet.dts is None or packet.pts is None or packet.dts > packet.pts:
+        return False
+    return previous_dts is None or packet.dts >= previous_dts
 
 
 def _nal_framing(stream: av.VideoStream, codec: str) -> tuple[int, bool]:
@@ -556,7 +571,8 @@ def _run_ffmpeg(args: list[str], *, purpose: str) -> str:
     completed = subprocess.run(
         command,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
         **subprocess_no_window_kwargs(),
     )
@@ -578,8 +594,6 @@ def create_copy_fragment(
     *,
     codec: str,
 ) -> None:
-    if destination.exists():
-        destination.unlink()
     if canonical_codec(codec) == "av1":
         start = index.seconds_for_pts(span.start_pts)
         duration = float((span.end_pts - span.start_pts) * index.time_base)
@@ -611,6 +625,8 @@ def create_copy_fragment(
         for packet in src.demux(in_stream):
             if not packet.size:
                 continue
+            if index.monotonic_dts and packet.dts >= span.end_pts:
+                break
             data = bytes(packet)
             cut = _next_access_unit_offset(
                 data, codec=codec, length_size=length_size, length_prefixed=length_prefixed
@@ -704,6 +720,13 @@ def concatenate_fragments(
         raise RuntimeError(f"Failed to concatenate smart-render video fragments: {errors.strip()}")
 
 
+def _video_delay(container: av.container.InputContainer, video: av.VideoStream) -> float:
+    """Seconds from the start of ``container`` (its earliest stream) to the start of ``video``."""
+    if video.start_time is None or container.start_time is None:
+        return 0.0
+    return float(video.start_time * video.time_base - Fraction(container.start_time, av.time_base))
+
+
 def mux_final_output(
     video: Path,
     source: Path,
@@ -723,15 +746,18 @@ def mux_final_output(
     with av.open(BytesIO(), "w", format=output_format) as probe:
         supported_codecs = probe.supported_codecs
 
-    args = [
-        "-i", str(video),
-        "-i", str(source),
-        "-map", "0:v:0",
-    ]
     with av.open(str(source), metadata_errors="replace") as container:
         comment = with_source_comment(comment, container.metadata)
         log.info("%s settings: %s", destination.name, comment)
         primary_video = container.streams.video[0]
+        # ffmpeg starts each input at its earliest stream: the assembled video at 0, the source's
+        # audio where it began, so a video that began later needs that delay put back.
+        args = [
+            "-itsoffset", _seconds(_video_delay(container, primary_video)),
+            "-i", str(video),
+            "-i", str(source),
+            "-map", "0:v:0",
+        ]
         copied_streams = []
         transcoded_subtitles = {}
         source_formats = set(container.format.name.split(","))

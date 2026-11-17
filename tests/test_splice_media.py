@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import struct
+from dataclasses import replace
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -123,17 +125,47 @@ def test_copy_span_keeps_frames_past_the_recorded_video_duration(tmp_path: Path)
         assert np.array_equal(frame, source_frames[24 + frame_index])
 
 
-@pytest.mark.parametrize(
-    ("codec", "encoder", "options"),
-    [
-        ("h264", "libx264", ["-g", "12", "-keyint_min", "12", "-sc_threshold", "0"]),
-        ("av1", "libsvtav1", ["-preset", "10", "-g", "12", "-svtav1-params", "scd=0"]),
-    ],
-)
-def test_copy_span_of_video_starting_after_audio_holds_only_its_frames(
-    tmp_path: Path, codec: str, encoder: str, options: list[str]
-) -> None:
-    # MKV keeps the audio priming delay by starting the video after the audio.
+def _fragment_packets(path: Path) -> list[tuple[int, int | None, bytes]]:
+    with av.open(str(path)) as container:
+        return [
+            (packet.pts, packet.dts, bytes(packet))
+            for packet in container.demux(container.streams.video[0])
+            if packet.size
+        ]
+
+
+def test_copy_span_stops_reading_at_its_end_with_the_same_packets(tmp_path: Path) -> None:
+    source = tmp_path / "b-frames.mp4"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc2=size=160x96:rate=12:duration=4",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-g", "12", "-keyint_min", "12", "-bf", "3", "-x264-params", "scenecut=0",
+        str(source),
+    )
+    index = probe_keyframes(source, get_video_meta_data(str(source)))
+    assert index.monotonic_dts
+    span = SpliceSpan("copy", index.pts[1], index.pts[2])
+
+    stopped = tmp_path / "stopped.nut"
+    create_copy_fragment(source, span, index, stopped, codec="h264")
+    read_to_end = tmp_path / "read-to-end.nut"
+    create_copy_fragment(source, span, replace(index, monotonic_dts=False), read_to_end, codec="h264")
+
+    packets = _fragment_packets(stopped)
+    assert len(packets) == 12
+    assert packets == _fragment_packets(read_to_end)
+
+
+
+_LATE_VIDEO_ENCODERS = [
+    ("h264", "libx264", ["-g", "12", "-keyint_min", "12", "-sc_threshold", "0"]),
+    ("av1", "libsvtav1", ["-preset", "10", "-g", "12", "-svtav1-params", "scd=0"]),
+]
+
+
+def _late_video_source(tmp_path: Path, codec: str, encoder: str, options: list[str]) -> Path:
+    """MKV whose video starts 0.25 s after its audio, as MKV keeps an audio priming delay."""
     source = tmp_path / f"late-video-{codec}.mkv"
     _ffmpeg(
         "-itsoffset", "0.25",
@@ -145,6 +177,20 @@ def test_copy_span_of_video_starting_after_audio_holds_only_its_frames(
         "-c:a", "libopus",
         str(source),
     )
+    return source
+
+
+def _video_delay_after_audio(path: Path) -> float:
+    with av.open(str(path)) as container:
+        video, audio = container.streams.video[0], container.streams.audio[0]
+        return float(video.start_time * video.time_base - audio.start_time * audio.time_base)
+
+
+@pytest.mark.parametrize(("codec", "encoder", "options"), _LATE_VIDEO_ENCODERS)
+def test_copy_span_of_video_starting_after_audio_holds_only_its_frames(
+    tmp_path: Path, codec: str, encoder: str, options: list[str]
+) -> None:
+    source = _late_video_source(tmp_path, codec, encoder, options)
     with av.open(str(source)) as container:
         assert container.streams.video[0].start_time * container.streams.video[0].time_base == pytest.approx(0.25)
         source_frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
@@ -160,6 +206,33 @@ def test_copy_span_of_video_starting_after_audio_holds_only_its_frames(
         assert len(copied_frames) == 12
         for frame_index, frame in enumerate(copied_frames):
             assert np.array_equal(frame, source_frames[first_frame + frame_index])
+
+
+@pytest.mark.parametrize("suffix", [".mkv", ".mp4"])
+@pytest.mark.parametrize(("codec", "encoder", "options"), _LATE_VIDEO_ENCODERS)
+def test_final_mux_keeps_the_video_start_after_the_audio(
+    tmp_path: Path, codec: str, encoder: str, options: list[str], suffix: str
+) -> None:
+    source = _late_video_source(tmp_path, codec, encoder, options)
+    source_delay = _video_delay_after_audio(source)
+    assert source_delay > 0.2
+    index = probe_keyframes(source, get_video_meta_data(str(source)))
+    bounds = (*index.pts[1:], index.end_pts)
+    fragments = []
+    for span_index, (start, end) in enumerate(zip((index.start_pts, *index.pts[1:]), bounds)):
+        span = SpliceSpan("copy", start, end)
+        raw = tmp_path / f"raw-{span_index}.nut"
+        create_copy_fragment(source, span, index, raw, codec=codec)
+        normalized = tmp_path / f"part-{span_index}{'.ts' if codec == 'h264' else '.mkv'}"
+        normalize_fragment(raw, normalized, codec=codec)
+        fragments.append((normalized, float((end - start) * index.time_base)))
+    assembled = tmp_path / f"assembled{'.ts' if codec == 'h264' else '.mkv'}"
+    concatenate_fragments(fragments, manifest=tmp_path / "parts.ffconcat", destination=assembled, codec=codec)
+    output = tmp_path / f"output{suffix}"
+
+    mux_final_output(assembled, source, output, codec=codec, comment=COMMENT)
+
+    assert _video_delay_after_audio(output) == pytest.approx(source_delay, abs=0.02)
 
 
 def test_h264_probe_resolves_source_compatible_smart_settings(tmp_path: Path) -> None:
@@ -685,3 +758,11 @@ def test_concatenation_fails_when_a_fragment_cannot_be_read(tmp_path: Path) -> N
         concatenate_fragments(
             [(unreadable, 1.0)], manifest=tmp_path / "parts.ffconcat", destination=tmp_path / "out.ts", codec="h264"
         )
+
+
+def test_ffmpeg_failure_naming_a_non_utf8_path_reports_its_error(tmp_path: Path) -> None:
+    unreadable = tmp_path / os.fsdecode(b"broken\x90.nut")
+    unreadable.write_bytes(b"not a video")
+
+    with pytest.raises(RuntimeError, match="Failed to normalize smart-render fragment"):
+        normalize_fragment(unreadable, tmp_path / "out.ts", codec="h264")

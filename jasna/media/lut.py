@@ -141,6 +141,12 @@ def _launch_lut(
     )
 
 
+def lut_applier(path: str | None, device: torch.device) -> GpuLutApplier | None:
+    """The applier of the ``.cube`` file at ``path``; None when no file is set."""
+    path = (path or "").strip()
+    return GpuLutApplier(parse_cube_file(path), device) if path else None
+
+
 class GpuLutApplier:
     """Applies a parsed CubeLut to RGB CHW frames on GPU.
 

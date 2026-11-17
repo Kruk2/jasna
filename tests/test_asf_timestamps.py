@@ -10,10 +10,10 @@ import av
 import numpy as np
 import pytest
 import torch
-from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
+from av.video.reformatter import Colorspace as AvColorspace
 
+from factories import video_metadata
 from jasna.media.container_utils import demux_video
-from jasna.media.probe import VideoMetadata
 from jasna.media.video_decoder import VideoReader
 
 FRAME_MS = 40
@@ -80,21 +80,15 @@ def test_b_frame_asf_from_other_codecs_keeps_ffmpeg_timestamps(tmp_path):
 def test_video_reader_starts_vc1_asf_at_first_timestamp(tmp_path):
     path = tmp_path / "vc1.wmv"
     _write_vc1_asf(path)
-    metadata = VideoMetadata(
+    metadata = video_metadata(
+        fps=25,
+        num_frames=FRAME_COUNT,
         video_file=str(path),
         video_height=16,
         video_width=16,
-        video_fps=25.0,
-        average_fps=25.0,
-        video_fps_exact=Fraction(25),
         codec_name="vc1",
-        duration=FRAME_COUNT / 25,
         time_base=Fraction(1, 1000),
-        start_pts=0,
-        color_range=AvColorRange.MPEG,
         color_space=AvColorspace.ITU601,
-        num_frames=FRAME_COUNT,
-        is_10bit=False,
     )
     with VideoReader(str(path), 4, torch.device("cuda:0"), metadata, decode_backend="pyav-sw") as reader:
         pts = [p for _, batch_pts in reader.frames() for p in batch_pts]

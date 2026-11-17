@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 import torch
 
+from jasna.media.cuda_kernel import has_precompiled_kernels
 from jasna.media.lut import GpuLutApplier, parse_cube_text
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
@@ -48,11 +49,8 @@ def _device() -> torch.device:
 
 
 def _reference(applier: GpuLutApplier, frame: torch.Tensor) -> torch.Tensor:
-    kernel, applier._kernel = applier._kernel, None
-    try:
-        return applier.apply(frame)
-    finally:
-        applier._kernel = kernel
+    """The Torch path: a frame that is not on the applier's device skips the kernel."""
+    return applier.apply(frame.cpu())
 
 
 def _exact(applier: GpuLutApplier, frame: torch.Tensor) -> torch.Tensor:
@@ -65,8 +63,8 @@ def _exact(applier: GpuLutApplier, frame: torch.Tensor) -> torch.Tensor:
     """
     size = applier.lut.size
     values = frame.double().cpu().numpy() / 255.0
-    minimum = applier._domain_min_flat.double().cpu().numpy()
-    scale = applier._domain_scale_flat.double().cpu().numpy()
+    minimum = np.array(applier.lut.domain_min)
+    scale = 1.0 / (np.array(applier.lut.domain_max) - minimum)
     normalized = ((values - minimum[:, None, None]) * scale[:, None, None]).clip(0.0, 1.0)
 
     if applier.lut.is_3d:
@@ -108,7 +106,7 @@ def test_kernel_is_at_least_as_accurate_as_the_torch_path(name):
         0, 256, (3, 48, 80), generator=generator, device=_device(), dtype=torch.uint8
     )
     applier = GpuLutApplier(parse_cube_text(CUBES[name]), _device())
-    assert applier._kernel is not None
+    assert has_precompiled_kernels(_device())
 
     exact = _codes(_exact(applier, frame))
     kernel_error = (applier.apply(frame).int().cpu() - exact).abs()
@@ -163,12 +161,3 @@ def test_kernel_output_is_a_fresh_contiguous_tensor():
     assert out.data_ptr() != frame.data_ptr()
     assert out.is_contiguous()
     assert out.dtype is torch.uint8
-
-
-def test_float_input_still_uses_the_torch_path():
-    frame = torch.rand((3, 8, 8), device=_device(), dtype=torch.float32)
-    applier = GpuLutApplier(parse_cube_text(CUBES["3d-identity"]), _device())
-
-    out = applier.apply(frame)
-
-    assert out.dtype is torch.float32

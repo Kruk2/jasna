@@ -113,26 +113,37 @@ T = TypeVar("T")
 
 
 def _shown_frames(
-    decoded: Iterator[T], pts_of: Callable[[T], int | None], start_pts: int, frame_stride: int
+    decoded: Iterator[T], pts_of: Callable[[T], int | None], first_pts: int, frame_stride: int
 ) -> Iterator[T]:
-    """Every ``frame_stride``th shown frame. Frames before the stream start are the hidden
-    lead-in of an MP4 cut mid-GOP: the demuxer marks them discard, but VALI and the AMF
-    decoders still return them."""
+    """Every ``frame_stride``th frame from ``first_pts`` on. A decoder starts at the keyframe
+    before a seek target, and frames before the stream start are the hidden lead-in of an MP4
+    cut mid-GOP: the demuxer marks them discard, but VALI and the AMF decoders still return them."""
     index = 0
     for frame in decoded:
         pts = pts_of(frame)
-        if pts is not None and pts < start_pts:
+        if pts is not None and pts < first_pts:
             continue
         if index % frame_stride == 0:
             yield frame
         index += 1
 
 
+def _first_shown_pts(seek_ts: float | None, start_pts: int, time_base: Fraction) -> int:
+    """The pts ``frames(seek_ts)`` starts at: ``seek_ts`` seconds past the stream start."""
+    if seek_ts is None:
+        return start_pts
+    return start_pts + max(0, round(seek_ts / time_base))
+
+
 def _vali_seek_seconds(seek_ts: float, start_pts: int, time_base: Fraction) -> float:
-    """VALI seeks in absolute stream seconds and rounds them to whole microseconds, so a
-    target rounded up past a frame on a finer time base skips that frame (issue #709).
-    Floor to the microsecond: VALI then returns the first frame at or after the target."""
-    return math.floor((seek_ts + float(start_pts * time_base)) * 1_000_000) / 1_000_000
+    """The seconds to hand VALI so it starts decoding at or before the target. VALI seeks the file
+    to those seconds plus the stream start, then skips frames whose pts is below those seconds
+    alone. A stream starting late (start > 0) gets the seconds past its start: the file seek lands
+    on the target and the skip stops before it. A stream starting early gets absolute seconds: the
+    file seek lands earlier and the skip stops on the target. The caller drops what comes before
+    the target. VALI rounds to whole microseconds, so floor to one: rounding up past a frame on a
+    finer time base skipped it (issue #709)."""
+    return math.floor((seek_ts + float(min(start_pts, 0) * time_base)) * 1_000_000) / 1_000_000
 
 
 class BatchPrefetcher:
@@ -304,7 +315,10 @@ class _ValiFrameSource:
                 seek_ts=_vali_seek_seconds(seek_ts, self.metadata.start_pts, self.metadata.time_base)
             )
         shown = _shown_frames(
-            self._decoded_pts(seek_ctx), lambda pts: pts, self.metadata.start_pts, self.frame_stride
+            self._decoded_pts(seek_ctx),
+            lambda pts: pts,
+            _first_shown_pts(seek_ts, self.metadata.start_pts, self.metadata.time_base),
+            self.frame_stride,
         )
         exhausted = False
         while not exhausted:
@@ -389,7 +403,7 @@ class VideoReader:
                         self.metadata,
                         self.frame_stride,
                     )
-                except (ImportError, RuntimeError, ValueError, VideoDecodeError) as exc:
+                except (ImportError, RuntimeError, ValueError) as exc:
                     if backend == "vali":
                         raise VideoDecodeError(f"VALI cannot decode {self.file}: {exc}") from exc
                     log.warning(
@@ -575,14 +589,12 @@ class VideoReader:
         return frames, consecutive_errors
 
     def _decoded_frames(self, seek_ts: float | None):
-        target_pts = None
         if seek_ts is not None:
-            start = resolve_video_start_pts(
-                self.video_stream.start_time,
-                self.metadata.start_pts,
+            self.container.seek(
+                _first_shown_pts(seek_ts, self.start_pts, self.video_stream.time_base),
+                stream=self.video_stream,
+                backward=True,
             )
-            target_pts = start + round(seek_ts / self.video_stream.time_base)
-            self.container.seek(target_pts, stream=self.video_stream, backward=True)
             if self._decoder_ctx is not None:
                 self._decoder_ctx.flush_buffers()
 
@@ -593,9 +605,6 @@ class VideoReader:
                 # VC-1 NVDEC returns an empty frame for a stream starting on a P frame.
                 if not frame.planes:
                     continue
-                if target_pts is not None and frame.pts is not None and frame.pts < target_pts:
-                    continue
-                target_pts = None
                 yield frame
 
     def _read_group(self, decoded) -> list:
@@ -641,7 +650,10 @@ class VideoReader:
         # hardware initialization rejects a profile or pixel format. Dispatch
         # once here so neither per-frame loop carries a backend branch.
         decoded = _shown_frames(
-            self._decoded_frames(seek_ts), lambda frame: frame.pts, self.start_pts, self.frame_stride
+            self._decoded_frames(seek_ts),
+            lambda frame: frame.pts,
+            _first_shown_pts(seek_ts, self.start_pts, self.video_stream.time_base),
+            self.frame_stride,
         )
         group = self._read_group(decoded)
         if not group:

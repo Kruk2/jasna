@@ -39,7 +39,7 @@ from jasna.media.container_utils import (
     with_output_creation_time,
 )
 from jasna.media.encoder_settings import cq_controls, encoder_cq_spec, validate_encoder_settings
-from jasna.media.lut import GpuLutApplier, parse_cube_file
+from jasna.media.lut import CubeLut, GpuLutApplier
 from jasna.media.probe import VideoMetadata
 from jasna.media.rgb_to_yuv import RgbToYuvConverter
 from jasna.settings_tag import settings_comment, with_source_comment
@@ -305,7 +305,7 @@ def source_bitrate_cap_options(
     *,
     output_codec: str,
     vendor: AcceleratorVendor,
-    frame_generation: bool = False,
+    frame_generation: bool,
 ) -> dict[str, str]:
     """With ``frame_generation`` the output has twice the frames, so the ceiling doubles to
     keep each frame's share of it."""
@@ -388,21 +388,11 @@ def _normalize_amf_cq(
         raise ValueError(f"AMD {codec.upper()} CQ requires rc=cqp")
 
 
-def _align_yuv_pitch(packed: torch.Tensor) -> torch.Tensor:
-    item_size = packed.element_size()
-    if packed.stride(0) * item_size % _NVENC_PITCH_ALIGNMENT == 0:
-        return packed
-
-    width = packed.shape[1]
-    row_bytes = width * item_size
-    aligned_row_bytes = (
-        row_bytes + _NVENC_PITCH_ALIGNMENT - 1
-    ) // _NVENC_PITCH_ALIGNMENT * _NVENC_PITCH_ALIGNMENT
-    pitch_elements = aligned_row_bytes // item_size
-    storage = packed.new_empty((packed.shape[0], pitch_elements))
-    storage[:, :width].copy_(packed)
-    storage[:, width:].zero_()
-    return storage[:, :width]
+def nvenc_yuv_frame(height: int, width: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+    """A packed NV12/P010 frame whose rows start on the pitch NVENC accepts."""
+    pitch_bytes = -(-width * dtype.itemsize // _NVENC_PITCH_ALIGNMENT) * _NVENC_PITCH_ALIGNMENT
+    rows = torch.empty((height + height // 2, pitch_bytes // dtype.itemsize), dtype=dtype, device=device)
+    return rows[:, :width]
 
 
 def _mov_container_options(suffix: str, *, fmp4: bool) -> dict[str, str]:
@@ -508,7 +498,7 @@ class VideoEncoder:
         *,
         codec: str,
         encoder_settings: dict[str, object],
-        lut_path: str | Path | None = None,
+        lut: CubeLut | None = None,
         sharpen_strength: float = 0.0,
         output_fps: Fraction | None = None,
         pts_origin: int = 0,
@@ -548,10 +538,7 @@ class VideoEncoder:
         ) * (2 if frame_generation else 1)
         self.time_base = metadata.time_base / 2 if frame_generation else metadata.time_base
 
-        self._lut_applier: GpuLutApplier | None = None
-        if lut_path:
-            lut = parse_cube_file(lut_path)
-            self._lut_applier = GpuLutApplier(lut, device)
+        self._lut_applier = None if lut is None else GpuLutApplier(lut, device)
 
         self._cas: GpuCasSharpener | None = None
         if sharpen_strength > 0.0:
@@ -641,6 +628,9 @@ class VideoEncoder:
         self._cuda_ctx = None
         self._host_yuv = None
         self.stream = new_stream(self.device)
+        if self._cas is not None:
+            with stream_context(self.stream):
+                self._cas_luma = torch.empty((height, width), dtype=self._converter.sample_dtype, device=self.device)
         if self.vendor is AcceleratorVendor.NVIDIA:
             from av.video.frame import CudaContext
 
@@ -657,8 +647,6 @@ class VideoEncoder:
                     dtype=self._converter.sample_dtype,
                     device=self.device,
                 )
-                if self._cas is not None:
-                    self._cas_luma = torch.empty_like(self._packed[:height])
             self._host_yuv = torch.empty(
                 (height + height // 2, width),
                 dtype=torch.uint16 if self.spec.ten_bit else torch.uint8,
@@ -788,10 +776,7 @@ class VideoEncoder:
                         self.output_path.suffix,
                     )
                     out_stream = self.dst.add_stream(transcode_codec)
-                    subtitle_time_base = (
-                        getattr(in_stream, "time_base", None)
-                        or Fraction(1, 1_000)
-                    )
+                    subtitle_time_base = in_stream.time_base or Fraction(1, 1_000)
                     out_stream.time_base = subtitle_time_base
                     out_stream.codec_context.time_base = subtitle_time_base
                     out_stream.codec_context.subtitle_header = b""
@@ -1077,16 +1062,9 @@ class VideoEncoder:
         # this buffer into pinned host memory, so one buffer can serve every frame.
         if self._packed is not None:
             return self._packed
-        return torch.empty(
-            (height + height // 2, width),
-            dtype=self._converter.sample_dtype,
-            device=self.device,
-        )
+        return nvenc_yuv_frame(height, width, self._converter.sample_dtype, self.device)
 
     def _to_yuv(self, frame: torch.Tensor, height: int) -> torch.Tensor:
-        # Sharpening happens here rather than after, because it must see a
-        # contiguous plane: pitch alignment can hand back a strided view into a
-        # wider buffer, and the AMD path copies straight to host memory.
         packed = self._packed_frame(height, frame.shape[2])
         if self._cas is None:
             self._converter.convert_into(frame, packed[:height], packed[height:])
@@ -1094,11 +1072,8 @@ class VideoEncoder:
         # CAS is a 3x3 stencil, so it cannot run in place: the conversion writes
         # luma to a scratch plane and sharpening reads from there into the frame
         # the encoder receives, instead of copying a whole plane back.
-        luma = self._cas_luma
-        if luma is None:
-            luma = torch.empty_like(packed[:height])
-        self._converter.convert_into(frame, luma, packed[height:])
-        self._cas.sharpen_into(luma, packed[:height])
+        self._converter.convert_into(frame, self._cas_luma, packed[height:])
+        self._cas.sharpen_into(self._cas_luma, packed[:height])
         return packed
 
     def _encode_frame(self, frame: torch.Tensor, pts: int):
@@ -1108,7 +1083,6 @@ class VideoEncoder:
                 frame = self._lut_applier.apply(frame)
             packed = self._to_yuv(frame, height)
             if self.vendor is AcceleratorVendor.NVIDIA:
-                packed = _align_yuv_pitch(packed)
                 if self.spec.frame_format == "p010le":
                     planes = [
                         packed[:height].view(torch.uint16),

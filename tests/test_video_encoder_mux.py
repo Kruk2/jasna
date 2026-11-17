@@ -44,7 +44,6 @@ _EXPECTED_STREAM = {
 
 def _av1_probe(tmp_path_factory) -> str | None:
     """One minimal AV1 encoder open; returns the failure text when the GPU has no AV1 encoder."""
-    import av as _av
 
     tmp = tmp_path_factory.mktemp("av1probe")
     src = _make_source(tmp, "probe_src.mp4", acodec=None)
@@ -454,17 +453,6 @@ def test_square_pixels_keep_default_sar(tmp_path):
         assert sar is None or sar == Fraction(1, 1)
 
 
-def test_audio_copy_when_compatible(tmp_path):
-    src = _make_source(tmp_path, "src.mp4", acodec="aac")
-    dst = tmp_path / "out.mp4"
-    _transcode(src, dst)
-
-    with av.open(str(dst)) as c:
-        assert len(c.streams.audio) == 1
-        assert c.streams.audio[0].codec_context.name == "aac"
-        assert float(c.streams.audio[0].duration * c.streams.audio[0].time_base) == pytest.approx(2.0, abs=0.15)
-
-
 def test_source_with_timecode_track_muxes(tmp_path):
     src = _make_source(tmp_path, "timecode.mp4", extra=["-timecode", "01:00:00:00"])
     with av.open(str(src)) as source:
@@ -532,29 +520,18 @@ def test_wma_audio_the_container_cannot_hold_is_reencoded_to_aac(tmp_path, suffi
     )
 
 
-def test_audio_reencoded_when_incompatible(tmp_path):
+@pytest.mark.parametrize("codec", ["hevc", "h264", "av1"])
+def test_audio_reencoded_when_incompatible(tmp_path, codec, require_codec):
+    require_codec(codec)
     assert needs_audio_reencode("vorbis", ".mp4", {"vorbis", "aac"})
     src = _make_source(tmp_path, "src.mkv", acodec="libvorbis")
     dst = tmp_path / "out.mp4"
-    _transcode(src, dst)
+    _transcode(src, dst, codec=codec)
 
     with av.open(str(dst)) as c:
         a = c.streams.audio[0]
         assert a.codec_context.name == "aac"
         assert float(a.duration * a.time_base) == pytest.approx(2.0, abs=0.2)
-
-
-def test_container_metadata_and_audio_language_copied(tmp_path):
-    src = _make_source(
-        tmp_path, "src.mp4",
-        extra=["-metadata", "title=jasna-test", "-metadata:s:a:0", "language=pol"],
-    )
-    dst = tmp_path / "out.mp4"
-    _transcode(src, dst)
-
-    with av.open(str(dst)) as c:
-        assert c.metadata.get("title") == "jasna-test"
-        assert c.streams.audio[0].metadata.get("language") == "pol"
 
 
 @pytest.mark.parametrize(("suffix", "dated_tags"), [(".mp4", 3), (".mkv", 1)])
@@ -644,6 +621,26 @@ def test_container_structure_preserved(
             assert output_attachment.name == "rich-font.txt"
             assert output_attachment.mimetype == "text/plain"
             assert output_attachment.data == b"font payload"
+
+
+def test_smart_fragment_leaves_out_the_source_chapters(tmp_path):
+    src = _make_rich_source(tmp_path)
+    metadata = get_video_meta_data(str(src))
+    dst = tmp_path / "part.nut"
+
+    with (
+        VideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
+        VideoEncoder(
+            str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={}, smart_fragment=True
+        ) as encoder,
+    ):
+        for frames, pts_list in reader.frames():
+            for index, pts in enumerate(pts_list):
+                encoder.encode(frames[index], pts)
+
+    with av.open(str(src)) as source, av.open(str(dst)) as fragment:
+        assert len(source.chapters()) == 2
+        assert fragment.chapters() == []
 
 
 def test_faststart_moov_before_mdat(tmp_path):
@@ -900,8 +897,8 @@ def test_codec_round_trip_pixels(tmp_path, codec, require_codec):
     assert (decoded - expected).abs().mean().item() < 4.0
 
 
-@pytest.mark.parametrize("codec", ["h264", "av1"])
-def test_shared_mux_path_for_new_codecs(tmp_path, codec, require_codec):
+@pytest.mark.parametrize("codec", ["hevc", "h264", "av1"])
+def test_compatible_audio_and_tags_are_copied(tmp_path, codec, require_codec):
     require_codec(codec)
     src = _make_source(
         tmp_path, "src.mp4",
@@ -922,19 +919,6 @@ def test_shared_mux_path_for_new_codecs(tmp_path, codec, require_codec):
 
     data = dst.read_bytes()
     assert data.index(b"moov") < data.index(b"mdat")
-
-
-@pytest.mark.parametrize("codec", ["h264", "av1"])
-def test_audio_transcode_for_new_codecs(tmp_path, codec, require_codec):
-    require_codec(codec)
-    src = _make_source(tmp_path, "src.mkv", acodec="libvorbis")
-    dst = tmp_path / "out.mp4"
-    _transcode(src, dst, codec=codec)
-
-    with av.open(str(dst)) as c:
-        a = c.streams.audio[0]
-        assert a.codec_context.name == "aac"
-        assert float(a.duration * a.time_base) == pytest.approx(2.0, abs=0.2)
 
 
 if __name__ == "__main__" and len(sys.argv) == 6 and sys.argv[1] == "pitch-probe":

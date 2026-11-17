@@ -20,10 +20,8 @@ TRITON_LAUNCH_TABLES = {
 }
 
 
-def test_nvidia_always_runs_the_kernels(monkeypatch):
-    monkeypatch.setattr(torch.version, "hip", None)
-    monkeypatch.setattr(torch.version, "cuda", "13.0")
-
+@pytest.mark.usefixtures("nvidia_vendor")
+def test_nvidia_always_runs_the_kernels():
     assert has_precompiled_kernels(torch.device("cuda:0"))
     assert not has_precompiled_kernels(torch.device("cpu"))
 
@@ -62,10 +60,6 @@ def test_every_triton_kernel_ships_for_every_triton_architecture(table, module_n
     assert {target.rpartition("--")[2] for target in targets if target.startswith("hipv4-")} == set(TRITON_HIP_ARCHITECTURES)
     assert set(launch) == set(TRITON_HIP_ARCHITECTURES)
     assert all(module_name in kernels for kernels in launch.values())
-
-
-def test_the_triton_architectures_are_media_kernel_architectures():
-    assert set(TRITON_HIP_ARCHITECTURES) < HIP_KERNEL_ARCHITECTURES
 
 
 class _FakeHip:

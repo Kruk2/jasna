@@ -1,8 +1,8 @@
 """AMD decoding: batches decode on a prefetch thread, and AMF decodes like software."""
 from __future__ import annotations
 
+import itertools
 import threading
-from types import SimpleNamespace
 
 import av
 import numpy as np
@@ -10,7 +10,8 @@ import pytest
 import torch
 
 import jasna.media.video_decoder as module
-from factories import video_metadata
+from factories import video_metadata, write_dated_source
+from jasna.media.probe import get_video_meta_data
 
 
 def _reader() -> module.VideoReader:
@@ -96,32 +97,29 @@ def test_prefetcher_close_stops_decoding_and_closes_the_source(monkeypatch):
     assert len(produced) < 10
 
 
-def test_amd_reader_exit_stops_the_prefetcher_before_closing_the_container(monkeypatch, amd_gpu):
+def test_amd_reader_exit_stops_the_prefetcher_before_closing_the_container(monkeypatch, amd_gpu, tmp_path):
     amd_gpu()
     _prefetch_env(monkeypatch)
-    reader = _reader()
-    order: list = []
-    decoding = threading.Event()
+    source = write_dated_source(tmp_path / "source.mp4")
+    reader = module.VideoReader(str(source), 3, torch.device("cuda:0"), get_video_meta_data(str(source)))
+    packets_readable_when_decoding_stopped: list = []
 
     def decoded_batches(_seek_ts):
         try:
             for i in range(1000):
-                decoding.set()
                 yield _Batch(i), [i]
         finally:
-            order.append("decode stopped")
+            packets = itertools.islice(reader.container.demux(video=0), 1)
+            packets_readable_when_decoding_stopped.append(len(list(packets)))
 
     monkeypatch.setattr(reader, "_decoded_batches", decoded_batches)
-    reader.container = SimpleNamespace(close=lambda: order.append("container closed"))
-    reader._raw_stream = None
-
+    reader.__enter__()
     frames = reader.frames()
     next(frames)
-    assert decoding.wait(1)
     reader.__exit__(None, None, None)
-
-    assert order == ["decode stopped", "container closed"]
     frames.close()
+
+    assert packets_readable_when_decoding_stopped == [1]
 
 
 @pytest.mark.usefixtures("nvidia_vendor")

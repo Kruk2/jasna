@@ -131,7 +131,7 @@ def parse_spatial_metadata(json_video_stream: dict) -> tuple[str, str]:
 
 
 def _ffprobe_video_json(path: str, *options: str) -> dict:
-    cmd = [resolve_executable("ffprobe"), "-v", "quiet", "-print_format", "json", "-select_streams", "v", *options, path]
+    cmd = [resolve_executable("ffprobe"), "-v", "error", "-print_format", "json", "-select_streams", "v", *options, path]
     p = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -148,7 +148,7 @@ def _ffprobe_video_json(path: str, *options: str) -> dict:
             stdout_text,
             stderr_text,
         )
-        raise RuntimeError(f"error running ffprobe: {err.strip()}. Code: {p.returncode}, cmd: {cmd}")
+        raise RuntimeError(f"error running ffprobe: {stderr_text.strip()}. Code: {p.returncode}, cmd: {cmd}")
     return json.loads(out)
 
 

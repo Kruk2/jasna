@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import pytest
 import torch
 
-from jasna.media.lut import CubeLut, GpuLutApplier, parse_cube_file, parse_cube_text
+from jasna.media.lut import GpuLutApplier, parse_cube_file, parse_cube_text
 
 
 def _identity_3d_cube_text(size: int = 5) -> str:
@@ -158,7 +157,7 @@ def test_apply_rejects_wrong_shape() -> None:
 def test_apply_float_tensor_returns_float() -> None:
     lut = parse_cube_text(_identity_3d_cube_text(33))
     applier = GpuLutApplier(lut, _device())
-    frame = torch.rand(3, 8, 8)
+    frame = torch.rand(3, 8, 8, device=_device())
     out = applier.apply(frame).cpu()
     assert out.dtype == frame.dtype
-    assert torch.allclose(out, frame, atol=1e-3)
+    assert torch.allclose(out, frame.cpu(), atol=1e-3)

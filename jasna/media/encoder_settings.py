@@ -118,6 +118,24 @@ def cq_controls(settings: Mapping[str, object], vendor: AcceleratorVendor | str)
     return [key for key in keys if key in settings]
 
 
+def resolve_custom_encoder_settings(
+    raw: str,
+    *,
+    cq: int | None,
+    codec: str,
+    vendor: AcceleratorVendor | str,
+) -> dict[str, object]:
+    """The user's custom encoder settings ``raw``, validated, with one CQ: the quality setting
+    ``cq``, else at most one CQ control of their own."""
+    settings = parse_encoder_settings(raw)
+    controls = cq_controls(settings, vendor)
+    if len(controls) > 1:
+        raise ValueError(f"Custom encoder settings contain multiple CQ controls: {', '.join(controls)}; use only one")
+    if cq is not None and controls:
+        raise ValueError(f"The quality setting already sets the CQ; remove {', '.join(controls)} from the custom encoder settings")
+    return resolve_encoder_settings(settings, cq=cq, codec=codec, vendor=vendor)
+
+
 def resolve_encoder_settings(
     settings: Mapping[str, object],
     *,

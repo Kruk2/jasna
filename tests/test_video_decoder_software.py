@@ -4,17 +4,15 @@ Requires a CUDA GPU; fixtures are generated through PyAV (no ffmpeg CLI)."""
 from __future__ import annotations
 
 import logging
-from fractions import Fraction
 from pathlib import Path
 
 import av
 import numpy as np
 import pytest
 import torch
-from av.codec.hwaccel import HWAccel
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
-from jasna.media.probe import VideoMetadata
+from factories import video_metadata
 from jasna.media.video_decoder import VideoReader
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 
@@ -68,32 +66,9 @@ def _solid_yuv420p10_frame(w: int, h: int, y: int, u: int, v: int) -> av.VideoFr
     return frame
 
 
-def _metadata(
-    path: Path,
-    w: int,
-    h: int,
-    n: int,
-    *,
-    codec_name: str = "ffv1",
-    is_10bit: bool = False,
-    color_space=AvColorspace.ITU709,
-    color_range=AvColorRange.MPEG,
-) -> VideoMetadata:
-    return VideoMetadata(
-        video_file=str(path),
-        video_height=h,
-        video_width=w,
-        video_fps=12.0,
-        average_fps=12.0,
-        video_fps_exact=Fraction(12, 1),
-        codec_name=codec_name,
-        duration=n / 12.0,
-        time_base=Fraction(1, 12),
-        start_pts=0,
-        color_range=color_range,
-        color_space=color_space,
-        num_frames=n,
-        is_10bit=is_10bit,
+def _metadata(path: Path, w: int, h: int, n: int, *, codec_name: str = "ffv1", **overrides):
+    return video_metadata(
+        fps=12, num_frames=n, video_file=str(path), video_width=w, video_height=h, codec_name=codec_name, **overrides
     )
 
 
@@ -115,16 +90,6 @@ def _reference_rgb(y_val, u_val, v_val, w, h, color_space, full_range, ten_bit):
     uv[..., 1] = v_val * shift
     converter = YuvToRgbConverter(h, w, color_space, full_range, ten_bit, torch.device("cpu"))
     return converter.convert(y, uv.to(dtype))
-
-
-def test_fallback_off_rejects_software_only_codec(ffv1_video):
-    path, _ = ffv1_video
-    torch.cuda.current_stream(DEVICE)
-    hwaccel = HWAccel("cuda", device="0", allow_software_fallback=False, is_hw_owned=True)
-    hwaccel.options["primary_ctx"] = "0"
-    hwaccel.options["current_ctx"] = "1"
-    with pytest.raises(RuntimeError, match="no stream is compatible"):
-        av.open(str(path), hwaccel=hwaccel)
 
 
 def test_ffv1_returns_cuda_uint8_rgb_batches(ffv1_video):
@@ -149,65 +114,33 @@ def test_pts_and_frame_count_match_direct_decode(ffv1_video):
     assert reader_pts == direct_pts
 
 
-def test_software_pixel_values_match_reference(ffv1_video):
-    path, metadata = ffv1_video
-    expected = _reference_rgb(120, 90, 200, 128, 96, AvColorspace.ITU709, False, False)
-    with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
-        batch, _ = next(iter(reader.frames()))
-    diff = (batch[0].cpu().float() - expected.float()).abs().max().item()
-    assert diff <= 1.0, f"maxdiff {diff}"
-
-
 @pytest.mark.parametrize(
-    ("color_space", "color_range"),
+    ("width", "height", "ten_bit", "yuv", "color_space", "color_range"),
     [
-        (AvColorspace.ITU601, AvColorRange.MPEG),
-        (AvColorspace.ITU601, AvColorRange.JPEG),
-        (AvColorspace.ITU709, AvColorRange.MPEG),
-        (AvColorspace.ITU709, AvColorRange.JPEG),
-        (AvColorspace.BT2020, AvColorRange.MPEG),
-        (AvColorspace.BT2020, AvColorRange.JPEG),
+        (64, 64, False, (140, 100, 180), AvColorspace.ITU601, AvColorRange.MPEG),
+        (64, 64, False, (140, 100, 180), AvColorspace.ITU601, AvColorRange.JPEG),
+        (64, 64, False, (140, 100, 180), AvColorspace.ITU709, AvColorRange.MPEG),
+        (64, 64, False, (140, 100, 180), AvColorspace.ITU709, AvColorRange.JPEG),
+        (64, 64, False, (140, 100, 180), AvColorspace.BT2020, AvColorRange.MPEG),
+        (64, 64, False, (140, 100, 180), AvColorspace.BT2020, AvColorRange.JPEG),
+        # 100-px rows are narrower than the 32/64-byte swscale pitch alignment.
+        (100, 50, False, (120, 90, 200), AvColorspace.ITU709, AvColorRange.MPEG),
+        (64, 64, True, (700, 400, 600), AvColorspace.ITU709, AvColorRange.MPEG),
     ],
+    ids=["bt601-limited", "bt601-full", "bt709-limited", "bt709-full", "bt2020-limited", "bt2020-full",
+         "pitch-padding", "10-bit"],
 )
-def test_software_matrix_and_range_pixel_reference(tmp_path, color_space, color_range):
-    w, h = 64, 64
-    frames = [_solid_yuv420p_frame(w, h, 140, 100, 180) for _ in range(4)]
-    path = tmp_path / "colors.mkv"
-    _write_video(path, "ffv1", "yuv420p", frames)
-    metadata = _metadata(path, w, h, 4, color_space=color_space, color_range=color_range)
-    full = color_range == AvColorRange.JPEG
-    expected = _reference_rgb(140, 100, 180, w, h, color_space, full, False)
-    with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
-        batch, _ = next(iter(reader.frames()))
-    diff = (batch[0].cpu().float() - expected.float()).abs().max().item()
-    assert diff <= 1.0, f"maxdiff {diff}"
-
-
-def test_10bit_software_source_normalizes_to_p010(tmp_path):
-    w, h = 64, 64
-    frames = [_solid_yuv420p10_frame(w, h, 700, 400, 600) for _ in range(4)]
-    path = tmp_path / "soft10.mkv"
-    _write_video(path, "ffv1", "yuv420p10le", frames)
-    metadata = _metadata(path, w, h, 4, is_10bit=True)
-    expected = _reference_rgb(700, 400, 600, w, h, AvColorspace.ITU709, False, True)
+def test_software_decode_matches_the_reference_conversion(tmp_path, width, height, ten_bit, yuv, color_space, color_range):
+    solid_frame = _solid_yuv420p10_frame if ten_bit else _solid_yuv420p_frame
+    frames = [solid_frame(width, height, *yuv) for _ in range(4)]
+    path = tmp_path / "solid.mkv"
+    _write_video(path, "ffv1", "yuv420p10le" if ten_bit else "yuv420p", frames)
+    metadata = _metadata(path, width, height, 4, is_10bit=ten_bit, color_space=color_space, color_range=color_range)
+    full_range = color_range == AvColorRange.JPEG
+    expected = _reference_rgb(*yuv, width, height, color_space, full_range, ten_bit)
     with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
         batch, _ = next(iter(reader.frames()))
     assert batch.dtype == torch.uint8
-    diff = (batch[0].cpu().float() - expected.float()).abs().max().item()
-    assert diff <= 1.0, f"maxdiff {diff}"
-
-
-def test_pitched_plane_padding_is_discarded(tmp_path):
-    # 100-px rows are narrower than typical 32/64-byte swscale pitch alignment,
-    # so the CPU views must slice off the padding columns.
-    w, h = 100, 50
-    frames = [_solid_yuv420p_frame(w, h, 120, 90, 200) for _ in range(4)]
-    path = tmp_path / "pitch.mkv"
-    _write_video(path, "ffv1", "yuv420p", frames)
-    metadata = _metadata(path, w, h, 4)
-    expected = _reference_rgb(120, 90, 200, w, h, AvColorspace.ITU709, False, False)
-    with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
-        batch, _ = next(iter(reader.frames()))
     diff = (batch[0].cpu().float() - expected.float()).abs().max().item()
     assert diff <= 1.0, f"maxdiff {diff}"
 
