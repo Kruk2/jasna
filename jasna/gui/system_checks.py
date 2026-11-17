@@ -1,12 +1,15 @@
-"""First-run dependency checks, run off the UI thread by the wizard."""
+"""Dependency checks and the CUDA warm-up, run off the UI thread."""
 
 import logging
 import os
 import sys
-from collections.abc import Iterable
+import threading
+from collections.abc import Callable, Iterable
 
 from jasna import os_utils, system_requirements
+from jasna.accelerator import AcceleratorVendor
 from jasna.gui.locales import t
+from jasna.gui.workers import run_in_background
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,48 @@ def run_system_checks(results: dict[str, tuple[bool | None, str]]) -> None:
 
     if is_amd_device():
         results["amf"] = check_amf()
+
+
+def start_system_checks(results: dict[str, tuple[bool | None, str]]) -> threading.Thread:
+    """Run ``run_system_checks(results)`` on a daemon thread."""
+    thread = threading.Thread(target=run_system_checks, args=(results,), daemon=True)
+    thread.start()
+    return thread
+
+
+def warm_up_cuda() -> tuple[AcceleratorVendor, bool, bool]:
+    """Import torch and create the CUDA context. Run off the UI thread after the window
+    paints, so the window shows first and the first job skips cold torch/CUDA init.
+    An unsupported GPU gets no kernel launch; the system check reports it instead.
+    Returns (GPU vendor, Blackwell GPU, frame generation support) for the GPU-specific options;
+    CPU without a supported GPU."""
+    from jasna.accelerator import supports_frame_generation, supports_nvfp4, vendor_for_device
+
+    if vendor_for_device() is AcceleratorVendor.AMD:
+        driver_ok, _ = system_requirements.check_gpu_driver_version()
+        if driver_ok is False:
+            return AcceleratorVendor.CPU, False, False
+    gpu_ok, _ = system_requirements.check_supported_gpu()
+    if not gpu_ok:
+        return AcceleratorVendor.CPU, False, False
+    import torch
+
+    torch.zeros(1, device="cuda")
+    vendor = vendor_for_device()
+    return vendor, supports_nvfp4("cuda:0"), supports_frame_generation("cuda:0")
+
+
+def start_cuda_warmup(on_support: Callable[[AcceleratorVendor, bool, bool], None]) -> threading.Thread:
+    """Run ``warm_up_cuda`` on the "cuda-warmup" thread, then ``on_support(vendor, blackwell, frame_generation)``
+    on that thread; a failed warm-up reports CPU."""
+
+    def warmed_up(support, error):
+        if error is not None:
+            logger.warning("CUDA warm-up failed", exc_info=error)
+            support = AcceleratorVendor.CPU, False, False
+        on_support(*support)
+
+    return run_in_background(warm_up_cuda, warmed_up, name="cuda-warmup")
 
 
 def check_amf() -> tuple[bool, str]:

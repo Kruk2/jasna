@@ -3,6 +3,8 @@
 import threading
 from typing import Callable
 
+from jasna.gui.workers import run_in_background
+
 DownloadProgress = Callable[[int, int | None], None]
 
 
@@ -31,14 +33,6 @@ def start_download(
             last_percent = percent
         on_percent(percent)
 
-    def worker():
-        error = None
-        try:
-            download(progress)
-        except Exception as exc:  # surface failure to the user
-            error = str(exc)
-        on_done(error)
-
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-    return thread
+    return run_in_background(
+        lambda: download(progress), lambda _result, error: on_done(None if error is None else str(error))
+    )

@@ -547,6 +547,10 @@ class AutoHidingScrollableFrame(ctk.CTkScrollableFrame):
 
 class Toast(ctk.CTkFrame):
     """Toast notification that auto-dismisses."""
+
+    @classmethod
+    def show(cls, master, message: str, type_: str) -> None:
+        cls(master, message, type_).place(relx=0.5, rely=0.9, anchor="center")
     
     def __init__(self, master, message: str, type_: str = "info", duration_ms: int = 3000, **kwargs):
         super().__init__(

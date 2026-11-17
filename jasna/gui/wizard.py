@@ -3,7 +3,6 @@
 import logging
 import os
 import sys
-import threading
 import time
 import webbrowser
 
@@ -14,7 +13,7 @@ from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import get_locale, t
 from jasna.gui.components import KofiButton, UnifansButton, XianyuButton, grab_modal, shows_xianyu_seller
-from jasna.gui.system_checks import WARNING_ONLY_CHECKS, evaluate_check_results, run_system_checks
+from jasna.gui.system_checks import WARNING_ONLY_CHECKS, evaluate_check_results, start_system_checks
 
 logger = logging.getLogger(__name__)
 _WINDOW_WIDTH = 820
@@ -204,8 +203,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         
     def _start_checks_in_background(self) -> None:
         self._checks_deadline = time.monotonic() + _CHECKS_TIMEOUT_SECONDS
-        self._checks_thread = threading.Thread(target=run_system_checks, args=(self._check_results,), daemon=True)
-        self._checks_thread.start()
+        self._checks_thread = start_system_checks(self._check_results)
         self.after(50, self._poll_checks_thread)
 
     def _poll_checks_thread(self) -> None:

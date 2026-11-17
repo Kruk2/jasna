@@ -29,6 +29,11 @@ def license_status_key(mode: str | None) -> str:
     return {"offline": "license_offline_active", "online": "license_lease_active"}.get(mode, "license_active")
 
 
+def license_chip_key(mode: str | None) -> str:
+    """Locale key for the header chip of an activated Jasna; ``mode`` comes from ``read_license_info``."""
+    return {"offline": "license_chip_offline", "online": "license_chip_online"}.get(mode, "license_chip_active")
+
+
 def refresh_pc_license() -> None:
     """Binds a saved offline activation to this PC once, so LTX later works without internet. Quiet: a failure only
     logs, and the first LTX job tries again and says what to do."""

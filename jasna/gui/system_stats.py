@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path
 import subprocess
+import threading
 
 from jasna import os_utils
 
@@ -112,3 +114,16 @@ def read_system_stats() -> SystemStats:
         ram_util=ram_util,
         cpu_util=cpu_util,
     )
+
+
+def start_poller(stop: threading.Event, on_stats: Callable[[SystemStats], None]) -> threading.Thread:
+    """Call ``on_stats(read_system_stats())`` on a daemon thread every 1.5 s until ``stop`` is set."""
+
+    def loop():
+        while not stop.is_set():
+            on_stats(read_system_stats())
+            stop.wait(1.5)
+
+    thread = threading.Thread(target=loop, daemon=True)
+    thread.start()
+    return thread

@@ -8,35 +8,32 @@ import sys
 import threading
 import time
 import tkinter as tk
-import webbrowser
 
 from tkinterdnd2 import TkinterDnD
 
 from jasna import __version__
 from jasna import license_status, os_utils, startup_timing, system_requirements, update_check
 from jasna.accelerator import AcceleratorVendor
-from jasna.gui.branding import (
-    HEADER_LOGO_SIZE,
-    create_header_logo,
-    install_window_icon,
-)
-from jasna.gui import scaling
+from jasna.gui.branding import install_window_icon
+from jasna.gui import scaling, system_checks, system_stats
 from jasna.gui import activation_worker
-from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
-from jasna.gui.components import StatusPill, KofiButton, UnifansButton, XianyuButton, XianyuQrDialog, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, CloseWhileProcessingDialog, Tooltip, OptionsDialog
-from jasna.gui.icons import create_icon
+from jasna.gui.theme import Colors, Sizing, apply_ui_fonts
+from jasna.gui.components import XianyuQrDialog, Toast, ShutdownCountdownDialog, CloseWhileProcessingDialog, OptionsDialog
+from jasna.gui.header_bar import HeaderBar
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
 from jasna.gui.control_bar import ControlBar
 from jasna.gui.log_panel import LogPanel
-from jasna.gui.log_filter import runtime_log_level_for_filter
+from jasna.gui.gui_logging import install_gui_logging
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.user_settings import read_settings
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui import saved_queue, tray
-from jasna.gui.models import JobStatus, PresetManager
-from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
-from jasna.gui.settings_sections.widgets import ValueOptionMenu
+from jasna.gui.ltx_models import card_unavailable_reason
+from jasna.gui.models import AppSettings, JobStatus, PresetManager
+from jasna.gui.start_flow import StartBlock, StartBlocked, read_ltx_license, start_blocker
+from jasna.gui.validation import any_job_uses_ltx, job_is_resumable
+from jasna.gui.locales import get_locale, t
 from jasna.media.media_files import IMAGE_EXTENSIONS, file_dialog_patterns
 from jasna.gui.font_backend import (
     GuiFontBackendError,
@@ -53,29 +50,6 @@ _DEFAULT_WINDOW_SIZE = (1320, 960)
 _MIN_WINDOW_SIZE = (900, 580)
 _SHUTDOWN_COUNTDOWN_SECONDS = 60
 _WINDHAWK_MODULE = "windhawk.dll"
-
-
-def _warm_up_cuda() -> tuple[AcceleratorVendor, bool, bool]:
-    """Import torch and create the CUDA context. Run off the UI thread after the window
-    paints, so the window shows first and the first job skips cold torch/CUDA init.
-    An unsupported GPU gets no kernel launch; the system check reports it instead.
-    Returns (GPU vendor, Blackwell GPU, frame generation support) for the GPU-specific options;
-    CPU without a supported GPU."""
-    from jasna.system_requirements import check_supported_gpu
-    from jasna.accelerator import supports_frame_generation, supports_nvfp4, vendor_for_device
-
-    if vendor_for_device() is AcceleratorVendor.AMD:
-        driver_ok, _ = system_requirements.check_gpu_driver_version()
-        if driver_ok is False:
-            return AcceleratorVendor.CPU, False, False
-    gpu_ok, _ = check_supported_gpu()
-    if not gpu_ok:
-        return AcceleratorVendor.CPU, False, False
-    import torch
-
-    torch.zeros(1, device="cuda")
-    vendor = vendor_for_device()
-    return vendor, supports_nvfp4("cuda:0"), supports_frame_generation("cuda:0")
 
 
 class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
@@ -118,6 +92,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._job_start_times: dict[int, float] = {}
         self._processing_start_time: float = 0.0
         self._preview_gpu_owners: set[object] = set()
+        self._gpu_vendor: AcceleratorVendor | None = None
         self._video_player_dialog = None
         self._segment_editor = None
         self._closing_after_player = False
@@ -128,13 +103,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             on_quit=lambda: self._main_thread.post(self._quit_from_tray),
         )
 
-        self._system_stats_stop = threading.Event()
-        self._system_stats_thread: threading.Thread | None = None
-        
         self._build_ui()
         self._t_ui_built = startup_timing.elapsed_ms()
         self._setup_processor()
-        self._start_system_stats_poller()
+        self._system_stats_stop = threading.Event()
+        self._system_stats_thread = system_stats.start_poller(
+            self._system_stats_stop,
+            lambda stats: self._main_thread.post(lambda: self._control_bar.set_system_stats(stats)),
+        )
 
         self.protocol("WM_DELETE_WINDOW", self._on_close_requested)
         self.bind("<Unmap>", self._on_unmap, add="+")
@@ -149,7 +125,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.after_idle(license_status.start_pc_license_refresh)
 
         if self._preset_manager.get_system_check_passed_version() != __version__:
-            self.after(100, self._show_wizard)
+            self.after(100, lambda: self._show_system_check(quit_when_blocked=True))
             
     def _size_and_center(self):
         self.update_idletasks()
@@ -167,169 +143,17 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _build_ui(self):
         # Footer before the body: the packer starves its last slaves when the window is
         # shorter than the requested layout, and the control bar must never be the casualty.
-        self._build_header()
+        self._header_bar = HeaderBar(
+            self,
+            self._main_thread,
+            on_options=self._show_options,
+            on_open_player=self._open_video_player,
+            on_system_check=lambda: self._show_system_check(quit_when_blocked=False),
+        )
+        self._header_bar.pack(fill="x")
         self._build_footer()
         self._build_main_body()
         
-    def _build_header(self):
-        header = ctk.CTkFrame(self, fg_color=Colors.BG_PANEL, height=Sizing.HEADER_HEIGHT, corner_radius=0)
-        header.pack(fill="x")
-        header.pack_propagate(False)
-        
-        # Left: Logo and title
-        left = ctk.CTkFrame(header, fg_color="transparent")
-        left.pack(side="left", padx=Sizing.PADDING_MEDIUM)
-        
-        self._header_logo = create_header_logo()
-        logo = ctk.CTkLabel(
-            left,
-            text="",
-            image=self._header_logo,
-            fg_color="transparent",
-            width=HEADER_LOGO_SIZE[0],
-            height=HEADER_LOGO_SIZE[1],
-        )
-        logo.pack(side="left")
-        
-        title = ctk.CTkLabel(
-            left,
-            text=t("app_title"),
-            font=(Fonts.FAMILY, Fonts.SIZE_TITLE, "bold"),
-            text_color=Colors.TEXT_PRIMARY,
-        )
-        title.pack(side="left", padx=(8, 4))
-        
-        version = ctk.CTkLabel(
-            left,
-            text=f"v{__version__}",
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            text_color=Colors.TEXT_PRIMARY,
-        )
-        version.pack(side="left", pady=(4, 0))
-
-        # Status pill, left-aligned next to the version (the right side holds the
-        # license/support chips, which used to overlap a centered pill).
-        self._status_pill = StatusPill(left)
-        self._status_pill.pack(side="left", padx=(12, 0))
-
-        # Right: Language, Help and About
-        right = ctk.CTkFrame(header, fg_color="transparent")
-        right.pack(side="right", padx=Sizing.PADDING_MEDIUM)
-        
-        self._options_icon = create_icon("settings", 20, Colors.TEXT_PRIMARY)
-        self._options_btn = ctk.CTkButton(
-            right,
-            text="",
-            image=self._options_icon,
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            width=32,
-            height=32,
-            command=self._show_options,
-        )
-        self._options_btn.pack(side="left", padx=(0, 8))
-        Tooltip(self._options_btn, t("dialog_options_title"))
-
-        locale = get_locale()
-        self._lang_dropdown = ValueOptionMenu(
-            right,
-            options={code: LANGUAGE_NAMES[code] for code in locale.available_languages},
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            fg_color=Colors.BG_CARD,
-            button_color=Colors.BG_CARD,
-            button_hover_color=Colors.BORDER_LIGHT,
-            dropdown_fg_color=Colors.BG_CARD,
-            dropdown_hover_color=Colors.PRIMARY,
-            text_color=Colors.TEXT_PRIMARY,
-            width=100,
-            height=28,
-            command=self._on_language_changed,
-        )
-        self._lang_dropdown.pack(side="left", padx=(0, 12))
-        self._lang_dropdown.set_value(locale.current_language)
-
-        self._video_player_icon = create_icon("play", 16, Colors.PLAYER_TEXT)
-        self._video_player_btn = ctk.CTkButton(
-            right,
-            text=t("btn_video_player"),
-            image=self._video_player_icon,
-            compound="left",
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL, "bold"),
-            fg_color=Colors.PLAYER,
-            hover_color=Colors.PLAYER_HOVER,
-            border_color=Colors.PLAYER_BORDER,
-            border_width=1,
-            border_spacing=6,
-            text_color=Colors.PLAYER_TEXT,
-            text_color_disabled=Colors.STATUS_PENDING,
-            corner_radius=8,
-            width=0,
-            height=34,
-            command=self._open_video_player,
-        )
-        self._video_player_btn.pack(side="left", padx=(0, 12))
-        
-        # Support buttons — back the project on Ko-fi, Unifans or (Chinese UI) Xianyu
-        KofiButton(right, width=100, height=28).pack(side="left", padx=(0, 8))
-        show_xianyu = shows_xianyu_seller(get_locale().current_language)
-        UnifansButton(right, width=110, height=28).pack(side="left", padx=(0, 8 if show_xianyu else 12))
-        if show_xianyu:
-            XianyuButton(right, width=110, height=28).pack(side="left", padx=(0, 12))
-
-        self._license_chip = ctk.CTkButton(
-            right, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            fg_color="transparent", hover_color=Colors.BG_CARD,
-            text=t("license_chip_inactive"), text_color=Colors.STATUS_WARNING,
-            width=0, command=self._open_license_dialog,
-        )
-        self._license_chip.pack(side="left", padx=(0, 12))
-        self._refresh_license_chip()
-        if show_xianyu:
-            activation_worker.start_unofficial_notice_check(
-                lambda due, error: self._main_thread.post(lambda: self._unofficial_notice_ready(due, error))
-            )
-
-        self._system_check_btn = ctk.CTkButton(
-            right,
-            text=t("btn_system_check"),
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY,
-            width=0,
-            command=self._show_system_check,
-        )
-        self._system_check_btn.pack(side="left", padx=(0, 4))
-        
-        self._help_btn = ctk.CTkButton(
-            right,
-            text=t("btn_help"),
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY,
-            width=0,
-            command=self._show_help,
-        )
-        self._help_btn.pack(side="left")
-
-        self._update_icon = create_icon("download", 14, Colors.STATUS_COMPLETED)
-        self._update_chip = ctk.CTkButton(
-            right,
-            image=self._update_icon,
-            compound="left",
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            text_color=Colors.STATUS_COMPLETED,
-            border_width=1,
-            border_color=Colors.STATUS_COMPLETED,
-            corner_radius=14,
-            width=0,
-            height=26,
-        )
-        Tooltip(self._update_chip, t("tip_update_available"))
-
     def _build_main_body(self):
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True)
@@ -385,9 +209,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._preset_manager.get_last_output_pattern(),
         )
         self._queue_panel.set_on_output_changed(self._on_output_changed)
-        self._queue_panel.set_on_play(
-            lambda path: JasnaApp._open_video_player(self, path)
-        )
+        self._queue_panel.set_on_play(self._open_video_player)
         if self.TkdndVersion is not None:
             self._queue_panel.enable_file_drop()
         
@@ -467,35 +289,15 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         messagebox.showwarning(t("old_files_warning_title"), message, parent=self)
 
     def _start_cuda_warmup(self):
-        def _run():
-            try:
-                vendor, blackwell, frame_generation = _warm_up_cuda()
-            except Exception:
-                logger.warning("CUDA warm-up failed", exc_info=True)
-                vendor, blackwell, frame_generation = AcceleratorVendor.CPU, False, False
-            self._main_thread.post(
-                lambda: self._settings_panel.set_gpu_support(
-                    vendor=vendor, blackwell=blackwell, frame_generation=frame_generation
-                )
+        system_checks.start_cuda_warmup(
+            lambda vendor, blackwell, frame_generation: self._main_thread.post(
+                lambda: self._set_gpu_support(vendor, blackwell, frame_generation)
             )
+        )
 
-        threading.Thread(target=_run, daemon=True, name="cuda-warmup").start()
-
-    def _start_system_stats_poller(self):
-        if self._system_stats_thread and self._system_stats_thread.is_alive():
-            return
-
-        self._system_stats_stop.clear()
-
-        def _loop():
-            from jasna.gui.system_stats import read_system_stats
-            while not self._system_stats_stop.is_set():
-                stats = read_system_stats()
-                self._main_thread.post(lambda s=stats: self._control_bar.set_system_stats(s))
-                self._system_stats_stop.wait(1.5)
-
-        self._system_stats_thread = threading.Thread(target=_loop, daemon=True)
-        self._system_stats_thread.start()
+    def _set_gpu_support(self, vendor: AcceleratorVendor, blackwell: bool, frame_generation: bool) -> None:
+        self._gpu_vendor = vendor
+        self._settings_panel.set_gpu_support(vendor=vendor, blackwell=blackwell, frame_generation=frame_generation)
 
     def _stop_system_stats_poller(self):
         self._system_stats_stop.set()
@@ -553,20 +355,13 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _update_check_ready(self, version, error):
         if error is not None:
             logger.warning("Could not check for a new version: %s", error)
-        if version is None or not read_settings().get(update_check.ENABLED_SETTING, True):
-            self._update_chip.pack_forget()
-            return
-        self._update_chip.configure(
-            text=t("update_available", version=version),
-            command=lambda: webbrowser.open(update_check.release_page_url(version)),
-        )
-        self._update_chip.pack(side="left", padx=(8, 0), after=self._help_btn)
+        self._header_bar.show_update(version if read_settings().get(update_check.ENABLED_SETTING, True) else None)
 
     def _on_update_check_changed(self, enabled: bool):
         if enabled:
             self._start_update_check()
         else:
-            self._update_chip.pack_forget()
+            self._header_bar.show_update(None)
 
     def _on_unmap(self, event):
         if event.widget is self and self.state() == "iconic" and read_settings().get("minimize_to_tray", False):
@@ -597,55 +392,21 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._show_from_tray()
         self._request_quit()
 
-    def _refresh_license_chip(self):
-        activation_worker.start_license_info(
-            lambda info, error: self._main_thread.post(lambda: self._license_chip_ready(info, error))
+    def _show_system_check(self, quit_when_blocked: bool):
+        from jasna.gui.wizard import FirstRunWizard
+        FirstRunWizard(
+            self,
+            on_complete=lambda can_continue, all_passed: self._on_system_check_complete(
+                can_continue, all_passed, quit_when_blocked
+            ),
         )
 
-    def _license_chip_ready(self, info, error):
-        if error is not None:
-            logger.warning("Could not read activation status: %s", error)
-        licensed = error is None and info[0]
-        if licensed:
-            text = t({"offline": "license_chip_offline", "online": "license_chip_online"}.get(info[1], "license_chip_active"))
-        else:
-            text = t("license_chip_inactive")
-        self._license_chip.configure(
-            text=text,
-            text_color=Colors.STATUS_COMPLETED if licensed else Colors.STATUS_WARNING,
-        )
-
-    def _unofficial_notice_ready(self, due, error):
-        if error is not None:
-            logger.warning("Could not check the activation note: %s", error)
-        elif due:
-            XianyuQrDialog(self, unofficial_notice=True)
-
-    def _open_license_dialog(self):
-        LicenseDialog(self, on_activated=self._refresh_license_chip)
-
-    def _show_wizard(self):
-        from jasna.gui.wizard import FirstRunWizard
-        FirstRunWizard(self, on_complete=self._on_wizard_complete)
-
-    def _show_system_check(self):
-        from jasna.gui.wizard import FirstRunWizard
-        FirstRunWizard(self, on_complete=self._on_system_check_complete)
-
-    def _on_wizard_complete(self, can_continue: bool, all_passed: bool = False):
+    def _on_system_check_complete(self, can_continue: bool, all_passed: bool, quit_when_blocked: bool):
+        """Dismissing the first-run check quits the app; dismissing a re-run only closes the dialog."""
         if not can_continue:
-            self._log_panel.error(t("wizard_log_blocked"))
-            self._on_close()
-            return
-        if all_passed:
-            self._preset_manager.set_system_check_passed_version(__version__)
-            self._log_panel.info(t("wizard_log_ready"))
-        else:
-            self._log_panel.warning(t("wizard_warnings_only"))
-
-    def _on_system_check_complete(self, can_continue: bool, all_passed: bool = False):
-        """Dismissing a re-run system check only closes the dialog; it never quits the app."""
-        if not can_continue:
+            if quit_when_blocked:
+                self._log_panel.error(t("wizard_log_blocked"))
+                self._on_close()
             return
         if all_passed:
             self._preset_manager.set_system_check_passed_version(__version__)
@@ -795,11 +556,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _update_video_player_button_state(self) -> None:
         processing = self._processor is not None and self._processor.is_running()
         disabled = self._preview_gpu_busy or processing
-        self._video_player_btn.configure(
-            state="disabled" if disabled else "normal",
-            fg_color=Colors.BG_CARD if disabled else Colors.PLAYER,
-            border_color=Colors.BORDER_LIGHT if disabled else Colors.PLAYER_BORDER,
-        )
+        self._header_bar.set_player_enabled(not disabled)
 
     @property
     def _preview_gpu_busy(self) -> bool:
@@ -813,11 +570,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         else:
             self._preview_gpu_owners.discard(owner)
         self._main_thread.post(self._update_start_button_state)
-        
-    def _show_toast(self, message: str, type_: str = "info"):
-        """Show a toast notification."""
-        toast = Toast(self, message, type_)
-        toast.place(relx=0.5, rely=0.9, anchor="center")
         
     def _on_start(self):
         if self._preview_gpu_busy or (
@@ -838,48 +590,17 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         output_pattern = self._queue_panel.get_output_pattern()
         settings = self._settings_panel.get_settings()
 
-        from jasna.gui.validation import any_job_uses_ltx, job_is_resumable, validate_gui_start
-
-        if self._settings_panel.ltx_unavailable_reason() == "model_ltx_not_downloaded" and any_job_uses_ltx(
-            jobs, settings
-        ):
-            self._ltx_models.ensure(settings.ltx_model, settings.ltx_fast, on_ready=self._on_start)
-            return
-        if settings.upscale_model == "dlss5" and not self._dlss5_runtime.installed():
-            self._dlss5_runtime.ensure(on_ready=self._on_start)
-            return
-        if (
-            not settings.ltx_trial
-            and self._settings_panel.ltx_unavailable_reason() is None
-            and any_job_uses_ltx(jobs, settings)
-        ):
-            from tkinter import messagebox
-
-            from jasna.gui.ltx_models import license_blocked, license_missing
-
-            if license_blocked():
-                messagebox.showwarning(t("ltx_blocked_title"), t("ltx_blocked_text"))
-                return
-            if license_missing(
-                self._ltx_models.directory,
-                settings.ltx_model,
-                settings.ltx_fast,
-                settings.ltx_vae_encoder,
-                settings.ltx_vae_decoder,
-            ):
-                if messagebox.askyesno(t("ltx_license_trial_title"), t("ltx_license_trial_confirm")):
-                    self._settings_panel.set_ltx_trial(True)
-                    self._on_start()
-                return
-        errors = validate_gui_start(
-            settings, jobs, ltx_available=self._settings_panel.ltx_unavailable_reason() is None
+        blocked = start_blocker(
+            settings,
+            jobs,
+            ltx_ready=self._settings_panel.ltx_unavailable_reason() is None,
+            ltx_runs_on_this_pc=card_unavailable_reason(self._gpu_vendor) is None,
+            ltx_downloadable=self._ltx_models.state.downloadable,
+            dlss5_installed=self._dlss5_runtime.installed,
+            ltx_license=lambda: read_ltx_license(self._ltx_models.directory, settings),
         )
-        if errors:
-            from tkinter import messagebox
-
-            msg = t("error_cannot_start") + "\n\n" + "\n".join(f"- {e}" for e in errors)
-            self._log_panel.error(msg)
-            messagebox.showerror(t("error_start_title"), msg)
+        if blocked is not None:
+            self._resolve_start_block(blocked, settings)
             return
 
         try:
@@ -897,16 +618,15 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
         trial = settings.ltx_trial and any_job_uses_ltx(jobs, settings)
         if trial:
-            self._show_toast(t("toast_ltx_trial"), "warning")
+            Toast.show(self, t("toast_ltx_trial"), "warning")
             self._log_panel.warning(t("toast_ltx_trial"))
         self._control_bar.set_trial(trial)
         if not continuing:
             self._queue_panel.reset_jobs_for_run()
         
-        self._status_pill.set_status("PROCESSING", Colors.STATUS_PROCESSING)
+        self._header_bar.set_status("PROCESSING", Colors.STATUS_PROCESSING)
         self._control_bar.set_resumable(any(job_is_resumable(job, settings) for job in jobs))
         self._control_bar.set_running(True)
-        self._video_player_btn.configure(state="disabled")
         
         # Disable settings and output controls while running
         self._settings_panel.set_enabled(False)
@@ -928,22 +648,42 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         )
         self._update_video_player_button_state()
                 
+    def _resolve_start_block(self, blocked: StartBlocked, settings: AppSettings) -> None:
+        from tkinter import messagebox
+
+        match blocked.block:
+            case StartBlock.DOWNLOAD_LTX:
+                self._ltx_models.ensure(settings.ltx_model, settings.ltx_fast, on_ready=self._on_start)
+            case StartBlock.DOWNLOAD_DLSS5:
+                self._dlss5_runtime.ensure(on_ready=self._on_start)
+            case StartBlock.LTX_LOCKED:
+                messagebox.showwarning(t("ltx_blocked_title"), t("ltx_blocked_text"))
+            case StartBlock.OFFER_LTX_TRIAL:
+                if messagebox.askyesno(t("ltx_license_trial_title"), t("ltx_license_trial_confirm")):
+                    self._settings_panel.set_ltx_trial(True)
+                    self._on_start()
+            case StartBlock.INVALID:
+                msg = t("error_cannot_start") + "\n\n" + "\n".join(f"- {e}" for e in blocked.errors)
+                self._log_panel.error(msg)
+                messagebox.showerror(t("error_start_title"), msg)
+
     def _on_stop(self):
         if self._processor is None or not self._processor.is_running():
             return
         self._processor.stop()
         self._log_panel.info("Processing stopped by user")
 
-        self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
+        self._header_bar.set_status("IDLE", Colors.STATUS_PENDING)
         self._control_bar.reset()
         # Start stays disabled until the worker thread has finished unwinding;
         # _handle_complete re-enables it.
         self._control_bar.set_start_enabled(False)
+        self._enable_run_settings()
 
-        # Re-enable settings and output controls
+    def _enable_run_settings(self):
         self._settings_panel.set_enabled(True)
         self._queue_panel.set_output_enabled(True)
-        
+
     def _toggle_logs(self):
         self._logs_visible = not self._logs_visible
         if self._logs_visible:
@@ -988,28 +728,22 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 stage=update.stage,
             )
             self._tray.set_title(f"Jasna - {update.progress:.0f}% ({queue_current}/{len(jobs)})")
-            try:
-                self._queue_panel.set_running(True, processing_job_id=job_id)
-            except Exception:
-                logger.warning("Failed to mark queue panel running", exc_info=True)
+            self._queue_panel.set_running(True, processing_job_id=job_id)
         if update.status == JobStatus.PENDING:
             self._job_start_times.pop(job_id, None)
         job_elapsed: float | None = None
         if update.status == JobStatus.COMPLETED:
             start = self._job_start_times.pop(job_id, None)
             job_elapsed = time.time() - start if start is not None else 0.0
-        try:
-            self._queue_panel.update_job_status(
-                job_id,
-                update.status,
-                update.progress / 100.0,
-                update.fps,
-                update.eta_seconds,
-                elapsed_seconds=job_elapsed,
-                stage=update.stage,
-            )
-        except Exception:
-            logger.warning("Failed to update job status in queue panel", exc_info=True)
+        self._queue_panel.update_job_status(
+            job_id,
+            update.status,
+            update.progress / 100.0,
+            update.fps,
+            update.eta_seconds,
+            elapsed_seconds=job_elapsed,
+            stage=update.stage,
+        )
         if update.status is not JobStatus.PROCESSING:
             self._save_queue()
             
@@ -1020,7 +754,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._main_thread.post(lambda: self._handle_complete(queue_finished))
 
     def _handle_complete(self, queue_finished: bool):
-        self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
+        self._header_bar.set_status("IDLE", Colors.STATUS_PENDING)
         self._tray.set_title("Jasna")
         if queue_finished:
             elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
@@ -1029,15 +763,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         else:
             self._control_bar.reset()
         self._update_start_button_state()
-        
-        # Re-enable settings and output controls
-        self._settings_panel.set_enabled(True)
-        self._queue_panel.set_output_enabled(True)
-        # Clear running mode
-        try:
-            self._queue_panel.set_running(False)
-        except Exception:
-            logger.warning("Failed to clear queue panel running state", exc_info=True)
+        self._enable_run_settings()
+        self._queue_panel.set_running(False)
         if queue_finished:
             self._run_post_export_action()
 
@@ -1065,62 +792,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._log_panel.info(f"Running post-export action: {action}")
         run_post_export_action_safely(action, settings.post_export_command, self._log_panel.error)
 
-    def _on_language_changed(self, code: str):
-        locale = get_locale()
-        if code == locale.current_language:
-            return
-        locale.set_language(code)
-        self._refresh_ui_text()
-        from tkinter import messagebox
-        messagebox.showinfo(t("dialog_language_changed"), t("dialog_language_restart"))
-                
-    def _refresh_ui_text(self):
-        """Refresh UI text after language change."""
-        # Update header buttons
-        self._help_btn.configure(text=t("btn_help"))
-        self._video_player_btn.configure(text=t("btn_video_player"))
-        self._status_pill.refresh_text()
-        # Note: Other panels would need their own refresh methods
-        # For a full implementation, each panel should listen to locale changes
-        
-    def _show_help(self):
-        webbrowser.open("https://github.com/Kruk2/jasna")
-        
-
-
-class GUILogHandler(logging.Handler):
-    """Custom logging handler that forwards logs to the GUI log panel."""
-    
-    def __init__(self, main_thread: MainThreadCalls, log_panel: LogPanel):
-        super().__init__()
-        self._main_thread = main_thread
-        self._log_panel = log_panel
-
-    def emit(self, record):
-        try:
-            msg = self.format(record)
-            self._main_thread.post(lambda: self._log_panel.add_log(record.levelname, msg))
-        except Exception:
-            self.handleError(record)
-
-
-def route_gui_logs(gui_handler: logging.Handler) -> None:
-    """Every log goes to the log panel; warnings and errors also go to the terminal Jasna was started from."""
-    console = logging.StreamHandler()
-    console.setLevel(logging.WARNING)
-    console.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-    logging.getLogger().handlers = [gui_handler, console]
-    jasna_logger = logging.getLogger("jasna")
-    jasna_logger.handlers = [gui_handler, console]
-    jasna_logger.propagate = False
-
 
 def run_gui():
     """Entry point to run the GUI application."""
     from jasna.bootstrap import configure_process
     configure_process()
 
-    import logging
     # Set up basic logging - will be connected to GUI after app creation
     logging.basicConfig(
         level=logging.INFO,
@@ -1147,20 +824,8 @@ def run_gui():
         print(error, file=sys.stderr)
         return
     
-    gui_handler = GUILogHandler(app._main_thread, app._log_panel)
-    gui_handler.setFormatter(logging.Formatter('%(message)s'))
-    route_gui_logs(gui_handler)
-    root_logger = logging.getLogger()
-    jasna_logger = logging.getLogger("jasna")
+    install_gui_logging(app._main_thread, app._log_panel)
 
-    def _apply_runtime_log_level(filter_level: str) -> None:
-        runtime_level = runtime_log_level_for_filter(filter_level=filter_level)
-        root_logger.setLevel(runtime_level)
-        jasna_logger.setLevel(runtime_level)
-
-    app._log_panel.set_filter_changed_callback(_apply_runtime_log_level)
-    _apply_runtime_log_level(app._log_panel.get_filter_level())
-    
     app.mainloop()
 
     os_utils.exit_without_joining_threads()

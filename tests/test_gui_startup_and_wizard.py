@@ -54,7 +54,7 @@ def test_warm_up_reports_gpu_support_and_launches_a_kernel_only_on_a_usable_gpu(
     import torch
 
     from jasna import system_requirements
-    from jasna.gui.app import _warm_up_cuda
+    from jasna.gui.system_checks import warm_up_cuda
 
     cuda_capability((major, 0))
     if vendor is AMD:
@@ -64,7 +64,7 @@ def test_warm_up_reports_gpu_support_and_launches_a_kernel_only_on_a_usable_gpu(
     monkeypatch.setattr(system_requirements, "check_supported_gpu", lambda: gpu_check)
     monkeypatch.setattr(system_requirements, "check_gpu_driver_version", lambda: (driver_ok, "driver"))
 
-    assert _warm_up_cuda() == support
+    assert warm_up_cuda() == support
     assert devices == launched
 
 
@@ -79,10 +79,7 @@ def test_continuing_with_warnings_does_not_record_a_pass(jasna_app, rerun, all_p
     from jasna.gui.locales import t
 
     previous = jasna_app._preset_manager.get_system_check_passed_version()
-    if rerun:
-        jasna_app._on_system_check_complete(True, all_passed)
-    else:
-        jasna_app._on_wizard_complete(True, all_passed)
+    jasna_app._on_system_check_complete(True, all_passed, quit_when_blocked=not rerun)
 
     expected = __version__ if all_passed else previous
     assert jasna_app._preset_manager.get_system_check_passed_version() == expected
@@ -198,10 +195,10 @@ def test_missing_amf_runtime_tells_the_user_what_to_do(monkeypatch, gui_language
 @pytest.fixture
 def wizard_factory(tk_root, monkeypatch):
     """Build the first-run wizard with system checks that run ``checks`` instead of probing the machine."""
-    from jasna.gui import wizard as wizard_module
+    from jasna.gui import system_checks, wizard as wizard_module
 
     def build(checks=lambda results: None, on_complete=None):
-        monkeypatch.setattr(wizard_module, "run_system_checks", checks)
+        monkeypatch.setattr(system_checks, "run_system_checks", checks)
         return wizard_module.FirstRunWizard(tk_root, on_complete=on_complete)
 
     return build
@@ -291,8 +288,8 @@ def test_wizard_stops_waiting_on_a_wedged_check_thread(wizard_factory, monkeypat
 def test_license_chip_names_how_jasna_checks_the_license(jasna_app, info, error, key):
     from jasna.gui.locales import t
 
-    jasna_app._license_chip_ready(info, error)
-    assert jasna_app._license_chip.cget("text") == t(key)
+    jasna_app._header_bar._license_chip_ready(info, error)
+    assert jasna_app._header_bar._license_chip.cget("text") == t(key)
 
 
 @pytest.fixture

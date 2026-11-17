@@ -164,9 +164,9 @@ def make_jasna_app(monkeypatch, tmp_path, user_config_dir):
 
     from jasna import engine_paths, os_utils, system_requirements, update_check
     from jasna.accelerator import AcceleratorVendor
-    from jasna.gui import app as app_module
+    from jasna.gui import app as app_module, system_checks
 
-    monkeypatch.setattr(app_module, "_warm_up_cuda", lambda: (AcceleratorVendor.NVIDIA, True, True))
+    monkeypatch.setattr(system_checks, "warm_up_cuda", lambda: (AcceleratorVendor.NVIDIA, True, True))
     monkeypatch.setattr(update_check, "fetch_latest_release", lambda: None)
     monkeypatch.setattr(system_requirements, "install_on_hard_disk", lambda: False)
     monkeypatch.setattr(os_utils, "windows_module_loaded", lambda _name: False)
@@ -222,8 +222,8 @@ def settle_activation(monkeypatch):
     from jasna.gui import activation_worker
 
     threads = []
-    start = activation_worker._start
-    monkeypatch.setattr(activation_worker, "_start", lambda *args: threads.append(start(*args)) or threads[-1])
+    start = activation_worker.run_in_background
+    monkeypatch.setattr(activation_worker, "run_in_background", lambda *args: threads.append(start(*args)) or threads[-1])
 
     def settle(window) -> None:
         while threads:

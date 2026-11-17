@@ -12,7 +12,7 @@ TRAY = TraySupport(available=True, has_menu=True)
 
 
 def chip_shown(app) -> bool:
-    return app._update_chip.winfo_manager() == "pack"
+    return app._header_bar._update_chip.winfo_manager() == "pack"
 
 
 def refuse_to_answer():
@@ -28,8 +28,8 @@ def test_a_newer_release_shows_a_header_chip_that_opens_its_release_page(make_ja
     settle_activation(app)
 
     assert chip_shown(app)
-    assert "99.0.0" in app._update_chip.cget("text")
-    app._update_chip.invoke()
+    assert "99.0.0" in app._header_bar._update_chip.cget("text")
+    app._header_bar._update_chip.invoke()
     assert opened == [update_check.release_page_url("99.0.0")]
 
 
@@ -93,11 +93,11 @@ def test_the_whole_header_fits_the_default_window_with_a_new_release_shown(
 
     app = make_jasna_app()
     settle_activation(app)
-    app._status_pill.set_status("PROCESSING", "#ffffff")
+    app._header_bar._status_pill.set_status("PROCESSING", "#ffffff")
     show_window(app)
 
     window_right = app.winfo_rootx() + app.winfo_width()
-    status_right = app._status_pill.winfo_rootx() + app._status_pill.winfo_width()
+    status_right = app._header_bar._status_pill.winfo_rootx() + app._header_bar._status_pill.winfo_width()
     assert chip_shown(app)
-    assert app._update_chip.winfo_rootx() + app._update_chip.winfo_width() <= window_right
-    assert status_right < app._lang_dropdown.master.winfo_rootx()
+    assert app._header_bar._update_chip.winfo_rootx() + app._header_bar._update_chip.winfo_width() <= window_right
+    assert status_right < app._header_bar._lang_dropdown.master.winfo_rootx()

@@ -113,9 +113,8 @@ class SettingsPanel(ctk.CTkFrame):
                 section.frame.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         self._scroll.scroll_to_top()
 
-    def _show_toast(self, message: str, type_: str = "info"):
-        toast = Toast(self.winfo_toplevel(), message, type_)
-        toast.place(relx=0.5, rely=0.9, anchor="center")
+    def _show_toast(self, message: str, type_: str):
+        Toast.show(self.winfo_toplevel(), message, type_)
 
     def _build_scrollable(self):
         self._scroll = AutoHidingScrollableFrame(

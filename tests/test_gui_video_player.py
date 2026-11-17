@@ -340,7 +340,7 @@ def test_player_secondary_options_follow_gpu_and_model_availability(
 
 
 def test_header_player_button_follows_gpu_use(jasna_app, monkeypatch) -> None:
-    button = jasna_app._video_player_btn
+    button = jasna_app._header_bar._video_player_btn
 
     jasna_app._set_preview_gpu_busy("preview", True)
     jasna_app._main_thread._run_pending()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import customtkinter as ctk
 
-from jasna.gui import wizard
+from jasna.gui import system_checks, wizard
 from jasna.gui.locales import t
 
 
@@ -14,7 +14,7 @@ def _label_texts(widget) -> list[str]:
 
 
 def test_wizard_names_the_official_sellers(tk_root, monkeypatch):
-    monkeypatch.setattr(wizard, "run_system_checks", lambda results: None)
+    monkeypatch.setattr(system_checks, "run_system_checks", lambda results: None)
 
     dialog = wizard.FirstRunWizard(tk_root)
 

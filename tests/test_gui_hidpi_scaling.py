@@ -227,9 +227,9 @@ def test_slider_value_label_is_a_native_label_whose_font_scales_at_hidpi(hidpi, 
 
 @pytest.mark.parametrize("hidpi", [1.0, 1.25, 1.5], indirect=True)
 def test_wizard_button_is_on_screen_at_hidpi(hidpi, tk_root, monkeypatch, show_window) -> None:
-    from jasna.gui import wizard as wizard_module
+    from jasna.gui import system_checks, wizard as wizard_module
 
-    monkeypatch.setattr(wizard_module, "run_system_checks", lambda results: None)
+    monkeypatch.setattr(system_checks, "run_system_checks", lambda results: None)
     tk_root.geometry("1000x700+0+0")
     tk_root.update()
     wizard = wizard_module.FirstRunWizard(tk_root)

@@ -5,7 +5,7 @@ import threading
 
 
 from jasna.gui import log_panel as log_panel_module
-from jasna.gui.app import GUILogHandler
+from jasna.gui.gui_logging import GUILogHandler
 from jasna.gui.log_panel import LogPanel
 from jasna.gui.queues import MainThreadCalls
 
@@ -41,7 +41,7 @@ def test_log_panel_keeps_only_the_newest_entries(tk_root, monkeypatch) -> None:
 
 
 def test_gui_logs_reach_the_panel_and_warnings_also_the_terminal(capsys, monkeypatch) -> None:
-    from jasna.gui.app import route_gui_logs
+    from jasna.gui.gui_logging import route_gui_logs
 
     root, jasna_logger = logging.getLogger(), logging.getLogger("jasna")
     monkeypatch.setattr(root, "handlers", list(root.handlers))
