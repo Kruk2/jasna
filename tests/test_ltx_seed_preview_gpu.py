@@ -34,6 +34,9 @@ class _Capture:
         if self.start <= int(pts) < self.end:
             self.frames[int(pts)] = frame.cpu()
 
+    def finish(self) -> None:
+        pass
+
     def close(self) -> None:
         pass
 
@@ -47,6 +50,7 @@ def test_seed_preview_restores_a_range_exactly_like_a_segment_job(tmp_path) -> N
     from jasna.gui.ltx_seed_preview import SeedRenderer
     from jasna.gui.models import AppSettings
     from jasna.gui.video_session import build_video_session, video_session_config
+    from jasna.job_resume import ResumeJob
     from jasna.media.probe import get_video_meta_data
     from jasna.media.splice import build_splice_plan, probe_keyframes
     from jasna.segments import SegmentRange, SegmentRestoration
@@ -79,6 +83,9 @@ def test_seed_preview_restores_a_range_exactly_like_a_segment_job(tmp_path) -> N
         pipeline = build_pipeline(config, session, video, tmp_path / "out.mkv", segments=(previewed, other))
         pipeline.configure_vr(metadata)
         plan = build_splice_plan((previewed, other), index, duration=metadata.duration)
+        pipeline.resume = ResumeJob(config, video, tmp_path / "out.mkv", metadata, plan)
+        pipeline.resume.prepare()
+        pipeline._open_ltx_runtime()
         captures = []
 
         def opener(span):
@@ -87,6 +94,7 @@ def test_seed_preview_restores_a_range_exactly_like_a_segment_job(tmp_path) -> N
             return lambda: capture
 
         pipeline._run_ltx_spans(
+            pipeline.ltx_segment_render(metadata),
             metadata,
             index,
             [(span, segments, opener(span)) for span, segments in zip(plan.render_spans, plan.render_span_segments())],
@@ -94,9 +102,42 @@ def test_seed_preview_restores_a_range_exactly_like_a_segment_job(tmp_path) -> N
             None,
         )
     finally:
+        if pipeline._ltx_runtime is not None:
+            pipeline._ltx_runtime.close()
         session.close()
 
     job = captures[0]
     assert preview.frames and preview.frames.keys() == job.frames.keys()
     differing = [pts for pts in job.frames if not torch.equal(job.frames[pts], preview.frames[pts])]
     assert not differing, f"{len(differing)} of {len(job.frames)} frames differ"
+
+
+def test_trying_more_seeds_keeps_the_gpu_memory_in_use_flat(tmp_path) -> None:
+    from jasna.gui.ltx_seed_preview import SeedRenderer
+    from jasna.gui.models import AppSettings
+    from jasna.media.probe import get_video_meta_data
+    from jasna.media.splice import probe_keyframes
+    from jasna.segments import SegmentRange, SegmentRestoration
+
+    video = Path(VIDEO)
+    start, end = _ranges()[0]
+    segment = SegmentRange(start, end, SegmentRestoration("ltx", 1))
+    metadata = get_video_meta_data(str(video))
+    renderer = SeedRenderer(video, metadata, probe_keyframes(video, metadata), tmp_path)
+    in_use = []
+    try:
+        for seed in (1, 2, 3):
+            renderer.render(
+                segment,
+                seed,
+                AppSettings(),
+                writer_for=lambda _directory, effect, _stereo: _Capture(effect),
+                report=lambda *_args: None,
+                cancel=threading.Event(),
+            )
+            torch.cuda.synchronize()
+            in_use.append(torch.cuda.memory_allocated())
+    finally:
+        renderer.close()
+
+    assert in_use[1] == in_use[2]

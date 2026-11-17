@@ -19,7 +19,7 @@ from pathlib import Path
 
 import torch
 
-from jasna.accelerator import device_free_bytes
+from jasna.accelerator import device_free_bytes, release_blas_workspaces
 from jasna.gui.models import AppSettings
 from jasna.gui.preview_frames import preview_image
 from jasna.gui.queues import CommandWorker, drain
@@ -191,6 +191,7 @@ class SeedRenderer:
         finally:
             del decoder
             self._runtime.unload_decoder()
+            release_blas_workspaces()
             torch.cuda.empty_cache()
         return writer
 
