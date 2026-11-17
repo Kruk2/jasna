@@ -79,3 +79,12 @@ def test_output_is_a_fresh_tensor():
     assert out.data_ptr() != frames.data_ptr()
     assert out.shape == frames.shape
     assert out.dtype is frames.dtype
+
+
+def test_half_precision_clips_use_the_kernel():
+    frames = torch.rand(2, 3, 16, 16, device=_device())
+
+    out = spatial_denoise(frames.half(), 5, 2.0, 0.10)
+
+    assert out.dtype is torch.float16
+    assert torch.equal(out, spatial_denoise(frames.half().float(), 5, 2.0, 0.10).half())

@@ -60,6 +60,13 @@ def _kernel_denoise(
     return out
 
 
+def _spatial_weights(kernel_size: int, sigma_spatial: float, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
+    half = kernel_size // 2
+    offsets = torch.arange(-half, half + 1, dtype=dtype, device=device)
+    gy, gx = torch.meshgrid(offsets, offsets, indexing="ij")
+    return torch.exp(-0.5 * (gx * gx + gy * gy) / (sigma_spatial ** 2))
+
+
 def spatial_denoise(
     frames: torch.Tensor, kernel_size: int, sigma_spatial: float, sigma_range: float
 ) -> torch.Tensor:
@@ -77,21 +84,14 @@ def spatial_denoise(
         sigma_range: Gaussian sigma for intensity difference (in [0, 1]).
     """
     half = kernel_size // 2
-
-    offsets = torch.arange(-half, half + 1, dtype=frames.dtype, device=frames.device)
-    gy, gx = torch.meshgrid(offsets, offsets, indexing="ij")
-    spatial_weights = torch.exp(-0.5 * (gx * gx + gy * gy) / (sigma_spatial ** 2))
-
     range_scale = -0.5 / (sigma_range ** 2)
 
-    if (
-        frames.dtype is torch.float32
-        and frames.ndim == 4
-        and frames.shape[1] == 3
-        and frames.stride(3) == 1
-        and has_precompiled_kernels(frames.device)
-    ):
-        return _kernel_denoise(frames, kernel_size, range_scale, spatial_weights)
+    if frames.ndim == 4 and frames.shape[1] == 3 and has_precompiled_kernels(frames.device):
+        # The kernel reads float32; an fp16 clip converts there and back, far faster than the loop below.
+        weights = _spatial_weights(kernel_size, sigma_spatial, torch.float32, frames.device)
+        return _kernel_denoise(frames.to(torch.float32).contiguous(), kernel_size, range_scale, weights).to(frames.dtype)
+
+    spatial_weights = _spatial_weights(kernel_size, sigma_spatial, frames.dtype, frames.device)
 
     padded = F.pad(frames, (half, half, half, half), mode="reflect")
 
