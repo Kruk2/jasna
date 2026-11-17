@@ -6,10 +6,11 @@ from unittest.mock import patch
 
 import pytest
 
+from jasna.gui.job_queue import JobQueue
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobItem, JobStatus, AppSettings
 from jasna.post_export_action import PostExportVideoCommandError
-from factories import no_resume_conflict
+from factories import gui_processor, job_queue
 
 pytestmark = pytest.mark.usefixtures("tk_garbage_collected")
 
@@ -18,8 +19,8 @@ def _make_jobs(*names: str) -> list[JobItem]:
     return [JobItem(path=Path(n)) for n in names]
 
 
-def _run(processor: Processor, jobs: list[JobItem], settings: AppSettings = AppSettings(), output_folder: str = "") -> None:
-    processor.start(jobs, settings, output_folder=output_folder, output_pattern="{original}_restored.mp4")
+def _run(processor: Processor, jobs: list[JobItem] | JobQueue, settings: AppSettings = AppSettings(), output_folder: str = "") -> None:
+    processor.start(jobs if isinstance(jobs, JobQueue) else job_queue(jobs), settings, output_folder=output_folder, output_pattern="{original}_restored.mp4")
     processor.join(timeout=5.0)
     assert not processor.is_running()
 
@@ -32,7 +33,7 @@ class TestProcessorPullLoop:
     def test_processes_jobs_in_order_by_status(self, fake_job_pipelines):
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
 
-        _run(Processor(on_resume_conflict=no_resume_conflict), jobs)
+        _run(gui_processor(), jobs)
 
         assert _restored(fake_job_pipelines) == ["a.mp4", "b.mp4", "c.mp4"]
         assert all(j.status == JobStatus.COMPLETED for j in jobs)
@@ -49,20 +50,21 @@ class TestProcessorPullLoop:
                 raise UnsupportedVideoError(reason)
 
         fake_job_pipelines.restore = restore
-        _run(Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append), jobs)
+        _run(gui_processor(on_progress=updates.append), jobs)
 
         assert [j.status for j in jobs] == [JobStatus.SKIPPED, JobStatus.COMPLETED]
         assert any(u.job_id == jobs[0].id and u.status is JobStatus.SKIPPED and u.message == reason for u in updates)
 
     def test_skips_removed_pending_job(self, fake_job_pipelines):
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
+        queue = job_queue(jobs)
 
         def restore(pipeline):
             if pipeline.input_path.name == "a.mp4":
-                del jobs[1]  # the GUI removes b.mp4 while a.mp4 is processing
+                queue.remove(jobs[1])  # the GUI removes b.mp4 while a.mp4 is processing
 
         fake_job_pipelines.restore = restore
-        _run(Processor(on_resume_conflict=no_resume_conflict), jobs)
+        _run(gui_processor(), queue)
 
         assert _restored(fake_job_pipelines) == ["a.mp4", "c.mp4"]
 
@@ -70,7 +72,7 @@ class TestProcessorPullLoop:
         updates: list[ProgressUpdate] = []
         jobs = _make_jobs("a.mp4")
 
-        _run(Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append), jobs)
+        _run(gui_processor(on_progress=updates.append), jobs)
 
         assert all(u.job_id == jobs[0].id for u in updates)
         assert any(u.status == JobStatus.PROCESSING for u in updates)
@@ -78,20 +80,21 @@ class TestProcessorPullLoop:
 
     def test_reorder_during_processing_respects_new_order(self, fake_job_pipelines):
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
+        queue = job_queue(jobs)
 
         def restore(pipeline):
             if pipeline.input_path.name == "a.mp4":
-                jobs[1], jobs[2] = jobs[2], jobs[1]
+                queue.move(2, 1)
 
         fake_job_pipelines.restore = restore
-        _run(Processor(on_resume_conflict=no_resume_conflict), jobs)
+        _run(gui_processor(), queue)
 
         assert _restored(fake_job_pipelines) == ["a.mp4", "c.mp4", "b.mp4"]
 
     @pytest.mark.parametrize("stop_during_first_job", [False, True])
     def test_reports_whether_the_queue_finished(self, fake_job_pipelines, stop_during_first_job):
         finished: list[bool] = []
-        processor = Processor(on_resume_conflict=no_resume_conflict, on_complete=finished.append)
+        processor = gui_processor(on_complete=finished.append)
         jobs = _make_jobs("a.mp4", "b.mp4")
         if stop_during_first_job:
             fake_job_pipelines.restore = lambda _pipeline: processor.stop()
@@ -106,7 +109,7 @@ class TestProcessorPullLoop:
         jobs = _make_jobs("a.mp4", "b.mp4")
         jobs[0].status = JobStatus.COMPLETED
 
-        _run(Processor(on_resume_conflict=no_resume_conflict), jobs)
+        _run(gui_processor(), jobs)
 
         assert _restored(fake_job_pipelines) == ["b.mp4"]
 
@@ -119,7 +122,7 @@ class TestProcessorPullLoop:
             lambda command, input_path, output_path, _cancel, **_kwargs: calls.append((command, input_path, output_path)),
         ):
             _run(
-                Processor(on_resume_conflict=no_resume_conflict), jobs,
+                gui_processor(), jobs,
                 AppSettings(post_export_video_command="remux {output}"), output_folder=str(tmp_path),
             )
 
@@ -138,7 +141,7 @@ class TestProcessorPullLoop:
 
         with patch("jasna.post_export_action.run_post_export_video_command", side_effect=run_command):
             _run(
-                Processor(on_resume_conflict=no_resume_conflict), jobs,
+                gui_processor(), jobs,
                 AppSettings(post_export_video_command="remux {output}"), output_folder=str(tmp_path),
             )
 
@@ -157,7 +160,7 @@ class TestProcessorPullLoop:
             lambda _command, input_path, *_args, **_kwargs: commands.append(input_path),
         ):
             _run(
-                Processor(on_resume_conflict=no_resume_conflict), jobs,
+                gui_processor(), jobs,
                 AppSettings(post_export_video_command="remux {output}"), output_folder=str(tmp_path),
             )
 
@@ -174,7 +177,7 @@ class TestProcessorPullLoop:
             lambda _command, _input_path, output_path, *_args, **_kwargs: outputs.append(output_path),
         ):
             _run(
-                Processor(on_resume_conflict=no_resume_conflict), jobs,
+                gui_processor(), jobs,
                 AppSettings(post_export_video_command="remux {output}", file_conflict="auto_rename"),
                 output_folder=str(tmp_path),
             )
@@ -193,7 +196,7 @@ class TestProcessorPullLoop:
 
         with patch("jasna.post_export_action.run_post_export_video_command", side_effect=run_command):
             _run(
-                Processor(on_resume_conflict=no_resume_conflict), jobs,
+                gui_processor(), jobs,
                 AppSettings(post_export_video_command="copy {log} logs"), output_folder=str(tmp_path),
             )
 
@@ -215,7 +218,7 @@ class TestProcessorPullLoop:
             lambda *_args, log_path: log_paths.append(log_path),
         ):
             _run(
-                Processor(on_resume_conflict=no_resume_conflict), jobs,
+                gui_processor(), jobs,
                 AppSettings(post_export_video_command="remux {output}"), output_folder=str(tmp_path),
             )
 

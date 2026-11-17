@@ -18,7 +18,7 @@ from jasna.gui.ltx_models import (
     run_unavailable_reason,
     trial_only,
 )
-from jasna.gui.models import AppSettings, PresetManager
+from jasna.gui.models import AppSettings, JobItem, PresetManager
 from jasna.license_api import DriverLibraryMismatch
 from jasna.ltx import model_files
 from jasna.ltx.model_files import bundle_names
@@ -250,7 +250,7 @@ def _queue_job(app, settings: AppSettings, **job_options) -> None:
     app._settings_panel.set_gpu_support(vendor=NVIDIA, blackwell=True, frame_generation=True)
     for section in app._settings_panel._sections:
         section.apply(settings)
-    app._queue_panel.add_job(Path("a.mp4"))
+    app._queue_panel.add_jobs([JobItem(path=Path("a.mp4"))])
     for name, value in job_options.items():
         setattr(app._queue_panel.get_jobs()[0], name, value)
 

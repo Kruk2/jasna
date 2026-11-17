@@ -151,7 +151,7 @@ def test_activation_worker_runs_io_and_errors_off_the_main_thread(lease_api):
 def test_the_pc_license_refresh_runs_off_the_main_thread_and_only_logs_a_failure(lease_api, monkeypatch, caplog):
     import logging
 
-    from jasna.gui.activation_worker import start_pc_license_refresh
+    from jasna.license_status import start_pc_license_refresh
     from jasna.protection import lease
 
     ran = []
@@ -304,13 +304,13 @@ def test_cli_online_activates_online_and_needs_a_license_code(monkeypatch, lease
 ])
 def test_cli_license_code_environment_variable_activates_only_a_pc_without_activation(monkeypatch, lease_api, arguments,
                                                                                        activated, activated_with):
-    from jasna import main
+    from jasna import cli_activation, main
     from jasna.protection import lease
 
     monkeypatch.setenv("JASNA_LICENSE_CODE", " JL1-env ")
     monkeypatch.setattr(lease, "activated", lambda: activated)
     monkeypatch.setattr(sys, "argv", ["jasna", *arguments, "--activation-status"])
-    monkeypatch.setattr(main, "_print_activation_status", lambda parser: None)
+    monkeypatch.setattr(cli_activation, "_print_activation_status", lambda parser: None)
     main.main()
     if activated_with is None:
         lease_api.assert_not_called()
@@ -355,12 +355,12 @@ def test_lease_dialog_explains_a_failed_activation(tk_root, lease_api, settle_ac
 @pytest.mark.parametrize(("grant", "token", "mode", "message"), SAVED_ACTIVATIONS)
 def test_lease_dialog_names_the_saved_activation_when_reopened(tk_root, saved_activation, settle_activation,
                                                                 grant, token, mode, message):
-    from jasna.gui import activation_worker
+    from jasna import license_status
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t
 
     saved_activation(grant=grant, token=token)
-    assert activation_worker.read_license_info() == (True, mode)
+    assert license_status.read_license_info() == (True, mode)
     dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     settle_activation(dialog)
     assert dialog._status.cget("text") == t(message)
@@ -371,7 +371,7 @@ def test_lease_dialog_names_the_saved_activation_when_reopened(tk_root, saved_ac
 def test_device_list_marks_this_pc_and_says_where_to_report_an_activation_error():
     from datetime import datetime
 
-    from jasna.gui import activation_worker
+    from jasna import license_status
     from jasna.gui import locales
     from jasna.protection import lease
 
@@ -381,7 +381,7 @@ def test_device_list_marks_this_pc_and_says_where_to_report_an_activation_error(
         lease.DeviceSlot("JT1-1a2b3c4d", "offline", since),
         lease.DeviceSlot("JD1-0a1b2c3d", "online", since),
     ), "JT1-1a2b3c4d")
-    count, older, this_pc, online, hint = activation_worker.device_use_text(use).split("\n")
+    count, older, this_pc, online, hint = license_status.device_use_text(use).split("\n")
     assert "3" in count
     assert older.startswith("JT1-5e6f7a8b") and "2026-11-05" in older
     assert this_pc.startswith("JT1-1a2b3c4d") and this_pc.endswith(locales.t("license_device_this_pc"))

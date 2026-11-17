@@ -3,11 +3,12 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, get_args
 
+from jasna.cli_activation import run_activation_options
+from jasna.cli_downloads import ensure_dlss5_runtime, ensure_ltx_model
 from jasna.cli_parser import BASICVSRPP_ONLY_ARG_DESTS, CLI_RESTORATION_MODELS, LTX_ONLY_ARG_DESTS, build_parser
 from jasna.engine_paths import default_restoration_model_path
 from jasna.media.probe import UnsupportedVideoError
@@ -391,95 +392,6 @@ def _ask_to_replace_progress(error) -> bool:
     return confirm_in_terminal(f"{error}\nReplace saved progress and start over? [y/N]: ") is True
 
 
-def _ensure_ltx_model(config: SessionConfig, segments) -> None:
-    """Offer to download the selected LTX model when the job needs it and it is missing.
-    Without a terminal to ask in, fail with what to download instead of waiting."""
-    from jasna.ltx.model_files import LTX_TRIAL_NOTICE, download_files, download_size_text, missing_downloads
-
-    from jasna.segments import job_models
-
-    if "ltx" not in job_models(config.restoration_model_name, segments):
-        return
-    from jasna.accelerator import supports_nvfp4
-    from jasna.session_factory import LTX_FAST_NEEDS_BLACKWELL
-
-    if config.ltx_fast and not supports_nvfp4(config.device):
-        sys.exit(f"Error: {LTX_FAST_NEEDS_BLACKWELL}")
-    if config.ltx_trial:
-        print(LTX_TRIAL_NOTICE)
-        return
-    directory = config.model_path("ltx")
-    missing = missing_downloads(
-        directory,
-        config.ltx_model,
-        fast=config.ltx_fast,
-        encoder=config.ltx_vae_encoder,
-        decoder=config.ltx_vae_decoder,
-    )
-    if not missing:
-        return
-    from jasna.license_api import ltx_driver_mismatch, require_protection
-
-    require_protection()
-    mismatch = ltx_driver_mismatch()
-    if mismatch is not None:
-        sys.exit(
-            f"Error: LTX can't use {mismatch.path}: it is from NVIDIA driver {mismatch.library_version}, but this "
-            f"machine runs driver {mismatch.driver_version}. It usually comes from a CUDA compatibility package in "
-            "the container. Remove its folder from /etc/ld.so.conf.d and run ldconfig, or use an image without it."
-        )
-    names = ", ".join(file.name for file in missing)
-    size = download_size_text(missing)
-    updating = any((directory / file.name).is_file() for file in missing)
-    status = "need updating" if updating else "missing"
-    message = f"LTX model files {status} in {directory}: {names}."
-    if updating:
-        message += " Models copied from older Jasna versions cannot be used. Your existing License code still works."
-    terminal_hint = f"Error: {message} Run jasna in a terminal to download them ({size})."
-    answer = confirm_in_terminal(f"{message}\nDownload ({size})? [y/N]: ")
-    if answer is None:
-        sys.exit(terminal_hint)
-    if not answer:
-        sys.exit(f"Error: {message}")
-    from tqdm import tqdm
-
-    from jasna.user_settings import user_language
-
-    with tqdm(total=sum(file.size_bytes for file in missing), unit="B", unit_scale=True, desc="LTX download") as bar:
-        download_files(directory, missing, lambda done, total: bar.update(done - bar.n), mirror_first=user_language() == "zh")
-
-
-def _ensure_dlss5_runtime(config: SessionConfig) -> None:
-    """Offer to download the DLSS 5 runtime, which Jasna does not ship, when the job needs it."""
-    if config.upscale_model != "dlss5" or sys.platform != "win32":
-        return
-    from jasna.upscale.dlss5 import (
-        DLSS5_RELEASE_PAGE,
-        DLSS5_RELEASE_SIZE,
-        download_dlss5_runtime,
-        dlss5_runtime_dir,
-        missing_runtime_files,
-    )
-
-    directory = dlss5_runtime_dir()
-    if not missing_runtime_files(directory):
-        return
-    size = f"{DLSS5_RELEASE_SIZE / 1e6:.0f} MB"
-    message = (
-        f"DLSS 5 is not part of Jasna. It runs an unofficial community runtime from {DLSS5_RELEASE_PAGE} "
-        f"(NVIDIA files modified to run outside games)."
-    )
-    answer = confirm_in_terminal(f"{message}\nDownload it ({size}) into {directory}? [y/N]: ")
-    if answer is None:
-        sys.exit(f"Error: {message} Run jasna in a terminal to download it ({size}).")
-    if not answer:
-        sys.exit(f"Error: {message} DLSS 5 upscaling needs this download.")
-    from tqdm import tqdm
-
-    with tqdm(total=DLSS5_RELEASE_SIZE, unit="B", unit_scale=True, desc="DLSS 5 download") as bar:
-        download_dlss5_runtime(directory, lambda done, total: bar.update(done - bar.n))
-
-
 def _reject_options_of_other_restoration_backend(
     parser: argparse.ArgumentParser, args: argparse.Namespace, restoration_backend: str
 ) -> None:
@@ -491,27 +403,6 @@ def _reject_options_of_other_restoration_backend(
         if getattr(args, dest) != parser.get_default(dest):
             option = "--" + dest.replace("_", "-")
             parser.error(f"{option} needs --restoration-model-name {needed_models}")
-
-
-def _print_activation_status(parser: argparse.ArgumentParser) -> None:
-    from jasna.gui.activation_worker import device_use_text, license_status_key, read_license_info
-    from jasna.gui.locales import t
-
-    try:
-        licensed, mode = read_license_info()
-    except Exception as exc:  # ProtectionError or OSError; not imported here, jasna.protection may be missing
-        parser.exit(1, f"Could not read the activation: {exc}\n")
-    if not licensed:
-        parser.exit(1, t("license_problem_no_activation") + "\n")
-    print(t(license_status_key(mode)))
-    from jasna.protection import ProtectionError, lease
-
-    try:
-        use = lease.device_count()
-    except (ProtectionError, OSError) as exc:
-        print(f"Could not check devices in use: {exc}", file=sys.stderr)
-        return
-    print(device_use_text(use))
 
 
 def _stop_like_ctrl_c(signum, frame) -> None:
@@ -535,66 +426,15 @@ def main() -> None:
         sys.exit(130)
 
 
-LICENSE_CODE_ENVIRONMENT_VARIABLE = "JASNA_LICENSE_CODE"
-
-
-def license_code_to_activate(flag_code: str | None, environment_code: str, activated: Callable[[], bool]) -> str | None:
-    """--license-code always activates; the environment variable only while nothing is activated, so a code kept there
-    never re-activates a PC on later runs."""
-    if flag_code is not None:
-        return flag_code
-    if not environment_code.strip() or activated():
-        return None
-    return environment_code.strip()
-
-
-def _require_protection_for_activation(parser: argparse.ArgumentParser) -> None:
-    from jasna.license_api import ProtectionUnavailableError, require_protection
-
-    try:
-        require_protection()
-    except ProtectionUnavailableError as exc:
-        parser.exit(1, f"Activation error: {exc}\n")
-
-
-def _saved_activation_exists(parser: argparse.ArgumentParser) -> bool:
-    _require_protection_for_activation(parser)
-    from jasna.protection import lease
-
-    return lease.activated()
-
-
 def _main() -> None:
     escape_unencodable_output(sys.stdout, sys.stderr)
     parser = build_parser()
     args = parser.parse_args()
-    environment_code = os.environ.get(LICENSE_CODE_ENVIRONMENT_VARIABLE, "")
-    if args.online and args.license_code is None and not environment_code.strip():
-        parser.error(f"--online needs --license-code or {LICENSE_CODE_ENVIRONMENT_VARIABLE}")
-    if args.activation_status and (args.input is not None or args.stream or args.benchmark):
-        parser.error("--activation-status cannot be combined with --input, --stream or --benchmark")
-    license_code = license_code_to_activate(args.license_code, environment_code, lambda: _saved_activation_exists(parser))
-    if license_code is not None:
-        _require_protection_for_activation(parser)
-        from jasna.license_api import typed_license_code
-        from jasna.protection import ProtectionError, lease
-        if sys.platform == "win32" and not args.online:
-            print("Windows may ask for permission once. This is a one-time license check for offline use.")
-        # Activation warnings always show, as they did before logging was configured; --log-level can add more.
-        _configure_logging(min(getattr(logging, args.log_level.upper()), logging.WARNING))
-        try:
-            result = lease.activate_license_code(typed_license_code(license_code), try_offline=not args.online)
-        except (ProtectionError, OSError) as exc:
-            parser.exit(1, f"Activation error: {exc}\n")
-        print(lease.activated_message(result.online_reason))
-        if args.input is None and not args.stream and not args.benchmark and not args.activation_status:
-            return
-    if args.activation_status:
-        _print_activation_status(parser)
+    if run_activation_options(parser, args, _configure_logging):
         return
 
     if not args.benchmark:
-        from jasna.gui.activation_worker import start_pc_license_refresh
+        from jasna.license_status import start_pc_license_refresh
 
         start_pc_license_refresh()
     if args.benchmark:
@@ -776,8 +616,8 @@ def _main() -> None:
         _plan_segments(parser, args, config, input_video, output_video, codec_was_explicit=args.codec is not None)
         if segments_spec else None
     )
-    _ensure_ltx_model(config, segment_job.splice_plan.segments if segment_job is not None else None)
-    _ensure_dlss5_runtime(config)
+    ensure_ltx_model(config, segment_job.splice_plan.segments if segment_job is not None else None)
+    ensure_dlss5_runtime(config)
 
     from jasna.session_factory import build_job_pipeline, build_restoration_session, plan_job
 

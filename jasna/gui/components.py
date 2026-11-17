@@ -16,7 +16,7 @@ from jasna.gui.queues import MainThreadCalls
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import get_locale, t
 from jasna.license_api import protection_available
-from jasna import update_check
+from jasna import license_status, update_check
 
 logger = logging.getLogger(__name__)
 
@@ -413,7 +413,7 @@ class LicenseDialog(_Dialog):
             return
         licensed, mode = info
         if licensed:
-            self._status.configure(text=t(activation_worker.license_status_key(mode)), text_color=Colors.STATUS_COMPLETED)
+            self._status.configure(text=t(license_status.license_status_key(mode)), text_color=Colors.STATUS_COMPLETED)
             self._devices.configure(text=t("license_devices_checking"))
             self._devices.pack(anchor="w", pady=(6, 0))
             activation_worker.start_device_count(lambda count, error: self._post_result(self._devices_ready, count, error))
@@ -423,7 +423,7 @@ class LicenseDialog(_Dialog):
         if error is not None:
             self._devices.configure(text=t("license_devices_unavailable"))
         else:
-            self._devices.configure(text=activation_worker.device_use_text(count))
+            self._devices.configure(text=license_status.device_use_text(count))
         self._resize()
 
     def _activate(self):

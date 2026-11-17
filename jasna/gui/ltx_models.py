@@ -7,7 +7,7 @@ from pathlib import Path
 from jasna import system_requirements
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui.download_worker import start_download
-from jasna.gui.activation_worker import read_license_info
+from jasna.license_status import read_license_info
 from jasna.gui.locales import get_locale, t
 from jasna.gui.queues import MainThreadCalls
 from jasna.ltx import model_files

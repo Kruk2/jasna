@@ -174,8 +174,12 @@ def make_jasna_app(monkeypatch, tmp_path, user_config_dir):
     apps = []
 
     def make():
+        from jasna import __version__
+        from jasna.gui.models import PresetManager
+
+        PresetManager().set_system_check_passed_version(__version__)
         try:
-            app = app_module.JasnaApp(skip_wizard=True)
+            app = app_module.JasnaApp()
         except TclError as exc:
             pytest.skip(f"Tk display unavailable: {exc}")
         apps.append(app)

@@ -14,7 +14,7 @@ import torch
 from safetensors.torch import save_file
 
 from factories import session_config, write_sparse_file
-from jasna import main
+from jasna import cli_downloads
 from jasna.ltx import model_files
 from jasna.ltx.model_files import LtxModelFiles, bundle_names, open_tensors
 
@@ -276,15 +276,15 @@ def download_prompt(monkeypatch):
 
 def test_cli_offers_the_missing_model_only_when_ltx_runs(tmp_path, monkeypatch, nvidia_vendor, download_prompt):
     asked = download_prompt("n", tty=False)
-    main._ensure_ltx_model(session_config(restoration_model_name="basicvsrpp"), None)
+    cli_downloads.ensure_ltx_model(session_config(restoration_model_name="basicvsrpp"), None)
     assert asked == []
 
     ltx = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
     with pytest.raises(SystemExit, match="Run jasna in a terminal"):
-        main._ensure_ltx_model(ltx, None)
+        cli_downloads.ensure_ltx_model(ltx, None)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     with pytest.raises(SystemExit, match="missing"):
-        main._ensure_ltx_model(ltx, None)
+        cli_downloads.ensure_ltx_model(ltx, None)
     assert "GB" in asked[0] and "ltx-restore-alpha1-distill8-int8" in asked[0]
 
 
@@ -293,7 +293,7 @@ def test_cli_without_input_to_read_explains_the_download_instead_of_failing(tmp_
     ltx = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
 
     with pytest.raises(SystemExit, match="^Error: .*Run jasna in a terminal"):
-        main._ensure_ltx_model(ltx, None)
+        cli_downloads.ensure_ltx_model(ltx, None)
 
 
 def test_cli_offers_only_the_fast_models_files(tmp_path, cuda_capability, download_prompt):
@@ -302,7 +302,7 @@ def test_cli_offers_only_the_fast_models_files(tmp_path, cuda_capability, downlo
     fast = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path, ltx_fast=True)
 
     with pytest.raises(SystemExit, match="missing"):
-        main._ensure_ltx_model(fast, None)
+        cli_downloads.ensure_ltx_model(fast, None)
 
     assert "ltx-restore-alpha1-distill8-nvfp4" in asked[0] and "int8" not in asked[0]
     assert "9.2 GB" in asked[0]
@@ -320,7 +320,7 @@ def test_cli_explains_models_copied_from_older_release_need_updating(
     config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path, ltx_model="distilled2")
 
     with pytest.raises(SystemExit) as error:
-        main._ensure_ltx_model(config, None)
+        cli_downloads.ensure_ltx_model(config, None)
     message = asked[0] if interactive else str(error.value)
     assert "need updating" in message and "older Jasna" in message
     assert "License code still works" in message
@@ -346,7 +346,7 @@ def test_cli_fast_ltx_checks_hardware_before_models_or_downloads(tmp_path, monke
     config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path,
                             ltx_fast=True, ltx_trial=trial)
     with pytest.raises(SystemExit, match="Blackwell"):
-        main._ensure_ltx_model(config, None)
+        cli_downloads.ensure_ltx_model(config, None)
 
 
 def test_licensed_amd_reaches_the_normal_model_preflight(tmp_path, monkeypatch):
@@ -358,7 +358,7 @@ def test_licensed_amd_reaches_the_normal_model_preflight(tmp_path, monkeypatch):
     monkeypatch.setattr("jasna.ltx.transformer.require_kernels", Mock(side_effect=RuntimeError("normal kernel preflight")))
     config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
     with pytest.raises(RuntimeError, match="normal download preflight"):
-        main._ensure_ltx_model(config, None)
+        cli_downloads.ensure_ltx_model(config, None)
     with pytest.raises(RuntimeError, match="normal kernel preflight"):
         session_factory._ltx_model_files(config, torch.device("cuda:0"))
 
@@ -369,7 +369,7 @@ def test_cli_does_not_offer_ltx_when_every_range_uses_basicvsrpp(tmp_path, nvidi
     asked = download_prompt()
     ltx = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
 
-    main._ensure_ltx_model(ltx, (SegmentRange(0, 1, SegmentRestoration("basicvsrpp", None)),))
+    cli_downloads.ensure_ltx_model(ltx, (SegmentRange(0, 1, SegmentRestoration("basicvsrpp", None)),))
 
     assert asked == []
 
@@ -383,5 +383,5 @@ def test_cli_names_a_driver_mismatch_before_offering_the_download(tmp_path, monk
                         lambda: DriverLibraryMismatch(compat, "615.65.02", "610.57.04"))
 
     with pytest.raises(SystemExit, match=f"^Error: LTX can't use {compat}: .* 615.65.02, .* 610.57.04"):
-        main._ensure_ltx_model(session_config(restoration_model_name="ltx", restoration_model_path=tmp_path), None)
+        cli_downloads.ensure_ltx_model(session_config(restoration_model_name="ltx", restoration_model_path=tmp_path), None)
     assert asked == []

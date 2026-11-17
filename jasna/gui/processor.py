@@ -12,6 +12,7 @@ from typing import Callable
 from jasna.job_resume import ResumeMismatchError, resume_directories, run_with_resume_prompt
 from jasna.license_api import LicenseCheckStopped
 from jasna.gui.job_log import JobLog, job_log_path
+from jasna.gui.job_queue import JobQueue
 from jasna.gui.locales import t
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobProcessingSnapshot, JobStatus, AppSettings
 from jasna.gui.video_session import (
@@ -48,8 +49,6 @@ class ProgressUpdate:
     progress: float = 0.0
     fps: float = 0.0
     eta_seconds: float = 0.0
-    frames_processed: int = 0
-    total_frames: int = 0
     message: str = ""
     stage: StageProgress | None = None
     resumable: bool | None = None
@@ -105,10 +104,10 @@ class Processor:
     
     def __init__(
         self,
-        on_progress: Callable[[ProgressUpdate], None] = None,
-        on_log: Callable[[str, str], None] = None,
-        on_complete: Callable[[bool], None] = None,
         *,
+        on_progress: Callable[[ProgressUpdate], None],
+        on_log: Callable[[str, str], None],
+        on_complete: Callable[[bool], None],
         on_resume_conflict: Callable[[Path], Future[bool]],
     ):
         self._on_progress = on_progress
@@ -120,7 +119,7 @@ class Processor:
         self._stop_event = threading.Event()
         self._license_stopped = False
         
-        self._jobs: list[JobItem] = []
+        self._jobs = JobQueue()
         self._settings: AppSettings | None = None
         self._output_folder: str = ""
         self._output_pattern: str = DEFAULT_OUTPUT_PATTERN
@@ -135,7 +134,7 @@ class Processor:
         
     def start(
         self,
-        jobs: list[JobItem],
+        jobs: JobQueue,
         settings: AppSettings,
         output_folder: str,
         output_pattern: str,
@@ -174,26 +173,18 @@ class Processor:
         job_log = self._job_log
         if job_log is not None:
             job_log.add_entry(level, message)
-        if self._on_log:
-            self._on_log(level, message)
+        self._on_log(level, message)
             
     def _progress(self, update: ProgressUpdate):
-        if self._on_progress:
-            self._on_progress(update)
+        self._on_progress(update)
             
-    def _next_pending_job(self) -> JobItem | None:
-        for job in self._jobs:
-            if job.status == JobStatus.PENDING:
-                return job
-        return None
-
     def _run(self):
         self._log("INFO", "Processing started")
         log_system_summary()
 
         try:
             while not self._stop_event.is_set():
-                job = self._next_pending_job()
+                job = self._jobs.next_pending()
                 if job is None:
                     break
 
@@ -211,8 +202,7 @@ class Processor:
             self._log("WARNING", "Processing stopped: the license check failed")
         else:
             self._log("INFO", "Processing stopped by user")
-        if self._on_complete:
-            self._on_complete(queue_finished)
+        self._on_complete(queue_finished)
 
     def _process_job(self, job: JobItem):
         snapshot = job.begin_processing()
@@ -444,7 +434,7 @@ class Processor:
             return True
         if choice == "skip":
             return False
-        if self._next_pending_job() is not None:
+        if self._jobs.next_pending() is not None:
             self._log("INFO", "Not asking about saved progress while other videos are queued")
             return False
         return self._confirm_replacing_progress(error)
@@ -497,8 +487,6 @@ class Processor:
                 progress=progress_pct,
                 fps=fps,
                 eta_seconds=eta_seconds,
-                frames_processed=frames_done,
-                total_frames=total,
                 stage=stage,
             ))
 

@@ -42,14 +42,14 @@ sys.meta_path[:] = [finder for finder in sys.meta_path
 def test_public_startup_imports_and_license_status(public_checkout, tmp_path):
     result = run_public(public_checkout, tmp_path, """
 from jasna.gui import components, activation_worker
-from jasna import session_factory, engine_compiler, image_restore
+from jasna import license_status, session_factory, engine_compiler, image_restore
 from jasna.license_api import protection_available
 assert not protection_available()
 results = []
 worker = activation_worker.start_license_info(lambda info, error: results.append((info, error)))
 worker.join(5)
 assert results == [((False, None), None)], results
-activation_worker.refresh_pc_license()
+license_status.refresh_pc_license()
 from jasna import update_check
 assert update_check.fetch_latest_release() is None
 assert 'jasna.protection.license_store' not in sys.modules

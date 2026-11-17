@@ -3,8 +3,7 @@ import webbrowser
 
 import pytest
 
-from jasna import update_check
-from jasna.gui import activation_worker
+from jasna import license_status, update_check
 from jasna.gui.components import OptionsDialog
 from jasna.gui.tray import TraySupport
 from jasna.user_settings import read_settings, update_settings
@@ -90,7 +89,7 @@ def test_the_whole_header_fits_the_default_window_with_a_new_release_shown(
 ):
     gui_language(lang)
     monkeypatch.setattr(update_check, "fetch_latest_release", lambda: "99.0.0")
-    monkeypatch.setattr(activation_worker, "read_license_info", lambda: license_info)
+    monkeypatch.setattr(license_status, "read_license_info", lambda: license_info)
 
     app = make_jasna_app()
     settle_activation(app)

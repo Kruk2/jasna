@@ -23,6 +23,7 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 from jasna.blend_buffer import BlendBuffer
 from jasna.frame_queue import FrameQueue
 from jasna.media.probe import VideoMetadata
+from jasna.media.yuv_to_rgb import YuvToRgbConverter
 from jasna.pipeline import Pipeline
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import PrimaryRestoreResult, SecondaryRestoreResult
@@ -142,6 +143,13 @@ def video_metadata(*, fps: int = 24, num_frames: int = 2, **overrides) -> VideoM
     )
     values.update(overrides)
     return VideoMetadata(**values)
+
+
+def yuv_to_rgb(converter: YuvToRgbConverter, y: torch.Tensor, uv: torch.Tensor) -> torch.Tensor:
+    """``converter``'s RGB frame for one Y/UV plane pair, in a fresh buffer."""
+    out = torch.empty((3, converter.height, converter.width), device=y.device, dtype=torch.uint8)
+    converter.convert_into(y, uv, out)
+    return out
 
 
 def pass_context(**overrides) -> PassContext:
@@ -285,6 +293,27 @@ def write_test_image(path: Path) -> Path:
 
 def no_resume_conflict(directory: Path):
     raise AssertionError(f"unexpected saved-progress conflict: {directory}")
+
+
+def job_queue(jobs):
+    from jasna.gui.job_queue import JobQueue
+
+    queue = JobQueue()
+    queue.add_unique(jobs)
+    return queue
+
+
+def gui_processor(**callbacks):
+    """A GUI ``Processor`` whose callbacks ignore everything except the ones given."""
+    from jasna.gui.processor import Processor
+
+    return Processor(**{
+        "on_progress": lambda _update: None,
+        "on_log": lambda _level, _message: None,
+        "on_complete": lambda _queue_finished: None,
+        "on_resume_conflict": no_resume_conflict,
+        **callbacks,
+    })
 
 
 class CallsAtOnce:
@@ -777,6 +806,11 @@ def shown_message(canvas) -> str:
     (item,) = canvas.find_all()
     assert canvas.type(item) == "text"
     return canvas.itemcget(item, "text")
+
+
+def scheduled_after_ids(widget) -> set[str]:
+    """Ids of the Tk ``after`` callbacks still waiting to run."""
+    return set(widget.tk.splitlist(widget.tk.call("after", "info")))
 
 
 class FakeFrameGeneration:

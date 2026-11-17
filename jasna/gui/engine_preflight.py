@@ -10,16 +10,13 @@ from jasna.gui.models import AppSettings
 @dataclass(frozen=True)
 class EngineRequirement:
     key: str
-    label: str
     paths: tuple[Path, ...]
     exists: bool
-    missing_paths: tuple[Path, ...]
 
 
 @dataclass(frozen=True)
 class EnginePreflightResult:
     requirements: tuple[EngineRequirement, ...]
-    should_warn_first_run_slow: bool
 
     @property
     def missing(self) -> tuple[EngineRequirement, ...]:
@@ -78,10 +75,8 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
             reqs.append(
                 EngineRequirement(
                     key="rfdetr",
-                    label=f"RF-DETR ({det_weights.name})",
                     paths=(det_engine,),
                     exists=det_exists,
-                    missing_paths=() if det_exists else (det_engine,),
                 )
             )
     elif is_yolo_model(det_name) and not amd:
@@ -92,10 +87,8 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         reqs.append(
             EngineRequirement(
                 key="yolo",
-                label=f"YOLO ({det_weights.name})",
                 paths=(det_engine,),
                 exists=det_exists,
-                missing_paths=() if det_exists else (det_engine,),
             )
         )
 
@@ -104,14 +97,11 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
     if standard_model and bool(settings.compile_basicvsrpp) and not amd:
         sub_paths = get_basicvsrpp_sub_engine_paths(str(restoration_model_path), bool(settings.fp16_mode))
         all_engine_paths = tuple(Path(p) for p in sub_paths.values())
-        missing_paths = tuple(p for p in all_engine_paths if not p.is_file())
         reqs.append(
             EngineRequirement(
                 key="basicvsrpp",
-                label="BasicVSR++ (restoration sub-engines)",
                 paths=all_engine_paths,
-                exists=len(missing_paths) == 0,
-                missing_paths=missing_paths,
+                exists=all(p.is_file() for p in all_engine_paths),
             )
         )
 
@@ -121,16 +111,9 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         reqs.append(
             EngineRequirement(
                 key="unet_4x",
-                label="UNet 4x (secondary restoration)",
                 paths=(unet_engine,),
                 exists=unet_exists,
-                missing_paths=() if unet_exists else (unet_engine,),
             )
         )
 
-    should_warn = any(not r.exists for r in reqs)
-
-    return EnginePreflightResult(
-        requirements=tuple(reqs),
-        should_warn_first_run_slow=bool(should_warn),
-    )
+    return EnginePreflightResult(requirements=tuple(reqs))

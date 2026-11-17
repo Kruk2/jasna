@@ -4,14 +4,14 @@ from pathlib import Path
 import pytest
 
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, AppSettings, JobItem, JobStatus
-from jasna.gui.processor import Processor, ProgressUpdate
-from factories import no_resume_conflict, video_metadata
+from jasna.gui.processor import ProgressUpdate
+from factories import gui_processor, job_queue, video_metadata
 
 pytestmark = pytest.mark.usefixtures("no_gpu_cleanup", "tk_garbage_collected")
 
 
 def _run_queue(processor, jobs, tmp_path, settings, output_pattern="{original}_restored.mp4"):
-    processor.start(jobs, settings, str(tmp_path), output_pattern)
+    processor.start(job_queue(jobs), settings, str(tmp_path), output_pattern)
     processor.join()
     assert not processor.is_running()
 
@@ -26,8 +26,8 @@ def test_stop_cancels_the_running_job_and_leaves_it_queued(tmp_path, fake_job_pi
     fake_job_pipelines.restore = restore
     job = JobItem(path=tmp_path / "clip.mp4")
     updates: list[ProgressUpdate] = []
-    processor = Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append)
-    processor.start([job], AppSettings(), str(tmp_path), "{original}_restored.mp4")
+    processor = gui_processor(on_progress=updates.append)
+    processor.start(job_queue([job]), AppSettings(), str(tmp_path), "{original}_restored.mp4")
     assert started.wait(5)
     assert job.status is JobStatus.PROCESSING
 
@@ -46,7 +46,7 @@ def test_completed_job_stays_completed(tmp_path, fake_job_pipelines):
     job = JobItem(path=tmp_path / "clip.mp4")
     updates: list[ProgressUpdate] = []
 
-    _run_queue(Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append), [job], tmp_path, AppSettings())
+    _run_queue(gui_processor(on_progress=updates.append), [job], tmp_path, AppSettings())
 
     assert job.status is JobStatus.COMPLETED
     assert job.output_path == tmp_path / "clip_restored.mp4"
@@ -61,7 +61,7 @@ def test_failing_job_still_marked_error(tmp_path, fake_job_pipelines):
     job = JobItem(path=tmp_path / "clip.mp4")
     updates: list[ProgressUpdate] = []
 
-    _run_queue(Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append), [job], tmp_path, AppSettings())
+    _run_queue(gui_processor(on_progress=updates.append), [job], tmp_path, AppSettings())
 
     assert job.status is JobStatus.ERROR
     assert updates[-1].status is JobStatus.ERROR
@@ -105,8 +105,8 @@ def test_outdated_progress_never_holds_up_videos_queued_after_it(
         return future
 
     completions = []
-    processor = Processor(on_resume_conflict=answer_question, on_complete=completions.append)
-    processor.start(jobs, AppSettings(saved_progress_conflict=choice), str(tmp_path), DEFAULT_OUTPUT_PATTERN)
+    processor = gui_processor(on_resume_conflict=answer_question, on_complete=completions.append)
+    processor.start(job_queue(jobs), AppSettings(saved_progress_conflict=choice), str(tmp_path), DEFAULT_OUTPUT_PATTERN)
     processor.join()
 
     assert not processor.is_running()
@@ -179,7 +179,7 @@ def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conf
         restoration_model="basicvsrpp" if ranges == "basicvsrpp_editor" else "ltx", ltx_auto_split=ranges == "auto_split", codec="av1", encoder_cq=38,
         vr_mode="off", file_conflict=file_conflict,
     )
-    processor = Processor(on_resume_conflict=no_resume_conflict)
+    processor = gui_processor()
 
     _run_queue(processor, [job], tmp_path, settings)
     assert job.status is JobStatus.PENDING
@@ -285,7 +285,7 @@ def test_a_failed_license_check_fails_that_job_and_stops_the_queue(tmp_path, fak
     job, later = JobItem(path=tmp_path / "clip.mp4"), JobItem(path=tmp_path / "later.mp4")
     updates: list[ProgressUpdate] = []
     completions = []
-    processor = Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append, on_complete=completions.append)
+    processor = gui_processor(on_progress=updates.append, on_complete=completions.append)
 
     _run_queue(processor, [job, later], tmp_path, AppSettings())
 
@@ -310,7 +310,7 @@ def test_a_range_job_that_reencodes_the_whole_video_offers_stop_not_pause(tmp_pa
         processor_module, "plan_segment_job", MagicMock(return_value=MagicMock(reencodes_whole_video=True))
     )
     updates: list[ProgressUpdate] = []
-    processor = Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append)
+    processor = gui_processor(on_progress=updates.append)
     job = JobItem(path=tmp_path / "clip.mp4", segments=(SegmentRange(2.5, 3.0),))
     job.path.touch()
 
@@ -329,7 +329,7 @@ def test_rerun_replaces_the_output_its_stopped_run_left(tmp_path, fake_job_pipel
     fake_job_pipelines.restore = restore
     job = JobItem(path=tmp_path / "clip.mp4")
     job.path.touch()
-    processor = Processor(on_resume_conflict=no_resume_conflict)
+    processor = gui_processor()
 
     _run_queue(processor, [job], tmp_path, AppSettings(file_conflict="skip"))
     assert job.status is JobStatus.PENDING
@@ -344,7 +344,7 @@ def test_overwrite_never_writes_over_the_input(tmp_path, fake_job_pipelines):
     job.path.touch()
 
     _run_queue(
-        Processor(on_resume_conflict=no_resume_conflict), [job], tmp_path,
+        gui_processor(), [job], tmp_path,
         AppSettings(file_conflict="overwrite"), output_pattern="{original}.mp4",
     )
 

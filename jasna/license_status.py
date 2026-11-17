@@ -1,0 +1,80 @@
+"""The license state of this install, read on the calling thread."""
+
+import logging
+import threading
+
+from jasna.license_api import protection_available
+
+logger = logging.getLogger(__name__)
+
+
+def read_license_info() -> tuple[bool, str | None]:
+    """Whether Jasna is activated, and how it checks the license: "offline", "online", or None while an earlier
+    activation waits to move on the first supporter-model job."""
+    if not protection_available():
+        return False, None
+    from jasna.protection import lease, license_store, offline
+
+    if offline.saved_grant() is not None:
+        mode = "offline"
+    elif lease.load_token() is not None:
+        mode = "online"
+    else:
+        mode = None
+    return license_store.is_licensed(), mode
+
+
+def license_status_key(mode: str | None) -> str:
+    """Locale key that names how an activated Jasna checks the license; ``mode`` comes from ``read_license_info``."""
+    return {"offline": "license_offline_active", "online": "license_lease_active"}.get(mode, "license_active")
+
+
+def refresh_pc_license() -> None:
+    """Binds a saved offline activation to this PC once, so LTX later works without internet. Quiet: a failure only
+    logs, and the first LTX job tries again and says what to do."""
+    if not protection_available():
+        return
+    from jasna.protection import lease
+
+    lease.refresh_pc_grant_quietly()
+
+
+def start_pc_license_refresh() -> threading.Thread:
+    """Runs ``refresh_pc_license`` in the background; a failure there only logs a warning."""
+
+    def refresh():
+        try:
+            refresh_pc_license()
+        except Exception as exc:
+            logger.warning("Could not refresh the license for this PC: %s", exc)
+
+    thread = threading.Thread(target=refresh, daemon=True)
+    thread.start()
+    return thread
+
+
+def read_unofficial_notice_due() -> bool:
+    """Whether this launch shows the note for buyers of an unofficial copy; only the Chinese UI asks."""
+    if not protection_available():
+        return False
+    from jasna.protection import notice
+
+    return notice.due()
+
+
+def device_use_text(use) -> str:
+    """The devices in use and, when the service lists them, one line per slot with this PC marked."""
+    from datetime import datetime
+
+    from jasna.gui.locales import t
+
+    lines = [t("license_devices_count", used=use.used, limit=use.limit, offline=use.offline, online=use.online)]
+    for slot in use.slots:
+        if slot.kind == "offline":
+            line = t("license_device_offline", device=slot.device, date=datetime.fromtimestamp(slot.since / 1000).strftime("%Y-%m-%d"))
+        else:
+            line = t("license_device_online", device=slot.device)
+        lines.append(f"{line} {t('license_device_this_pc')}" if slot.device == use.this_device else line)
+    if use.slots:
+        lines.append(t("license_devices_error_hint"))
+    return "\n".join(lines)

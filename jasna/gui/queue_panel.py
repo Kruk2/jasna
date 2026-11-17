@@ -6,14 +6,15 @@ from typing import Iterable
 import customtkinter as ctk
 from pathlib import Path
 from tkinter import filedialog
-from tkinter import messagebox
 
 from tkinterdnd2 import DND_FILES
 
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus
+from jasna.gui.models import JobItem, JobStatus
 from jasna.gui.components import AutoHidingScrollableFrame, Tooltip
 from jasna.gui.job_list_item import JobListItem
+from jasna.gui.job_queue import FINISHED_STATUSES, JobQueue
+from jasna.gui.output_location_bar import OutputLocationBar
 from jasna.gui.icons import create_icon
 from jasna.gui.file_actions import open_containing_folder
 from jasna.gui.file_actions import open_file
@@ -29,9 +30,9 @@ from jasna.media.media_files import (
     folder_output_path,
     is_image,
 )
+from jasna.segments import SegmentRange
 
 logger = logging.getLogger(__name__)
-from jasna.segments import SegmentRange
 
 _PAGE_SIZE = 20
 
@@ -49,7 +50,7 @@ class QueuePanel(ctk.CTkFrame):
         )
         self.pack_propagate(False)
         
-        self._jobs: list[JobItem] = []
+        self._queue = JobQueue()
         self._job_widgets: list[JobListItem | None] = []
         self._page = 0
         self._on_jobs_changed: callable = None
@@ -57,10 +58,7 @@ class QueuePanel(ctk.CTkFrame):
         self._on_play: callable = None
         self._running = False
         self._processing_job_id: int | None = None
-        self._segment_editor = None
-        self._get_settings: callable = None
-        self._is_gpu_busy: callable = None
-        self._set_preview_gpu_busy: callable = None
+        self._on_edit_segments: callable = None
         
         self._build_toolbar()
         self._build_list_area()
@@ -186,99 +184,25 @@ class QueuePanel(ctk.CTkFrame):
         )
         self._clear_completed_btn.pack(side="right", padx=(0, 6))
         
-        # Output location section
-        output_label_row = ctk.CTkFrame(footer, fg_color="transparent")
-        output_label_row.pack(fill="x", pady=(Sizing.PADDING_SMALL, 4))
-        output_label = ctk.CTkLabel(
-            output_label_row,
-            text=t("output_location"),
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY, "bold"),
-            text_color=Colors.TEXT_PRIMARY,
-            anchor="w",
+        self._output_bar = OutputLocationBar(
+            footer, on_edited=self._on_output_edited, on_folder_set=self._on_output_folder_set
         )
-        output_label.pack(side="left")
-        self._same_as_input_btn = ctk.CTkButton(
-            output_label_row,
-            text=t("same_as_input"),
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            fg_color=Colors.PRIMARY,
-            hover_color=Colors.PRIMARY_HOVER,
-            text_color=Colors.TEXT_PRIMARY,
-            height=22,
-            width=94,
-            command=self._on_same_as_input,
-        )
-        self._same_as_input_btn.pack(side="right")
-        output_tip = ctk.CTkLabel(output_label_row, text="\u24d8", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        output_tip.pack(side="left", padx=4)
-        Tooltip(output_tip, t("tip_output_location"))
-        
-        output_row = ctk.CTkFrame(footer, fg_color="transparent")
-        output_row.pack(fill="x")
-        
-        self._output_entry = ctk.CTkEntry(
-            output_row,
-            placeholder_text=t("same_as_input"),
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            fg_color=Colors.BG_CARD,
-            border_color=Colors.BORDER,
-            text_color=Colors.TEXT_PRIMARY,
-            height=Sizing.INPUT_HEIGHT,
-        )
-        self._output_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
-        self._output_entry.bind("<KeyRelease>", self._on_output_entry_changed)
-        
-        self._output_browse_btn = ctk.CTkButton(
-            output_row,
-            text="",
-            image=create_icon("folder", 16, Colors.TEXT_PRIMARY),
-            fg_color=Colors.BG_CARD,
-            hover_color=Colors.BORDER_LIGHT,
-            text_color=Colors.TEXT_PRIMARY,
-            width=32,
-            height=Sizing.INPUT_HEIGHT,
-            command=self._on_browse_output,
-        )
-        self._output_browse_btn.pack(side="right")
-        
-        # Output pattern
-        pattern_label_row = ctk.CTkFrame(footer, fg_color="transparent")
-        pattern_label_row.pack(fill="x", pady=(4, 2))
-        pattern_label = ctk.CTkLabel(
-            pattern_label_row,
-            text=t("output_pattern"),
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY, "bold"),
-            text_color=Colors.TEXT_PRIMARY,
-            anchor="w",
-        )
-        pattern_label.pack(side="left")
-        pattern_tip = ctk.CTkLabel(pattern_label_row, text="\u24d8", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        pattern_tip.pack(side="left", padx=4)
-        Tooltip(pattern_tip, t("tip_output_pattern"))
-        self._pattern_entry = ctk.CTkEntry(
-            footer,
-            placeholder_text=DEFAULT_OUTPUT_PATTERN,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            fg_color=Colors.BG_CARD,
-            border_color=Colors.BORDER,
-            text_color=Colors.TEXT_PRIMARY,
-            height=Sizing.INPUT_HEIGHT,
-        )
-        self._pattern_entry.pack(fill="x", pady=(4, 0))
-        self._pattern_entry.insert(0, DEFAULT_OUTPUT_PATTERN)
-        self._pattern_entry.bind("<KeyRelease>", self._on_pattern_or_conflicts)
+        self._output_bar.pack(fill="x")
 
-    def _on_pattern_or_conflicts(self, event=None):
-        self._refresh_conflicts()
+    def _notify_output_changed(self) -> None:
         if self._on_output_changed:
             self._on_output_changed(self.get_output_folder(), self.get_output_pattern())
 
-    def _on_output_entry_changed(self, event=None) -> None:
-        self._update_same_as_input_style()
+    def _on_output_edited(self) -> None:
         self._refresh_conflicts()
-        if self._on_output_changed:
-            self._on_output_changed(self.get_output_folder(), self.get_output_pattern())
-        
+        self._notify_output_changed()
+
+    def _on_output_folder_set(self) -> None:
+        self._refresh_conflicts()
+        if self._on_jobs_changed:
+            self._on_jobs_changed()
+        self._notify_output_changed()
+
     def _on_add_files(self):
         files = filedialog.askopenfilenames(
             title=t("select_video_files"),
@@ -296,35 +220,8 @@ class QueuePanel(ctk.CTkFrame):
         if folder:
             self.add_jobs(JobItem(path=f) for f in folder_media_in_processing_order(Path(folder)))
                     
-    def _on_browse_output(self):
-        folder = filedialog.askdirectory(title=t("select_output_folder"))
-        if folder:
-            self._set_output_folder(folder)
-
-    def _on_same_as_input(self) -> None:
-        self._set_output_folder("")
-
-    def _set_output_folder(self, folder: str) -> None:
-        self._output_entry.configure(state="normal")
-        self._output_entry.delete(0, "end")
-        if folder:
-            self._output_entry.insert(0, folder)
-        self._update_same_as_input_style()
-        self._refresh_conflicts()
-        if self._on_jobs_changed:
-            self._on_jobs_changed()
-        if self._on_output_changed:
-            self._on_output_changed(self.get_output_folder(), self.get_output_pattern())
-
-    def _update_same_as_input_style(self) -> None:
-        same_as_input = not self.get_output_folder()
-        self._same_as_input_btn.configure(
-            fg_color=Colors.PRIMARY if same_as_input else Colors.BG_CARD,
-            hover_color=Colors.PRIMARY_HOVER if same_as_input else Colors.BORDER_LIGHT,
-        )
-
     def _on_clear_queue(self):
-        self._jobs.clear()
+        self._queue.clear()
         for w in self._job_widgets:
             if w is not None:
                 w.destroy()
@@ -337,8 +234,7 @@ class QueuePanel(ctk.CTkFrame):
             
     def _on_clear_completed(self):
         """Clear completed, errored, and skipped jobs from the queue."""
-        completed_statuses = {JobStatus.COMPLETED, JobStatus.ERROR, JobStatus.SKIPPED}
-        self._jobs[:] = [job for job in self._jobs if job.status not in completed_statuses]
+        self._queue.clear_finished()
         self._render_page()
         self._update_empty_state()
         self._update_count()
@@ -346,13 +242,13 @@ class QueuePanel(ctk.CTkFrame):
             self._on_jobs_changed()
             
     def _update_empty_state(self):
-        if self._jobs:
+        if len(self._queue):
             self._empty_state.pack_forget()
         else:
             self._empty_state.pack(fill="x", pady=20)
             
     def _update_count(self):
-        count = len(self._jobs)
+        count = len(self._queue)
         self._queue_count.configure(text=t("items_queued", count=count))
         pages = max(1, (count + _PAGE_SIZE - 1) // _PAGE_SIZE)
         self._page_label.configure(text=f"{self._page + 1} / {pages}")
@@ -364,26 +260,26 @@ class QueuePanel(ctk.CTkFrame):
             self._page_row.pack_forget()
 
     def _change_page(self, step: int) -> None:
-        pages = max(1, (len(self._jobs) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+        pages = max(1, (len(self._queue) + _PAGE_SIZE - 1) // _PAGE_SIZE)
         page = min(max(self._page + step, 0), pages - 1)
         if page == self._page:
             return
         self._page = page
         self._render_page()
-        self._list_frame._parent_canvas.yview_moveto(0)
+        self._list_frame.scroll_to_top()
         self._update_count()
 
     def _render_page(self) -> None:
         for widget in self._job_widgets:
             if widget is not None:
                 widget.destroy()
-        self._page = min(self._page, max(0, (len(self._jobs) - 1) // _PAGE_SIZE))
-        self._job_widgets = [None] * len(self._jobs)
-        for index in range(self._page * _PAGE_SIZE, min(len(self._jobs), (self._page + 1) * _PAGE_SIZE)):
+        self._page = min(self._page, max(0, (len(self._queue) - 1) // _PAGE_SIZE))
+        self._job_widgets = [None] * len(self._queue)
+        for index in range(self._page * _PAGE_SIZE, min(len(self._queue), (self._page + 1) * _PAGE_SIZE)):
             self._create_job_widget(index)
 
     def _create_job_widget(self, index: int) -> None:
-        job = self._jobs[index]
+        job = self._queue[index]
         path = job.path
         widget = JobListItem(
             self._list_frame,
@@ -415,19 +311,16 @@ class QueuePanel(ctk.CTkFrame):
 
     def add_jobs(self, jobs: Iterable[JobItem]) -> None:
         """Append the jobs whose input is not queued yet, keeping their own options."""
-        added = False
-        for job in jobs:
-            if any(j.path == job.path for j in self._jobs):
-                continue
-            self._jobs.append(job)
+        added = self._queue.add_unique(jobs)
+        if not added:
+            return
+        first_index = len(self._queue) - len(added)
+        for index, job in enumerate(added, first_index):
             output_path = self._get_output_path(job.path)
             job.has_conflict = output_path.exists() if output_path else False
             self._job_widgets.append(None)
-            if len(self._jobs) <= (self._page + 1) * _PAGE_SIZE and len(self._jobs) > self._page * _PAGE_SIZE:
-                self._create_job_widget(len(self._jobs) - 1)
-            added = True
-        if not added:
-            return
+            if self._page * _PAGE_SIZE <= index < (self._page + 1) * _PAGE_SIZE:
+                self._create_job_widget(index)
 
         self._update_empty_state()
         self._update_count()
@@ -459,20 +352,11 @@ class QueuePanel(ctk.CTkFrame):
             open_file(job.output_path, parent=self.winfo_toplevel())
 
     def _requeue_job(self, job: JobItem) -> None:
-        terminal_statuses = {JobStatus.COMPLETED, JobStatus.ERROR, JobStatus.SKIPPED}
-        if job.status not in terminal_statuses:
-            return
-        index = self._find_job_index_by_id(job.id)
+        index = self._queue.requeue(job)
         if index is None:
             return
-        self._jobs.append(self._jobs.pop(index))
         self._job_widgets.pop(index).destroy()
         self._job_widgets.append(None)
-        job.error_message = ""
-        job.output_path = None
-        job.status = JobStatus.PENDING
-        job.progress = 0.0
-        job.elapsed_seconds = None
         self._show_last_page_row()
         self._refresh_conflicts()
         if self._on_jobs_changed:
@@ -488,54 +372,15 @@ class QueuePanel(ctk.CTkFrame):
             has_restored_output=(
                 job.status is JobStatus.COMPLETED and job.output_path is not None
             ),
-            requeueable=(
-                job.status in {JobStatus.COMPLETED, JobStatus.ERROR, JobStatus.SKIPPED}
-            ),
+            requeueable=job.status in FINISHED_STATUSES,
         )
 
     def _edit_segments(self, job: JobItem) -> None:
-        if job.status is not JobStatus.PENDING:
-            return
-        if self._segment_editor is not None and self._segment_editor.winfo_exists():
-            self._segment_editor.lift()
-            self._segment_editor.focus_force()
-            return
-        self._segment_editor = None
-        try:
-            from jasna.gui.segment_editor import SegmentEditor
+        if job.status is JobStatus.PENDING:
+            self._on_edit_segments(job)
 
-            self._segment_editor = SegmentEditor(
-                self,
-                job,
-                self._get_settings,
-                self._is_gpu_busy,
-                self._set_preview_gpu_busy,
-                self._ltx_unavailable_reason(),
-                lambda segments, j=job: self._segments_saved(j, segments),
-                self._segment_editor_closed,
-            )
-        except Exception as exc:
-            self._segment_editor = None
-            logger.warning("Failed to open segment editor", exc_info=True)
-            messagebox.showerror(t("segments_title"), str(exc), parent=self.winfo_toplevel())
-
-    def _segment_editor_closed(self) -> None:
-        self._segment_editor = None
-
-    def close_segment_editor(self) -> bool:
-        """Closes the open segment editor the way its own Close does and waits for its seed
-        preview to delete its frames; False when the user keeps the editor open."""
-        editor = self._segment_editor
-        if editor is None:
-            return True
-        editor.request_close()
-        if self._segment_editor is not None:
-            return False
-        editor.join_seed_worker(timeout=10.0)
-        return True
-
-    def _segments_saved(self, job: JobItem, segments: tuple[SegmentRange, ...]) -> None:
-        idx = self._find_job_index_by_id(job.id)
+    def on_segments_saved(self, job: JobItem, segments: tuple[SegmentRange, ...]) -> None:
+        idx = self._queue.index_of(job.id)
         if idx is None:
             return
         widget = self._job_widgets[idx]
@@ -559,15 +404,13 @@ class QueuePanel(ctk.CTkFrame):
             
     def _get_output_path(self, input_path: Path) -> Path | None:
         """Get the output path for a given input file based on current settings."""
-        output_folder = self._output_entry.get() or input_path.parent
-        return folder_output_path(output_folder, input_path, self._pattern_entry.get() or DEFAULT_OUTPUT_PATTERN)
+        return folder_output_path(self.get_output_folder() or input_path.parent, input_path, self.get_output_pattern())
             
     def _remove_job(self, job: JobItem):
-        if job in self._jobs:
-            index = self._jobs.index(job)
-            self._jobs.pop(index)
+        index = self._queue.remove(job)
+        if index is not None:
             self._job_widgets.pop(index).destroy()
-            if self._page and self._page * _PAGE_SIZE >= len(self._jobs):
+            if self._page and self._page * _PAGE_SIZE >= len(self._queue):
                 self._page -= 1
                 self._render_page()
             else:
@@ -578,22 +421,20 @@ class QueuePanel(ctk.CTkFrame):
                 self._on_jobs_changed()
 
     def _show_last_page_row(self) -> None:
-        last_index = min(len(self._jobs), (self._page + 1) * _PAGE_SIZE) - 1
+        last_index = min(len(self._queue), (self._page + 1) * _PAGE_SIZE) - 1
         if last_index >= 0 and self._job_widgets[last_index] is None:
             self._create_job_widget(last_index)
 
     def get_jobs(self) -> list[JobItem]:
-        # Return a shallow copy for callers that should not modify the queue
-        return self._jobs.copy()
+        return list(self._queue)
 
-    def get_jobs_ref(self) -> list[JobItem]:
-        """Return the live jobs list reference so callers (like the Processor)
-        can observe additions/removals while processing is running.
-        Use with care: this returns the internal list, not a defensive copy."""
-        return self._jobs
+    @property
+    def job_queue(self) -> JobQueue:
+        """The live queue, which the processor works through while the user edits it."""
+        return self._queue
 
     def reset_jobs_for_run(self) -> None:
-        for job in self._jobs:
+        for job in self._queue:
             job.error_message = ""
             job.output_path = None
             job.elapsed_seconds = None
@@ -601,25 +442,16 @@ class QueuePanel(ctk.CTkFrame):
         self._refresh_conflicts()
         
     def get_output_folder(self) -> str:
-        return self._output_entry.get() or ""
-        
+        return self._output_bar.folder
+
     def get_output_pattern(self) -> str:
-        return self._pattern_entry.get() or DEFAULT_OUTPUT_PATTERN
+        return self._output_bar.pattern
         
     def set_on_jobs_changed(self, callback: callable):
         self._on_jobs_changed = callback
 
-    def set_segment_editor_context(
-        self,
-        get_settings: callable,
-        is_gpu_busy: callable,
-        set_preview_gpu_busy: callable,
-        ltx_unavailable_reason: callable,
-    ):
-        self._get_settings = get_settings
-        self._is_gpu_busy = is_gpu_busy
-        self._set_preview_gpu_busy = set_preview_gpu_busy
-        self._ltx_unavailable_reason = ltx_unavailable_reason
+    def set_on_edit_segments(self, callback: callable) -> None:
+        self._on_edit_segments = callback
 
     def set_on_output_changed(self, callback: callable):
         self._on_output_changed = callback
@@ -628,22 +460,15 @@ class QueuePanel(ctk.CTkFrame):
         self._on_play = callback
 
     def set_initial_output(self, folder: str = "", pattern: str = ""):
-        self._set_output_folder(folder)
+        self._output_bar.set_folder(folder)
         if pattern:
-            self._pattern_entry.delete(0, "end")
-            self._pattern_entry.insert(0, pattern)
+            self._output_bar.set_pattern(pattern)
         
-    def _find_job_index_by_id(self, job_id: int) -> int | None:
-        for i, job in enumerate(self._jobs):
-            if job.id == job_id:
-                return i
-        return None
-
     def update_job_status(self, job_id: int, status: JobStatus, progress: float = 0.0, fps: float = 0.0, eta_seconds: float = 0.0, elapsed_seconds: float | None = None, stage: StageProgress | None = None):
-        idx = self._find_job_index_by_id(job_id)
+        idx = self._queue.index_of(job_id)
         if idx is None:
             return
-        job = self._jobs[idx]
+        job = self._queue[idx]
         job.status = status
         job.progress = progress
         if status is JobStatus.COMPLETED and elapsed_seconds is not None:
@@ -681,7 +506,7 @@ class QueuePanel(ctk.CTkFrame):
                 
     def _refresh_conflicts(self):
         """Re-check all jobs for output file conflicts."""
-        for job, widget in zip(self._jobs, self._job_widgets):
+        for job, widget in zip(self._queue, self._job_widgets):
             if job.status == JobStatus.PENDING:
                 output_path = self._get_output_path(job.path)
                 job.has_conflict = output_path.exists() if output_path else False
@@ -691,10 +516,7 @@ class QueuePanel(ctk.CTkFrame):
     def set_output_enabled(self, enabled: bool):
         """Enable or disable output location controls (but not queue add/remove)."""
         state = "normal" if enabled else "disabled"
-        self._output_entry.configure(state=state)
-        self._output_browse_btn.configure(state=state)
-        self._same_as_input_btn.configure(state=state)
-        self._pattern_entry.configure(state=state)
+        self._output_bar.set_enabled(enabled)
         self._clear_btn.configure(state=state)
         self._clear_completed_btn.configure(state=state)
 
@@ -706,7 +528,7 @@ class QueuePanel(ctk.CTkFrame):
             idx = self._job_widgets.index(widget)
         except ValueError:
             return False
-        return idx < len(self._jobs) and self._jobs[idx].id == self._processing_job_id
+        return idx < len(self._queue) and self._queue[idx].id == self._processing_job_id
 
     def _on_widget_drag_start(self, widget: 'JobListItem', event):
         if self._is_processing_widget(widget):
@@ -750,19 +572,10 @@ class QueuePanel(ctk.CTkFrame):
         new_index += self._page * _PAGE_SIZE
         if new_index != current_index:
             # Remove and reinsert data + widget and repack
-            job = self._jobs.pop(current_index)
+            self._queue.move(current_index, new_index)
             self._job_widgets.pop(current_index)
-            self._jobs.insert(new_index, job)
             self._job_widgets.insert(new_index, widget)
-            # Repack in order
-            for w in self._job_widgets:
-                if w is None:
-                    continue
-                w.pack_forget()
-            for w in self._job_widgets:
-                if w is None:
-                    continue
-                w.pack(fill="x", pady=(0, 4))
+            self._repack()
             if self._on_jobs_changed:
                 self._on_jobs_changed()
 
@@ -771,16 +584,16 @@ class QueuePanel(ctk.CTkFrame):
             widget.configure(cursor="")
         except Exception:
             logger.debug("cursor reset failed on drag end", exc_info=True)
-        for w in self._job_widgets:
-            if w is None:
-                continue
-            w.pack_forget()
-        for w in self._job_widgets:
-            if w is None:
-                continue
-            w.pack(fill="x", pady=(0, 4))
+        self._repack()
         if self._on_jobs_changed:
             self._on_jobs_changed()
+
+    def _repack(self) -> None:
+        shown = [widget for widget in self._job_widgets if widget is not None]
+        for widget in shown:
+            widget.pack_forget()
+        for widget in shown:
+            widget.pack(fill="x", pady=(0, 4))
 
     def set_running(self, running: bool, processing_job_id: int | None = None):
         """Set queue running state.
@@ -795,47 +608,16 @@ class QueuePanel(ctk.CTkFrame):
             return
         self._running = running
         self._processing_job_id = processing_job_id if running else None
-        if running:
-            # Disable controls we don't want interactive while running
-            self._clear_btn.configure(state="disabled")
-            self._clear_completed_btn.configure(state="disabled")
-            self._output_browse_btn.configure(state="disabled")
-            self._output_entry.configure(state="disabled")
-            self._same_as_input_btn.configure(state="disabled")
-            self._pattern_entry.configure(state="disabled")
-            # Allow adding files/folders
-            self._add_files_btn.configure(state="normal")
-            self._add_folder_btn.configure(state="normal")
-            processing_idx = self._find_job_index_by_id(processing_job_id) if processing_job_id is not None else None
-            for i, widget in enumerate(self._job_widgets):
-                if widget is None:
-                    continue
-                widget.set_removable(i != processing_idx)
-                widget.set_segments_editable(self._jobs[i].status is JobStatus.PENDING)
-                widget.set_player_enabled(False)
-                widget.set_action_menu_visible(
-                    i != processing_idx
-                    and self._jobs[i].status is not JobStatus.PROCESSING
-                )
-                self._set_widget_action_options(self._jobs[i], widget)
-        else:
-            # Restore normal appearance and enable controls
-            self._clear_btn.configure(state="normal")
-            self._clear_completed_btn.configure(state="normal")
-            self._output_browse_btn.configure(state="normal")
-            self._output_entry.configure(state="normal")
-            self._same_as_input_btn.configure(state="normal")
-            self._pattern_entry.configure(state="normal")
-            self._add_files_btn.configure(state="normal")
-            self._add_folder_btn.configure(state="normal")
-            for job, widget in zip(self._jobs, self._job_widgets):
-                if widget is None:
-                    continue
-                widget.set_removable(True)
-                widget.set_segments_editable(job.status is JobStatus.PENDING)
-                widget.set_player_enabled(True)
-                widget.set_action_menu_visible(job.status is not JobStatus.PROCESSING)
-                self._set_widget_action_options(job, widget)
+        self.set_output_enabled(not running)
+        processing_idx = self._queue.index_of(self._processing_job_id) if self._processing_job_id is not None else None
+        for index, (job, widget) in enumerate(zip(self._queue, self._job_widgets)):
+            if widget is None:
+                continue
+            widget.set_removable(index != processing_idx)
+            widget.set_segments_editable(job.status is JobStatus.PENDING)
+            widget.set_player_enabled(not running)
+            widget.set_action_menu_visible(index != processing_idx and job.status is not JobStatus.PROCESSING)
+            self._set_widget_action_options(job, widget)
 
     def enable_file_drop(self):
         """Register the list area as an OS file drop target."""
@@ -843,27 +625,9 @@ class QueuePanel(ctk.CTkFrame):
         inner.drop_target_register(DND_FILES)
         inner.dnd_bind("<<Drop>>", self._on_file_drop)
 
-    def _parse_drop_data(self, data: str) -> list[Path]:
-        paths = []
-        i = 0
-        while i < len(data):
-            if data[i] == "{":
-                end = data.index("}", i)
-                paths.append(Path(data[i + 1 : end]))
-                i = end + 2
-            elif data[i] == " ":
-                i += 1
-            else:
-                end = data.find(" ", i)
-                if end == -1:
-                    end = len(data)
-                paths.append(Path(data[i:end]))
-                i = end + 1
-        return paths
-
     def _on_file_drop(self, event):
         files = []
-        for p in self._parse_drop_data(event.data):
+        for p in map(Path, self.tk.splitlist(event.data)):
             if p.is_dir():
                 files.extend(folder_media_in_processing_order(p))
             elif p.is_file() and p.suffix.lower() in MEDIA_EXTENSIONS:

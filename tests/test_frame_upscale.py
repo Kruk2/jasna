@@ -527,27 +527,27 @@ def test_the_dlss5_download_installs_only_the_runtime_of_the_expected_release(mo
 
 
 def test_cli_asks_before_downloading_the_dlss5_runtime(monkeypatch, tmp_path):
-    from jasna import main
+    from jasna import cli_downloads
     from jasna.upscale import dlss5
 
     asked = []
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(dlss5, "dlss5_runtime_dir", lambda: tmp_path)
     monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or "n")
-    main._ensure_dlss5_runtime(session_config(upscale_model="span"))
+    cli_downloads.ensure_dlss5_runtime(session_config(upscale_model="span"))
     assert asked == []
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     with pytest.raises(SystemExit, match="Run jasna in a terminal"):
-        main._ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
+        cli_downloads.ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     with pytest.raises(SystemExit, match="needs this download"):
-        main._ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
+        cli_downloads.ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
     assert "unofficial" in asked[0] and "467 MB" in asked[0]
 
     for name in DLSS5_RUNTIME_FILES:
         (tmp_path / name).touch()
-    main._ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
+    cli_downloads.ensure_dlss5_runtime(session_config(upscale_model="dlss5"))
     assert len(asked) == 1
 
 

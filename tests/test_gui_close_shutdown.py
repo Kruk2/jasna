@@ -5,20 +5,20 @@ import pytest
 
 from jasna.gui.processor import Processor
 from jasna.gui.models import JobItem, AppSettings
-from factories import no_resume_conflict
+from factories import gui_processor, job_queue
 
 pytestmark = pytest.mark.usefixtures("tk_garbage_collected")
 
 
 def _start(processor: Processor, folder: Path) -> None:
-    processor.start([JobItem(path=folder / "test.mp4")], AppSettings(), output_folder=str(folder), output_pattern="{original}_restored.mp4")
+    processor.start(job_queue([JobItem(path=folder / "test.mp4")]), AppSettings(), output_folder=str(folder), output_pattern="{original}_restored.mp4")
 
 
 def test_join_waits_for_the_running_job_and_is_safe_before_and_after(tmp_path, fake_job_pipelines):
     entered = threading.Event()
     release = threading.Event()
     fake_job_pipelines.restore = lambda _pipeline: entered.set() or release.wait(5)
-    processor = Processor(on_resume_conflict=no_resume_conflict)
+    processor = gui_processor()
     processor.join(timeout=1.0)
     assert not processor.is_running()
 
@@ -40,7 +40,7 @@ def test_processor_error_logs_full_traceback(tmp_path, fake_job_pipelines):
 
     fake_job_pipelines.restore = restore
     logs: list[tuple[str, str]] = []
-    processor = Processor(on_resume_conflict=no_resume_conflict, on_log=lambda level, message: logs.append((level, message)))
+    processor = gui_processor(on_log=lambda level, message: logs.append((level, message)))
 
     _start(processor, tmp_path)
     processor.join(timeout=5.0)

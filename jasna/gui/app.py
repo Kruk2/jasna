@@ -13,7 +13,7 @@ import webbrowser
 from tkinterdnd2 import TkinterDnD
 
 from jasna import __version__
-from jasna import os_utils, startup_timing, system_requirements, update_check
+from jasna import license_status, os_utils, startup_timing, system_requirements, update_check
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui.branding import (
     HEADER_LOGO_SIZE,
@@ -81,7 +81,7 @@ def _warm_up_cuda() -> tuple[AcceleratorVendor, bool, bool]:
 class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     """Main application window for Jasna GUI."""
     
-    def __init__(self, skip_wizard: bool = False):
+    def __init__(self):
         super().__init__()
         self._main_thread = MainThreadCalls(self, 50)
         font_status = inspect_font_backend(self)
@@ -119,6 +119,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._processing_start_time: float = 0.0
         self._preview_gpu_owners: set[object] = set()
         self._video_player_dialog = None
+        self._segment_editor = None
         self._closing_after_player = False
         self._queue_restored = False
         self._preset_manager = PresetManager()
@@ -145,11 +146,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.after_idle(self._warn_if_installed_on_hard_disk)
         self.after_idle(self._warn_if_older_version_files_left)
         self.after_idle(self._start_update_check)
-        self.after_idle(activation_worker.start_pc_license_refresh)
+        self.after_idle(license_status.start_pc_license_refresh)
 
-        if not skip_wizard:
-            if self._preset_manager.get_system_check_passed_version() != __version__:
-                self.after(100, self._show_wizard)
+        if self._preset_manager.get_system_check_passed_version() != __version__:
+            self.after(100, self._show_wizard)
             
     def _size_and_center(self):
         self.update_idletasks()
@@ -379,12 +379,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             stretch="always",
         )
         
-        self._queue_panel.set_segment_editor_context(
-            self._settings_panel.get_settings,
-            lambda: self._processor is not None and self._processor.is_running(),
-            self._set_preview_gpu_busy,
-            self._settings_panel.ltx_unavailable_reason,
-        )
+        self._queue_panel.set_on_edit_segments(self._edit_segments)
         self._queue_panel.set_initial_output(
             self._preset_manager.get_last_output_folder(),
             self._preset_manager.get_last_output_pattern(),
@@ -534,7 +529,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._closing_after_player = True
             self._video_player_dialog.request_close()
             return
-        if not self._queue_panel.close_segment_editor():
+        if not self._close_segment_editor():
             return
         try:
             if self._processor:
@@ -731,6 +726,47 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._set_preview_gpu_busy(VideoPlayerDialog, False)
             raise
 
+    def _edit_segments(self, job) -> None:
+        if self._segment_editor is not None and self._segment_editor.winfo_exists():
+            self._segment_editor.lift()
+            self._segment_editor.focus_force()
+            return
+        self._segment_editor = None
+        try:
+            from jasna.gui.segment_editor import SegmentEditor
+
+            self._segment_editor = SegmentEditor(
+                self,
+                job,
+                self._settings_panel.get_settings,
+                lambda: self._processor is not None and self._processor.is_running(),
+                self._set_preview_gpu_busy,
+                self._settings_panel.ltx_unavailable_reason(),
+                lambda segments: self._queue_panel.on_segments_saved(job, segments),
+                self._segment_editor_closed,
+            )
+        except Exception as exc:
+            from tkinter import messagebox
+
+            self._segment_editor = None
+            logger.warning("Failed to open segment editor", exc_info=True)
+            messagebox.showerror(t("segments_title"), str(exc), parent=self)
+
+    def _segment_editor_closed(self) -> None:
+        self._segment_editor = None
+
+    def _close_segment_editor(self) -> bool:
+        """Closes the open segment editor the way its own Close does and waits for its GPU
+        workers to stop; False when the user keeps the editor open."""
+        editor = self._segment_editor
+        if editor is None:
+            return True
+        editor.request_close()
+        if self._segment_editor is not None:
+            return False
+        editor.join_workers(timeout=10.0)
+        return True
+
     def _video_player_closed(self):
         from jasna.gui.video_player import VideoPlayerDialog
 
@@ -850,7 +886,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             from jasna.gui.engine_preflight import first_run_warning, run_engine_preflight
 
             preflight = run_engine_preflight(settings)
-            if preflight.should_warn_first_run_slow:
+            if preflight.missing:
                 from tkinter import messagebox
 
                 msg = first_run_warning([requirement.key for requirement in preflight.missing])
@@ -884,9 +920,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
         self._processing_start_time = time.time()
         self._job_start_times.clear()
-        jobs_ref = self._queue_panel.get_jobs_ref()
         self._processor.start(
-            jobs_ref,
+            self._queue_panel.job_queue,
             settings,
             output_folder,
             output_pattern,

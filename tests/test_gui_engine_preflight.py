@@ -42,7 +42,6 @@ def test_preflight_detects_missing_engines() -> None:
     keys = {r.key for r in res.requirements}
     assert "rfdetr" in keys
     assert "basicvsrpp" in keys
-    assert res.should_warn_first_run_slow
     assert {r.key for r in res.missing} == {"rfdetr", "basicvsrpp"}
 
 
@@ -54,7 +53,6 @@ def test_preflight_no_warning_when_all_expected_engines_exist() -> None:
             _touch(p)
 
     res = run_engine_preflight(settings)
-    assert not res.should_warn_first_run_slow
     assert res.missing == ()
 
 
@@ -79,7 +77,7 @@ def test_preflight_basicvsrpp_missing_then_found() -> None:
 
     basic_req = next(r for r in res.requirements if r.key == "basicvsrpp")
     assert not basic_req.exists
-    assert len(basic_req.missing_paths) == 6
+    assert len(basic_req.paths) == 6
 
     for p in basic_req.paths:
         _touch(p)
@@ -87,7 +85,6 @@ def test_preflight_basicvsrpp_missing_then_found() -> None:
     res2 = run_engine_preflight(settings)
     basic_req2 = next(r for r in res2.requirements if r.key == "basicvsrpp")
     assert basic_req2.exists
-    assert len(basic_req2.missing_paths) == 0
 
 
 def test_preflight_unet4x_encrypted_engine_satisfies(monkeypatch) -> None:
@@ -136,7 +133,6 @@ def test_amd_preflight_has_no_engine_requirements(monkeypatch, secondary) -> Non
 
     assert result.requirements == ()
     assert result.missing == ()
-    assert result.should_warn_first_run_slow is False
 
 
 def test_ltx_preflight_skips_standard_model_engines() -> None:
