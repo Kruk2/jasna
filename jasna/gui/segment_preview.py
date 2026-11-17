@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from contextlib import ExitStack
 from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
@@ -11,7 +12,7 @@ import av
 from PIL import Image
 
 from jasna.gui.queues import CommandWorker, Stop
-from jasna.media.container_utils import demux_video
+from jasna.media.container_utils import demux_video, idle_decoder_threads
 from jasna.media.probe import VideoMetadata, get_video_meta_data, resolve_video_start_pts
 from jasna.media.splice import KeyframeIndex, probe_keyframes
 from jasna.vr180 import VrModeResolution, resolve_vr_mode
@@ -129,8 +130,9 @@ class SegmentPreviewWorker(CommandWorker):
                 name=f"segment-keyframes-{self.path.name}",
                 daemon=True,
             ).start()
-            with av.open(str(self.path), metadata_errors="replace") as container:
+            with av.open(str(self.path), metadata_errors="replace") as container, ExitStack() as before_close:
                 stream = container.streams.video[0]
+                before_close.callback(idle_decoder_threads, stream.codec_context)
                 start_pts = resolve_video_start_pts(stream.start_time, metadata.start_pts)
                 if not stream.codec_context.is_hwaccel:
                     stream.codec_context.thread_type = "AUTO"

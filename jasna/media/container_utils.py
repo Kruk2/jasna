@@ -76,3 +76,11 @@ def demux_video(container, stream):
         if restamp:
             packet.pts = packet.dts
         yield packet
+
+
+def idle_decoder_threads(codec_context: av.CodecContext) -> None:
+    """Let the decoder's worker threads finish before its context is freed. PyAV frees a context
+    while holding the GIL; with FFmpeg logging on (``log_ffmpeg_errors``) a worker that logs at
+    that moment waits for the GIL, and the free waits for the worker."""
+    if codec_context.is_open:
+        codec_context.flush_buffers()

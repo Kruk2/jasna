@@ -18,7 +18,7 @@ from jasna.accelerator import (
     stream_context,
     vendor_for_device,
 )
-from jasna.media.container_utils import demux_video
+from jasna.media.container_utils import demux_video, idle_decoder_threads
 from jasna.media.probe import VideoMetadata, resolve_video_start_pts
 from jasna.media.cuda_kernel import create_stream, destroy_stream
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
@@ -555,6 +555,7 @@ class VideoReader:
             source.close()
             return
         self._close_prefetcher()
+        idle_decoder_threads(self.video_stream.codec_context)
         self.container.close()
         self._decoder_ctx = None
         if self._raw_stream is None:
