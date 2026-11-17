@@ -211,7 +211,7 @@ def controlled_activation_workers(monkeypatch):
 
 
 def test_dialog_locks_input_while_activating(tk_root, controlled_activation_workers):
-    from jasna.gui.components import LicenseDialog
+    from jasna.gui.license_dialog import LicenseDialog
     from jasna.gui.locales import t
     from jasna.protection.activation import ActivationServiceError
 
@@ -236,10 +236,10 @@ def test_dialog_locks_input_while_activating(tk_root, controlled_activation_work
 
 @pytest.mark.parametrize("stage", ["info", "activation", "devices"])
 def test_dialog_ignores_worker_result_after_close(tk_root, controlled_activation_workers, caplog, stage):
-    from jasna.gui.components import LicenseDialog
+    from jasna.gui.license_dialog import LicenseDialog
     from jasna.protection import lease
 
-    caplog.set_level("DEBUG", logger="jasna.gui.components")
+    caplog.set_level("DEBUG", logger="jasna.gui.license_dialog")
     pending = controlled_activation_workers
     activated = Mock()
     dialog = LicenseDialog(tk_root, on_activated=activated)
@@ -263,7 +263,7 @@ def test_dialog_ignores_worker_result_after_close(tk_root, controlled_activation
 @pytest.mark.parametrize(("online_reason", "messages"), ACTIVATION_MESSAGES)
 def test_lease_dialog_activates_with_the_license_code_only(tk_root, lease_api, settle_activation, monkeypatch, online_reason,
                                                            messages):
-    from jasna.gui.components import LicenseDialog
+    from jasna.gui.license_dialog import LicenseDialog
     from jasna.gui.locales import t
     from jasna.protection import lease
 
@@ -320,7 +320,7 @@ def test_cli_license_code_environment_variable_activates_only_a_pc_without_activ
 
 
 def test_lease_dialog_activates_online_when_chosen_and_explains_an_offline_pc(tk_root, lease_api, settle_activation):
-    from jasna.gui.components import LicenseDialog
+    from jasna.gui.license_dialog import LicenseDialog
     from jasna.gui.locales import t
     from jasna.protection import lease
 
@@ -339,7 +339,7 @@ def test_lease_dialog_activates_online_when_chosen_and_explains_an_offline_pc(tk
 @pytest.mark.parametrize(("code", "message"), [("network_error", "license_lease_network_error"),
                                                 ("license_not_found", "license_service_license_not_found")])
 def test_lease_dialog_explains_a_failed_activation(tk_root, lease_api, settle_activation, code, message):
-    from jasna.gui.components import LicenseDialog
+    from jasna.gui.license_dialog import LicenseDialog
     from jasna.gui.locales import t
     from jasna.protection.activation import ActivationServiceError
 
@@ -356,7 +356,7 @@ def test_lease_dialog_explains_a_failed_activation(tk_root, lease_api, settle_ac
 def test_lease_dialog_names_the_saved_activation_when_reopened(tk_root, saved_activation, settle_activation,
                                                                 grant, token, mode, message):
     from jasna import license_status
-    from jasna.gui.components import LicenseDialog
+    from jasna.gui.license_dialog import LicenseDialog
     from jasna.gui.locales import t
 
     saved_activation(grant=grant, token=token)
@@ -391,7 +391,7 @@ def test_device_list_marks_this_pc_and_says_where_to_report_an_activation_error(
 
 
 def test_device_count_failure_keeps_the_activation_status(tk_root, saved_activation, settle_activation):
-    from jasna.gui.components import LicenseDialog
+    from jasna.gui.license_dialog import LicenseDialog
     from jasna.gui.locales import t
     from jasna.protection.activation import ActivationServiceError
 
@@ -404,7 +404,7 @@ def test_device_count_failure_keeps_the_activation_status(tk_root, saved_activat
 
 
 def test_device_count_waits_on_screen_and_a_new_activation_hides_it(tk_root, controlled_activation_workers):
-    from jasna.gui.components import LicenseDialog
+    from jasna.gui.license_dialog import LicenseDialog
     from jasna.gui.locales import t
     from jasna.protection import lease
 
@@ -526,7 +526,7 @@ def test_cli_windows_warns_about_the_permission_prompt_only_for_offline_activati
 @pytest.mark.parametrize(("mode", "status_key"), [(0, "license_offline_permission"), (1, "license_connecting")])
 def test_windows_dialog_warns_about_the_permission_prompt_only_for_offline_activation(
         tk_root, controlled_activation_workers, monkeypatch, mode, status_key):
-    from jasna.gui.components import LicenseDialog
+    from jasna.gui.license_dialog import LicenseDialog
     from jasna.gui.locales import t
 
     pending = controlled_activation_workers

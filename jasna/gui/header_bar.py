@@ -11,7 +11,6 @@ from jasna.gui import activation_worker
 from jasna.gui.branding import HEADER_LOGO_SIZE, create_header_logo
 from jasna.gui.components import (
     KofiButton,
-    LicenseDialog,
     StatusPill,
     Tooltip,
     UnifansButton,
@@ -20,6 +19,7 @@ from jasna.gui.components import (
     shows_xianyu_seller,
 )
 from jasna.gui.icons import create_icon
+from jasna.gui.license_dialog import LicenseDialog
 from jasna.gui.locales import LANGUAGE_NAMES, get_locale, t
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.settings_sections.widgets import ValueOptionMenu

@@ -22,7 +22,7 @@ def test_wizard_names_the_official_sellers(tk_root, monkeypatch):
 
 
 def test_license_dialog_names_the_official_sellers(tk_root, settle_activation, user_config_dir):
-    from jasna.gui.components import LicenseDialog
+    from jasna.gui.license_dialog import LicenseDialog
 
     dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     settle_activation(dialog)
@@ -52,7 +52,8 @@ def test_wizard_blocks_amd_without_amf_and_links_the_fix(tk_root, monkeypatch):
 
 
 def test_chinese_license_dialog_has_the_xianyu_button_and_stays_modal_after_the_qr(tk_root, settle_activation, gui_language):
-    from jasna.gui.components import LicenseDialog, XianyuButton, XianyuQrDialog
+    from jasna.gui.components import XianyuButton, XianyuQrDialog
+    from jasna.gui.license_dialog import LicenseDialog
 
     gui_language("zh")
     dialog = LicenseDialog(tk_root, on_activated=lambda: None)
@@ -67,7 +68,8 @@ def test_chinese_license_dialog_has_the_xianyu_button_and_stays_modal_after_the_
 
 
 def test_english_license_dialog_has_no_xianyu_button(tk_root, settle_activation, gui_language):
-    from jasna.gui.components import LicenseDialog, XianyuButton
+    from jasna.gui.components import XianyuButton
+    from jasna.gui.license_dialog import LicenseDialog
 
     gui_language("en")
     dialog = LicenseDialog(tk_root, on_activated=lambda: None)

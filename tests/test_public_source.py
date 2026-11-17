@@ -41,7 +41,7 @@ sys.meta_path[:] = [finder for finder in sys.meta_path
 
 def test_public_startup_imports_and_license_status(public_checkout, tmp_path):
     result = run_public(public_checkout, tmp_path, """
-from jasna.gui import components, activation_worker
+from jasna.gui import components, license_dialog, activation_worker
 from jasna import license_status, session_factory, engine_compiler, image_restore
 from jasna.license_api import protection_available
 assert not protection_available()
@@ -122,7 +122,7 @@ def test_public_activation_dialog_stays_disabled(public_checkout, tmp_path):
         pytest.skip("GUI check needs a display")
     result = run_public(public_checkout, tmp_path, """
 import customtkinter as ctk
-from jasna.gui.components import LicenseDialog
+from jasna.gui.license_dialog import LicenseDialog
 from jasna.gui.locales import t
 root = ctk.CTk()
 root.update()
