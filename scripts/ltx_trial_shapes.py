@@ -12,10 +12,9 @@ import struct
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO))
+from jasna.ltx.model_files import LTX_MODELS, VAE_DECODERS, VAE_ENCODERS, bundle_names
 
-from jasna.ltx.model_files import LTX_MODELS, VAE_DECODERS, VAE_ENCODERS, bundle_names  # noqa: E402
+REPO = Path(__file__).resolve().parents[1]
 
 OUTPUT = REPO / "jasna" / "ltx" / "trial_shapes.py"
 

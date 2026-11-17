@@ -20,30 +20,14 @@ _IMAGENET_MEAN = (0.485, 0.456, 0.406)
 _IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
-def TrtRunner(*args, **kwargs):
-    from jasna.trt.trt_runner import TrtRunner as Runner
-
-    return Runner(*args, **kwargs)
-
-
 def compile_rfdetr_engine(
     weights_path: Path,
     device: torch.device,
     *,
     batch_size: int,
-    resolution: int,
     dynamic_batch: bool,
     fp16: bool,
 ) -> Path:
-    if is_amd_device(device):
-        # AMD runs the trained checkpoint through the rfdetr torch model
-        # (RfDetrTorchRunner); there is no ahead-of-time engine to build.
-        return weights_path
-    if not is_nvidia_device(device):
-        raise RuntimeError(
-            f"RF-DETR is not supported on device backend {device.type!r}"
-        )
-
     from jasna.trt import compile_onnx_to_tensorrt_engine
     return compile_onnx_to_tensorrt_engine(
         weights_path,
@@ -57,7 +41,7 @@ def compile_rfdetr_engine(
 
 class RfDetrMosaicDetectionModel:
     DEFAULT_SCORE_THRESHOLD = 0.25
-    DEFAULT_MAX_SELECT = 16
+    MAX_SELECT = 16
 
     def __init__(
         self,
@@ -69,7 +53,6 @@ class RfDetrMosaicDetectionModel:
         dynamic_batch: bool,
         torch_variant: str | None = None,
         score_threshold: float = DEFAULT_SCORE_THRESHOLD,
-        max_select: int = DEFAULT_MAX_SELECT,
         fp16: bool = True,
     ) -> None:
         self.weights_path = weights_path
@@ -78,7 +61,6 @@ class RfDetrMosaicDetectionModel:
         self.resolution = int(resolution)
         self.dynamic_batch = bool(dynamic_batch)
         self.score_threshold = float(score_threshold)
-        self.max_select = int(max_select)
         self._normalization_cache: dict[
             tuple[torch.device, torch.dtype], tuple[torch.Tensor, torch.Tensor]
         ] = {}
@@ -105,17 +87,15 @@ class RfDetrMosaicDetectionModel:
             self.engine_path = self.weights_path
             self._stream = new_stream(self.device)
         elif is_nvidia_device(self.device):
+            from jasna.trt import require_engine_file
+            from jasna.trt.trt_runner import TrtRunner
+
             self.engine_path = get_onnx_tensorrt_engine_path(
                 self.weights_path, batch_size=self.batch_size, fp16=bool(fp16),
                 dynamic_batch=self.dynamic_batch,
             )
-            if not self.engine_path.exists():
-                raise FileNotFoundError(
-                    f"RF-DETR engine not found: {self.engine_path}. "
-                    "Run engine compilation first via ensure_engines_compiled()."
-                )
             self.runner = TrtRunner(
-                self.engine_path,
+                require_engine_file(self.engine_path),
                 input_shapes=[
                     (self.batch_size, 3, self.resolution, self.resolution)
                 ],
@@ -296,7 +276,7 @@ class RfDetrMosaicDetectionModel:
             pred_masks=outs[self.masks_out],
             target_hw=target_hw,
             score_threshold=self.score_threshold,
-            max_select=self.max_select,
+            max_select=self.MAX_SELECT,
         )
         return Detections(
             boxes_xyxy=boxes_list,

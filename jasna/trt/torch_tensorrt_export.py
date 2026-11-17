@@ -7,6 +7,7 @@ import warnings
 import torch
 
 from jasna._frozen import is_frozen
+from jasna.trt import BUILDER_OPTIMIZATION_LEVEL
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,6 @@ def compile_and_save_torchtrt_dynamo(
     workspace_size_bytes: int,
     message: str,
     device: torch.device | None = None,
-    optimization_level: int = 3,
 ) -> str:
     """Compile a module to TensorRT and save the result.
 
@@ -106,7 +106,7 @@ def compile_and_save_torchtrt_dynamo(
             use_fp32_acc=False,
             use_explicit_typing=False,
             sparse_weights=False,
-            optimization_level=int(optimization_level),
+            optimization_level=BUILDER_OPTIMIZATION_LEVEL,
             hardware_compatible=False,
             use_python_runtime=False,
             cache_built_engines=False,

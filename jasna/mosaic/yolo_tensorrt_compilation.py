@@ -36,7 +36,7 @@ def compile_yolo_to_tensorrt_engine(
     if not model_path.exists():
         raise FileNotFoundError(str(model_path))
 
-    engine_path = get_yolo_tensorrt_engine_path(model_path, fp16=bool(fp16))
+    engine_path = get_yolo_tensorrt_engine_path(model_path, batch_size=int(batch), fp16=bool(fp16))
     if engine_path.exists():
         return engine_path
 
@@ -98,13 +98,6 @@ def compile_yolo_to_tensorrt_engine(
     if exported_path.suffix.lower() != ".onnx":
         raise RuntimeError(f"Expected ONNX export, got: {exported_path}")
 
-    out = compile_onnx_to_tensorrt_engine(
-        exported_path, device, batch_size=None, fp16=bool(fp16), workspace_gb=20,
+    return compile_onnx_to_tensorrt_engine(
+        exported_path, device, batch_size=int(batch), fp16=bool(fp16), workspace_gb=20,
     )
-    if out != engine_path:
-        engine_path.parent.mkdir(parents=True, exist_ok=True)
-        out.replace(engine_path)
-
-    if not engine_path.exists():
-        raise FileNotFoundError(str(engine_path))
-    return engine_path

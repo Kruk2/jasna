@@ -29,6 +29,7 @@ def _make_restorer(num_workers: int = 1):
         tvai_args=TVAI_ARGS,
         scale=1,
         num_workers=num_workers,
+        tvai_denoise=False,
     )
 
 
@@ -39,27 +40,14 @@ def _make_color_frames(n: int, color: tuple[float, float, float] = (0.5, 0.3, 0.
     return frames
 
 
-class TestTvaiClipSizes:
-    def test_single_frame(self) -> None:
-        restorer = _make_restorer()
-        frames = _make_color_frames(1)
-        result = restorer.restore(frames, keep_start=0, keep_end=1)
+@pytest.mark.parametrize("frame_count", [1, 4, 5])
+def test_every_kept_frame_comes_back(frame_count) -> None:
+    restorer = _make_restorer()
+    try:
+        result = restorer.restore(_make_color_frames(frame_count), keep_start=0, keep_end=frame_count)
+    finally:
         restorer.close()
-        assert len(result) == 1
-
-    def test_4_frames(self) -> None:
-        restorer = _make_restorer()
-        frames = _make_color_frames(4)
-        result = restorer.restore(frames, keep_start=0, keep_end=4)
-        restorer.close()
-        assert len(result) == 4
-
-    def test_5_frames(self) -> None:
-        restorer = _make_restorer()
-        frames = _make_color_frames(5)
-        result = restorer.restore(frames, keep_start=0, keep_end=5)
-        restorer.close()
-        assert len(result) == 5
+    assert len(result) == frame_count
 
 
 class TestTvaiOutputQuality:
@@ -125,17 +113,13 @@ class TestTvaiAsyncApi:
         assert completed[0][0] == seq
         assert len(completed[0][1]) == 5
 
-    def test_push_multiple_flush_pending_pop(self) -> None:
+    def test_push_multiple_flush_pending_then_all_pop(self) -> None:
         restorer = _make_restorer(num_workers=1)
         s0 = restorer.push_clip(_make_color_frames(10), keep_start=0, keep_end=10)
         s1 = restorer.push_clip(_make_color_frames(10), keep_start=0, keep_end=10)
         restorer.flush_pending()
-        import time
-        time.sleep(2)
+        restorer.flush_all()
         completed = restorer.pop_completed()
-        if len(completed) < 2:
-            restorer.flush_all()
-            completed += restorer.pop_completed()
         restorer.close()
         seqs = [s for s, _ in completed]
         assert s0 in seqs

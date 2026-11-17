@@ -62,7 +62,7 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
 
     from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine, get_yolo_tensorrt_engine_path
 
-    expected = get_yolo_tensorrt_engine_path(pt, fp16=True)
+    expected = get_yolo_tensorrt_engine_path(pt, batch_size=8, fp16=True)
     engine_path = compile_yolo_to_tensorrt_engine(pt, batch=8, fp16=True, imgsz=640, device=torch.device("cuda:0"))
     assert engine_path == expected
     assert engine_path.is_file()
@@ -91,7 +91,7 @@ def test_compile_yolo_to_tensorrt_engine_skips_when_present(monkeypatch, tmp_pat
     monkeypatch.setitem(sys.modules, "ultralytics.utils", ultra_utils)
 
     from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path, compile_yolo_to_tensorrt_engine
-    engine = get_yolo_tensorrt_engine_path(pt, fp16=True)
+    engine = get_yolo_tensorrt_engine_path(pt, batch_size=8, fp16=True)
     _touch(engine)
 
 
@@ -143,12 +143,50 @@ def test_compile_yolo_restores_cuda_visible_devices(monkeypatch, tmp_path: Path)
 
     # Case 2: var had a value before -> must be restored to that value.
     (pt.with_suffix(".onnx")).unlink()
-    jt.get_onnx_tensorrt_engine_path(pt.with_suffix(".onnx"), batch_size=None, fp16=True).unlink()
     from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path
-    get_yolo_tensorrt_engine_path(pt, fp16=True).unlink(missing_ok=True)
+    get_yolo_tensorrt_engine_path(pt, batch_size=8, fp16=True).unlink()
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
     compile_yolo_to_tensorrt_engine(pt, batch=8, fp16=True, imgsz=640, device=torch.device("cuda:0"))
     assert os.environ["CUDA_VISIBLE_DEVICES"] == "0"
+
+
+def test_yolo_engine_built_for_another_batch_size_is_missing(monkeypatch, tmp_path: Path) -> None:
+    # The exported ONNX has a fixed batch, so an engine built at one batch size cannot run another.
+    pt = tmp_path / "lada_mosaic_detection_model_v4_fast.pt"
+    _touch(pt)
+
+    class _FakeYOLO:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def export(self, **_kwargs):
+            onnx = pt.with_suffix(".onnx")
+            _touch(onnx)
+            return str(onnx)
+
+    ultra = types.ModuleType("ultralytics")
+    ultra.YOLO = _FakeYOLO  # type: ignore[attr-defined]
+    ultra_utils = types.ModuleType("ultralytics.utils")
+    ultra_utils.LOGGER = logging.getLogger("ultralytics")
+    monkeypatch.setitem(sys.modules, "ultralytics", ultra)
+    monkeypatch.setitem(sys.modules, "ultralytics.utils", ultra_utils)
+
+    import jasna.trt as jt
+
+    def _fake_compile(onnx_path, device, *, batch_size=None, fp16=True, **_kwargs):
+        engine = jt.get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=fp16)
+        _touch(engine)
+        return engine
+
+    monkeypatch.setattr(jt, "compile_onnx_to_tensorrt_engine", _fake_compile)
+
+    from jasna.engine_compiler import _detection_engine_exists
+    from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine
+
+    compile_yolo_to_tensorrt_engine(pt, batch=4, fp16=True, imgsz=640, device=torch.device("cuda:0"))
+
+    assert _detection_engine_exists("lada-yolo-v4", str(pt), 4, True, "cuda:0") is True
+    assert _detection_engine_exists("lada-yolo-v4", str(pt), 8, True, "cuda:0") is False
 
 
 def test_compile_yolo_exports_onnx_without_onnxruntime(monkeypatch, tmp_path: Path) -> None:

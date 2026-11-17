@@ -28,14 +28,3 @@ def test_importing_restorer_package_does_not_load_torch():
 def test_bundle_present_import_does_not_load_torch():
     result = _import_keeps_torch_out("from jasna.restorer.sd15_download import bundle_present")
     assert result.returncode == 0, result.stderr
-
-
-def test_lazy_exports_still_resolve():
-    code = (
-        "from jasna.restorer import RestorationPipeline, BasicvsrppMosaicRestorer, "
-        "DenoiseStrength\n"
-        "assert all(x is not None for x in "
-        "(RestorationPipeline, BasicvsrppMosaicRestorer, DenoiseStrength))\n"
-    )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr

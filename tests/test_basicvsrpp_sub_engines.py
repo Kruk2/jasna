@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -11,10 +9,11 @@ import torch.nn as nn
 from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
 from jasna.restorer.basicvsrpp_sub_engines import (
     EAGER_UPSAMPLE_BATCH,
+    PREPROCESS_MIN_BATCH,
     UPSAMPLE_BATCH,
     BasicVSRPlusPlusNetSplit,
     _SPyNetWrapper,
-    _get_inference_generator,
+    _loop_body_cudagraphs_enabled,
     create_eager_split_forward,
     load_sub_engines,
 )
@@ -55,43 +54,14 @@ def test_load_sub_engines_returns_none_when_missing(tmp_path: Path) -> None:
     assert result is None
 
 
-def test_create_split_forward_cudagraphs_env_gates_warmup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from jasna.restorer import basicvsrpp_sub_engines as mod
+@pytest.mark.parametrize(("value", "enabled"), [(None, True), ("1", True), ("0", False)], ids=["unset", "on", "off"])
+def test_loop_body_cuda_graphs_are_on_unless_the_env_turns_them_off(monkeypatch, value, enabled) -> None:
+    if value is None:
+        monkeypatch.delenv("JASNA_TRT_CUDAGRAPHS", raising=False)
+    else:
+        monkeypatch.setenv("JASNA_TRT_CUDAGRAPHS", value)
 
-    model_path = str(tmp_path / "model.pth")
-    _make_engine_files(model_path)
-    monkeypatch.setattr(
-        mod, "load_torchtrt_export",
-        lambda *, checkpoint_path, device: MagicMock(),
-    )
-    warmups: list[int] = []
-    monkeypatch.setattr(
-        mod, "_warmup_capture_loop_body_graphs",
-        lambda *a, **k: warmups.append(1),
-    )
-    generator = MagicMock(mid_channels=16)
-    model = MagicMock(generator_ema=generator)
-
-    monkeypatch.setenv("JASNA_TRT_CUDAGRAPHS", "0")
-    split = mod.create_split_forward(model, model_path, torch.device("cpu"), fp16=True)
-    assert split is not None
-    assert not warmups
-    assert split._loop_body_cudagraphs is False
-
-    monkeypatch.delenv("JASNA_TRT_CUDAGRAPHS", raising=False)
-    split = mod.create_split_forward(model, model_path, torch.device("cpu"), fp16=True)
-    assert split is not None
-    assert warmups == [1]
-    assert split._loop_body_cudagraphs is True
-    assert split._upsample_batch == UPSAMPLE_BATCH
-
-
-def test_inference_uses_the_ema_generator_when_there_is_one() -> None:
-    ema, generator = nn.Identity(), nn.Linear(1, 1)
-    assert _get_inference_generator(SimpleNamespace(generator_ema=ema, generator=generator)) is ema
-    assert _get_inference_generator(SimpleNamespace(generator_ema=None, generator=generator)) is generator
+    assert _loop_body_cudagraphs_enabled() is enabled
 
 
 def test_spynet_wrapper_matches_original() -> None:
@@ -116,7 +86,7 @@ def test_spynet_wrapper_matches_original() -> None:
 
 
 def _build_split_from_net(net):
-    return create_eager_split_forward(MagicMock(generator_ema=net))
+    return create_eager_split_forward(net)
 
 
 def _split(*, preprocess: nn.Module | None = None, upsample: nn.Module | None = None) -> BasicVSRPlusPlusNetSplit:
@@ -200,7 +170,7 @@ def test_preprocess_runs_in_overlapping_batches() -> None:
     feats, flows_fwd, flows_bwd = split._preprocess(lqs_flat)
 
     assert [start for start, _ in calls] == [0, PREPROCESS_BATCH - 1, t - 3]
-    assert all(size >= split._PREPROCESS_MIN_BATCH for _, size in calls)
+    assert all(size >= PREPROCESS_MIN_BATCH for _, size in calls)
     assert torch.equal(feats.flatten(), torch.arange(t, dtype=torch.float32))
     assert torch.equal(flows_fwd.flatten(), torch.arange(t - 1, dtype=torch.float32))
     assert torch.equal(flows_bwd, flows_fwd)
@@ -213,7 +183,7 @@ def test_eager_split_forward_never_touches_torch_tensorrt(monkeypatch: pytest.Mo
     monkeypatch.setitem(sys.modules, "torch_tensorrt", None)
     monkeypatch.delenv("JASNA_TRT_CUDAGRAPHS", raising=False)
     net = BasicVSRPlusPlusNet(mid_channels=16, num_blocks=2, spynet_pretrained=None).eval()
-    split = create_eager_split_forward(MagicMock(generator_ema=net))
+    split = create_eager_split_forward(net)
 
     with torch.inference_mode():
         out = split(torch.randn(1, 4, 3, 256, 256))

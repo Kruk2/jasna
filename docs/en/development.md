@@ -267,7 +267,9 @@ latents no further from `fp32`. The third line then prints the entry's
 its fastest launch; keep it if `shipped` gets faster without moving further
 from `fp32`. Both need only `model_weights/ltx-restore/vae.safetensors`.
 
-`scripts/bench_memory.py` is the RAM/VRAM sampler the others share.
+`scripts/bench_common.py` holds what the benchmark scripts share: the RAM/VRAM
+sampler (VRAM through `nvidia-smi`, so AMD runs report 0), frame counts, GPU
+kernel timing and the measured commit.
 
 ## LTX native block
 

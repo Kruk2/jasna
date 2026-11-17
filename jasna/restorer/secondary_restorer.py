@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-import numpy as np
 import torch
 
 
@@ -37,8 +36,8 @@ class AsyncSecondaryRestorer(Protocol):
         """Push a clip for async processing. Returns a sequence number."""
         ...
 
-    def pop_completed(self) -> list[tuple[int, list[np.ndarray]]]:
-        """Return list of (seq, frames_hwc_uint8) for completed clips."""
+    def pop_completed(self) -> list[tuple[int, torch.Tensor]]:
+        """Return (seq, (T, C, H, W) uint8 CPU tensor) for completed clips."""
         ...
 
     @property
@@ -59,8 +58,4 @@ class AsyncSecondaryRestorer(Protocol):
         ...
 
     def close(self) -> None:
-        ...
-
-    @staticmethod
-    def _to_tensors(frames_np: list[np.ndarray]) -> torch.Tensor:
         ...

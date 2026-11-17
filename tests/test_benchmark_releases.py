@@ -1,12 +1,8 @@
 import argparse
-import os
 import sys
 from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-
 from benchmark_releases import (
     Target,
     build_command,
@@ -17,7 +13,6 @@ from benchmark_releases import (
     safe_name,
     targets_for_repeat,
 )
-from bench_memory import MemorySampler
 
 
 def test_parse_target_spec_resolves_path(tmp_path: Path) -> None:
@@ -93,16 +88,6 @@ def test_remove_output_artifacts_removes_only_known_files(tmp_path: Path) -> Non
 
     assert all(not path.exists() for path in artifacts)
     assert unrelated.exists()
-
-
-def test_memory_sampler_reads_ram_cross_platform() -> None:
-    sampler = MemorySampler.__new__(MemorySampler)
-    sampler.pid = os.getpid()
-    sampler._ram_mb = []
-
-    sampler._sample_ram()
-
-    assert sampler._ram_mb[0] > 0
 
 
 def test_run_once_times_out_and_removes_partial_output(tmp_path: Path) -> None:

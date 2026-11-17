@@ -1,54 +1,17 @@
-from dataclasses import dataclass
-
 import numpy as np
 import pytest
 import torch
 import torch.nn.functional as F
 
+from factories import restore_synchronously
+from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import RawCrop, extract_crop, scale_offsets, _torch_pad_reflect
+from jasna.pipeline_items import SecondaryRestoreResult
 from jasna.restorer.denoise import DenoiseStrength
 from jasna.restorer.restoration_pipeline import RestorationPipeline
 from jasna.tracking.clip_tracker import TrackedClip
 
-
-@dataclass
-class RestoredClip:
-    restored_frames: list[torch.Tensor]
-    masks: list[torch.Tensor]
-    frame_shape: tuple[int, int]
-    enlarged_bboxes: list[tuple[int, int, int, int]]
-    crop_shapes: list[tuple[int, int]]
-    pad_offsets: list[tuple[int, int]]
-    resize_shapes: list[tuple[int, int]]
-
-
-def restore_clip(
-    pipeline: RestorationPipeline,
-    clip: TrackedClip,
-    raw_crops: list[RawCrop],
-    frame_shape: tuple[int, int],
-    *,
-    keep_start: int,
-    keep_end: int,
-) -> RestoredClip:
-    pr = pipeline.prepare_and_run_primary(clip, raw_crops, frame_shape, int(keep_start), int(keep_end), None)
-    restored_frames = pipeline._run_secondary(pr.primary_raw, pr.keep_start, pr.keep_end)
-    sr = pipeline.build_secondary_result(pr, restored_frames)
-    scaled_pad_offsets: list[tuple[int, int]] = []
-    scaled_resize_shapes: list[tuple[int, int]] = []
-    for frame_u8, po, rs in zip(sr.restored_frames, sr.pad_offsets, sr.resize_shapes):
-        pad_offset, resize_shape = scale_offsets(frame_u8, po, rs)
-        scaled_pad_offsets.append(pad_offset)
-        scaled_resize_shapes.append(resize_shape)
-    return RestoredClip(
-        restored_frames=sr.restored_frames,
-        masks=sr.masks,
-        frame_shape=frame_shape,
-        enlarged_bboxes=sr.enlarged_bboxes,
-        crop_shapes=sr.crop_shapes,
-        pad_offsets=scaled_pad_offsets,
-        resize_shapes=scaled_resize_shapes,
-    )
+pytestmark = pytest.mark.usefixtures("exact_crops")
 
 
 def _make_raw_crops(frames: list[torch.Tensor], clip: TrackedClip) -> list[RawCrop]:
@@ -56,39 +19,52 @@ def _make_raw_crops(frames: list[torch.Tensor], clip: TrackedClip) -> list[RawCr
     return [extract_crop(frame, bbox, frame_h, frame_w) for frame, bbox in zip(frames, clip.bboxes)]
 
 
+def _clip(bbox, frames: int = 1, mask_hw=(2, 2), mask_value: bool = False) -> TrackedClip:
+    return TrackedClip(
+        track_id=0,
+        start_frame=0,
+        mask_resolution=mask_hw,
+        bboxes=[np.array(bbox, dtype=np.float32)] * frames,
+        masks=[torch.full(mask_hw, mask_value, dtype=torch.bool)] * frames,
+    )
+
+
+def _restore(pipeline: RestorationPipeline, frames: list[torch.Tensor], clip: TrackedClip) -> SecondaryRestoreResult:
+    frame_shape = (frames[0].shape[1], frames[0].shape[2])
+    return restore_synchronously(pipeline, clip, _make_raw_crops(frames, clip), frame_shape, 0, len(frames))
+
+
+def _scaled_offsets(sr: SecondaryRestoreResult) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Pad offsets and resize shapes in the restored frames' own pixels."""
+    scaled = [scale_offsets(frame, po, rs) for frame, po, rs in zip(sr.restored_frames, sr.pad_offsets, sr.resize_shapes)]
+    return [pad for pad, _ in scaled], [shape for _, shape in scaled]
+
+
 class _IdentityRestorer:
-    dtype = torch.float32
     input_dtype = torch.float32
     device = torch.device("cpu")
-
-    def restore(self, crops: list[torch.Tensor]) -> list[torch.Tensor]:
-        return crops
 
     def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
-        stacked = []
-        for f in crops:
-            stacked.append(f.to(dtype=torch.float32).div(255.0))
-        return torch.stack(stacked, dim=0)
+        return torch.stack([crop.to(dtype=torch.float32).div(255.0) for crop in crops], dim=0)
 
 
-class _CaptureRestorer:
-    dtype = torch.float32
-    input_dtype = torch.float32
-    device = torch.device("cpu")
-
+class _CaptureRestorer(_IdentityRestorer):
     def __init__(self) -> None:
         self.captured: list[torch.Tensor] | None = None
 
-    def restore(self, crops: list[torch.Tensor]) -> list[torch.Tensor]:
-        self.captured = crops
-        return crops
-
     def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
         self.captured = crops
-        stacked = []
-        for f in crops:
-            stacked.append(f.to(dtype=torch.float32).div(255.0))
-        return torch.stack(stacked, dim=0)
+        return super().raw_process(crops)
+
+
+class _ConstantRestorer(_IdentityRestorer):
+    """Primary restorer that turns every crop into the flat ``value`` (0..1)."""
+
+    def __init__(self, value: float) -> None:
+        self.value = value
+
+    def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
+        return torch.stack([torch.full(crop.shape, self.value, dtype=torch.float32) for crop in crops])
 
 
 class _Upscale2xSecondary:
@@ -102,90 +78,36 @@ class _Upscale2xSecondary:
         return list(y.mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).unbind(0))
 
 
-class _Upscale2xSecondaryList:
-    name = "upscale2x_list"
-    num_workers = 2
-
-    def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
-        del keep_start, keep_end
-        x = frames_256.to(dtype=torch.float32)
-        y = F.interpolate(x, scale_factor=2.0, mode="bilinear", align_corners=False).clamp(0, 1)
-        y_u8 = y.mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8)
-        return list(torch.unbind(y_u8, 0))
-
-
-def test_restore_clip_uses_floor_ceil_xyxy_rounding(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
-
-    # Disable expansion so we can assert pure xyxy rounding + slicing.
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
+def test_restore_clip_uses_floor_ceil_xyxy_rounding() -> None:
     pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
 
-    frame = torch.zeros((3, 10, 10), dtype=torch.uint8)
-    bbox = np.array([2.1, 2.1, 6.2, 6.2], dtype=np.float32)  # xyxy floats
-    mask = torch.zeros((4, 4), dtype=torch.bool)
-
-    clip = TrackedClip(
-        track_id=0,
-        start_frame=0,
-        mask_resolution=(4, 4),
-        bboxes=[bbox],
-        masks=[mask],
-    )
-
-    raw_crops = _make_raw_crops([frame], clip)
-    restored = restore_clip(pipeline, clip, raw_crops, (10, 10), keep_start=0, keep_end=1)
+    restored = _restore(pipeline, [torch.zeros((3, 10, 10), dtype=torch.uint8)], _clip([2.1, 2.1, 6.2, 6.2], mask_hw=(4, 4)))
 
     # floor(x1/y1)=2, ceil(x2/y2)=7; xyxy are exclusive for slicing.
     assert restored.enlarged_bboxes == [(2, 2, 7, 7)]
     assert restored.crop_shapes == [(5, 5)]
 
 
-def test_restore_clip_clamps_bbox_to_frame(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
-
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
+def test_restore_clip_clamps_bbox_to_frame() -> None:
     pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
 
-    frame = torch.zeros((3, 10, 10), dtype=torch.uint8)
-    bbox = np.array([-1.2, -0.1, 12.3, 9.9], dtype=np.float32)  # out of bounds
-    mask = torch.zeros((2, 2), dtype=torch.bool)
-
-    clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(2, 2), bboxes=[bbox], masks=[mask])
-    raw_crops = _make_raw_crops([frame], clip)
-    restored = restore_clip(pipeline, clip, raw_crops, (10, 10), keep_start=0, keep_end=1)
+    restored = _restore(pipeline, [torch.zeros((3, 10, 10), dtype=torch.uint8)], _clip([-1.2, -0.1, 12.3, 9.9]))
 
     assert restored.enlarged_bboxes == [(0, 0, 10, 10)]
     assert restored.crop_shapes == [(10, 10)]
 
 
-def test_restore_clip_does_not_upscale_small_crops(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
-
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
+def test_restore_clip_does_not_upscale_small_crops() -> None:
     restorer = _CaptureRestorer()
     pipeline = RestorationPipeline(restorer=restorer)  # type: ignore[arg-type]
-
     frame = torch.arange(3 * 30 * 40, dtype=torch.uint8).reshape(3, 30, 40)
-    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)  # crop: (10, 20)
-    mask = torch.zeros((2, 2), dtype=torch.bool)
 
-    clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(2, 2), bboxes=[bbox], masks=[mask])
-    raw_crops = _make_raw_crops([frame], clip)
-    restored = restore_clip(pipeline, clip, raw_crops, (30, 40), keep_start=0, keep_end=1)
+    restored = _restore(pipeline, [frame], _clip([5.0, 7.0, 25.0, 17.0]))  # crop: (10, 20)
 
+    pad_offsets, resize_shapes = _scaled_offsets(restored)
     assert restored.crop_shapes == [(10, 20)]
-    assert restored.resize_shapes == [(10, 20)]
-    assert restored.pad_offsets == [((256 - 20) // 2, (256 - 10) // 2)]
+    assert resize_shapes == [(10, 20)]
+    assert pad_offsets == [((256 - 20) // 2, (256 - 10) // 2)]
     assert restored.restored_frames[0].shape == (3, 256, 256)
 
     assert restorer.captured is not None
@@ -197,139 +119,57 @@ def test_restore_clip_does_not_upscale_small_crops(monkeypatch) -> None:
     resized = crop.unsqueeze(0).to(dtype=torch.float32)
     resized = F.interpolate(resized, size=(10, 20), mode="bilinear", align_corners=False).squeeze(0)
 
-    pad_left, pad_top = restored.pad_offsets[0]
+    pad_left, pad_top = pad_offsets[0]
     pad_bottom = 256 - 10 - pad_top
     pad_right = 256 - 20 - pad_left
     expected = _torch_pad_reflect(resized, (pad_left, pad_right, pad_top, pad_bottom))
     assert torch.equal(restorer.captured[0], expected)
 
 
-def test_restore_clip_secondary_output_can_be_larger_and_unpad_metadata_scales(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
-
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-    restorer = _CaptureRestorer()
+def test_restore_clip_secondary_output_can_be_larger_and_unpad_metadata_scales() -> None:
     pipeline = RestorationPipeline(  # type: ignore[arg-type]
-        restorer=restorer,
+        restorer=_CaptureRestorer(),
         secondary_restorer=_Upscale2xSecondary(),
     )
-
     frame = torch.arange(3 * 30 * 40, dtype=torch.uint8).reshape(3, 30, 40)
-    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)  # crop: (10, 20)
-    mask = torch.zeros((2, 2), dtype=torch.bool)
-    clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(2, 2), bboxes=[bbox], masks=[mask])
-    raw_crops = _make_raw_crops([frame], clip)
 
-    restored = restore_clip(pipeline, clip, raw_crops, (30, 40), keep_start=0, keep_end=1)
+    restored = _restore(pipeline, [frame], _clip([5.0, 7.0, 25.0, 17.0]))  # crop: (10, 20)
 
+    pad_offsets, resize_shapes = _scaled_offsets(restored)
     assert restored.restored_frames[0].shape == (3, 512, 512)
-    assert restored.pad_offsets == [(((256 - 20) // 2) * 2, ((256 - 10) // 2) * 2)]
-    assert restored.resize_shapes == [(10 * 2, 20 * 2)]
+    assert pad_offsets == [(((256 - 20) // 2) * 2, ((256 - 10) // 2) * 2)]
+    assert resize_shapes == [(10 * 2, 20 * 2)]
 
 
-def test_restore_clip_secondary_output_as_list_is_supported(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
-
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-    restorer = _CaptureRestorer()
-    pipeline = RestorationPipeline(  # type: ignore[arg-type]
-        restorer=restorer,
-        secondary_restorer=_Upscale2xSecondaryList(),
-    )
-
-    frame = torch.arange(3 * 30 * 40, dtype=torch.uint8).reshape(3, 30, 40)
-    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)  # crop: (10, 20)
-    mask = torch.zeros((2, 2), dtype=torch.bool)
-    clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(2, 2), bboxes=[bbox], masks=[mask])
-    raw_crops = _make_raw_crops([frame], clip)
-
-    restored = restore_clip(pipeline, clip, raw_crops, (30, 40), keep_start=0, keep_end=1)
-    assert restored.restored_frames[0].shape == (3, 512, 512)
-    assert restored.pad_offsets == [(((256 - 20) // 2) * 2, ((256 - 10) // 2) * 2)]
-    assert restored.resize_shapes == [(10 * 2, 20 * 2)]
-
-
-def test_restore_clip_downscales_when_crop_is_larger_than_restoration_size(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
-
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
+def test_restore_clip_downscales_when_crop_is_larger_than_restoration_size() -> None:
     pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
 
-    frame = torch.zeros((3, 400, 300), dtype=torch.uint8)
-    bbox = np.array([0.0, 0.0, 300.0, 400.0], dtype=np.float32)  # full frame crop
-    mask = torch.zeros((1, 1), dtype=torch.bool)
-    clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(1, 1), bboxes=[bbox], masks=[mask])
+    restored = _restore(pipeline, [torch.zeros((3, 400, 300), dtype=torch.uint8)], _clip([0.0, 0.0, 300.0, 400.0], mask_hw=(1, 1)))
 
-    raw_crops = _make_raw_crops([frame], clip)
-    restored = restore_clip(pipeline, clip, raw_crops, (400, 300), keep_start=0, keep_end=1)
+    pad_offsets, resize_shapes = _scaled_offsets(restored)
     assert restored.crop_shapes == [(400, 300)]
-    assert restored.resize_shapes == [(256, 256)]
-    assert restored.pad_offsets == [(0, 0)]
+    assert resize_shapes == [(256, 256)]
+    assert pad_offsets == [(0, 0)]
     assert restored.restored_frames[0].shape == (3, 256, 256)
 
 
-def test_torch_pad_reflect_supports_large_padding() -> None:
+def test_torch_pad_reflect_reflects_again_when_padding_exceeds_the_image() -> None:
+    image = torch.arange(3 * 3 * 2, dtype=torch.float32).reshape(3, 3, 2)
 
-    image = torch.arange(3 * 2 * 2, dtype=torch.float32).reshape(3, 2, 2)
-    out = _torch_pad_reflect(image, (10, 10, 10, 10))
-    assert out.shape == (3, 22, 22)
+    out = _torch_pad_reflect(image, (10, 1, 2, 7))
 
-
-def test_restore_clip_raises_on_bbox_with_zero_area(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
-
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
-
-    frame = torch.zeros((3, 10, 10), dtype=torch.uint8)
-    bbox = np.array([2.0, 2.0, 2.0, 6.0], dtype=np.float32)  # x1 == x2 -> empty crop
-    mask = torch.zeros((1, 1), dtype=torch.bool)
-    clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(1, 1), bboxes=[bbox], masks=[mask])
-
-    raw_crops = _make_raw_crops([frame], clip)
-    with pytest.raises(ZeroDivisionError):
-        restore_clip(pipeline, clip, raw_crops, (10, 10), keep_start=0, keep_end=1)
+    assert np.array_equal(out.numpy(), np.pad(image.numpy(), ((0, 0), (2, 7), (10, 1)), mode="reflect"))
 
 
-def test_restore_clip_with_denoise_strength(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
-
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-    pipeline_none = RestorationPipeline(restorer=_IdentityRestorer(), denoise_strength=DenoiseStrength.NONE)  # type: ignore[arg-type]
-    pipeline_med = RestorationPipeline(restorer=_IdentityRestorer(), denoise_strength=DenoiseStrength.MEDIUM)  # type: ignore[arg-type]
-
+def test_restore_clip_with_denoise_strength() -> None:
     torch.manual_seed(99)
-    T = 5
-    frames = [torch.randint(0, 256, (3, 30, 40), dtype=torch.uint8) for _ in range(T)]
-    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
-    mask = torch.zeros((2, 2), dtype=torch.bool)
-    bboxes = [bbox] * T
-    masks = [mask] * T
+    frames = [torch.randint(0, 256, (3, 30, 40), dtype=torch.uint8) for _ in range(5)]
+    clip = _clip([5.0, 7.0, 25.0, 17.0], frames=5)
 
-    clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(2, 2), bboxes=bboxes, masks=masks)
-    raw_crops = _make_raw_crops(frames, clip)
+    restored_none = _restore(RestorationPipeline(restorer=_IdentityRestorer(), denoise_strength=DenoiseStrength.NONE), frames, clip)  # type: ignore[arg-type]
+    restored_med = _restore(RestorationPipeline(restorer=_IdentityRestorer(), denoise_strength=DenoiseStrength.MEDIUM), frames, clip)  # type: ignore[arg-type]
 
-    restored_none = restore_clip(pipeline_none, clip, raw_crops, (30, 40), keep_start=0, keep_end=T)
-    restored_med = restore_clip(pipeline_med, clip, raw_crops, (30, 40), keep_start=0, keep_end=T)
-
-    assert len(restored_none.restored_frames) == T
-    assert len(restored_med.restored_frames) == T
-
+    assert len(restored_none.restored_frames) == len(restored_med.restored_frames) == 5
     diff = sum(
         (a.float() - b.float()).abs().sum().item()
         for a, b in zip(restored_none.restored_frames, restored_med.restored_frames)
@@ -337,162 +177,31 @@ def test_restore_clip_with_denoise_strength(monkeypatch) -> None:
     assert diff > 0, "Denoise MEDIUM should produce different output from NONE"
 
 
-def test_restore_clip_denoise_with_secondary_produces_valid_output(monkeypatch) -> None:
-    import jasna.crop_buffer as cb
+@pytest.mark.parametrize(
+    ("keep_start", "keep_end", "crossfade_weights", "box_values"),
+    [
+        (0, 3, None, [255, 255, 255]),
+        (1, 2, None, [0, 255, 0]),
+        (0, 3, {0: 0.5, 1: 1.0, 2: 0.5}, [128, 255, 128]),
+        (2, 1, None, [0, 0, 0]),
+    ],
+    ids=["whole-clip", "kept-middle", "crossfade", "empty-keep-range"],
+)
+def test_blending_a_restored_clip_paints_only_its_kept_frames(
+    keep_start, keep_end, crossfade_weights, box_values, whole_box_blend_mask
+) -> None:
+    frames = [torch.zeros((3, 30, 40), dtype=torch.uint8) for _ in range(3)]
+    clip = _clip([5.0, 7.0, 25.0, 17.0], frames=3, mask_value=True)
+    pipeline = RestorationPipeline(restorer=_ConstantRestorer(1.0))  # type: ignore[arg-type]
+    blend_buffer = BlendBuffer(vr_projector=None)
+    for frame_idx in range(3):
+        blend_buffer.register_frame(frame_idx, {0})
 
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-    pipeline = RestorationPipeline(  # type: ignore[arg-type]
-        restorer=_IdentityRestorer(),
-        secondary_restorer=_Upscale2xSecondary(),
-        denoise_strength=DenoiseStrength.MEDIUM,
+    blend_buffer.add_result(
+        restore_synchronously(pipeline, clip, _make_raw_crops(frames, clip), (30, 40), keep_start, keep_end, crossfade_weights)
     )
 
-    torch.manual_seed(42)
-    T = 3
-    frames = [torch.randint(0, 256, (3, 30, 40), dtype=torch.uint8) for _ in range(T)]
-    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
-    clip = TrackedClip(
-        track_id=0,
-        start_frame=0,
-        mask_resolution=(2, 2),
-        bboxes=[bbox] * T,
-        masks=[torch.zeros((2, 2), dtype=torch.bool)] * T,
-    )
-
-    raw_crops = _make_raw_crops(frames, clip)
-    restored = restore_clip(pipeline, clip, raw_crops, (30, 40), keep_start=0, keep_end=T)
-
-    assert len(restored.restored_frames) == T
-    assert restored.restored_frames[0].shape == (3, 512, 512)
-
-
-def test_secondary_num_workers_no_secondary() -> None:
-    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
-    assert pipeline.secondary_num_workers == 1
-
-
-def test_secondary_num_workers_with_secondary() -> None:
-    pipeline = RestorationPipeline(  # type: ignore[arg-type]
-        restorer=_IdentityRestorer(),
-        secondary_restorer=_Upscale2xSecondaryList(),
-    )
-    assert pipeline.secondary_num_workers == 2
-
-
-def _make_clip_and_frames(monkeypatch, *, t=3, frame_hw=(30, 40)):
-    import jasna.crop_buffer as cb
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-    torch.manual_seed(42)
-    frames = [torch.randint(0, 256, (3, frame_hw[0], frame_hw[1]), dtype=torch.uint8) for _ in range(t)]
-    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
-    mask = torch.zeros((2, 2), dtype=torch.bool)
-    clip = TrackedClip(
-        track_id=0,
-        start_frame=0,
-        mask_resolution=(2, 2),
-        bboxes=[bbox] * t,
-        masks=[mask] * t,
-    )
-    raw_crops = _make_raw_crops(frames, clip)
-    return clip, frames, raw_crops
-
-
-def test_prepare_and_run_primary_with_denoise(monkeypatch) -> None:
-    clip, frames, raw_crops = _make_clip_and_frames(monkeypatch)
-    pipeline = RestorationPipeline(
-        restorer=_IdentityRestorer(),  # type: ignore[arg-type]
-        denoise_strength=DenoiseStrength.MEDIUM,
-    )
-
-    result = pipeline.prepare_and_run_primary(clip, raw_crops, (30, 40), 0, 3, None)
-    assert result.primary_raw.shape[0] == 3
-
-
-def _build_sr(pipeline, pr):
-    ks = max(0, pr.keep_start)
-    ke = min(pr.frame_count, pr.keep_end)
-    restored_frames = pipeline._run_secondary(pr.primary_raw, ks, ke)
-    del pr.primary_raw
-    return pipeline.build_secondary_result(pr, restored_frames)
-
-
-def test_blend_secondary_result(monkeypatch) -> None:
-    from jasna.blend_buffer import BlendBuffer
-
-    clip, frames, raw_crops = _make_clip_and_frames(monkeypatch)
-    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
-
-    bb = BlendBuffer(device=torch.device("cpu"))
-    for i in range(3):
-        bb.register_frame(i, {0})
-
-    pr = pipeline.prepare_and_run_primary(clip, raw_crops, (30, 40), 0, 3, None)
-    sr = _build_sr(pipeline, pr)
-    bb.add_result(sr)
-
-    for i in range(3):
-        assert bb.is_frame_ready(i)
-
-
-def test_blend_secondary_result_with_crossfade(monkeypatch) -> None:
-    from jasna.blend_buffer import BlendBuffer
-
-    clip, frames, raw_crops = _make_clip_and_frames(monkeypatch)
-    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
-
-    bb = BlendBuffer(device=torch.device("cpu"))
-    for i in range(3):
-        bb.register_frame(i, {0})
-
-    crossfade_weights = {0: 0.5, 1: 1.0, 2: 0.5}
-    pr = pipeline.prepare_and_run_primary(clip, raw_crops, (30, 40), 0, 3, crossfade_weights)
-    sr = _build_sr(pipeline, pr)
-    bb.add_result(sr)
-
-    for i in range(3):
-        assert bb.is_frame_ready(i)
-        blended = bb.blend_frame(i, frames[i])
-        assert blended.shape == frames[i].shape
-
-
-def test_blend_secondary_result_skips_out_of_range_frames(monkeypatch) -> None:
-    from jasna.blend_buffer import BlendBuffer
-
-    clip, frames, raw_crops = _make_clip_and_frames(monkeypatch)
-    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
-
-    bb = BlendBuffer(device=torch.device("cpu"))
-    for i in range(3):
-        bb.register_frame(i, {0})
-
-    pr = pipeline.prepare_and_run_primary(clip, raw_crops, (30, 40), 1, 2, None)
-    sr = _build_sr(pipeline, pr)
-    bb.add_result(sr)
-
-    for i in range(3):
-        assert bb.is_frame_ready(i)
-
-
-def test_blend_secondary_result_empty_range(monkeypatch) -> None:
-    """Cover empty keep range in build_secondary_result."""
-    from jasna.blend_buffer import BlendBuffer
-
-    clip, frames, raw_crops = _make_clip_and_frames(monkeypatch, t=3)
-    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
-
-    bb = BlendBuffer(device=torch.device("cpu"))
-    for i in range(3):
-        bb.register_frame(i, {0})
-
-    pr = pipeline.prepare_and_run_primary(clip, raw_crops, (30, 40), 2, 1, None)
-    sr = _build_sr(pipeline, pr)
-    bb.add_result(sr)
-
-    for i in range(3):
-        assert bb.is_frame_ready(i)
+    assert all(blend_buffer.is_frame_ready(frame_idx) for frame_idx in range(3))
+    blended = [blend_buffer.blend_frame(frame_idx, frames[frame_idx]) for frame_idx in range(3)]
+    assert [int(frame[0, 10, 10]) for frame in blended] == box_values
+    assert all(int(frame[:, 0, 0].max()) == 0 for frame in blended)

@@ -1,11 +1,5 @@
-import sys
-from pathlib import Path
-
-import torch
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-
 import benchmark_ltx_denoise as bench
+import torch
 
 
 def test_kernels_are_grouped_by_kind():

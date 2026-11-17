@@ -12,12 +12,13 @@ CPU only. Requires ffmpeg 8.x with v360. Run:
 from __future__ import annotations
 
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+from vr_projection import v360_map
 
 IN = 1600            # square hequirect input side
 OUT = 512            # output side
@@ -35,13 +36,6 @@ CASES = [
     dict(name="flat-pitch+30", out_proj="flat", h_fov=60, v_fov=60, yaw=0, pitch=30, roll=0),
     dict(name="fisheye-180", out_proj="fisheye", h_fov=180, v_fov=180, yaw=0, pitch=0, roll=0),
 ]
-
-
-def load_v360_map():
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from scripts.vr_projection import v360_map
-
-    return v360_map
 
 
 def make_coord_input(path: Path) -> None:
@@ -122,7 +116,6 @@ def evaluate(case: dict, work: Path, v360_map) -> dict:
 
 
 def main() -> int:
-    v360_map = load_v360_map()
     with tempfile.TemporaryDirectory() as td:
         work = Path(td)
         rows = [evaluate(c, work, v360_map) for c in CASES]

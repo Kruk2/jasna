@@ -136,26 +136,17 @@ class Unet4xSecondaryRestorer:
         self._infer()
 
     def _load_trt_runner(self) -> None:
+        from jasna.trt import require_engine_file
         from jasna.trt.trt_runner import TrtRunner
 
         if use_plaintext_unet4x():
-            self.engine_path = get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=self.fp16)
-            if not self.engine_path.exists():
-                raise FileNotFoundError(
-                    f"Unet4x engine not found: {self.engine_path}. "
-                    "Run engine compilation first via ensure_engines_compiled()."
-                )
+            self.engine_path = require_engine_file(get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=self.fp16))
             self.runner = TrtRunner(
                 self.engine_path, input_shapes=UNET4X_INPUT_SHAPES, device=self.device,
             )
         else:
             require_protection()
-            self.engine_path = get_unet4x_encrypted_engine_path(fp16=self.fp16)
-            if not self.engine_path.exists():
-                raise FileNotFoundError(
-                    f"Unet4x engine not found: {self.engine_path}. "
-                    "Run engine compilation first via ensure_engines_compiled()."
-                )
+            self.engine_path = require_engine_file(get_unet4x_encrypted_engine_path(fp16=self.fp16))
             from jasna.protection import protected_model
             engine_bytes = decrypt_unet4x_engine(self.engine_path)
             if engine_bytes is None:

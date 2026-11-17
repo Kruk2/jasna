@@ -11,7 +11,7 @@ import torch
 from torch.nn import functional as F
 
 if TYPE_CHECKING:
-    from jasna.ltx.restore import FrameWriter
+    from jasna.ltx.spans import FrameWriter
     from jasna.media.probe import VideoMetadata
 
 Size = tuple[int, int]

@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from jasna.restorer.denoise import spatial_denoise
@@ -21,8 +22,15 @@ def test_spatial_denoise_reduces_noise() -> None:
     assert denoised_mse < noisy_mse
 
 
-def test_spatial_denoise_constant_image_unchanged() -> None:
-    constant = torch.full((2, 3, 16, 16), 0.5)
+DEVICES = [
+    "cpu",
+    pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")),
+]
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_spatial_denoise_constant_image_unchanged(device) -> None:
+    constant = torch.full((2, 3, 16, 16), 0.5, device=device)
     result = spatial_denoise(constant, kernel_size=5, sigma_spatial=2.0, sigma_range=0.10)
     assert torch.allclose(result, constant, atol=1e-6)
 
@@ -40,10 +48,11 @@ def test_spatial_denoise_preserves_edges() -> None:
     assert right > 0.95
 
 
-def test_spatial_denoise_per_frame_independence() -> None:
+@pytest.mark.parametrize("device", DEVICES)
+def test_spatial_denoise_per_frame_independence(device) -> None:
     torch.manual_seed(0)
-    frame_a = torch.rand(1, 3, 16, 16)
-    frame_b = torch.rand(1, 3, 16, 16)
+    frame_a = torch.rand(1, 3, 16, 16, device=device)
+    frame_b = torch.rand(1, 3, 16, 16, device=device)
 
     single_a = spatial_denoise(frame_a, kernel_size=5, sigma_spatial=2.0, sigma_range=0.10)
     batched = spatial_denoise(torch.cat([frame_a, frame_b], dim=0), kernel_size=5, sigma_spatial=2.0, sigma_range=0.10)

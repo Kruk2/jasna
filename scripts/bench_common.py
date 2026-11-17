@@ -1,14 +1,60 @@
-"""Sample RSS and VRAM (median/peak) of one child process while it runs."""
+"""Helpers shared by the benchmark scripts: child-process memory sampling, frame counts,
+GPU kernel timing and the commit a result was measured on."""
 
+import json
 import statistics
 import subprocess
 import threading
-import time
+from pathlib import Path
 
 import psutil
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CLIP_DIR = REPO_ROOT / "assets" / "benchmark"
+FALLBACK_MARKERS = ("falling back", "software decoding")
+"""Log text of a run whose decoder fell back to software."""
+
+
+def git_commit() -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def probe_frames(clip: Path) -> int:
+    out = subprocess.run(
+        [
+            "ffprobe", "-v", "quiet", "-select_streams", "v:0",
+            "-count_packets", "-show_entries", "stream=nb_read_packets",
+            "-of", "json", str(clip),
+        ],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    return int(json.loads(out)["streams"][0]["nb_read_packets"])
+
+
+def milliseconds(fn, repeats: int) -> float:
+    """Median GPU time of ``fn`` over ``repeats`` runs after two warm-up runs."""
+    import torch
+
+    for _ in range(2):
+        fn()
+    torch.cuda.synchronize()
+    times = []
+    for _ in range(repeats):
+        start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+        start.record()
+        fn()
+        end.record()
+        end.synchronize()
+        times.append(start.elapsed_time(end))
+    return statistics.median(times)
+
 
 class MemorySampler:
+    """RSS and VRAM (median/peak) of one child process while it runs. VRAM comes from
+    nvidia-smi, so AMD runs report 0."""
+
     def __init__(self, pid: int, interval_seconds: float = 0.5) -> None:
         self.pid = pid
         self.interval_seconds = interval_seconds

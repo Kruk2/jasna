@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from scripts.rfdetr_sample_viewer import collect_images
+from rfdetr_sample_viewer import collect_images
 
 
 def test_collect_images_filters_mask_files_and_extensions(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -83,8 +84,9 @@ def test_torch_restorer_empty_ranges(torch_restorer, frames, start, end):
     assert torch_restorer.restore(torch.empty(frames, 3, 256, 256), keep_start=start, keep_end=end) == []
 
 
-@pytest.fixture
-def restorer(tmp_path: Path, plaintext_model):
+@contextmanager
+def _fake_engine_restorer(tmp_path: Path, engine_dtype: torch.dtype):
+    """A TensorRT-path restorer whose engine takes ``engine_dtype`` inputs and returns random frames."""
     pytest.importorskip("tensorrt")
     device = torch.device("cpu")
     fake_engine = tmp_path / "fake_engine.trt"
@@ -93,11 +95,16 @@ def restorer(tmp_path: Path, plaintext_model):
     mock_stream.cuda_stream = 0
     with (
         patch("jasna.restorer.unet4x_secondary_restorer.get_unet4x_engine_path", return_value=fake_engine),
-        patch("jasna.trt.trt_runner.TrtRunner", return_value=_make_fake_runner(device, torch.float32)),
+        patch("jasna.trt.trt_runner.TrtRunner", return_value=_make_fake_runner(device, engine_dtype)),
         patch("torch.cuda.current_stream", return_value=mock_stream),
     ):
-        r = Unet4xSecondaryRestorer(device=device, fp16=False)
-        yield r
+        yield Unet4xSecondaryRestorer(device=device, fp16=False)
+
+
+@pytest.fixture
+def restorer(tmp_path: Path, plaintext_model):
+    with _fake_engine_restorer(tmp_path, torch.float32) as fake_engine_restorer:
+        yield fake_engine_restorer
 
 
 @pytest.mark.parametrize("frames, keep_start, keep_end, kept, runs", [
@@ -117,24 +124,12 @@ def test_restore_returns_the_kept_frames_upscaled(restorer, frames, keep_start, 
 
 class TestEngineDtypeMismatch:
     def test_buffers_match_half_engine_bindings_when_fp16_off(self, tmp_path: Path, plaintext_model):
-        pytest.importorskip("tensorrt")
-        device = torch.device("cpu")
-        fake_engine = tmp_path / "fake_engine.trt"
-        fake_engine.write_text("x")
-        mock_stream = MagicMock()
-        mock_stream.cuda_stream = 0
-        with (
-            patch("jasna.restorer.unet4x_secondary_restorer.get_unet4x_engine_path", return_value=fake_engine),
-            patch("jasna.trt.trt_runner.TrtRunner", return_value=_make_fake_runner(device, torch.float16)),
-            patch("torch.cuda.current_stream", return_value=mock_stream),
-        ):
-            r = Unet4xSecondaryRestorer(device=device, fp16=False)
+        with _fake_engine_restorer(tmp_path, torch.float16) as r:
+            assert r._g_lr_prev.dtype == torch.float16
+            assert r._g_lr_curr.dtype == torch.float16
+            assert r._g_hr_prev.dtype == torch.float16
 
-        assert r._g_lr_prev.dtype == torch.float16
-        assert r._g_lr_curr.dtype == torch.float16
-        assert r._g_hr_prev.dtype == torch.float16
-
-        frames = torch.rand(2, 3, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE)
-        result = r.restore(frames, keep_start=0, keep_end=2)
+            frames = torch.rand(2, 3, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE)
+            result = r.restore(frames, keep_start=0, keep_end=2)
         assert len(result) == 2
         assert all(f.dtype == torch.uint8 for f in result)

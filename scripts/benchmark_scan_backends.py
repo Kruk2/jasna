@@ -19,10 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from bench_memory import MemorySampler
+from bench_common import DEFAULT_CLIP_DIR, MemorySampler
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CLIP_DIR = REPO_ROOT / "assets" / "benchmark"
 BACKENDS = ("vali", "pyav-hw", "pyav-sw")
 
 RUNNER_SHIM = """

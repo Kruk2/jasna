@@ -1,8 +1,6 @@
 """Tests for jasna.restorer.rtx_superres_secondary_restorer covering init, restore, and close."""
 from __future__ import annotations
 
-import ctypes
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,8 +10,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
-# Install the mock nvvfx module BEFORE importing the rtx module so local
-# ``from nvvfx import VideoSuperRes`` calls resolve correctly.
+from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
+
 
 class _Quality:
     LOW = "low"
@@ -51,19 +49,15 @@ class _MockVideoSuperRes:
         pass
 
 
-_mock_nvvfx = ModuleType("nvvfx")
-_mock_nvvfx.VideoSuperRes = _MockVideoSuperRes
-sys.modules.setdefault("nvvfx", _mock_nvvfx)
-
-from jasna.restorer.rtx_superres_secondary_restorer import (
-    _resolve_quality,
-    _resolve_denoise,
-    _resolve_deblur,
-    RtxSuperresSecondaryRestorer,
-)
+@pytest.fixture
+def fake_nvvfx(monkeypatch):
+    """nvvfx (RTX Video Effects) replaced by a fake for this test only."""
+    module = ModuleType("nvvfx")
+    module.VideoSuperRes = _MockVideoSuperRes
+    monkeypatch.setitem(sys.modules, "nvvfx", module)
 
 
-def _make_restorer(*, scale=4, quality="high", denoise="medium", deblur=None):
+def _make_restorer(*, scale=4, quality="high", denoise="medium", deblur="none"):
     with patch("torch.cuda.current_stream") as mock_stream:
         mock_stream.return_value.cuda_stream = 12345
         return RtxSuperresSecondaryRestorer(
@@ -75,89 +69,54 @@ def _make_restorer(*, scale=4, quality="high", denoise="medium", deblur=None):
         )
 
 
-class TestTensorrtLoadOrder:
-    """nvvfx bundles its own libnvinfer under the same SONAME as the pip tensorrt
-    our BasicVSR++ engines are serialized against, and loads it with RTLD_GLOBAL.
-    The pip runtime must claim the global symbol scope *before* nvvfx loads, so
-    the module preloads it at import and only ever imports nvvfx lazily (inside
-    functions). If that order breaks, BasicVSR++ engine deserialization fails
-    with a TensorRT serialization-version mismatch.
-    """
+TENSORRT_LOAD_ORDER_SCRIPT = """
+import ctypes, importlib.abc, importlib.util, os, sys
+import jasna.frame_generation, jasna.ltx.super_res, jasna.restorer.rtx_superres_secondary_restorer, jasna.upscale.rtx
+from jasna.upscale.nvvfx_effects import import_nvvfx
 
-    def test_import_preloads_tensorrt_without_loading_nvvfx(self):
-        # A fresh process: this file's fake nvvfx module must not be visible.
-        code = (
-            "import ctypes, sys\n"
-            "import jasna.restorer.rtx_superres_secondary_restorer\n"
-            "assert 'nvvfx' not in sys.modules\n"
-            "assert sys.platform == 'win32' or hasattr(ctypes.CDLL(None), 'getInferLibVersion')\n"
-        )
-        subprocess.run([sys.executable, "-c", code], check=True, cwd=Path(__file__).parents[1], timeout=60)
+class FakeNvvfx(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    def find_spec(self, name, path, target=None):
+        return importlib.util.spec_from_loader(name, self) if name == "nvvfx" else None
 
-    def test_preload_loads_tensorrt_libnvinfer_globally(self):
-        import jasna.restorer.rtx_superres_secondary_restorer as mod
-        # Importing the module runs the preload; the pip tensorrt libnvinfer
-        # must then be resolvable in the process-global symbol scope.
-        if sys.platform == "win32":
-            pytest.skip("RTLD_GLOBAL symbol-scope check is POSIX-specific")
-        mod._preload_tensorrt_runtime()
-        get_version = ctypes.CDLL(None).getInferLibVersion
-        get_version.restype = ctypes.c_int
-        import tensorrt_libs
-        libs_dir = os.path.dirname(tensorrt_libs.__file__)
-        expected = ctypes.CDLL(os.path.join(libs_dir, "libnvinfer.so.10")).getInferLibVersion
-        expected.restype = ctypes.c_int
-        assert get_version() == expected()
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        process = ctypes.CDLL(None)
+        module.global_tensorrt = process.getInferLibVersion() if hasattr(process, "getInferLibVersion") else None
+
+imported_by_modules = "nvvfx" in sys.modules
+sys.meta_path.insert(0, FakeNvvfx())
+nvvfx = import_nvvfx()
+import tensorrt_libs
+pip_tensorrt = ctypes.CDLL(os.path.join(os.path.dirname(tensorrt_libs.__file__), "libnvinfer.so.10")).getInferLibVersion()
+print(imported_by_modules, nvvfx.global_tensorrt == pip_tensorrt)
+"""
 
 
-class TestResolveHelpers:
-    def test_resolve_quality(self):
-        from nvvfx import VideoSuperRes
-        assert _resolve_quality("low") == VideoSuperRes.QualityLevel.LOW
-        assert _resolve_quality("HIGH") == VideoSuperRes.QualityLevel.HIGH
-        assert _resolve_quality("Ultra") == VideoSuperRes.QualityLevel.ULTRA
-
-    def test_resolve_quality_invalid(self):
-        with pytest.raises(KeyError):
-            _resolve_quality("invalid")
-
-    def test_resolve_denoise(self):
-        from nvvfx import VideoSuperRes
-        assert _resolve_denoise("low") == VideoSuperRes.QualityLevel.DENOISE_LOW
-        assert _resolve_denoise("MEDIUM") == VideoSuperRes.QualityLevel.DENOISE_MEDIUM
-
-    def test_resolve_denoise_invalid(self):
-        with pytest.raises(KeyError):
-            _resolve_denoise("invalid")
-
-    def test_resolve_deblur(self):
-        from nvvfx import VideoSuperRes
-        assert _resolve_deblur("low") == VideoSuperRes.QualityLevel.DEBLUR_LOW
-        assert _resolve_deblur("HIGH") == VideoSuperRes.QualityLevel.DEBLUR_HIGH
-
-    def test_resolve_deblur_invalid(self):
-        with pytest.raises(KeyError):
-            _resolve_deblur("invalid")
+@pytest.mark.skipif(sys.platform == "win32", reason="RTLD_GLOBAL symbol-scope check is POSIX-specific")
+def test_nvvfx_imports_after_the_pip_tensorrt_runtime_holds_the_global_scope():
+    """nvvfx bundles its own libnvinfer under the same SONAME as the pip tensorrt our BasicVSR++
+    engines are serialized against and loads it with RTLD_GLOBAL; if it loads first, engine
+    deserialization fails with a version mismatch. A fresh process, so no nvvfx is loaded yet."""
+    result = subprocess.run(
+        [sys.executable, "-c", TENSORRT_LOAD_ORDER_SCRIPT],
+        capture_output=True, text=True, check=True, cwd=Path(__file__).parents[1], timeout=60,
+    )
+    assert result.stdout.split("\n")[-2] == "False True"
 
 
+@pytest.mark.usefixtures("fake_nvvfx")
 class TestRtxSuperresRestore:
-    def test_restore_empty_tensor(self):
+    @pytest.mark.parametrize(
+        ("frame_count", "keep_start", "keep_end"),
+        [(0, 0, 0), (5, 3, 3), (5, 4, 2)],
+        ids=["no-frames", "empty-keep-range", "keep-end-before-start"],
+    )
+    def test_restore_returns_nothing_for_an_empty_keep_range(self, frame_count, keep_start, keep_end):
         restorer = _make_restorer()
-        frames = torch.zeros((0, 3, 256, 256), dtype=torch.float32)
-        result = restorer.restore(frames, keep_start=0, keep_end=0)
-        assert result == []
-
-    def test_restore_empty_keep_range(self):
-        restorer = _make_restorer()
-        frames = torch.rand((5, 3, 256, 256), dtype=torch.float32)
-        result = restorer.restore(frames, keep_start=3, keep_end=3)
-        assert result == []
-
-    def test_restore_keep_end_before_start(self):
-        restorer = _make_restorer()
-        frames = torch.rand((5, 3, 256, 256), dtype=torch.float32)
-        result = restorer.restore(frames, keep_start=4, keep_end=2)
-        assert result == []
+        frames = torch.rand((frame_count, 3, 256, 256), dtype=torch.float32)
+        assert restorer.restore(frames, keep_start=keep_start, keep_end=keep_end) == []
 
     def test_restore_rejects_wrong_input_size(self):
         restorer = _make_restorer()

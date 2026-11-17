@@ -14,17 +14,10 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from jasna.models.safetensors_conv import conv_from_weights
+
 SPAN_BLOCKS = 6
 SPAN_RGB_MEAN = (0.4488, 0.4371, 0.4040)
-
-
-def _conv(weights: Mapping[str, torch.Tensor], name: str) -> nn.Conv2d:
-    weight = weights[f"{name}.weight"]
-    out_channels, in_channels, kernel, _ = weight.shape
-    conv = nn.Conv2d(in_channels, out_channels, kernel, padding=kernel // 2, device="meta")
-    conv.weight = nn.Parameter(weight, requires_grad=False)
-    conv.bias = nn.Parameter(weights[f"{name}.bias"], requires_grad=False)
-    return conv
 
 
 class Span(nn.Module):
@@ -34,14 +27,14 @@ class Span(nn.Module):
         super().__init__()
         self.scale = scale
         self.register_buffer("mean", torch.tensor(SPAN_RGB_MEAN).view(1, 3, 1, 1), persistent=False)
-        self.conv_1 = _conv(weights, "conv_1")
+        self.conv_1 = conv_from_weights(weights, "conv_1")
         self.blocks = nn.ModuleList(
-            nn.ModuleList(_conv(weights, f"block_{block}.c{index}") for index in (1, 2, 3))
+            nn.ModuleList(conv_from_weights(weights, f"block_{block}.c{index}") for index in (1, 2, 3))
             for block in range(1, SPAN_BLOCKS + 1)
         )
-        self.conv_2 = _conv(weights, "conv_2")
-        self.conv_cat = _conv(weights, "conv_cat")
-        self.upsampler = _conv(weights, "upsampler")
+        self.conv_2 = conv_from_weights(weights, "conv_2")
+        self.conv_cat = conv_from_weights(weights, "conv_cat")
+        self.upsampler = conv_from_weights(weights, "upsampler")
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         features = self.conv_1((image - self.mean) * 255.0)

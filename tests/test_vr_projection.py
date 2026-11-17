@@ -18,14 +18,25 @@ from jasna.vr_projection import (
     GnomonicProjector,
     build_vr_projector,
 )
-from scripts import vr_projection as vpref
+import vr_projection as vpref
 
 CPU = torch.device("cpu")
 
 
+def _ref_fisheye_box(bbox_uv) -> tuple[float, float, float, float]:
+    """Square fisheye-uv box (u1, u2, v1, v2) around the region's edges, with a 6% margin."""
+    u1, v1, u2, v2 = bbox_uv
+    pu = np.concatenate([np.linspace(u1, u2, 33), np.full(33, u1), np.full(33, u2), np.linspace(u1, u2, 33)])
+    pv = np.concatenate([np.full(33, v1), np.linspace(v1, v2, 33), np.linspace(v1, v2, 33), np.full(33, v2)])
+    fuv, _ = vpref.xyz_to_fisheye_uv(vpref.hequirect_uv_to_xyz(pu, pv), 180, 180)
+    cxx = (fuv[:, 0].min() + fuv[:, 0].max()) / 2
+    cyy = (fuv[:, 1].min() + fuv[:, 1].max()) / 2
+    half = max(np.ptp(fuv[:, 0]), np.ptp(fuv[:, 1])) / 2 * 1.06
+    return cxx - half, cxx + half, cyy - half, cyy + half
+
+
 def _ref_forward_eye_uv(kind: str, bbox_uv, patch: int) -> np.ndarray:
     """scripts/-reference forward (patch->eye) uv map."""
-    u1, v1, u2, v2 = bbox_uv
     tx = (np.arange(patch) + 0.5) / patch
     pyy, pxx = np.meshgrid(tx, tx, indexing="ij")
     if kind == "gnomonic":
@@ -33,13 +44,7 @@ def _ref_forward_eye_uv(kind: str, bbox_uv, patch: int) -> np.ndarray:
         fov = 2 * math.degrees(math.atan(max(xmax, ymax)))
         uv, _ = vpref.v360_map("flat", patch, patch, h_fov=fov, v_fov=fov, yaw=lon0, pitch=lat0)
         return uv
-    pu = np.concatenate([np.linspace(u1, u2, 33), np.full(33, u1), np.full(33, u2), np.linspace(u1, u2, 33)])
-    pv = np.concatenate([np.full(33, v1), np.linspace(v1, v2, 33), np.linspace(v1, v2, 33), np.full(33, v2)])
-    fuv, _ = vpref.xyz_to_fisheye_uv(vpref.hequirect_uv_to_xyz(pu, pv), 180, 180)
-    cxx = (fuv[:, 0].min() + fuv[:, 0].max()) / 2
-    cyy = (fuv[:, 1].min() + fuv[:, 1].max()) / 2
-    half = max(np.ptp(fuv[:, 0]), np.ptp(fuv[:, 1])) / 2 * 1.06
-    f1u, f2u, f1v, f2v = cxx - half, cxx + half, cyy - half, cyy + half
+    f1u, f2u, f1v, f2v = _ref_fisheye_box(bbox_uv)
     fdir = vpref.fisheye_uv_to_xyz(f1u + (f2u - f1u) * pxx, f1v + (f2v - f1v) * pyy)
     uv, _ = vpref.xyz_to_hequirect_uv(fdir)
     return uv
@@ -74,15 +79,7 @@ def test_inverse_grid_matches_numpy_reference(kind: str) -> None:
         fov = 2 * math.degrees(math.atan(max(xmax, ymax)))
         ref, _ = vpref.xyz_to_flat_uv(vpref.rotate_inv(vec_raw, lon0, lat0, 0.0), fov, fov)
     else:
-        pu = np.concatenate([np.linspace(bbox_uv[0], bbox_uv[2], 33), np.full(33, bbox_uv[0]),
-                             np.full(33, bbox_uv[2]), np.linspace(bbox_uv[0], bbox_uv[2], 33)])
-        pv = np.concatenate([np.full(33, bbox_uv[1]), np.linspace(bbox_uv[1], bbox_uv[3], 33),
-                             np.linspace(bbox_uv[1], bbox_uv[3], 33), np.full(33, bbox_uv[3])])
-        fuv, _ = vpref.xyz_to_fisheye_uv(vpref.hequirect_uv_to_xyz(pu, pv), 180, 180)
-        cxx = (fuv[:, 0].min() + fuv[:, 0].max()) / 2
-        cyy = (fuv[:, 1].min() + fuv[:, 1].max()) / 2
-        half = max(np.ptp(fuv[:, 0]), np.ptp(fuv[:, 1])) / 2 * 1.06
-        f1u, f2u, f1v, f2v = cxx - half, cxx + half, cyy - half, cyy + half
+        f1u, f2u, f1v, f2v = _ref_fisheye_box(bbox_uv)
         finv, _ = vpref.xyz_to_fisheye_uv(vec_raw, 180, 180)
         ref = np.stack(((finv[..., 0] - f1u) / (f2u - f1u), (finv[..., 1] - f1v) / (f2v - f1v)), -1)
     assert np.abs(got - ref).max() < 2e-4

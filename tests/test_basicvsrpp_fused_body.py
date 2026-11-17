@@ -1,5 +1,4 @@
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -55,7 +54,7 @@ def test_eager_split_uses_the_fused_body_when_the_kernels_match(amd_gpu, monkeyp
     amd_gpu("gfx1201")
     monkeypatch.setattr(sub_engines, "has_fused_body_kernels", lambda weight: True)
 
-    split = sub_engines.create_eager_split_forward(MagicMock(generator_ema=_net()))
+    split = sub_engines.create_eager_split_forward(_net())
 
     assert all(isinstance(body, FusedPropagateBody) for body in split._loop_body_engines.values())
 

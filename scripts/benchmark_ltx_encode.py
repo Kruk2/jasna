@@ -35,7 +35,6 @@ import datetime
 import functools
 import math
 import statistics
-import subprocess
 import time
 from pathlib import Path
 
@@ -44,14 +43,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from bench_common import REPO_ROOT, git_commit
 from jasna._suppress_noise import install as install_noise_filters
 from jasna.engine_paths import configure_torch_compile_cache
-from jasna.ltx.plan import WINDOW_FRAMES
+from jasna.ltx.camera import WINDOW_FRAMES
 from jasna.models.ltx_vae import load_video_encoder
 from jasna.models.ltx_vae.video_encoder import ENCODER_COMPILE_MODE, CausalConv3d, encode_cropped
 from jasna.tensor_utils import compile_static, half_dtype
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 OPTIONS = ("shipped", "eager", "cl3d", "benchmark", "compile", "fp32", "fp16tail")
 HEAD_OPTIONS = ("fp16head", "kitchen")
 
@@ -108,7 +107,7 @@ def variant_encoder(variant: str, vae: Path, device: torch.device) -> tuple[call
             fn = compile_static(fn, mode=ENCODER_COMPILE_MODE, device=device, dtype=encoder.conv_in.conv.weight.dtype)
     if "benchmark" in options:
         stack.enter_context(torch.backends.cudnn.flags(enabled=True, benchmark=True))
-    # shipped takes the pixels as the encode pass builds them (_vae_pixels), the others in their weights' dtype
+    # shipped takes the pixels as the encode pass builds them (inference.vae_pixels), the others in their weights' dtype
     input_dtype = half_dtype(device) if "shipped" in options else encoder.conv_in.conv.weight.dtype
     input_format = torch.channels_last_3d if "cl3d" in options else torch.contiguous_format
 
@@ -155,12 +154,6 @@ def psnr(a: torch.Tensor, b: torch.Tensor) -> float:
     mse = F.mse_loss(a.float(), b.float()).item()
     peak = (b.float().max() - b.float().min()).item()
     return math.inf if mse == 0 else 10 * math.log10(peak**2 / mse)
-
-
-def git_commit() -> str:
-    return subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
-    ).stdout.strip()
 
 
 def print_profile(fn, pixels: torch.Tensor) -> None:

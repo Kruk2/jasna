@@ -31,13 +31,14 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
+from bench_common import REPO_ROOT, milliseconds
 from benchmark_ltx_encode import clip_pixels, encode, variant_encoder
 from jasna._suppress_noise import install as install_noise_filters
 from jasna.engine_paths import configure_torch_compile_cache
 from jasna.models.ltx_vae import conv_triton, load_video_encoder, video_encoder
 from jasna.models.ltx_vae.video_encoder import ConvLaunch, EncoderHead
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+TIMING_REPEATS = 7
 WINDOW_FRAMES = 121
 GRID = [ConvLaunch(*values) for values in itertools.product((64, 128, 256), (64, 128, 256), (32, 64), (4, 8), (3, 4), (1, 8))]
 """(block voxels, block out, block in, warps, stages, group) tried per shape."""
@@ -61,20 +62,6 @@ def head_convs(canvas: int) -> list[tuple[str, int, int, int, int, int]]:
         ("down5", 512, 128, (WINDOW_FRAMES + 1) // 2 + 1, side // 2, 1),
         ("res6", 1024, 1024, (WINDOW_FRAMES + 3) // 4, side // 4, 4),
     ]
-
-
-def milliseconds(fn, repeats: int = 7) -> float:
-    for _ in range(2):
-        fn()
-    times = []
-    for _ in range(repeats):
-        start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-        start.record()
-        fn()
-        end.record()
-        end.synchronize()
-        times.append(start.elapsed_time(end))
-    return statistics.median(times)
 
 
 def causal(x: torch.Tensor) -> torch.Tensor:
@@ -120,8 +107,8 @@ def time_layer(
     def triton(launch: ConvLaunch, repeats: int) -> float:
         return milliseconds(lambda: conv_triton.causal_conv3d(x, weight, bias, None, launch.arguments()), repeats)
 
-    kitchen_ms = milliseconds(kitchen) if cin < 1024 else math.inf
-    cudnn_ms = milliseconds(cudnn)
+    kitchen_ms = milliseconds(kitchen, TIMING_REPEATS) if cin < 1024 else math.inf
+    cudnn_ms = milliseconds(cudnn, TIMING_REPEATS)
     launches = {}
     for launch in GRID:
         if launch.block_out > cout or cout % launch.block_out or cin % launch.block_in:

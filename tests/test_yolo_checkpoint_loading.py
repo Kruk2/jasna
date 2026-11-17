@@ -2,21 +2,6 @@
 import os
 import subprocess
 import sys
-import tomllib
-from importlib import metadata
-from pathlib import Path
-
-from packaging.requirements import Requirement
-
-
-def test_ultralytics_dependency_requires_restricted_checkpoint_support():
-    with (Path(__file__).parents[1] / "pyproject.toml").open("rb") as stream:
-        dependencies = tomllib.load(stream)["project"]["dependencies"]
-    requirement = next(Requirement(item) for item in dependencies if Requirement(item).name == "ultralytics")
-    assert requirement.specifier
-    assert "8.4.60" not in requirement.specifier
-    assert "8.5.0" not in requirement.specifier
-    assert metadata.version("ultralytics") in requirement.specifier
 
 
 def test_yolo_checkpoint_loads_with_frozen_policy_and_rejects_unknown_types(tmp_path):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import torch
 
 import jasna.restorer.basicvsrpp_sub_engines as sub
@@ -23,21 +24,20 @@ def test_compile_skips_when_all_sub_engines_exist(monkeypatch, tmp_path: Path) -
     assert sub.compile_basicvsrpp_engines(model_path, torch.device("cuda:0"), True) is True
 
 
-def test_compile_skips_on_low_vram(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("device", "vram_gb", "fp16", "hip"),
+    [
+        ("cuda:0", 3.0, True, None),
+        ("cuda:0", 32.0, False, None),
+        ("cpu", 32.0, True, None),
+        ("cuda:0", 32.0, True, "7.1"),
+    ],
+    ids=["low-vram", "fp32", "off-cuda", "amd"],
+)
+def test_compile_skips(monkeypatch, tmp_path: Path, device, vram_gb, fp16, hip) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sub.torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(sub, "_gpu_vram_gb", lambda _dev: 3.0)
+    monkeypatch.setattr(sub, "_gpu_vram_gb", lambda _dev: vram_gb)
+    monkeypatch.setattr(torch.version, "hip", hip)
 
-    assert sub.compile_basicvsrpp_engines(_model_path(tmp_path), torch.device("cuda:0"), True) is False
-
-
-def test_compile_skips_on_fp32(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sub.torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(sub, "_gpu_vram_gb", lambda _dev: 32.0)
-
-    assert sub.compile_basicvsrpp_engines(_model_path(tmp_path), torch.device("cuda:0"), False) is False
-
-
-def test_compile_skips_off_cuda(tmp_path: Path) -> None:
-    assert sub.compile_basicvsrpp_engines(_model_path(tmp_path), torch.device("cpu"), True) is False
+    assert sub.compile_basicvsrpp_engines(_model_path(tmp_path), torch.device(device), fp16) is False

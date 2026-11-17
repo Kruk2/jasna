@@ -14,6 +14,19 @@ if TYPE_CHECKING:
     import tensorrt as trt
 
 
+# TensorRT's highest builder optimization level; every engine Jasna builds uses it.
+BUILDER_OPTIMIZATION_LEVEL = 5
+
+
+def require_engine_file(path: Path) -> Path:
+    """``path`` when its engine was compiled, else a FileNotFoundError naming it."""
+    if not path.exists():
+        raise FileNotFoundError(
+            f"TensorRT engine not found: {path}. Run engine compilation first via ensure_engines_compiled()."
+        )
+    return path
+
+
 @functools.cache
 def _error_only_trt_logger() -> trt.ILogger:
     import tensorrt as trt
@@ -59,15 +72,14 @@ def _trt_dtype_to_torch(trt_dtype: trt.DataType) -> torch.dtype:
     raise ValueError(f"Unsupported TensorRT dtype: {trt_dtype}")
 
 
-def _build_serialized_engine(
+def build_engine_bytes(
     onnx_bytes: bytes,
     device: torch.device,
     *,
     batch_size: int | None,
     fp16: bool,
-    optimization_level: int,
     workspace_gb: int,
-    dynamic_batch: bool = False,
+    dynamic_batch: bool,
 ) -> bytes:
     import tensorrt as trt
 
@@ -83,9 +95,7 @@ def _build_serialized_engine(
 
     config = builder.create_builder_config()
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, int(workspace_gb) * 1024**3)
-    if not (0 <= int(optimization_level) <= 5):
-        raise ValueError(f"optimization_level must be in [0, 5], got {optimization_level}")
-    config.builder_optimization_level = int(optimization_level)
+    config.builder_optimization_level = BUILDER_OPTIMIZATION_LEVEL
 
     if fp16:
         config.set_flag(trt.BuilderFlag.FP16)
@@ -153,7 +163,6 @@ def compile_onnx_to_tensorrt_engine(
     *,
     batch_size: int | None = None,
     fp16: bool = True,
-    optimization_level: int = 5,
     workspace_gb: int,
     dynamic_batch: bool = False,
 ) -> Path:
@@ -167,27 +176,16 @@ def compile_onnx_to_tensorrt_engine(
 
     if not onnx_path.exists():
         raise FileNotFoundError(str(onnx_path))
-    log = logging.getLogger(__name__)
-    msg = (
-        f"Compiling TensorRT engine for {onnx_path} (this can take a few minutes). "
-        f"Output: {engine_path}"
-    )
-    print(msg)
-    log.info("%s", msg)
-
-    engine_bytes = _build_serialized_engine(
+    _announce(f"Compiling TensorRT engine for {onnx_path} (this can take a few minutes). Output: {engine_path}")
+    engine_bytes = build_engine_bytes(
         onnx_path.read_bytes(),
         device,
         batch_size=batch_size,
         fp16=bool(fp16),
-        optimization_level=optimization_level,
         workspace_gb=workspace_gb,
         dynamic_batch=dynamic_batch,
     )
-
-    engine_path.parent.mkdir(parents=True, exist_ok=True)
-    engine_path.write_bytes(engine_bytes)
-    return engine_path
+    return _save_engine(engine_path, engine_bytes)
 
 
 def compile_onnx_bytes_to_encrypted_engine(
@@ -198,7 +196,6 @@ def compile_onnx_bytes_to_encrypted_engine(
     *,
     batch_size: int | None = None,
     fp16: bool = True,
-    optimization_level: int = 5,
     workspace_gb: int,
 ) -> Path:
     from jasna.protection import protected_model
@@ -206,20 +203,24 @@ def compile_onnx_bytes_to_encrypted_engine(
     if engine_path.exists():
         return engine_path
 
-    log = logging.getLogger(__name__)
-    msg = f"Compiling encrypted TensorRT engine for '{model_id}'. Output: {engine_path}"
-    print(msg)
-    log.info("%s", msg)
-
-    engine_bytes = _build_serialized_engine(
+    _announce(f"Compiling encrypted TensorRT engine for '{model_id}'. Output: {engine_path}")
+    engine_bytes = build_engine_bytes(
         onnx_bytes,
         device,
         batch_size=batch_size,
         fp16=bool(fp16),
-        optimization_level=optimization_level,
         workspace_gb=workspace_gb,
+        dynamic_batch=False,
     )
-    encrypted = protected_model.encrypt_engine_bytes(model_id, engine_bytes)
+    return _save_engine(engine_path, protected_model.encrypt_engine_bytes(model_id, engine_bytes))
+
+
+def _announce(message: str) -> None:
+    print(message)
+    logging.getLogger(__name__).info("%s", message)
+
+
+def _save_engine(engine_path: Path, engine_bytes: bytes) -> Path:
     engine_path.parent.mkdir(parents=True, exist_ok=True)
-    engine_path.write_bytes(encrypted)
+    engine_path.write_bytes(engine_bytes)
     return engine_path

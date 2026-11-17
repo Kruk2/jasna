@@ -44,7 +44,6 @@ class BasicvsrppMosaicRestorer:
         max_clip_size: int,
         use_tensorrt: bool,
         fp16: bool,
-        config: str | dict | None = None,
     ):
         self.device = torch.device(device)
         self.max_clip_size = int(max_clip_size)
@@ -57,9 +56,9 @@ class BasicvsrppMosaicRestorer:
         if use_tensorrt and is_nvidia_device(self.device):
             from jasna.restorer.basicvsrpp_sub_engines import create_split_forward
 
-            pytorch_model = load_model(config, checkpoint_path, self.device, fp16)
+            generator = load_model(checkpoint_path, self.device, fp16)
             self._split_forward = create_split_forward(
-                model=pytorch_model,
+                generator=generator,
                 model_weights_path=checkpoint_path,
                 device=self.device,
                 fp16=fp16,
@@ -67,12 +66,12 @@ class BasicvsrppMosaicRestorer:
             if self._split_forward is not None:
                 logger.info("BasicVSR++ using TRT sub-engines (fp16=%s)", fp16)
             else:
-                self.model = pytorch_model
+                self.model = generator
                 logger.info("BasicVSR++ sub-engines not found, using PyTorch model (fp16=%s)", fp16)
         elif is_amd_device(self.device):
             from jasna.restorer.basicvsrpp_sub_engines import create_eager_split_forward
 
-            self._split_forward = create_eager_split_forward(load_model(config, checkpoint_path, self.device, fp16))
+            self._split_forward = create_eager_split_forward(load_model(checkpoint_path, self.device, fp16))
             if os.environ.get(AMD_GRAPHS_ENV, "1") != "0":
                 self._clip_graph = _ClipGraph(self._split_forward, self.max_clip_size, self.device, self.input_dtype)
             logger.info(
@@ -80,7 +79,7 @@ class BasicvsrppMosaicRestorer:
                 fp16, self._clip_graph is not None,
             )
         else:
-            self.model = load_model(config, checkpoint_path, self.device, fp16)
+            self.model = load_model(checkpoint_path, self.device, fp16)
             logger.info("BasicVSR++ loaded from checkpoint: %s (fp16=%s)", checkpoint_path, fp16)
 
     def close(self) -> None:
@@ -106,5 +105,5 @@ class BasicvsrppMosaicRestorer:
             elif self._split_forward is not None:
                 result = self._split_forward(clip)
             else:
-                result = self.model(inputs=clip)
+                result = self.model(clip)
             return result.squeeze(0)

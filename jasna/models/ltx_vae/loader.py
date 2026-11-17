@@ -13,6 +13,7 @@ import torch
 from torch import nn
 
 from jasna.accelerator import KernelBackend, kernel_backend
+from jasna.ltx.host_tensors import read_host_tensors, zero_tensors
 from jasna.ltx.kernel_policy import gpu_architecture
 from jasna.ltx.model_files import open_tensors
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
@@ -93,29 +94,8 @@ def decoder_kwargs(config: dict) -> dict:
 
 
 def _read_tensors(reader, prefixes: tuple[str, ...]) -> dict[str, torch.Tensor]:
-    tensors = {name: torch.empty(shape, dtype=dtype, device="cpu")
-               for name, (dtype, shape) in reader.tensor_specs().items() if name.startswith(prefixes)}
-    try:
-        reader.read_tensors_into((tuple(tensors),), iter((tensors,)))
-        return tensors
-    except BaseException:
-        _clear_tensors(tensors.values(), None)
-        raise
-
-
-def _clear_tensors(tensors: Iterable[torch.Tensor], retained: nn.Module | None) -> None:
-    preserved = {(tensor.device, tensor.untyped_storage().data_ptr())
-                 for tensor in retained.state_dict().values()} if retained is not None else set()
-    devices = set()
-    with torch.no_grad():
-        for tensor in tensors:
-            if tensor.is_meta or (tensor.device, tensor.untyped_storage().data_ptr()) in preserved:
-                continue
-            tensor.zero_()
-            if tensor.device.type == "cuda":
-                devices.add(tensor.device)
-    for device in devices:
-        torch.cuda.synchronize(device)
+    specs = reader.tensor_specs()
+    return read_host_tensors(reader, [name for name in specs if name.startswith(prefixes)], specs)
 
 
 def encoder_state_dict(checkpoint: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -161,7 +141,7 @@ def decoder_state_dict(checkpoint: dict[str, torch.Tensor]) -> dict[str, torch.T
             out[key] = value
         return out
     except BaseException:
-        _clear_tensors(copies, None)
+        zero_tensors(copies)
         raise
 
 
@@ -182,7 +162,7 @@ def _build(
         tensors = [*state.values(), *converted.values()]
         if result is None and model is not None:
             tensors.extend(model.state_dict().values())
-        _clear_tensors(tensors, result)
+        zero_tensors(tensors, result)
 
 
 def _with_res_layers(blocks: list, state: Iterable[str]) -> list:
@@ -234,11 +214,11 @@ def load_video_encoder(vae_path: Path, device: torch.device, encoder_path: Path 
             layer.to(memory_format=torch.channels_last_3d)
         if eager_amd:
             encoder.release_cache_between_stages()
-        _clear_tensors(bf16_contiguous_weights, encoder)
+        zero_tensors(bf16_contiguous_weights, encoder)
         compile_video_encoder(device, dtype)
         return encoder
     finally:
-        _clear_tensors(checkpoint.values(), encoder)
+        zero_tensors(checkpoint.values(), encoder)
 
 
 def _diffusion_block_count(tensors: Iterable[str]) -> int:
@@ -260,8 +240,8 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
         depth = _diffusion_block_count(tuned) or kwargs["stage_depths"][-1]
         kwargs["stage_depths"] = (*kwargs["stage_depths"][:-1], depth)
         state = decoder_state_dict(checkpoint)
-        _clear_tensors([state.pop(name) for name in list(state)
-                        if name.startswith("diff_blocks.") and int(name.split(".")[1]) >= depth], None)
+        zero_tensors([state.pop(name) for name in list(state)
+                      if name.startswith("diff_blocks.") and int(name.split(".")[1]) >= depth])
         dtype = half_dtype(device)
         decoder = _build(lambda: DiffusionVideoDecoder(**kwargs), state, device, dtype)
         own = decoder.state_dict()
@@ -277,10 +257,10 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
         return decoder
     except BaseException:
         if decoder is not None:
-            _clear_tensors(decoder.state_dict().values(), None)
+            zero_tensors(decoder.state_dict().values())
         raise
     finally:
-        _clear_tensors([*checkpoint.values(), *tuned.values(), *overlay.values()], decoder if complete else None)
+        zero_tensors([*checkpoint.values(), *tuned.values(), *overlay.values()], decoder if complete else None)
 
 
 _decoded_layouts: set[tuple[int, int, int, TileSizeConfig]] = set()

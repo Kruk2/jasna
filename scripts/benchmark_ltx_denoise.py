@@ -25,22 +25,21 @@ import datetime
 import os
 import re
 import statistics
-import subprocess
 import tempfile
 import time
 from pathlib import Path
 
 import torch
 
+from bench_common import git_commit
 from jasna._suppress_noise import install as install_noise_filters
 from jasna.accelerator import device_free_bytes
 from jasna.engine_paths import configure_torch_compile_cache
 from jasna.ltx import transformer as T
 from jasna.ltx.model_files import LTX_MODELS, LtxModelFiles
-from jasna.ltx.plan import LATENT_FRAMES, WINDOW_HOP
+from jasna.ltx.windows import LATENT_FRAMES, WINDOW_HOP
 from jasna.ltx.sampler import LtxTransformer, TransformerSource
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 LATENT_CHANNELS = 128
 KERNEL_KINDS = (
     ("gemm", re.compile(r"^triton_tem|gemm|(?<!fmha_)cutlass|nvjet|xmma|gemv|cublas", re.I)),
@@ -106,12 +105,6 @@ def profile_step(transformer: LtxTransformer, refs: list[torch.Tensor], trace: P
     for event in sorted(kernels, key=lambda e: -e.self_device_time_total)[:25]:
         name = event.key if len(event.key) <= 90 else event.key[:87] + "..."
         print(f"  {event.self_device_time_total / 1e3 / windows:8.2f}  {event.count:6d}  [{kernel_kind(event.key)}] {name}")
-
-
-def git_commit() -> str:
-    return subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
-    ).stdout.strip()
 
 
 def main() -> None:

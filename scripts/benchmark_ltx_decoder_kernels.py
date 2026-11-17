@@ -25,10 +25,11 @@ from pathlib import Path
 
 import torch
 
+from bench_common import milliseconds
 from jasna._suppress_noise import install as install_noise_filters
 from jasna.engine_paths import configure_torch_compile_cache
 from jasna.ltx.model_files import VAE_DECODERS, VAE_ENCODERS, LtxModelFiles
-from jasna.ltx.plan import LATENT_FRAMES
+from jasna.ltx.windows import LATENT_FRAMES
 from jasna.models.ltx_vae import decode_latent, diffusion_triton, load_video_decoder
 from jasna.models.ltx_vae import diffusion_video_decoder as D
 from jasna.models.ltx_vae import transformer as T
@@ -140,20 +141,6 @@ LAUNCHERS = {
     "context_add": diffusion_triton.context_add_,
     "qkv": diffusion_triton.slab_qkv,
 }
-
-
-def milliseconds(fn, repeats: int) -> float:
-    fn()
-    torch.cuda.synchronize()
-    times = []
-    for _ in range(repeats):
-        start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
-        start.record()
-        fn()
-        end.record()
-        end.synchronize()
-        times.append(start.elapsed_time(end))
-    return statistics.median(times)
 
 
 @contextlib.contextmanager

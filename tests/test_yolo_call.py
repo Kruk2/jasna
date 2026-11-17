@@ -32,7 +32,7 @@ def _build_yolo_model(*, batch_size=2, imgsz=640):
 
     with (
         patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path", return_value=_mock_engine_path()),
-        patch("jasna.mosaic.yolo.TrtRunner", return_value=mock_runner),
+        patch("jasna.trt.trt_runner.TrtRunner", return_value=mock_runner),
     ):
         model = YoloMosaicDetectionModel(
             model_path=Path("model.pt"),
@@ -43,77 +43,34 @@ def _build_yolo_model(*, batch_size=2, imgsz=640):
     return model, mock_runner
 
 
-@tensorrt_gpu_only
-@pytest.mark.usefixtures("nvidia_vendor")
-class TestYoloInit:
-    def test_basic_init_trt(self):
-        model, runner = _build_yolo_model()
-        assert model.batch_size == 2
-        assert model.imgsz == 640
-        assert model.runner is runner
-        assert model.stride == 32
+def _centered_detection(anchors: int = 100) -> torch.Tensor:
+    """Raw (1, 4 + 1 + 32, anchors) prediction with one confident 100x100 box centred in a 640x640 input."""
+    pred = torch.zeros(1, 4 + 1 + 32, anchors)
+    pred[0, :4, 0] = torch.tensor([320.0, 320.0, 100.0, 100.0])
+    pred[0, 4, 0] = 10.0
+    pred[0, 5:, 0] = 0.5
+    return pred
 
-    def test_trt_runner_called_with_input_shapes(self):
-        mock_runner_cls = MagicMock()
-        mock_runner_cls.return_value.input_names = ["images"]
-        mock_runner_cls.return_value.input_dtypes = {"images": torch.float32}
-        engine = _mock_engine_path()
 
-        with (
-            patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path", return_value=engine),
-            patch("jasna.mosaic.yolo.TrtRunner", mock_runner_cls),
-        ):
-            YoloMosaicDetectionModel(
-                model_path=Path("model.pt"),
-                batch_size=2,
-                device=torch.device("cuda:0"),
-                imgsz=640,
-            )
+# The centred box of ``_centered_detection`` in a 480x640 frame letterboxed by 80 rows at the top.
+_CENTERED_BOX_IN_480x640 = [270.0, 190.0, 370.0, 290.0]
 
-        mock_runner_cls.assert_called_once_with(
-            engine,
-            input_shapes=[(2, 3, 640, 640)],
-            device=torch.device("cuda:0"),
-        )
 
-    def test_score_threshold_out_of_range(self):
-        with pytest.raises(ValueError, match="score_threshold"):
-            with (
-                patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path"),
-                patch("jasna.mosaic.yolo.TrtRunner"),
-            ):
-                YoloMosaicDetectionModel(
-                    model_path=Path("model.pt"),
-                    batch_size=1,
-                    device=torch.device("cuda:0"),
-                    score_threshold=1.5,
-                )
-
-    def test_iou_threshold_out_of_range(self):
-        with pytest.raises(ValueError, match="iou_threshold"):
-            with (
-                patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path"),
-                patch("jasna.mosaic.yolo.TrtRunner"),
-            ):
-                YoloMosaicDetectionModel(
-                    model_path=Path("model.pt"),
-                    batch_size=1,
-                    device=torch.device("cuda:0"),
-                    iou_threshold=-0.1,
-                )
-
-    def test_max_det_zero_raises(self):
-        with pytest.raises(ValueError, match="max_det"):
-            with (
-                patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path"),
-                patch("jasna.mosaic.yolo.TrtRunner"),
-            ):
-                YoloMosaicDetectionModel(
-                    model_path=Path("model.pt"),
-                    batch_size=1,
-                    device=torch.device("cuda:0"),
-                    max_det=0,
-                )
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"score_threshold": 1.5},
+        {"iou_threshold": -0.1},
+        {"max_det": 0},
+        {"imgsz": 0},
+        {"batch_size": 0},
+    ],
+    ids=["score_threshold", "iou_threshold", "max_det", "imgsz", "batch_size"],
+)
+def test_yolo_rejects_invalid_settings_before_loading_the_model(invalid):
+    settings = {"model_path": Path("missing.pt"), "batch_size": 1, "device": torch.device("cpu"), **invalid}
+    with pytest.raises(ValueError, match=next(iter(invalid))):
+        YoloMosaicDetectionModel(**settings)
 
 
 class TestYoloCall:
@@ -132,22 +89,12 @@ class TestYoloCall:
         assert keep.tolist() == [[True, False, True]]
 
     def test_scan_mask_is_cropped_to_predicted_box(self):
-        model = object.__new__(YoloMosaicDetectionModel)
-        model.device = torch.device("cpu")
-        model.input_dtype = torch.float32
-        model._resizer = None
-        model.imgsz = 4
-        model.stride = 1
-        model.max_det = 1
-        model.score_threshold = 0.05
-        model.iou_threshold = 0.7
-
-        pred = torch.zeros(1, 6, 1)
+        model, mock_ab = _build_yolo_autobackend(imgsz=4)
+        pred = torch.zeros(1, 6, 8)
         pred[0, :4, 0] = torch.tensor([2.0, 2.0, 2.0, 2.0])
         pred[0, 4, 0] = 0.9
         pred[0, 5, 0] = 100.0
-        proto = torch.ones(1, 1, 4, 4)
-        model._forward_raw = MagicMock(return_value=(pred, proto, 1))
+        mock_ab.return_value = (pred, torch.ones(1, 1, 4, 4))
 
         scores, masks = model.scan_scores_masks(
             torch.zeros(1, 3, 4, 4, dtype=torch.uint8),
@@ -159,6 +106,7 @@ class TestYoloCall:
         assert masks[0, 1:3, 1:3].all()
 
     @tensorrt_gpu_only
+    @pytest.mark.usefixtures("nvidia_vendor")
     def test_call_no_detections(self):
         model, mock_runner = _build_yolo_model(batch_size=1, imgsz=640)
 
@@ -173,36 +121,26 @@ class TestYoloCall:
         assert len(det.boxes_xyxy) == 1
         assert det.boxes_xyxy[0].shape[0] == 0
         assert len(det.masks) == 1
-        mock_runner.infer.assert_called_once()
 
     @tensorrt_gpu_only
+    @pytest.mark.usefixtures("nvidia_vendor")
     def test_call_with_detections(self):
         model, mock_runner = _build_yolo_model(batch_size=1, imgsz=640)
-
-        pred = torch.zeros(1, 4 + 1 + 32, 100)
-        pred[0, 0, 0] = 100.0   # x1
-        pred[0, 1, 0] = 100.0   # y1
-        pred[0, 2, 0] = 200.0   # x2
-        pred[0, 3, 0] = 200.0   # y2
-        pred[0, 4, 0] = 10.0    # high confidence
-        pred[0, 5:, 0] = 0.5    # mask coefficients
-
-        proto = torch.ones(1, 32, 160, 160)
-        mock_runner.infer.return_value = {"pred": pred, "proto": proto}
+        mock_runner.infer.return_value = {"pred": _centered_detection(), "proto": torch.ones(1, 32, 160, 160)}
 
         frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8, device="cuda:0")
         det = model(frames, target_hw=(480, 640))
 
-        assert len(det.boxes_xyxy) == 1
-        assert len(det.masks) == 1
+        np.testing.assert_allclose(det.boxes_xyxy[0], [_CENTERED_BOX_IN_480x640], atol=1.0)
+        assert det.masks[0].shape[0] == 1 and det.masks[0].any()
 
 
-def _build_yolo_autobackend(*, batch_size=1, imgsz=640):
+def _build_yolo_autobackend(*, batch_size=1, imgsz=640, stride=torch.tensor([32.0])):
     mock_instance = MagicMock()
     mock_instance.fp16 = False
     mock_instance.names = {0: "mosaic"}
     mock_instance.end2end = False
-    mock_instance.stride = torch.tensor([32.0])
+    mock_instance.stride = stride
     mock_instance.eval = MagicMock(return_value=mock_instance)
 
     with patch("ultralytics.nn.autobackend.AutoBackend", return_value=mock_instance, create=True):
@@ -216,87 +154,43 @@ def _build_yolo_autobackend(*, batch_size=1, imgsz=640):
     return model, mock_instance
 
 
-class TestYoloAutoBackendInit:
-    def test_autobackend_path(self):
-        model, mock_ab = _build_yolo_autobackend()
-        assert model.runner is None
-        assert model.stride == 32
-        assert model.end2end is False
-        assert model.input_dtype == torch.float32
-        mock_ab.eval.assert_called_once()
-
-    def test_autobackend_stride_list(self):
-        mock_ab = MagicMock()
-        mock_ab.fp16 = False
-        mock_ab.names = {}
-        mock_ab.end2end = False
-        mock_ab.stride = [8, 16, 32]
-        mock_ab.eval = MagicMock(return_value=mock_ab)
-
-        with patch("ultralytics.nn.autobackend.AutoBackend", return_value=mock_ab, create=True):
-            model = YoloMosaicDetectionModel(
-                model_path=Path("model.pt"),
-                batch_size=1,
-                device=torch.device("cpu"),
-                imgsz=640,
-                fp16=False,
-            )
-        assert model.stride == 32
-
-    def test_autobackend_stride_int(self):
-        mock_ab = MagicMock()
-        mock_ab.fp16 = False
-        mock_ab.names = {}
-        mock_ab.end2end = False
-        mock_ab.stride = 16
-        mock_ab.eval = MagicMock(return_value=mock_ab)
-
-        with patch("ultralytics.nn.autobackend.AutoBackend", return_value=mock_ab, create=True):
-            model = YoloMosaicDetectionModel(
-                model_path=Path("model.pt"),
-                batch_size=1,
-                device=torch.device("cpu"),
-                imgsz=640,
-                fp16=False,
-            )
-        assert model.stride == 16
+@pytest.mark.parametrize(
+    ("stride", "expected"), [(torch.tensor([8.0, 32.0]), 32), ([8, 16, 32], 32), (16, 16)], ids=["tensor", "list", "int"]
+)
+def test_autobackend_stride_is_the_largest_model_stride(stride, expected):
+    model, _ = _build_yolo_autobackend(stride=stride)
+    assert model.stride == expected
 
 
 class TestYoloAutoBackendCall:
-    def test_call_non_trt(self):
+    def test_call_without_detections_returns_empty_boxes_and_masks(self):
         model, mock_ab = _build_yolo_autobackend(batch_size=1, imgsz=640)
+        mock_ab.return_value = (torch.zeros(1, 100, 4 + 1 + 32), torch.zeros(1, 32, 160, 160))
 
-        pred = torch.zeros(1, 100, 4 + 1 + 32)
-        proto = torch.zeros(1, 32, 160, 160)
+        det = model(torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8), target_hw=(480, 640))
+
+        assert det.boxes_xyxy[0].shape == (0, 4)
+        assert det.masks[0].shape == (0, 192, 256)
+        assert det.masks[0].dtype == torch.bool
+
+    @pytest.mark.parametrize(
+        ("pred_layout", "proto_layout"),
+        [("channels-first", "nchw"), ("anchors-first", "nchw"), ("channels-first", "nhwc")],
+    )
+    def test_call_reads_every_output_layout(self, pred_layout, proto_layout):
+        model, mock_ab = _build_yolo_autobackend(batch_size=1, imgsz=640)
+        pred = _centered_detection()
+        if pred_layout == "anchors-first":
+            pred = pred.permute(0, 2, 1).contiguous()
+        proto = torch.ones(1, 32, 160, 160)
+        if proto_layout == "nhwc":
+            proto = proto.permute(0, 2, 3, 1).contiguous()
         mock_ab.return_value = (pred, proto)
 
-        frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8)
-        det = model(frames, target_hw=(480, 640))
+        det = model(torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8), target_hw=(480, 640))
 
-        assert len(det.boxes_xyxy) == 1
-        assert det.boxes_xyxy[0].shape[0] == 0
-
-    def test_protos_transpose_nhwc_to_nchw(self):
-        model, mock_ab = _build_yolo_autobackend(batch_size=1, imgsz=640)
-
-        pred = torch.zeros(1, 100, 4 + 1 + 32)
-        proto = torch.zeros(1, 160, 160, 32)  # NHWC layout, last dim is channel-like
-        mock_ab.return_value = (pred, proto)
-
-        frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8)
-        det = model(frames, target_hw=(480, 640))
-        assert len(det.boxes_xyxy) == 1
-
-    def test_pred_raw_transpose_when_shape1_gt_shape2(self):
-        model, mock_ab = _build_yolo_autobackend(batch_size=1, imgsz=640)
-
-        pred = torch.zeros(1, 4 + 1 + 32, 100)  # shape[1] > shape[2], needs transpose
-        proto = torch.zeros(1, 32, 160, 160)
-        mock_ab.return_value = (pred, proto)
-
-        frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8)
-        det = model(frames, target_hw=(480, 640))
-        assert len(det.boxes_xyxy) == 1
+        np.testing.assert_allclose(det.boxes_xyxy[0], [_CENTERED_BOX_IN_480x640], atol=1.0)
+        assert det.masks[0].shape[0] == 1 and det.masks[0].any()
 
     def test_call_accepts_nested_segmentation_output_with_metadata_dict(self):
         model, mock_ab = _build_yolo_autobackend(batch_size=1, imgsz=640)

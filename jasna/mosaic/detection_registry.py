@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 
 from jasna.accelerator import is_amd_device, is_nvidia_device
-from jasna.engine_paths import model_weights_dir
+from jasna.engine_paths import get_onnx_tensorrt_engine_path, get_yolo_tensorrt_engine_path, model_weights_dir
 from jasna.session_config import DEFAULT_DETECTION_MODEL_NAME
 
 
@@ -163,6 +163,20 @@ def rfdetr_model_config(name: str) -> RfDetrModelConfig:
     return RFDETR_MODEL_CONFIGS.get(coerce_detection_model_name(name), _RFDETR_FALLBACK_CONFIG)
 
 
+def detection_engine_path(name: str, weights_path: Path, batch_size: int, *, fp16: bool) -> Path:
+    """The TensorRT engine an NVIDIA run of detector ``name`` at ``batch_size`` loads."""
+    name = coerce_detection_model_name(name)
+    if is_rfdetr_model(name):
+        config = rfdetr_model_config(name)
+        return get_onnx_tensorrt_engine_path(
+            weights_path,
+            batch_size=config.engine_batch_size(batch_size),
+            fp16=fp16,
+            dynamic_batch=config.dynamic_batch,
+        )
+    return get_yolo_tensorrt_engine_path(weights_path, batch_size=batch_size, fp16=fp16)
+
+
 def recommended_score_threshold(name: str) -> float:
     coerced = coerce_detection_model_name(name)
     if is_rfdetr_model(coerced):
@@ -241,7 +255,7 @@ def precompile_detection_engine(
     device: torch.device,
     fp16: bool,
 ) -> None:
-    if not (is_nvidia_device(device) or is_amd_device(device)):
+    if not is_nvidia_device(device):
         return
     det_name = coerce_detection_model_name(detection_model_name)
     if is_rfdetr_model(det_name):
@@ -252,11 +266,10 @@ def precompile_detection_engine(
             detection_model_path,
             device,
             batch_size=config.engine_batch_size(batch_size),
-            resolution=config.resolution,
             dynamic_batch=config.dynamic_batch,
             fp16=bool(fp16),
         )
-    elif is_yolo_model(det_name) and is_nvidia_device(device):
+    elif is_yolo_model(det_name):
         from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine
         from jasna.mosaic.yolo import YoloMosaicDetectionModel
 

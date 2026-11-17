@@ -63,7 +63,7 @@ class RestorationPipeline:
         crop_shapes = [c.crop_shape for c in raw_crops]
         return resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes
 
-    def _run_secondary(self, primary_raw: torch.Tensor, keep_start: int, keep_end: int) -> list[torch.Tensor]:
+    def run_secondary(self, primary_raw: torch.Tensor, keep_start: int, keep_end: int) -> list[torch.Tensor]:
         if self.secondary_restorer is not None:
             restored_frames = self.secondary_restorer.restore(primary_raw, keep_start=keep_start, keep_end=keep_end)
         else:

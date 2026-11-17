@@ -10,16 +10,9 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from jasna.models.safetensors_conv import conv_from_weights
+
 REALPLKSR_NORM_GROUPS = 4
-
-
-def _conv(weights: Mapping[str, torch.Tensor], name: str) -> nn.Conv2d:
-    weight = weights[f"{name}.weight"]
-    out_channels, in_channels, kernel, _ = weight.shape
-    conv = nn.Conv2d(in_channels, out_channels, kernel, padding=kernel // 2, device="meta")
-    conv.weight = nn.Parameter(weight, requires_grad=False)
-    conv.bias = nn.Parameter(weights[f"{name}.bias"], requires_grad=False)
-    return conv
 
 
 def group_norm(features: torch.Tensor, norm: nn.GroupNorm) -> torch.Tensor:
@@ -41,11 +34,11 @@ def group_norm(features: torch.Tensor, norm: nn.GroupNorm) -> torch.Tensor:
 class _Block(nn.Module):
     def __init__(self, weights: Mapping[str, torch.Tensor], name: str) -> None:
         super().__init__()
-        self.mix_in = _conv(weights, f"{name}.channel_mixer.0")
-        self.mix_out = _conv(weights, f"{name}.channel_mixer.2")
-        self.large_kernel = _conv(weights, f"{name}.lk.conv")
-        self.attention = _conv(weights, f"{name}.attn.f.0")
-        self.refine = _conv(weights, f"{name}.refine")
+        self.mix_in = conv_from_weights(weights, f"{name}.channel_mixer.0")
+        self.mix_out = conv_from_weights(weights, f"{name}.channel_mixer.2")
+        self.large_kernel = conv_from_weights(weights, f"{name}.lk.conv")
+        self.attention = conv_from_weights(weights, f"{name}.attn.f.0")
+        self.refine = conv_from_weights(weights, f"{name}.refine")
         dim = self.refine.out_channels
         self.norm = nn.GroupNorm(REALPLKSR_NORM_GROUPS, dim, device="meta")
         self.norm.weight = nn.Parameter(weights[f"{name}.norm.weight"], requires_grad=False)
@@ -66,10 +59,10 @@ class RealPlksr(nn.Module):
         super().__init__()
         self.scale = scale
         blocks = sorted({int(name.split(".")[1]) for name in weights if ".lk." in name})
-        self.head = _conv(weights, "feats.0")
+        self.head = conv_from_weights(weights, "feats.0")
         self.blocks = nn.ModuleList(_Block(weights, f"feats.{index}") for index in blocks)
         # The training network has a dropout layer between the last block and the tail.
-        self.tail = _conv(weights, f"feats.{blocks[-1] + 2}")
+        self.tail = conv_from_weights(weights, f"feats.{blocks[-1] + 2}")
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         features = self.head(image)

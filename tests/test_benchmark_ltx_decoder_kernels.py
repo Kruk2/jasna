@@ -1,13 +1,8 @@
 import math
-import sys
-from pathlib import Path
-
-import pytest
-import torch
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import benchmark_ltx_decoder_kernels as bench
+import pytest
+import torch
 
 
 def test_the_distance_of_a_decode_is_measured_on_the_frames_compose_makes():

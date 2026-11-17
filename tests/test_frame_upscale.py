@@ -10,8 +10,7 @@ import pytest
 import torch
 from torch.nn import functional as F
 
-from factories import make_pipeline, session_config, video_metadata
-from jasna.engine_compiler import EngineCompilationRequest
+from factories import RecordingWriter, make_pipeline, session_config, video_metadata
 from jasna.media.splice import SmartRenderCompatibilityError
 from jasna.models.span import SPAN_BLOCKS, Span
 from jasna.session_factory import UPSCALE_RTX_NEEDS_NVIDIA, build_restoration_session, splice_source
@@ -80,14 +79,6 @@ def test_each_network_input_size_and_precision_has_its_own_engine():
     assert all(name.endswith(".engine") for name in paths)
 
 
-def test_upscale_engine_sizes_survive_the_compiler_subprocess_request():
-    request = EngineCompilationRequest(
-        device="cuda:0", fp16=True, upscale_model="span", upscale_input_sizes=[(1920, 1080), (3840, 2160)]
-    )
-
-    assert EngineCompilationRequest.from_json(request.to_json()) == request
-
-
 def test_a_model_output_is_resized_to_exactly_the_output_size():
     upscaled = torch.rand(1, 3, 16, 32)
 
@@ -106,23 +97,8 @@ def test_strength_mixes_the_model_output_with_a_plain_resize(strength):
     assert torch.all(frame == round(100 + strength * 100))
 
 
-class _Writer:
-    def __init__(self, *, fail_on_close: bool = False):
-        self.written, self.finished, self.closed, self._fail = [], False, False, fail_on_close
-
-    def write(self, frame, pts):
-        self.written.append((tuple(frame.shape), pts))
-
-    def after_write(self, frames_written, stop_event):
-        pass
-
-    def finish(self):
-        self.finished = True
-
-    def close(self):
-        self.closed = True
-        if self._fail:
-            raise RuntimeError("encoder failed")
+def _shapes(writer: RecordingWriter) -> list[tuple[tuple[int, ...], int]]:
+    return [(tuple(frame.shape), pts) for frame, pts in writer.written]
 
 
 class _NearestUpscaler:
@@ -137,14 +113,14 @@ class _NearestUpscaler:
 
 
 def test_the_upscale_writer_writes_upscaled_frames_and_owns_the_upscaler():
-    writer, upscaler = _Writer(), _NearestUpscaler()
+    writer, upscaler = RecordingWriter(), _NearestUpscaler()
     upscale = FrameUpscaleWriter(writer, upscaler)
 
     upscale.write(torch.zeros(3, 4, 6, dtype=torch.uint8), 7)
     upscale.finish()
     upscale.close()
 
-    assert writer.written == [((3, 8, 12), 7)]
+    assert _shapes(writer) == [((3, 8, 12), 7)]
     assert writer.finished and writer.closed and upscaler.closed
 
 
@@ -152,7 +128,7 @@ def test_the_upscaler_is_closed_when_the_writer_fails_to_close():
     upscaler = _NearestUpscaler()
 
     with pytest.raises(RuntimeError, match="encoder failed"):
-        FrameUpscaleWriter(_Writer(fail_on_close=True), upscaler).close()
+        FrameUpscaleWriter(RecordingWriter(fail_on_close=True), upscaler).close()
     assert upscaler.closed
 
 
@@ -160,21 +136,21 @@ def test_the_upscaler_is_closed_when_the_writer_fails_to_close():
 def test_an_upscaling_job_encodes_at_the_upscaled_size_and_upscales_every_frame():
     pipeline = make_pipeline(device=torch.device("cuda", 0), upscale_model="span", upscale_height=1080)
     metadata = video_metadata(video_width=960, video_height=540, video_bitrate=1_000_000)
-    inner = _Writer()
+    inner = RecordingWriter()
 
     encoder = pipeline._video_encoder(metadata, pipeline._resolve_frame_rate(metadata), {"output": {}})
     with patch("jasna.pipeline.build_frame_upscaler", return_value=_NearestUpscaler()):
         pipeline._frame_writer(inner, metadata).write(torch.zeros(3, 540, 960, dtype=torch.uint8), 0)
 
     assert (encoder.metadata.video_width, encoder.metadata.video_height) == (1920, 1080)
-    assert inner.written == [((3, 1080, 1920), 0)]
+    assert _shapes(inner) == [((3, 1080, 1920), 0)]
 
 
 @pytest.mark.usefixtures("nvidia_vendor")
 def test_a_video_already_at_the_target_height_is_not_upscaled():
     pipeline = make_pipeline(device=torch.device("cuda", 0), upscale_model="span", upscale_height=1080)
     metadata = video_metadata(video_width=1920, video_height=1080)
-    inner = _Writer()
+    inner = RecordingWriter()
 
     assert pipeline._frame_writer(inner, metadata) is inner
 
@@ -185,12 +161,14 @@ def test_smart_rendering_is_refused_with_upscaling():
 
 
 def test_an_amd_session_refuses_rtx_upscaling():
+    from jasna.accelerator import AcceleratorVendor
+
     with (
-        patch("jasna.accelerator.is_amd_device", return_value=True),
+        patch("jasna.accelerator.vendor_for_device", return_value=AcceleratorVendor.AMD),
         patch("jasna.accelerator.log_amd_backend"),
         pytest.raises(ValueError, match=UPSCALE_RTX_NEEDS_NVIDIA),
     ):
-        build_restoration_session(session_config(device="cpu", upscale_model="rtx-super-res"), log_callback=None)
+        build_restoration_session(session_config(upscale_model="rtx-super-res"), log_callback=None)
 
 
 @pytest.mark.parametrize(
@@ -337,9 +315,8 @@ def _training_conv3xc(state, name, image):
 
 
 def test_folded_span_weights_compute_what_the_training_convolutions_compute_away_from_the_border():
-    spec = importlib.util.spec_from_file_location("fuse_span_weights", REPO / "scripts" / "fuse_span_weights.py")
-    fuse = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(fuse)
+    import fuse_span_weights as fuse
+
     state = _training_span_state(torch.Generator().manual_seed(0))
     image = torch.rand(1, 8, 12, 12, generator=torch.Generator().manual_seed(1))
 

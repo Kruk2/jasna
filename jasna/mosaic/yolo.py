@@ -20,12 +20,6 @@ _YOLO_LETTERBOX_PAD_VALUE = 114.0 / 255.0
 _MASK_MAX_SIDE = 256
 
 
-def TrtRunner(*args, **kwargs):
-    from jasna.trt.trt_runner import TrtRunner as Runner
-
-    return Runner(*args, **kwargs)
-
-
 def _mask_hw_for_frame(target_hw: tuple[int, int]) -> tuple[int, int]:
     h, w = (int(target_hw[0]), int(target_hw[1]))
     m = max(h, w)
@@ -46,35 +40,17 @@ def _letterbox_geometry(
 
 
 def _letterbox_normalized_bchw(
-    x: torch.Tensor,
-    *,
-    new_shape: tuple[int, int],
-    stride: int,
+    x: torch.Tensor, *, new_shape: tuple[int, int]
 ) -> tuple[torch.Tensor, tuple[tuple[float, float], tuple[int, int]]]:
-    # Expect BCHW
-    del stride
     _, _, h, w = x.shape
-    new_h, new_w = (int(new_shape[0]), int(new_shape[1]))
-
-    gain = min(new_h / h, new_w / w)
-    unpad_w = int(round(w * gain))
-    unpad_h = int(round(h * gain))
-
-    dw = new_w - unpad_w
-    dh = new_h - unpad_h
-
+    gain, left, top, unpad_w, unpad_h = _letterbox_geometry(h, w, new_shape)
     if (unpad_h, unpad_w) != (h, w):
         x = F.interpolate(x, size=(unpad_h, unpad_w), mode="bilinear", align_corners=False)
-
-    left = dw // 2
-    right = dw - left
-    top = dh // 2
-    bottom = dh - top
-    if dw or dh:
+    right = int(new_shape[1]) - unpad_w - left
+    bottom = int(new_shape[0]) - unpad_h - top
+    if left or right or top or bottom:
         x = F.pad(x, (left, right, top, bottom), value=_YOLO_LETTERBOX_PAD_VALUE)
-
-    ratio_pad = ((float(gain), float(gain)), (int(left), int(top)))
-    return x, ratio_pad
+    return x, ((float(gain), float(gain)), (int(left), int(top)))
 
 
 def _batched_nms_keep(
@@ -159,14 +135,15 @@ class YoloMosaicDetectionModel:
 
         runtime_path = self.model_path
         if is_nvidia_device(self.device):
-            runtime_path = get_yolo_tensorrt_engine_path(self.model_path, fp16=self.fp16)
-            if not runtime_path.exists():
-                raise FileNotFoundError(
-                    f"YOLO engine not found: {runtime_path}. "
-                    "Run engine compilation first via ensure_engines_compiled()."
-                )
+            from jasna.trt import require_engine_file
+
+            runtime_path = require_engine_file(
+                get_yolo_tensorrt_engine_path(self.model_path, batch_size=self.batch_size, fp16=self.fp16)
+            )
 
         if runtime_path.suffix.lower() == ".engine":
+            from jasna.trt.trt_runner import TrtRunner
+
             self.runner = TrtRunner(
                 runtime_path,
                 input_shapes=[(self.batch_size, 3, self.imgsz, self.imgsz)],
@@ -222,9 +199,7 @@ class YoloMosaicDetectionModel:
 
         x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype, non_blocking=True)
         x = x / 255.0
-        return _letterbox_normalized_bchw(
-            x, new_shape=(self.imgsz, self.imgsz), stride=self.stride
-        )
+        return _letterbox_normalized_bchw(x, new_shape=(self.imgsz, self.imgsz))
 
     def close(self) -> None:
         if self.runner is not None:
@@ -400,7 +375,7 @@ class YoloMosaicDetectionModel:
 
             keep = masks.flatten(1).any(dim=1)
             if keep.any():
-                boxes_list.append(boxes[keep].to(device="cpu", dtype=torch.float32, non_blocking=True).numpy())
+                boxes_list.append(boxes[keep].to(device="cpu", dtype=torch.float32).numpy())
                 masks_list.append(masks[keep])
             else:
                 boxes_list.append(np.zeros((0, 4), dtype=np.float32))

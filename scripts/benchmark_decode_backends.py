@@ -12,7 +12,6 @@ Usage:
 
 import argparse
 import csv
-import json
 import statistics
 import subprocess
 import sys
@@ -20,10 +19,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from bench_memory import MemorySampler
+from bench_common import DEFAULT_CLIP_DIR, FALLBACK_MARKERS, MemorySampler, probe_frames
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CLIP_DIR = REPO_ROOT / "assets" / "benchmark"
 BACKENDS = ("vali", "pyav-hw", "pyav-sw")
 
 RUNNER_SHIM = """
@@ -34,20 +31,6 @@ sys.argv = ["jasna"] + sys.argv[2:]
 from jasna.main import main
 main()
 """
-
-FALLBACK_MARKERS = ("falling back", "software decoding")
-
-
-def probe_frames(clip: Path) -> int:
-    out = subprocess.run(
-        [
-            "ffprobe", "-v", "quiet", "-select_streams", "v:0",
-            "-count_packets", "-show_entries", "stream=nb_read_packets",
-            "-of", "json", str(clip),
-        ],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    return int(json.loads(out)["streams"][0]["nb_read_packets"])
 
 
 def run_once(clip: Path, backend: str, workdir: Path) -> tuple[float, str, dict[str, float]]:

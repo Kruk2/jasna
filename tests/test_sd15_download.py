@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 import jasna.restorer.sd15_download as dl
-from jasna.engine_paths import SD15_CKPT_ENC_PATH
+from jasna.engine_paths import SD15_CKPT_ENC_PATH, SD15_CKPT_PATH
 
 
 def _make_bundle(model_dir: Path) -> None:
@@ -15,29 +15,22 @@ def _make_bundle(model_dir: Path) -> None:
     (model_dir / SD15_CKPT_ENC_PATH.name).write_bytes(b"x")
 
 
-class TestBundlePresent:
-    def test_present_with_enc_and_config(self, tmp_path: Path):
-        _make_bundle(tmp_path)
-        assert dl.bundle_present(tmp_path) is True
+@pytest.mark.parametrize(
+    ("files", "present"),
+    [
+        (("unet/config.json", SD15_CKPT_ENC_PATH.name), True),
+        (("unet/config.json", SD15_CKPT_PATH.name), True),
+        (("unet/config.json",), False),
+        ((SD15_CKPT_ENC_PATH.name,), False),
+    ],
+    ids=["encrypted", "plaintext", "no-checkpoint", "no-config"],
+)
+def test_bundle_needs_a_checkpoint_and_the_unet_config(tmp_path: Path, files, present):
+    for name in files:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_bytes(b"x")
 
-    def test_absent_without_ckpt(self, tmp_path: Path):
-        (tmp_path / "unet").mkdir()
-        (tmp_path / "unet" / "config.json").write_text("{}")
-        assert dl.bundle_present(tmp_path) is False
-
-    def test_original_download_is_reused_without_network_or_prompt(self, tmp_path: Path):
-        (tmp_path / "unet").mkdir()
-        (tmp_path / "unet" / "config.json").write_text("{}")
-        (tmp_path / "sd15-200000.ckpt.enc").write_bytes(b"x")
-        assert dl.bundle_present(tmp_path) is True
-        with patch.object(dl, "download_sd15_bundle") as download, patch("builtins.input") as prompt:
-            dl.ensure_sd15_bundle(tmp_path)
-            download.assert_not_called()
-            prompt.assert_not_called()
-
-    def test_absent_without_config(self, tmp_path: Path):
-        (tmp_path / SD15_CKPT_ENC_PATH.name).write_bytes(b"x")
-        assert dl.bundle_present(tmp_path) is False
+    assert dl.bundle_present(tmp_path) is present
 
 
 def _closed_stdin(prompt):
@@ -82,38 +75,26 @@ class TestEnsureBundle:
             assert dl.bundle_present(target)
 
 
-class TestDownloadBundle:
-    def test_without_callback_uses_default_hf_progress(self, tmp_path: Path):
-        with patch("huggingface_hub.snapshot_download") as mock_snapshot:
-            dl.download_sd15_bundle(tmp_path)
+def test_skips_retired_checkpoint_but_not_the_current_one(tmp_path: Path):
+    from fnmatch import fnmatch
 
-        kwargs = mock_snapshot.call_args.kwargs
-        assert kwargs["local_dir"] == str(tmp_path)
-        assert "tqdm_class" not in kwargs
+    with patch("huggingface_hub.snapshot_download") as mock_snapshot:
+        dl.download_sd15_bundle(tmp_path)
 
-    def test_skips_retired_checkpoint_but_not_the_current_one(self, tmp_path: Path):
-        from fnmatch import fnmatch
+    ignored = mock_snapshot.call_args.kwargs["ignore_patterns"]
+    assert any(fnmatch("sd15-200000.v2.ckpt.enc", pattern) for pattern in ignored)
+    assert not any(fnmatch(SD15_CKPT_ENC_PATH.name, pattern) for pattern in ignored)
 
-        with patch("huggingface_hub.snapshot_download") as mock_snapshot:
-            dl.download_sd15_bundle(tmp_path)
 
-        ignored = mock_snapshot.call_args.kwargs["ignore_patterns"]
-        assert any(fnmatch("sd15-200000.v2.ckpt.enc", pattern) for pattern in ignored)
-        assert not any(fnmatch(SD15_CKPT_ENC_PATH.name, pattern) for pattern in ignored)
+def test_download_progress_reports_bytes_silently():
+    events: list[tuple[int, int | None]] = []
+    progress_cls = dl._progress_tqdm_class(lambda done, total: events.append((done, total)))
 
-    def test_callback_uses_silent_byte_progress_class(self, tmp_path: Path):
-        events: list[tuple[int, int | None]] = []
+    byte_bar = progress_cls(total=100, initial=10, unit="B")
+    byte_bar.update(15)
+    byte_bar.total += 25
+    byte_bar.refresh()
+    file_bar = progress_cls([1, 2], total=2)
 
-        with patch("huggingface_hub.snapshot_download") as mock_snapshot:
-            dl.download_sd15_bundle(tmp_path, progress_callback=lambda done, total: events.append((done, total)))
-
-        progress_cls = mock_snapshot.call_args.kwargs["tqdm_class"]
-        byte_bar = progress_cls(total=100, initial=10, unit="B")
-        byte_bar.update(15)
-        byte_bar.total += 25
-        byte_bar.refresh()
-
-        file_bar = progress_cls([1, 2], total=2)
-
-        assert list(file_bar) == [1, 2]
-        assert events == [(10, 100), (25, 100), (25, 125)]
+    assert list(file_bar) == [1, 2]
+    assert events == [(10, 100), (25, 100), (25, 125)]

@@ -26,7 +26,7 @@ def _double_onnx(path: Path, shape: list) -> Path:
 
 def _compile(onnx_path: Path, **options) -> Path:
     return compile_onnx_to_tensorrt_engine(
-        onnx_path, torch.device("cuda:0"), optimization_level=0, workspace_gb=1, **options)
+        onnx_path, torch.device("cuda:0"), workspace_gb=1, **options)
 
 
 def test_split_basicvsrpp_imports_without_tensorrt_installed():
@@ -69,7 +69,6 @@ def test_an_existing_engine_is_reused_without_its_onnx(tmp_path):
     ([4, 3, 8, 8], {"batch_size": 8}, "has fixed batch 4, requested batch_size=8"),
     ([4, 3, 8, 8], {"batch_size": 4, "dynamic_batch": True}, "requires an ONNX input with a dynamic batch axis"),
     (["batch", 3, "height", 8], {"batch_size": 4}, "non-batch dynamic shape"),
-    ([1, 3, 8, 8], {"optimization_level": 10}, "optimization_level must be in"),
 ])
 def test_compile_refuses_shapes_it_cannot_build(tmp_path, shape, options, error):
     onnx_path = _double_onnx(tmp_path / "model.onnx", shape)

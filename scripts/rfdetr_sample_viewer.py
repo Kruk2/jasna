@@ -82,8 +82,6 @@ def main() -> int:
     disp_max_w, disp_max_h = (int(v) for v in args.disp_max.lower().split("x"))
 
     os.chdir(REPO_ROOT)
-    if str(REPO_ROOT) not in sys.path:
-        sys.path.insert(0, str(REPO_ROOT))
 
     import cv2
     import numpy as np

@@ -73,6 +73,10 @@ def dlss5_runtime_dir() -> Path:
     return model_weights_dir() / "dlss5"
 
 
+def missing_runtime_files(runtime_dir: Path) -> list[str]:
+    return [name for name in DLSS5_RUNTIME_FILES if not (runtime_dir / name).is_file()]
+
+
 def dlss5_unavailable_reason(device: torch.device, runtime_dir: Path) -> str | None:
     from jasna.accelerator import is_nvidia_device
 
@@ -80,7 +84,7 @@ def dlss5_unavailable_reason(device: torch.device, runtime_dir: Path) -> str | N
         return "DLSS 5 upscaling runs on Windows only"
     if not is_nvidia_device(device) or torch.cuda.get_device_capability(device) < _RTX_30:
         return "DLSS 5 upscaling needs an NVIDIA RTX 30-series or newer GPU"
-    missing = [name for name in DLSS5_RUNTIME_FILES if not (runtime_dir / name).is_file()]
+    missing = missing_runtime_files(runtime_dir)
     if missing:
         return f"DLSS 5 upscaling needs these runtime files in {runtime_dir}: {', '.join(missing)}"
     return None

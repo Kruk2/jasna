@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
+from jasna.accelerator import is_nvidia_device
 from jasna.engine_paths import (
     BASICVSRPP_DIRECTIONS as DIRECTIONS,
     BASICVSRPP_PREPROCESS_BATCH as PREPROCESS_BATCH,
@@ -30,6 +31,8 @@ logger = logging.getLogger(__name__)
 FEATURE_SIZE = 64
 INPUT_SIZE = 256
 EAGER_UPSAMPLE_BATCH = 8
+# The preprocess engine's smallest batch: SPyNet needs frame pairs, and shorter clips are padded.
+PREPROCESS_MIN_BATCH = 3
 
 _CUDAGRAPHS_ENV = "JASNA_TRT_CUDAGRAPHS"
 
@@ -42,6 +45,19 @@ def _set_trt_cudagraphs_mode(enabled: bool) -> None:
     import torch_tensorrt  # type: ignore[import-not-found]
 
     torch_tensorrt.runtime.set_cudagraphs_mode(enabled)
+
+
+def _loop_body_example_inputs(
+    direction_index: int, mid_channels: int, dtype: torch.dtype, device: torch.device
+) -> list[torch.Tensor]:
+    """Random inputs shaped like one propagation step of the ``direction_index``-th direction."""
+    fs = FEATURE_SIZE
+    feature = (1, mid_channels, fs, fs)
+    grid = (1, fs, fs, 2)
+    flow = (1, 2, fs, fs)
+    backbone_prefix = (1, (1 + direction_index) * mid_channels, fs, fs)
+    shapes = (feature, grid, feature, grid, feature, flow, flow, backbone_prefix)
+    return [torch.randn(*shape, dtype=dtype, device=device) for shape in shapes]
 
 
 def _warmup_capture_loop_body_graphs(
@@ -57,21 +73,11 @@ def _warmup_capture_loop_body_graphs(
     graph replay is thread-safe. loop_body shapes are static, so no
     re-capture can happen mid-run.
     """
-    fs = FEATURE_SIZE
     _set_trt_cudagraphs_mode(True)
     try:
         with torch.inference_mode():
             for i, direction in enumerate(DIRECTIONS):
-                inputs = [
-                    torch.randn(1, mid_channels, fs, fs, dtype=dtype, device=device),
-                    torch.randn(1, fs, fs, 2, dtype=dtype, device=device),
-                    torch.randn(1, mid_channels, fs, fs, dtype=dtype, device=device),
-                    torch.randn(1, fs, fs, 2, dtype=dtype, device=device),
-                    torch.randn(1, mid_channels, fs, fs, dtype=dtype, device=device),
-                    torch.randn(1, 2, fs, fs, dtype=dtype, device=device),
-                    torch.randn(1, 2, fs, fs, dtype=dtype, device=device),
-                    torch.randn(1, (1 + i) * mid_channels, fs, fs, dtype=dtype, device=device),
-                ]
+                inputs = _loop_body_example_inputs(i, mid_channels, dtype, device)
                 engine = loop_body_engines[direction]
                 engine(*inputs)
                 engine(*inputs)
@@ -254,18 +260,11 @@ class _PreprocessWrapper(nn.Module):
         return feats, flows_fwd, flows_bwd
 
 
-def _get_inference_generator(model: nn.Module) -> nn.Module:
-    if hasattr(model, "generator_ema") and model.generator_ema is not None:
-        return model.generator_ema
-    return model.generator
-
-
 def compile_basicvsrpp_sub_engines(
-    model: nn.Module,
+    generator: nn.Module,
     device: torch.device,
     fp16: bool,
     model_weights_path: str,
-    optimization_level: int = 5,
 ) -> dict[str, str]:
     import torch_tensorrt  # type: ignore[import-not-found]
 
@@ -274,7 +273,6 @@ def compile_basicvsrpp_sub_engines(
     engine_paths = get_basicvsrpp_sub_engine_paths(model_weights_path, fp16)
     workspace_size = get_workspace_size_bytes()
 
-    generator = _get_inference_generator(model)
     mid = generator.mid_channels
 
     paths: dict[str, str] = {}
@@ -287,29 +285,20 @@ def compile_basicvsrpp_sub_engines(
             logger.info("Sub-engine already exists: %s", path)
             continue
 
-        prefix_channels = (1 + i) * mid
         wrapper = _PropagateBodyWrapper(
             generator.deform_align[direction],
             generator.backbone[direction],
         ).to(device=device, dtype=dtype).eval()
-        inp_fp = torch.randn(1, mid, FEATURE_SIZE, FEATURE_SIZE, dtype=dtype, device=device)
-        inp_g1 = torch.randn(1, FEATURE_SIZE, FEATURE_SIZE, 2, dtype=dtype, device=device)
-        inp_fn2 = torch.randn(1, mid, FEATURE_SIZE, FEATURE_SIZE, dtype=dtype, device=device)
-        inp_g2 = torch.randn(1, FEATURE_SIZE, FEATURE_SIZE, 2, dtype=dtype, device=device)
-        inp_fc = torch.randn(1, mid, FEATURE_SIZE, FEATURE_SIZE, dtype=dtype, device=device)
-        inp_f1 = torch.randn(1, 2, FEATURE_SIZE, FEATURE_SIZE, dtype=dtype, device=device)
-        inp_f2 = torch.randn(1, 2, FEATURE_SIZE, FEATURE_SIZE, dtype=dtype, device=device)
-        inp_bp = torch.randn(1, prefix_channels, FEATURE_SIZE, FEATURE_SIZE, dtype=dtype, device=device)
+        inputs = _loop_body_example_inputs(i, mid, dtype, device)
         compile_and_save_torchtrt_dynamo(
             module=wrapper,
-            inputs=[inp_fp, inp_g1, inp_fn2, inp_g2, inp_fc, inp_f1, inp_f2, inp_bp],
+            inputs=inputs,
             output_path=path,
             dtype=dtype,
             workspace_size_bytes=workspace_size,
             message=f"Compiling sub-engine {i + 1}/6: loop_body [{direction}]",
-            optimization_level=optimization_level,
         )
-        del wrapper, inp_fp, inp_g1, inp_fn2, inp_g2, inp_fc, inp_f1, inp_f2, inp_bp
+        del wrapper, inputs
 
     # ── preprocess engine (feat_extract + downsample + bidirectional SPyNet, dynamic batch) ──
     path = engine_paths["preprocess"]
@@ -321,7 +310,7 @@ def compile_basicvsrpp_sub_engines(
             generator.feat_extract, generator.spynet,
         ).to(device=device, dtype=dtype).eval()
         dyn_input = torch_tensorrt.Input(
-            min_shape=[3, 3, INPUT_SIZE, INPUT_SIZE],
+            min_shape=[PREPROCESS_MIN_BATCH, 3, INPUT_SIZE, INPUT_SIZE],
             opt_shape=[PREPROCESS_BATCH, 3, INPUT_SIZE, INPUT_SIZE],
             max_shape=[PREPROCESS_BATCH, 3, INPUT_SIZE, INPUT_SIZE],
             dtype=dtype,
@@ -334,7 +323,6 @@ def compile_basicvsrpp_sub_engines(
             workspace_size_bytes=workspace_size,
             message=f"Compiling sub-engine 5/6: preprocess (batch=3..{PREPROCESS_BATCH})",
             device=device,
-            optimization_level=optimization_level,
         )
         del wrapper
 
@@ -366,7 +354,6 @@ def compile_basicvsrpp_sub_engines(
             workspace_size_bytes=workspace_size,
             message=f"Compiling sub-engine 6/6: upsample (batch=1..{UPSAMPLE_BATCH})",
             device=device,
-            optimization_level=optimization_level,
         )
         del wrapper
 
@@ -489,19 +476,17 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         flow_idx: list[int],
         frame_count: int,
         grid: torch.Tensor,
-    ) -> dict[int, torch.Tensor]:
+    ) -> torch.Tensor | None:
+        """Second-order flows of steps ``2..frame_count-1`` (row ``j`` is step ``j + 2``)."""
         if frame_count <= 2:
-            return {}
+            return None
         indices = list(range(2, frame_count))
-        fn1_list = [flows[:, flow_idx[i], :, :, :] for i in indices]
-        fn2_list = [flows[:, flow_idx[i - 1], :, :, :] for i in indices]
-        fn1_batch = torch.cat(fn1_list, dim=0)
-        fn2_batch = torch.cat(fn2_list, dim=0)
+        fn1_batch = torch.cat([flows[:, flow_idx[i], :, :, :] for i in indices], dim=0)
+        fn2_batch = torch.cat([flows[:, flow_idx[i - 1], :, :, :] for i in indices], dim=0)
         warped = self._flow_warp_cached(
             fn2_batch, fn1_batch.permute(0, 2, 3, 1), grid,
         )
-        acc = fn1_batch + warped
-        return {i: acc[j : j + 1] for j, i in enumerate(indices)}
+        return fn1_batch + warped
 
     def _precompute_flow_data(
         self,
@@ -524,7 +509,7 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
             frame_idx = frame_idx[::-1]
             flow_idx = frame_idx
 
-        acc_flows = self._precompute_accumulated_flows(
+        acc = self._precompute_accumulated_flows(
             flows, flow_idx, len(frame_idx), grid,
         )
 
@@ -536,17 +521,15 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         flows_grid[..., 1].mul_(scale_y)
         flows_grid.add_(grid.unsqueeze(1))
 
+        acc_flows: dict[int, torch.Tensor] = {}
         acc_grids: dict[int, torch.Tensor] = {}
-        if acc_flows:
-            acc_keys = sorted(acc_flows.keys())
-            acc_batch = torch.cat([acc_flows[k] for k in acc_keys], dim=0)
-            acc_batch_nhwc = acc_batch.permute(0, 2, 3, 1).contiguous()
-            acc_batch_nhwc[..., 0].mul_(scale_x)
-            acc_batch_nhwc[..., 1].mul_(scale_y)
-            acc_batch_nhwc.add_(grid)
-            acc_grids = {
-                k: acc_batch_nhwc[j : j + 1] for j, k in enumerate(acc_keys)
-            }
+        if acc is not None:
+            acc_nhwc = acc.permute(0, 2, 3, 1).contiguous()
+            acc_nhwc[..., 0].mul_(scale_x)
+            acc_nhwc[..., 1].mul_(scale_y)
+            acc_nhwc.add_(grid)
+            acc_flows = {j + 2: acc[j : j + 1] for j in range(acc.shape[0])}
+            acc_grids = {j + 2: acc_nhwc[j : j + 1] for j in range(acc.shape[0])}
 
         return frame_idx, flow_idx, acc_flows, flows_grid, acc_grids
 
@@ -662,8 +645,6 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
 
         return out_batch.unsqueeze(0)
 
-    _PREPROCESS_MIN_BATCH = 3
-
     def _preprocess(
         self, lqs_flat: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -672,7 +653,7 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         SPyNet consumes consecutive frame pairs, so successive batches overlap
         by one frame: batch [a, b) yields the flows for pairs a..b-2, and the
         pair (b-1, b) comes from the next batch's first pair. Every batch keeps
-        at least ``_PREPROCESS_MIN_BATCH`` frames, the engine profile minimum.
+        at least ``PREPROCESS_MIN_BATCH`` frames, the engine profile minimum.
         """
         n = lqs_flat.size(0)
         if n <= PREPROCESS_BATCH:
@@ -693,7 +674,7 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
             covered = stop
             if stop >= n:
                 break
-            start = min(stop - 1, n - self._PREPROCESS_MIN_BATCH)
+            start = min(stop - 1, n - PREPROCESS_MIN_BATCH)
 
         return (
             torch.cat(feats_parts),
@@ -705,9 +686,9 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         n, t, c, h, w = lqs.size()
 
         lqs_flat = lqs.view(-1, c, h, w)
-        padded = t < self._PREPROCESS_MIN_BATCH
+        padded = t < PREPROCESS_MIN_BATCH
         if padded:
-            pad_count = self._PREPROCESS_MIN_BATCH - t
+            pad_count = PREPROCESS_MIN_BATCH - t
             lqs_flat = torch.cat(
                 [lqs_flat, lqs_flat[-1:].expand(pad_count, -1, -1, -1)], dim=0,
             )
@@ -746,7 +727,7 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
 
 
 def create_split_forward(
-    model: nn.Module,
+    generator: nn.Module,
     model_weights_path: str,
     device: torch.device,
     fp16: bool,
@@ -755,7 +736,6 @@ def create_split_forward(
     if result is None:
         return None
     loop_body_engines, preprocess_engine, upsample_engine = result
-    generator = _get_inference_generator(model)
     cudagraphs = _loop_body_cudagraphs_enabled()
     if cudagraphs:
         _warmup_capture_loop_body_graphs(
@@ -773,8 +753,7 @@ def _eager_propagate_body(deform_align: nn.Module, backbone: nn.Module) -> nn.Mo
     return _PropagateBodyWrapper(deform_align, backbone)
 
 
-def create_eager_split_forward(model: nn.Module) -> BasicVSRPlusPlusNetSplit:
-    generator = _get_inference_generator(model)
+def create_eager_split_forward(generator: nn.Module) -> BasicVSRPlusPlusNetSplit:
     loop_bodies = {
         d: _eager_propagate_body(generator.deform_align[d], generator.backbone[d]).eval()
         for d in DIRECTIONS
@@ -797,7 +776,7 @@ def compile_basicvsrpp_engines(model_weights_path: str, device: torch.device, fp
     """Compile the six BasicVSR++ TensorRT sub-engines if missing; True when they all exist."""
     if all_basicvsrpp_sub_engines_exist(model_weights_path, fp16):
         return True
-    if device.type != "cuda" or not torch.cuda.is_available():
+    if not is_nvidia_device(device) or not torch.cuda.is_available():
         return False
     if _gpu_vram_gb(device) < 4:
         logger.info("Skipping TRT compilation: GPU VRAM < 4 GB.")
@@ -808,9 +787,9 @@ def compile_basicvsrpp_engines(model_weights_path: str, device: torch.device, fp
 
     from jasna.models.basicvsrpp.inference import load_model
 
-    model = load_model(None, model_weights_path, device, fp16)
-    compile_basicvsrpp_sub_engines(model=model, device=device, fp16=fp16, model_weights_path=model_weights_path)
-    del model
+    generator = load_model(model_weights_path, device, fp16)
+    compile_basicvsrpp_sub_engines(generator=generator, device=device, fp16=fp16, model_weights_path=model_weights_path)
+    del generator
     gc.collect()
     torch.cuda.empty_cache()
     return all_basicvsrpp_sub_engines_exist(model_weights_path, fp16)

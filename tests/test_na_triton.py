@@ -8,11 +8,10 @@ import os
 
 import pytest
 import torch
+import triton
 
-triton = pytest.importorskip("triton")
-
-from jasna.models.ltx_vae.eager_na import na3d as eager_na3d  # noqa: E402
-from jasna.models.ltx_vae.na_triton import (  # noqa: E402
+from jasna.models.ltx_vae.eager_na import na3d as eager_na3d
+from jasna.models.ltx_vae.na_triton import (
     AMD_LARGE_WINDOW_CONFIG,
     AMD_SMALL_WINDOW_CONFIG,
     LARGE_WINDOW_CONFIG,

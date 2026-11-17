@@ -15,7 +15,6 @@ Usage:
 
 import argparse
 import csv
-import json
 import os
 import re
 import signal
@@ -27,11 +26,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bench_memory import MemorySampler
+from bench_common import DEFAULT_CLIP_DIR, FALLBACK_MARKERS, MemorySampler, probe_frames
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CLIP_DIR = REPO_ROOT / "assets" / "benchmark"
-FALLBACK_MARKERS = ("falling back", "software decoding")
 FAILURE_FLAGS = frozenset({"FAILED", "TIMEOUT"})
 
 SOURCE_RUNNER_SHIM = """
@@ -89,28 +85,6 @@ def safe_name(value: str) -> str:
 
 def targets_for_repeat(targets: list[Target], repeat: int) -> list[Target]:
     return targets if repeat % 2 else list(reversed(targets))
-
-
-def probe_frames(clip: Path) -> int:
-    out = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "quiet",
-            "-select_streams",
-            "v:0",
-            "-count_packets",
-            "-show_entries",
-            "stream=nb_read_packets",
-            "-of",
-            "json",
-            str(clip),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return int(json.loads(out)["streams"][0]["nb_read_packets"])
 
 
 def target_supports(target: Target, option: str) -> bool:

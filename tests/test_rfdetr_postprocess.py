@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import pytest
 
-from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel, compile_rfdetr_engine
+from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
 
 
 _DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
@@ -74,9 +74,10 @@ def test_postprocess_waits_for_the_gpu_once():
     assert len([w for w in caught if "called a synchronizing" in str(w.message)]) == 1
 
 
-def _build_rfdetr_model():
+def _build_rfdetr_model(*, dynamic_batch: bool = True):
     mock_runner = MagicMock()
-    mock_runner.input_dtype = torch.float16
+    mock_runner.input_names = ["input"]
+    mock_runner.input_dtypes = {"input": torch.float32}
     mock_runner.output_names = ["pred_boxes", "pred_logits", "pred_masks"]
     mock_runner.outputs = {
         "pred_boxes": torch.zeros(1, 100, 4),
@@ -90,14 +91,14 @@ def _build_rfdetr_model():
     with (
         patch("jasna.mosaic.rfdetr.is_nvidia_device", return_value=True),
         patch("jasna.mosaic.rfdetr.get_onnx_tensorrt_engine_path", return_value=engine_path),
-        patch("jasna.mosaic.rfdetr.TrtRunner", return_value=mock_runner),
+        patch("jasna.trt.trt_runner.TrtRunner", return_value=mock_runner),
     ):
         model = RfDetrMosaicDetectionModel(
             weights_path=Path("model.onnx"),
             batch_size=2,
             device=torch.device("cpu"),
             resolution=768,
-            dynamic_batch=True,
+            dynamic_batch=dynamic_batch,
             fp16=False,
         )
     return model, mock_runner
@@ -122,7 +123,6 @@ class TestRfDetrInit:
 class TestRfDetrPreprocess:
     def test_frames_are_resized_and_normalized_with_imagenet_statistics(self):
         model, _ = _build_rfdetr_model()
-        model.input_dtype = torch.float32
         out = model._preprocess(torch.full((2, 3, 100, 200), 255, dtype=torch.uint8))
         assert out.shape == (2, 3, 768, 768) and out.dtype == torch.float32
         white = (1 - torch.tensor([0.485, 0.456, 0.406])) / torch.tensor([0.229, 0.224, 0.225])
@@ -140,7 +140,6 @@ class TestRfDetrPreprocess:
 class TestRfDetrCall:
     def test_call_returns_detections(self):
         model, mock_runner = _build_rfdetr_model()
-        model.input_dtype = torch.float32
 
         pred_boxes = torch.tensor([[[0.5, 0.5, 0.2, 0.2]] + [[0.0, 0.0, 0.0, 0.0]] * 99] * 2)
         pred_logits = torch.tensor([[[5.0]] + [[-10.0]] * 99] * 2)
@@ -161,9 +160,7 @@ class TestRfDetrCall:
         mock_runner.infer.assert_called_once()
 
     def test_fixed_batch_model_pads_and_chunks(self):
-        model, mock_runner = _build_rfdetr_model()
-        model.dynamic_batch = False
-        model.input_dtype = torch.float32
+        model, mock_runner = _build_rfdetr_model(dynamic_batch=False)
         shared_outputs = {
             "pred_boxes": torch.zeros(2, 1, 4),
             "pred_logits": torch.zeros(2, 1, 1),
@@ -190,7 +187,6 @@ class TestRfDetrCall:
 
     def test_dynamic_batch_model_does_not_pad(self):
         model, mock_runner = _build_rfdetr_model()
-        model.input_dtype = torch.float32
         mock_runner.infer.return_value = {
             "pred_boxes": torch.zeros(1, 1, 4),
             "pred_logits": torch.full((1, 1, 1), -10.0),
@@ -202,26 +198,6 @@ class TestRfDetrCall:
 
         fed = next(iter(mock_runner.infer.call_args.args[0].values()))
         assert fed.shape[0] == 1
-
-
-class TestCompileRfdetrEngine:
-    def test_amd_is_a_noop_returning_the_weights_path(self, monkeypatch, tmp_path):
-        import jasna.mosaic.rfdetr as module
-
-        weights = tmp_path / "rfdetr-v6.pt"
-        monkeypatch.setattr(module, "is_amd_device", lambda _device: True)
-
-        result = compile_rfdetr_engine(
-            weights,
-            torch.device("cpu"),
-            batch_size=4,
-            resolution=576,
-            dynamic_batch=True,
-            fp16=True,
-        )
-
-        # AMD runs the checkpoint through the rfdetr torch model; nothing to build.
-        assert result == weights
 
 
 class _BrightnessRunner:

@@ -48,8 +48,8 @@ def run_encoders(backend: str) -> None:
     accelerator.configure_rocm_process_env()
     from jasna.engine_paths import configure_torch_compile_cache
     from jasna.ltx.model_files import LtxModelFiles
-    from jasna.ltx.plan import WINDOW_FRAMES
-    from jasna.ltx.restore import _vae_pixels
+    from jasna.ltx.camera import WINDOW_FRAMES
+    from jasna.ltx.inference import vae_pixels
     from jasna.models.ltx_vae import load_video_encoder
 
     configure_torch_compile_cache()
@@ -61,7 +61,7 @@ def run_encoders(backend: str) -> None:
         for canvas in CANVASES:
             pixels = torch.randint(0, 256, (3, WINDOW_FRAMES, canvas, canvas), dtype=torch.uint8)
             with torch.inference_mode():
-                encoder(_vae_pixels(pixels, device))
+                encoder(vae_pixels(pixels, device).unsqueeze(0))
             torch.cuda.synchronize()
             print(f"  {name} encoder at {canvas}: tuned", flush=True)
         del encoder

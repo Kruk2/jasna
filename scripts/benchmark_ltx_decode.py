@@ -32,24 +32,23 @@ import csv
 import datetime
 import math
 import statistics
-import subprocess
 import time
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
 
+from bench_common import git_commit
 from jasna._suppress_noise import install as install_noise_filters
 from jasna.engine_paths import configure_torch_compile_cache
 from jasna.ltx.model_files import LtxModelFiles
-from jasna.ltx.plan import LATENT_FRAMES
-from jasna.ltx.restore import segment_decode_budget
+from jasna.ltx.windows import LATENT_FRAMES
+from jasna.ltx.vram_budget import segment_decode_budget
 from jasna.models.ltx_vae import decode_latent, load_video_decoder
 from jasna.models.ltx_vae import diffusion_video_decoder as D
 from jasna.models.ltx_vae import transformer as T
 from jasna.tensor_utils import compile_static, half_dtype
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 LATENT_CHANNELS = 128
 LATENT_SPATIAL_SCALE = 32
 OPTIONS = ("shipped", "kitchen", "natten", "eager", "autotune")
@@ -168,12 +167,6 @@ def psnr(a: torch.Tensor, b: torch.Tensor) -> float:
     """PSNR of two ``[-1, 1]`` decodes, clamped as the compose pass clamps them."""
     mse = F.mse_loss(a.float().clamp(-1, 1), b.float().clamp(-1, 1)).item()
     return math.inf if mse == 0 else 10 * math.log10(4.0 / mse)
-
-
-def git_commit() -> str:
-    return subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
-    ).stdout.strip()
 
 
 def main() -> None:
