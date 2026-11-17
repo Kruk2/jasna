@@ -288,3 +288,18 @@ def test_click_above_canvas_snaps_point_to_top_edge(tk_root):
     )
     assert len(dialog._draft) == 1
     dialog._cancel()
+
+
+def test_closing_the_dialog_cancels_its_pending_redraw(tk_root):
+    from factories import scheduled_after_ids
+
+    tk_root.update()
+    dialog = mask_feedback.MaskSuggestDialog(
+        tk_root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
+    )
+    dialog._on_alpha(0.5)
+    pending = dialog._alpha_after
+
+    dialog._cancel()
+
+    assert pending not in scheduled_after_ids(tk_root)

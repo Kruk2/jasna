@@ -9,14 +9,13 @@ import pytest
 import torch
 
 from factories import video_metadata
-from jasna.gui.models import AppSettings
+from jasna.gui.models import AppSettings, JobItem
+from jasna.gui.queues import Cancel, Stop
 from jasna.gui.restoration_preview import (
     RestorationPreviewWorker,
-    _Cancel,
     _Request,
     _CenterFrameCollector,
     _PlaybackFrameCollector,
-    _Stop,
     playback_window,
     preview_window,
 )
@@ -185,7 +184,7 @@ def test_restoration_worker_coalesces_pending_requests() -> None:
 
     command = worker._commands.get_nowait()
     assert command.center_seconds == 2.0
-    assert command.projection == "fisheye"
+    assert command.settings.vr_projection == "fisheye"
     assert command.generation == second_generation
     assert second_generation == first_generation + 1
     with pytest.raises(queue.Empty):
@@ -200,7 +199,7 @@ def test_restoration_worker_marks_playback_requests() -> None:
 
     command = worker._commands.get_nowait()
     assert command.playback is True
-    assert command.projection == "raw"
+    assert command.settings.vr_projection == "raw"
     worker.close()
 
 
@@ -218,8 +217,8 @@ def _preview_pipeline() -> SimpleNamespace:
     ("action", "queued"),
     [
         (lambda worker: worker.request(2.0, AppSettings(), projection="auto"), _Request),
-        (lambda worker: worker.cancel(), _Cancel),
-        (lambda worker: worker.close(), _Stop),
+        (lambda worker: worker.cancel(), Cancel),
+        (lambda worker: worker.close(), Stop),
     ],
     ids=["request", "cancel", "close"],
 )
@@ -262,7 +261,7 @@ def _queue_jobs(app, tmp_path, statuses) -> list:
     from jasna.gui.models import JobStatus
 
     for index, status in enumerate(statuses):
-        app._queue_panel.add_job(tmp_path / f"clip-{index}.mp4")
+        app._queue_panel.add_jobs([JobItem(path=tmp_path / f"clip-{index}.mp4")])
         job = app._queue_panel.get_jobs()[index]
         if status is JobStatus.COMPLETED:
             job.output_path = tmp_path / f"clip-{index}_restored.mp4"
@@ -274,7 +273,7 @@ def _queue_jobs(app, tmp_path, statuses) -> list:
 def start_calls(jasna_app, monkeypatch) -> dict[str, list]:
     """What Start validated and handed to the processor; neither validation nor processing runs."""
     calls: dict[str, list] = {"validated": [], "started": []}
-    preflight = SimpleNamespace(missing=(), should_warn_first_run_slow=False)
+    preflight = SimpleNamespace(missing=())
 
     def validate(settings, jobs, **_kwargs):
         calls["validated"].append(list(jobs))
@@ -328,7 +327,7 @@ def test_app_prepares_queue_or_continues_after_pause(jasna_app, start_calls, tmp
 
     continuing = stopped and pending
     assert start_calls["validated"] == [[paused] if continuing else [finished, skipped, paused]]
-    assert start_calls["started"] == [jasna_app._queue_panel.get_jobs_ref()]
+    assert start_calls["started"] == [jasna_app._queue_panel.job_queue]
     if continuing:
         assert (finished.status, skipped.status) == (JobStatus.COMPLETED, JobStatus.SKIPPED)
         assert finished.output_path == tmp_path / "clip-0_restored.mp4"

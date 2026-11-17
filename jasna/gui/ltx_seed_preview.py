@@ -22,8 +22,8 @@ import torch
 from jasna.accelerator import device_free_bytes
 from jasna.gui.models import AppSettings
 from jasna.gui.preview_frames import preview_image
-from jasna.gui.queues import drain, replace_pending
-from jasna.gui.video_session import SessionCache, build_video_session, video_session_key
+from jasna.gui.queues import CommandWorker, drain
+from jasna.gui.video_session import SessionCache, build_preview_pipeline, build_video_session, video_session_key
 from jasna.media.probe import VideoMetadata
 from jasna.media.splice import KeyframeIndex, segment_render_span
 from jasna.os_utils import make_scratch_folder
@@ -137,19 +137,15 @@ class SeedRenderer:
     ):
         """Restore ``segment`` with ``seed``; returns the writer ``writer_for(directory,
         effect range, stereo layout)`` made, after every frame of the range went through it."""
-        from jasna.gui.video_session import video_session_config
         from jasna.ltx.progress import Progress
         from jasna.ltx.restore import PreparedSpan, compose_spans, denoise_spans, prepare_spans
         from jasna.ltx.resume_files import final_stores
         from jasna.ltx.inference import ModelRuntime
-        from jasna.session_factory import build_pipeline
 
         settings = replace(settings, restoration_model="ltx")
         seeded = replace(segment, restoration=SegmentRestoration("ltx", int(seed)))
         session = self._sessions.get(settings, lambda: build_video_session(settings, log=lambda _msg: None))
-        config = video_session_config(settings, codec=settings.codec, encoder_settings={})
-        pipeline = build_pipeline(config, session, self.path, self.path, segments=(seeded,))
-        pipeline.configure_vr(self.metadata)
+        pipeline = build_preview_pipeline(settings, session, self.path, self.metadata, segments=(seeded,))
         render = pipeline.ltx_segment_render(self.metadata)
         if self._runtime is None or self._runtime.files != render.files:
             self._drop_runtime()
@@ -235,12 +231,7 @@ class _Release:
     pass
 
 
-@dataclass(frozen=True)
-class _Stop:
-    pass
-
-
-class LtxSeedPreviewWorker:
+class LtxSeedPreviewWorker(CommandWorker):
     """Background thread around ``SeedRenderer``: one seed at a time, a new request
     cancels the running one. Posts ``SeedEvent``s to ``events``; never touches Tk."""
 
@@ -253,109 +244,77 @@ class LtxSeedPreviewWorker:
         *,
         on_stopped: Callable[[], None],
     ) -> None:
+        super().__init__(f"ltx-seed-preview-{Path(path).name}")
         self.path = Path(path)
         self.metadata = metadata
         self.index = index
         self.work_dir = Path(work_dir)
         self._on_stopped = on_stopped
         self.events: queue.Queue[SeedEvent] = queue.Queue()
-        self._commands: queue.Queue[_TrySeed | _Release | _Stop] = queue.Queue(maxsize=1)
-        self._closed = threading.Event()
-        self._generation = 0
-        self._active_cancel: threading.Event | None = None
-        self._cancel_lock = threading.Lock()
-        self._thread = threading.Thread(target=self._run, name=f"ltx-seed-preview-{self.path.name}", daemon=True)
-
-    def start(self) -> None:
-        self._thread.start()
 
     def try_seed(self, segment: SegmentRange, seed: int, settings: AppSettings) -> int:
         self._generation += 1
-        self._cancel_active()
-        replace_pending(self._commands, _TrySeed(segment, int(seed), settings, self._generation))
+        self._cancel_active_pass()
+        self._send(_TrySeed(segment, int(seed), settings, self._generation))
         return self._generation
 
     def cancel(self) -> None:
         self._generation += 1
         drain(self._commands)
-        self._cancel_active()
+        self._cancel_active_pass()
 
     def release(self) -> None:
         """Cancel any run and free the GPU for another preview or a scan."""
         self.cancel()
-        replace_pending(self._commands, _Release())
-
-    def close(self) -> None:
-        if self._closed.is_set():
-            return
-        self._closed.set()
-        self._cancel_active()
-        replace_pending(self._commands, _Stop())
-
-    def join(self, timeout: float | None = None) -> None:
-        self._thread.join(timeout=timeout)
-
-    def _cancel_active(self) -> None:
-        with self._cancel_lock:
-            if self._active_cancel is not None:
-                self._active_cancel.set()
+        self._send(_Release())
 
     def _make_renderer(self) -> SeedRenderer:
         return SeedRenderer(self.path, self.metadata, self.index, self.work_dir)
 
     def _run(self) -> None:
         from jasna.ltx.inference import Cancelled
+        from jasna.media.lut import lut_applier
 
         renderer: SeedRenderer | None = None
         try:
-            while True:
-                command = self._commands.get()
-                if isinstance(command, _Stop):
-                    break
+            while (command := self._next_command()) is not None:
                 if isinstance(command, _Release):
                     if renderer is not None:
                         renderer.release()
                     continue
-                cancel = threading.Event()
-                with self._cancel_lock:
-                    self._active_cancel = cancel
                 generation = command.generation
-                try:
-                    if renderer is None:
-                        renderer = self._make_renderer()
-                    writer = renderer.render(
-                        command.segment,
-                        command.seed,
-                        command.settings,
-                        writer_for=lambda directory, effect, stereo: SeedFrameWriter(
-                            directory, effect, self.metadata, _lut_applier(command.settings), stereo
-                        ),
-                        report=lambda fraction, eta, stage: self.events.put(
-                            SeedProgress(command.seed, stage.name, fraction, eta, generation)
-                        ),
-                        cancel=cancel,
-                    )
-                    self.events.put(SeedReady(command.seed, tuple(writer.frames), generation))
-                except Cancelled:
-                    if renderer is not None:
-                        renderer.release()
-                except Exception as exc:
-                    if renderer is not None:
-                        renderer.release()
-                    if not self._closed.is_set():
-                        self.events.put(SeedFailed(str(exc), generation))
-                finally:
-                    with self._cancel_lock:
-                        self._active_cancel = None
+                with self._cancellable_pass() as cancel:
+                    try:
+                        if renderer is None:
+                            renderer = self._make_renderer()
+                        writer = renderer.render(
+                            command.segment,
+                            command.seed,
+                            command.settings,
+                            writer_for=lambda directory, effect, stereo: SeedFrameWriter(
+                                directory,
+                                effect,
+                                self.metadata,
+                                lut_applier(command.settings.lut_path, torch.device("cuda:0")),
+                                stereo,
+                            ),
+                            report=lambda fraction, eta, stage: self.events.put(
+                                SeedProgress(command.seed, stage.name, fraction, eta, generation)
+                            ),
+                            cancel=cancel,
+                        )
+                        self.events.put(SeedReady(command.seed, tuple(writer.frames), generation))
+                    except Cancelled:
+                        if renderer is not None:
+                            renderer.release()
+                    except Exception as exc:
+                        if renderer is not None:
+                            renderer.release()
+                        if not self._closed.is_set():
+                            self.events.put(SeedFailed(str(exc), generation))
         finally:
             try:
                 if renderer is not None:
                     renderer.close()
             finally:
                 self._on_stopped()
-
-
-def _lut_applier(settings: AppSettings):
-    from jasna.media.lut import lut_applier
-
-    return lut_applier(settings.lut_path, torch.device("cuda:0"))

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import logging
-import queue
-import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -13,11 +10,10 @@ from jasna.gui.components import grab_modal
 from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, AppSettings
+from jasna.gui.image_restore_worker import ImageRestoreWorker
 from jasna.gui.queues import MainThreadCalls
 from jasna.media.media_files import folder_output_path, unique_path
 from jasna.gui.theme import Colors, Fonts, Sizing
-
-logger = logging.getLogger(__name__)
 
 
 def interactive_output_path(input_path: Path, output_folder: str, output_pattern: str) -> Path:
@@ -61,7 +57,6 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         self._output_folder = output_folder
         self._output_pattern = output_pattern
         self._on_log = on_log
-        self._on_stopped = on_stopped
 
         self._index = 0
         self._seed = int(settings.image_restore_seed)
@@ -84,8 +79,13 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         logical_screen = scaling.to_logical(self, *scaling.screen_rect(self)[2:])
         self._window_w, self._window_h, self._preview_w, self._preview_h = _dialog_geometry_for_image(image_size, logical_screen)
 
-        self._requests: queue.Queue[tuple[int, int, int] | None] = queue.Queue()
-        self._worker = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker = ImageRestoreWorker(
+            self._paths,
+            settings,
+            on_rendered=lambda *rendered: self._main_thread.post(lambda: self._finish_render(*rendered)),
+            on_failed=lambda token, exc: self._main_thread.post(lambda: self._fail_render(token, exc)),
+            on_stopped=on_stopped,
+        )
 
         self.title(t("interactive_title"))
         self.configure(fg_color=Colors.BG_MAIN)
@@ -281,77 +281,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         self._status.configure(text=t("interactive_rendering"), text_color=Colors.STATUS_PROCESSING)
         self._image_label.configure(text=t("interactive_loading"), image=None)
         self._refresh_header()
-        while True:
-            try:
-                self._requests.get_nowait()
-            except queue.Empty:
-                break
-        self._requests.put((token, self._index, self._seed))
-
-    def _worker_loop(self) -> None:
-        from jasna.gui.video_session import build_image_session, release_session_memory
-
-        session = None
-        prepared_by_path = {}
-        try:
-            while True:
-                request = self._requests.get()
-                if request is None:
-                    return
-
-                token, index, seed = request
-                try:
-                    if session is None:
-                        session = build_image_session(self._settings, log=None)
-                    path = self._paths[index]
-                    prepared = prepared_by_path.get(path)
-                    if prepared is None:
-                        prepared = self._prepare(path, session)
-                        prepared_by_path[path] = prepared
-                    result = self._render(prepared, session, seed)
-                    mask = self._mask(prepared)
-                    self._main_thread.post(lambda: self._finish_render(token, index, seed, prepared.img_chw_u8, mask, result))
-                except Exception as exc:
-                    self._main_thread.post(lambda e=exc, tk=token: self._fail_render(tk, e))
-        finally:
-            try:
-                if session is not None:
-                    session.close()
-                    try:
-                        release_session_memory(session.device)
-                    except Exception:
-                        logger.warning("Torch cleanup failed during render worker teardown", exc_info=True)
-            finally:
-                self._on_stopped()
-
-    def _prepare(self, path: Path, session):
-        from jasna.image_restore import prepare_image_restore
-        from jasna.media import image_io
-
-        img = image_io.read_image_rgb_chw(path)
-        return prepare_image_restore(img, session.detector, device=session.device, fp16=session.fp16)
-
-    def _render(self, prepared, session, seed: int):
-        from jasna.accelerator import device_context
-        from jasna.image_restore import clamp_strength, render_prepared_image
-        from jasna.restorer.sd15_inpaint_restorer import DEFAULT_FREEU
-
-        freeu = dict(DEFAULT_FREEU) if bool(self._settings.image_restore_freeu) else None
-        strength = clamp_strength(float(self._settings.image_restore_strength))
-        with device_context(session.device):
-            return render_prepared_image(
-                prepared,
-                session.restorer,
-                steps=int(self._settings.image_restore_steps),
-                strength=strength,
-                seed=int(seed),
-                freeu=freeu,
-            )
-
-    def _mask(self, prepared):
-        from jasna.image_restore import mask_overlay_rgb_chw
-
-        return mask_overlay_rgb_chw(prepared)
+        self._worker.request(token, self._index, self._seed)
 
     def _finish_render(self, token: int, index: int, seed: int, raw, mask, result) -> None:
         if self._closed or token != self._token:
@@ -402,7 +332,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
 
     def _close(self) -> None:
         self._closed = True
-        self._requests.put(None)
+        self._worker.close()
         self._main_thread.close()
         self.destroy()
 

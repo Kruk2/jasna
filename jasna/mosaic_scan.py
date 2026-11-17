@@ -9,7 +9,7 @@ BasicVSR++ for the rest.
 from __future__ import annotations
 
 import bisect
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -42,6 +42,21 @@ def scan_batch(detector, batch, batch_size: int):
 def sample_seconds(pts: int, start_pts: int, time_base: float) -> float:
     """The video time of a decoded frame's ``pts``."""
     return max(0.0, (pts - start_pts) * time_base)
+
+
+def sampled_batches(reader, *, seek_ts: float | None = None) -> Iterator[tuple[object, list[float]]]:
+    """The decoded batches of an open ``VideoReader``, each with its frames' video times in seconds."""
+    time_base = float(reader.metadata.time_base)
+    for batch, pts_list in reader.frames(seek_ts=seek_ts):
+        yield batch, [sample_seconds(pts, reader.start_pts, time_base) for pts in pts_list]
+
+
+def scan_batches(detector, reader, *, seek_ts: float | None = None) -> Iterator[tuple[list[float], object, object]]:
+    """Per decoded batch of an open ``VideoReader``: its frames' video times and ``scan_batch``'s
+    scores and masks of those frames (the padding dropped)."""
+    for batch, times in sampled_batches(reader, seek_ts=seek_ts):
+        scores, masks = scan_batch(detector, batch, reader.batch_size)
+        yield times, scores[: len(times)], masks[: len(times)]
 
 
 def segments_from_scores(
@@ -192,7 +207,6 @@ def scan_mosaic_sizes(
 
     detector = stereo_detector(detector, stereo)
     frame_stride = scan_sample_stride(metadata.video_fps)
-    time_base = float(metadata.time_base)
     times: list[float] = []
     scores: list[float] = []
     sizes: list[float] = []
@@ -201,19 +215,17 @@ def scan_mosaic_sizes(
         str(path), batch_size, device, metadata, frame_stride=frame_stride, decode_backend=decode_backend
     )
     with reader, tqdm(total=total, desc="Mosaic scan", unit="sample", disable=disable_progress) as bar:
-        for batch, pts_list in reader.frames():
-            count = len(pts_list)
-            batch_scores, batch_masks = scan_batch(detector, batch, batch_size)
-            times.extend(sample_seconds(pts, reader.start_pts, time_base) for pts in pts_list)
-            scores.extend(batch_scores[:count].tolist())
+        for batch_times, batch_scores, batch_masks in scan_batches(detector, reader):
+            times.extend(batch_times)
+            scores.extend(batch_scores.tolist())
             sizes.extend(
                 mosaic_sizes(
-                    batch_masks[:count].to(torch.uint8).cpu().numpy(),
+                    batch_masks.to(torch.uint8).cpu().numpy(),
                     frame_width=int(metadata.video_width),
                     frame_height=int(metadata.video_height),
                     stereo=stereo,
                 )
             )
-            bar.update(count)
+            bar.update(len(batch_times))
             on_progress(min(1.0, len(times) / total))
     return MosaicSamples(tuple(times), tuple(scores), tuple(sizes), frame_stride / float(metadata.video_fps))

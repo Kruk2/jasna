@@ -38,6 +38,7 @@ from jasna.mosaic_scan import ltx_auto_segments, mosaic_boxes, segments_from_sco
 from jasna.segments import SegmentRange, format_timestamp
 
 _MASK_CACHE_SIZE = 256
+OLD_SCAN_JOIN_SECONDS = 10.0
 
 
 def clamp_scan_threshold(value: float) -> float:
@@ -391,6 +392,16 @@ class ScanPanel(ctk.CTkFrame):
         if self._worker is not None:
             self._worker.close()
 
+    def join(self, timeout: float) -> None:
+        if self._worker is not None:
+            self._worker.join(timeout)
+
+    def destroy(self) -> None:
+        for after_id in (self._threshold_after, self._ltx_percent_after):
+            if after_id is not None:
+                self.after_cancel(after_id)
+        super().destroy()
+
     def _set_status(
         self,
         text: str,
@@ -439,7 +450,7 @@ class ScanPanel(ctk.CTkFrame):
             return
         if self._worker is not None:
             self._worker.close()
-            self._worker.join()
+            self._worker.join(OLD_SCAN_JOIN_SECONDS)
             self._worker = None
         self._claim_gpu()
         try:
@@ -537,14 +548,7 @@ class ScanPanel(ctk.CTkFrame):
         )
         self._timeline.set_detections(runs)
         proposals = self._scan_proposals(result)
-        self._proposals = tuple(
-            proposal
-            for proposal in proposals
-            if not any(
-                selected.start <= proposal.start and selected.end >= proposal.end
-                for selected in state.segments
-            )
-        )
+        self._proposals = state.uncovered(proposals)
         count = len(self._proposals)
         self._add_btn.configure(
             text=t("segments_scan_add", count=count),

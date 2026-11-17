@@ -486,6 +486,8 @@ class MaskSuggestDialog(ctk.CTkToplevel):
         if self._done:
             return
         self._done = True
+        if self._alpha_after is not None:
+            self.after_cancel(self._alpha_after)
         self.grab_release()
         if self._on_closed is not None:
             self._on_closed()

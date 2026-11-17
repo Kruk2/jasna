@@ -11,9 +11,10 @@ import pytest
 from PIL import Image
 
 from factories import video_metadata
+from jasna.gui import raw_player
 from jasna.gui import video_player as video_player_module
 from jasna.gui.locales import t
-from jasna.gui.models import AppSettings
+from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.raw_player import PlayerFrame
 from jasna.gui.video_player import (
     VideoPlayerDialog,
@@ -128,9 +129,9 @@ _METADATA = video_metadata(fps=24, num_frames=2400, video_width=1920, video_heig
 @pytest.fixture
 def player(tk_root, monkeypatch):
     """A real player dialog whose probe returns ``_METADATA`` and whose worker is a fake."""
-    monkeypatch.setattr(video_player_module, "get_video_meta_data", lambda _path: _METADATA)
+    monkeypatch.setattr(raw_player, "get_video_meta_data", lambda _path: _METADATA)
     monkeypatch.setattr(video_player_module, "RawPlayerWorker", _FakePlayerWorker)
-    monkeypatch.setattr(video_player_module, "source_has_audio", lambda _path: False)
+    monkeypatch.setattr(raw_player, "source_has_audio", lambda _path: False)
     closed: list[bool] = []
 
     def open_player(settings: AppSettings = AppSettings(), initial_path: Path | None = None):
@@ -355,9 +356,9 @@ def test_header_player_button_follows_gpu_use(jasna_app, monkeypatch) -> None:
 
 
 def test_queue_player_opens_one_player_and_frees_the_gpu_on_close(jasna_app, monkeypatch) -> None:
-    monkeypatch.setattr(video_player_module, "get_video_meta_data", lambda _path: _METADATA)
+    monkeypatch.setattr(raw_player, "get_video_meta_data", lambda _path: _METADATA)
 
-    jasna_app._queue_panel.add_job(Path("/videos/queued.mp4"))
+    jasna_app._queue_panel.add_jobs([JobItem(path=Path("/videos/queued.mp4"))])
     jasna_app._queue_panel._job_widgets[0]._handle_play()
     dialog = jasna_app._video_player_dialog
     jasna_app._open_video_player(Path("/videos/other.mp4"))

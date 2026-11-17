@@ -6,10 +6,9 @@ from unittest.mock import patch
 import pytest
 
 from jasna.gui.models import AppSettings, JobItem, JobStatus
-from jasna.gui.processor import Processor
 from jasna.segments import SegmentRange
 
-from factories import no_resume_conflict
+from factories import gui_processor, job_queue
 
 pytestmark = pytest.mark.usefixtures("nvidia_vendor", "no_gpu_cleanup", "tk_garbage_collected")
 
@@ -45,9 +44,9 @@ def test_begin_processing_atomically_freezes_segments() -> None:
 
 def _run_one_job(job: JobItem, settings: AppSettings):
     """Run ``job`` through a real processor queue and return the pipeline call it made."""
-    processor = Processor(on_resume_conflict=no_resume_conflict)
+    processor = gui_processor()
     with patch.object(processor, "_run_pipeline") as run_pipeline:
-        processor.start([job], settings, output_folder="", output_pattern="{original}_restored.mp4")
+        processor.start(job_queue([job]), settings, output_folder="", output_pattern="{original}_restored.mp4")
         processor.join(timeout=5.0)
     return run_pipeline.call_args
 

@@ -4,7 +4,6 @@ import logging
 import math
 import queue
 import sys
-import threading
 import time
 import tkinter as tk
 from dataclasses import replace
@@ -30,11 +29,11 @@ from jasna.gui.raw_player import (
     TimestampFrameBuffer,
     VlcAudioClock,
     VlcUnavailableError,
-    source_has_audio,
+    probe_video,
 )
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.media.probe import VideoMetadata, get_video_meta_data
+from jasna.media.probe import VideoMetadata
 from jasna.media.media_files import VIDEO_EXTENSIONS
 from jasna.mosaic.detection_registry import (
     detection_model_choices,
@@ -249,6 +248,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._frame_buffer: TimestampFrameBuffer | None = None
         self._clock: PlaybackClock | None = None
         self._has_audio = False
+        self._source_audio: bool | OSError = False
         self._generation = 0
         self._aligned_generation = -1
         self._desired_playing = False
@@ -585,24 +585,13 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._play_btn.configure(state="disabled", text="▶")
         self._set_status(t("player_loading_video"), Colors.STATUS_PENDING)
 
-        def probe() -> None:
-            try:
-                metadata = get_video_meta_data(str(path))
-                result = (metadata, "")
-            except Exception as exc:
-                result = (None, str(exc))
-            self._main_thread.post(lambda: self._video_probed(generation, *result))
-
-        threading.Thread(
-            target=probe,
-            name=f"player-probe-{path.name}",
-            daemon=True,
-        ).start()
+        probe_video(path, lambda *probed: self._main_thread.post(lambda: self._video_probed(generation, *probed)))
 
     def _video_probed(
         self,
         generation: int,
         metadata: VideoMetadata | None,
+        has_audio: bool | OSError,
         error: str,
     ) -> None:
         if generation != self._probe_generation or self._closed:
@@ -614,6 +603,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             )
             return
         self._metadata = metadata
+        self._source_audio = has_audio
         self._seek.configure(
             to=max(0.001, float(metadata.duration)),
             number_of_steps=max(1, int(metadata.duration * 10)),
@@ -644,7 +634,9 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         seconds = min(float(self._metadata.duration), max(0.0, float(seconds)))
         settings = self._playback_settings()
         try:
-            self._has_audio = source_has_audio(self._path)
+            if isinstance(self._source_audio, OSError):
+                raise self._source_audio
+            self._has_audio = self._source_audio
             self._clock = VlcAudioClock(self._path) if self._has_audio else SoftwareClock()
             if self._has_audio:
                 self._clock.set_volume(round(self._volume.get()))

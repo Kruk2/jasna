@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from fractions import Fraction
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -223,3 +224,51 @@ def test_mosaic_boxes_give_each_mosaic_its_box_and_size():
     assert [(box.left, box.top) for box in boxes] == [(0.1, 0.1), (0.5, 0.5)]
     assert boxes[0].size == pytest.approx(9 / 90)
     assert boxes[1].size == pytest.approx(0.5)
+
+
+class _BatchReader:
+    """An open ``VideoReader`` stand-in that yields the given ``(frames, pts)`` batches."""
+
+    def __init__(self, batches, *, batch_size: int, start_pts: int, time_base: Fraction):
+        self._batches = batches
+        self.batch_size = batch_size
+        self.start_pts = start_pts
+        self.metadata = SimpleNamespace(time_base=time_base)
+
+    def frames(self, *, seek_ts=None):
+        return iter(self._batches)
+
+
+class _BrightnessDetector:
+    """Scores each frame by its first pixel and masks it with that value; records batch sizes."""
+
+    def __init__(self):
+        self.batch_sizes = []
+
+    def scan_scores_masks(self, frames, *, mask_hw):
+        self.batch_sizes.append(frames.shape[0])
+        scores = frames[:, 0, 0, 0].float()
+        return scores, scores.view(-1, 1, 1).expand(-1, *mask_hw)
+
+
+def test_scan_batches_time_each_frame_and_drop_the_padding():
+    import torch
+
+    from jasna.mosaic_scan import SCAN_MASK_HW, scan_batches
+
+    frames = torch.arange(5, dtype=torch.uint8).view(5, 1, 1, 1).expand(5, 3, 2, 2)
+    reader = _BatchReader(
+        [(frames[:3], [1100, 2100, 3100]), (frames[3:], [4100, 5100])],
+        batch_size=4,
+        start_pts=100,
+        time_base=Fraction(1, 1000),
+    )
+    detector = _BrightnessDetector()
+
+    scanned = [(times, scores.tolist(), masks.shape) for times, scores, masks in scan_batches(detector, reader)]
+
+    assert detector.batch_sizes == [4, 4]
+    assert scanned == [
+        ([1.0, 2.0, 3.0], [0.0, 1.0, 2.0], (3, *SCAN_MASK_HW)),
+        ([4.0, 5.0], [3.0, 4.0], (2, *SCAN_MASK_HW)),
+    ]

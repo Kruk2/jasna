@@ -16,11 +16,11 @@ from typing import Protocol
 
 from PIL import Image
 
-from jasna.gui.queues import replace_pending
 from jasna._frozen import is_frozen
 from jasna.gui.models import AppSettings
 from jasna.gui.preview_frames import gpu_frame_image
-from jasna.media.probe import VideoMetadata
+from jasna.gui.video_session import PreviewPipelineWorker
+from jasna.media.probe import VideoMetadata, get_video_meta_data
 from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 
 logger = logging.getLogger(__name__)
@@ -209,12 +209,7 @@ class _Play:
     settings: AppSettings
 
 
-@dataclass(frozen=True)
-class _Stop:
-    pass
-
-
-class RawPlayerWorker:
+class RawPlayerWorker(PreviewPipelineWorker):
     def __init__(
         self,
         path: str | Path,
@@ -225,34 +220,19 @@ class RawPlayerWorker:
         max_size: tuple[int, int],
         on_stopped: Callable[[], None],
     ) -> None:
-        self.path = Path(path)
-        self.metadata = metadata
+        super().__init__(Path(path), metadata, thread_name=f"raw-player-{Path(path).name}", on_stopped=on_stopped)
         self.settings = settings
         self.frame_buffer = frame_buffer
         self.events: queue.Queue[PlayerEvent] = queue.Queue()
         self._max_size = max_size
-        self._commands: queue.Queue[_Play | _Stop] = queue.Queue(maxsize=1)
-        self._closed = threading.Event()
-        self._generation = 0
-        self._active_cancel: threading.Event | None = None
         self._active_writer: RawFrameWriter | None = None
-        self._cancel_lock = threading.Lock()
-        self._on_stopped = on_stopped
-        self._thread = threading.Thread(
-            target=self._run,
-            name=f"raw-player-{self.path.name}",
-            daemon=True,
-        )
-
-    def start(self) -> None:
-        self._thread.start()
 
     def play_from(self, seconds: float) -> int:
         self._generation += 1
         generation = self._generation
         self.frame_buffer.reset(generation)
         self._cancel_active_pass()
-        self._replace_command(
+        self._send(
             _Play(
                 max(0.0, float(seconds)),
                 generation,
@@ -271,114 +251,55 @@ class RawPlayerWorker:
             if self._active_writer is not None:
                 self._active_writer.set_max_size(max_size)
 
-    def close(self) -> None:
-        if self._closed.is_set():
-            return
-        self._closed.set()
-        self._cancel_active_pass()
-        self._replace_command(_Stop(), allow_closed=True)
+    def _load_session(self, command: _Play):
+        from jasna.gui.video_session import build_video_session
 
-    def _cancel_active_pass(self) -> None:
-        with self._cancel_lock:
-            if self._active_cancel is not None:
-                self._active_cancel.set()
+        self.events.put(PlayerStatus("loading_models", command.generation))
+        return build_video_session(command.settings, log=logger.info)
 
-    def _replace_command(self, command: _Play | _Stop, *, allow_closed: bool = False) -> None:
-        if self._closed.is_set() and not allow_closed:
-            return
-        replace_pending(self._commands, command)
-
-    def _run(self) -> None:
-        from jasna.gui.video_session import SessionCache, build_video_session
-
-        pipeline = None
-
-        def drop_pipeline() -> None:
-            nonlocal pipeline
-            pipeline = None
-
-        def load_session(command: _Play):
-            self.events.put(PlayerStatus("loading_models", command.generation))
-            return build_video_session(command.settings, log=logger.info)
-
-        sessions = SessionCache(on_close=drop_pipeline)
+    def _build_pipeline(self, command: _Play, session):
         try:
-            while not self._closed.is_set():
-                try:
-                    command = self._commands.get(timeout=0.1)
-                except queue.Empty:
-                    continue
-                if isinstance(command, _Stop):
-                    break
-                try:
-                    session = sessions.get(command.settings, lambda: load_session(command))
-                    if pipeline is None:
-                        try:
-                            pipeline = self._build_pipeline(command.settings, session)
-                        except Exception:
-                            sessions.close()
-                            raise
-                    if not self._commands.empty() or self._closed.is_set():
-                        continue
-                    self.events.put(PlayerStatus("restoring", command.generation))
-                    completed = self._run_pass(command, pipeline, session)
-                    superseded = not self._commands.empty() or self._closed.is_set()
-                    if completed and not superseded:
-                        self.frame_buffer.mark_eof(command.generation)
-                        self.events.put(PlayerEnded(command.generation))
-                except Exception as exc:
-                    if not self._closed.is_set() and self._commands.empty():
-                        self.events.put(PlayerFailed(str(exc), command.generation))
-        finally:
-            sessions.close()
-            self._on_stopped()
+            return super()._build_pipeline(command, session)
+        except Exception:
+            self._sessions.close()
+            raise
 
-    def _build_pipeline(self, settings: AppSettings, session):
-        from jasna.gui.video_session import video_session_config
-        from jasna.session_factory import build_pipeline
+    def _run_command(self, command: _Play, pipeline, session) -> None:
+        self.events.put(PlayerStatus("restoring", command.generation))
+        completed = self._run_pass(command, pipeline, session)
+        if completed and not self._superseded():
+            self.frame_buffer.mark_eof(command.generation)
+            self.events.put(PlayerEnded(command.generation))
 
-        config = video_session_config(
-            settings,
-            codec=settings.codec,
-            encoder_settings={},
-        )
-        pipeline = build_pipeline(
-            config,
-            session,
-            self.path,
-            self.path,
-        )
-        pipeline.prepare(self.metadata)
-        return pipeline
+    def _report_failure(self, command: _Play, exc: Exception) -> None:
+        self.events.put(PlayerFailed(str(exc), command.generation))
 
     def _run_pass(self, command: _Play, pipeline, session) -> bool:
-        cancel_event = threading.Event()
         from jasna.media.lut import lut_applier
 
-        writer = RawFrameWriter(
-            self.metadata,
-            self.frame_buffer,
-            cancel_event,
-            command.generation,
-            self._max_size,
-            lut_applier(command.settings.lut_path, session.device),
-        )
-        with self._cancel_lock:
-            self._active_cancel = cancel_event
-            self._active_writer = writer
-        try:
-            run_raw_restoration_pass(
-                pipeline,
+        with self._cancellable_pass() as cancel_event:
+            writer = RawFrameWriter(
                 self.metadata,
-                writer,
+                self.frame_buffer,
                 cancel_event,
-                seek_seconds=command.seconds,
+                command.generation,
+                self._max_size,
+                lut_applier(command.settings.lut_path, session.device),
             )
-            return not cancel_event.is_set()
-        finally:
             with self._cancel_lock:
-                self._active_cancel = None
-                self._active_writer = None
+                self._active_writer = writer
+            try:
+                run_raw_restoration_pass(
+                    pipeline,
+                    self.metadata,
+                    writer,
+                    cancel_event,
+                    seek_seconds=command.seconds,
+                )
+                return not cancel_event.is_set()
+            finally:
+                with self._cancel_lock:
+                    self._active_writer = None
 
 
 def run_raw_restoration_pass(
@@ -558,6 +479,26 @@ def source_has_audio(path: str | Path) -> bool:
     if result.returncode != 0:
         raise OSError(f"ffprobe audio probe failed: {result.stderr.strip()}")
     return bool(result.stdout.strip())
+
+
+def probe_video(path: Path, on_probed: Callable[[VideoMetadata | None, bool | OSError, str], None]) -> None:
+    """Read the metadata of ``path`` and whether it has audio on a daemon thread, then call
+    ``on_probed(metadata, has_audio, error)`` there: ``metadata`` None with the error message
+    when the video cannot be read, ``has_audio`` the ffprobe ``OSError`` when audio cannot be."""
+
+    def probe() -> None:
+        try:
+            metadata = get_video_meta_data(str(path))
+        except Exception as exc:
+            on_probed(None, False, str(exc))
+            return
+        try:
+            has_audio = source_has_audio(path)
+        except OSError as exc:
+            has_audio = exc
+        on_probed(metadata, has_audio, "")
+
+    threading.Thread(target=probe, name=f"player-probe-{path.name}", daemon=True).start()
 
 
 def _configure_bundled_vlc():

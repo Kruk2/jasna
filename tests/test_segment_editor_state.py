@@ -4,7 +4,7 @@ from fractions import Fraction
 
 import pytest
 
-from jasna.gui.segment_editor_state import SegmentEditorState, smart_render_error_key
+from jasna.gui.segment_editor_state import RangeOutOfBoundsError, SegmentEditorState, smart_render_error_key
 from jasna.media.splice import KeyframeIndex
 from jasna.segments import SegmentRange, SegmentRestoration
 
@@ -191,3 +191,31 @@ def test_smart_render_error_key_explains_mixed_models_too_close() -> None:
     segments = (_r(1.0, 2.0), _r(3.0, 4.0, LTX_7))
 
     assert smart_render_error_key(segments, index, 20.0) == "segments_mixed_models_too_close"
+
+
+@pytest.mark.parametrize(
+    ("seconds", "bounds"),
+    [(2.0, (2.0, 3.0)), (9.5, (9.5, 10.0)), (10.0, (9.0, 10.0))],
+    ids=["one second", "cut at the end", "at the end"],
+)
+def test_new_range_at_the_playhead_is_one_second_inside_the_video(seconds, bounds) -> None:
+    state = SegmentEditorState(duration=10, fps=10, segments=(), default_restoration=STANDARD)
+
+    assert state.new_range_at(seconds) == bounds
+
+
+def test_a_range_past_the_video_end_is_out_of_bounds() -> None:
+    state = SegmentEditorState(duration=10, fps=10, segments=(), default_restoration=STANDARD)
+
+    with pytest.raises(RangeOutOfBoundsError):
+        state.add(9.0, 11.0)
+    assert state.segments == ()
+
+
+def test_uncovered_keeps_ranges_no_single_range_covers() -> None:
+    state = SegmentEditorState(duration=10, fps=10, segments=(_r(1, 3), _r(4, 5)), default_restoration=STANDARD)
+
+    assert state.uncovered((SegmentRange(1.5, 2.5), SegmentRange(2, 4.5), SegmentRange(6, 7))) == (
+        SegmentRange(2, 4.5),
+        SegmentRange(6, 7),
+    )

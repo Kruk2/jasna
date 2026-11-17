@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import customtkinter as ctk
 
+from jasna.gui.segment_editor_state import snap_to_frame
 from jasna.gui.theme import Colors, Fonts
 from jasna.segments import SegmentRange, format_timestamp
 
@@ -483,4 +484,4 @@ class SegmentTimeline(ctk.CTkFrame):
         )
 
     def _snap(self, seconds: float) -> float:
-        return min(self.duration, max(0.0, round(seconds * self.fps) / self.fps))
+        return snap_to_frame(seconds, duration=self.duration, fps=self.fps)

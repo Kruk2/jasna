@@ -12,28 +12,35 @@ import pytest
 import torch
 from PIL import Image
 
-from jasna.gui import ltx_seed_preview, segment_editor, segment_scan_panel, segment_seed_panel
+from jasna.gui import (
+    ltx_seed_preview,
+    segment_editor,
+    segment_range_panel,
+    segment_restore_preview,
+    segment_scan_panel,
+    segment_seed_panel,
+)
 from jasna.gui.locales import t
 from jasna.gui.ltx_models import model_key
 from jasna.gui.ltx_seed_preview import LtxSeedPreviewWorker, SeedFrame, SeedProgress, SeedReady
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.mosaic_scan import MosaicScanResult, ScanCompleted
 from jasna.gui.segment_editor import SegmentEditor
-from jasna.gui.restoration_preview import RestorationClip, RestorationFrame, RestoredClipFrame
+from jasna.gui.restoration_preview import RestorationClip, RestorationFrame, RestorationPreviewWorker, RestoredClipFrame
 from jasna.ltx.inference import Cancelled
 from jasna.media.splice import KeyframeIndex
 from jasna.segments import SegmentRange, SegmentRestoration
 from jasna.session_config import LTX_DEFAULT_MODEL
 from jasna.vr180 import resolve_vr_mode
-from factories import shown_message, shown_pixel
+from factories import scheduled_after_ids, shown_message, shown_pixel
 
 
 def test_out_of_bounds_range_uses_specific_message(build_editor) -> None:
     editor = build_editor()
-    editor._start_entry.insert(0, "59")
-    editor._end_entry.insert(0, "61")
+    editor._ranges._start_entry.insert(0, "59")
+    editor._ranges._end_entry.insert(0, "61")
 
-    editor._add_or_update()
+    editor._ranges.add_or_update()
 
     assert editor._notice.cget("text") == t("segments_time_out_of_bounds")
     assert editor._state.segments == ()
@@ -128,9 +135,9 @@ def restoring_editor(build_editor, monkeypatch):
     """A loaded editor with restore preview on; its restoration worker is a mock numbering each request."""
     worker = MagicMock()
     worker.request.side_effect = lambda *_args, **_kwargs: worker.request.call_count
-    monkeypatch.setattr(segment_editor, "RestorationPreviewWorker", MagicMock(return_value=worker))
+    monkeypatch.setattr(segment_restore_preview, "RestorationPreviewWorker", MagicMock(return_value=worker))
     editor = build_editor()
-    editor._toggle_restoration_preview()
+    editor._restore.toggle()
     return editor, worker
 
 
@@ -149,7 +156,7 @@ def test_restored_playback_continues_with_the_next_window(restoring_editor) -> N
     editor._seek(1.0)
     editor._toggle_play()
     frames = tuple(RestoredClipFrame(seconds, Image.new("RGB", (16, 9))) for seconds in (1.0, 2.0))
-    editor._handle_restoration_event(RestorationClip(frames, worker.request.call_count))
+    editor._restore.handle_event(RestorationClip(frames, worker.request.call_count))
     editor._current = 2.0
 
     editor._request_next_frame()
@@ -177,12 +184,12 @@ def test_a_closed_restoration_worker_leaves_the_gpu_claimed_by_a_seed_render(bui
 
     stopped_callbacks = []
     monkeypatch.setattr(
-        segment_editor,
+        segment_restore_preview,
         "RestorationPreviewWorker",
         lambda path, metadata, *, on_stopped: stopped_callbacks.append(on_stopped) or MagicMock(),
     )
     editor = build_editor(set_preview_gpu_busy=set_preview_gpu_busy)
-    editor._toggle_restoration_preview()
+    editor._restore.toggle()
     editor._claim_gpu_for_seed()
 
     stopped_callbacks[0]()
@@ -204,13 +211,13 @@ def test_preview_surface_selects_original_or_restored_from_toggle_state(build_ed
     editor = build_editor()
     editor._scan_panel._overlay = False
     editor._preview_source = Image.new("RGB", (160, 90), "red")
-    editor._restored_source = Image.new("RGB", (160, 90), "blue")
+    editor._restore._restored_source = Image.new("RGB", (160, 90), "blue")
 
-    editor._restore_active = False
+    editor._restore._active = False
     editor._preview.redraw()
     assert shown_pixel(editor._preview, 0, 0) == (255, 0, 0)
 
-    editor._restore_active = True
+    editor._restore._active = True
     editor._preview.redraw()
     assert shown_pixel(editor._preview, 0, 0) == (0, 0, 255)
 
@@ -218,16 +225,16 @@ def test_preview_surface_selects_original_or_restored_from_toggle_state(build_ed
 def test_projection_selector_is_disabled_for_non_vr_video(build_editor) -> None:
     editor = build_editor()
 
-    assert editor._vr_projection_menu.cget("state") == "disabled"
+    assert editor._preview_card._vr_projection_menu.cget("state") == "disabled"
 
 
 def test_projection_selector_is_enabled_for_detected_vr_video(build_editor) -> None:
     editor = build_editor(metadata=_fake_metadata(width=3840, height=1920),
     )
 
-    assert editor._vr_projection_menu.cget("state") == "normal"
-    assert editor._vr_projection_menu.get_value() == "auto"
-    assert editor._vr_projection_label.cget("text") == t(
+    assert editor._preview_card._vr_projection_menu.cget("state") == "normal"
+    assert editor._preview_card._vr_projection_menu.get_value() == "auto"
+    assert editor._preview_card._vr_projection_label.cget("text") == t(
         "segments_vr_projection_resolved",
         projection=t("segments_vr_projection_raw"),
     )
@@ -241,26 +248,26 @@ def test_projection_selector_is_next_to_restore_preview_with_long_filename(build
     editor.update()
 
     menu_right = (
-        editor._vr_projection_menu.winfo_rootx()
-        + editor._vr_projection_menu.winfo_width()
+        editor._preview_card._vr_projection_menu.winfo_rootx()
+        + editor._preview_card._vr_projection_menu.winfo_width()
     )
     editor_right = editor.winfo_rootx() + editor.winfo_width()
-    assert editor._vr_projection_menu.winfo_ismapped()
-    assert editor._vr_projection_menu.cget("state") == "normal"
+    assert editor._preview_card._vr_projection_menu.winfo_ismapped()
+    assert editor._preview_card._vr_projection_menu.cget("state") == "normal"
     assert menu_right <= editor_right
     assert (
-        editor._vr_projection_menu.master.master
-        is editor._restore_toggle.master.master
+        editor._preview_card._vr_projection_menu.master.master
+        is editor._preview_card.restore_toggle.master.master
     )
 
 
 def test_projection_change_restarts_active_restoration_preview(restoring_editor) -> None:
     editor, worker = restoring_editor
-    editor._handle_restoration_event(RestorationFrame(0.0, Image.new("RGB", (16, 9)), worker.request.call_count))
+    editor._restore.handle_event(RestorationFrame(0.0, Image.new("RGB", (16, 9)), worker.request.call_count))
 
     editor._on_vr_projection_changed("fisheye")
-    assert editor._restored_source is None
-    editor._request_restoration_preview()
+    assert editor._restore._restored_source is None
+    editor._restore.request()
 
     assert worker.request.call_args.kwargs["projection"] == "fisheye"
 
@@ -268,25 +275,25 @@ def test_projection_change_restarts_active_restoration_preview(restoring_editor)
 def test_pan_zoom_controls_are_visible_and_explain_gestures(build_editor) -> None:
     editor = build_editor()
 
-    assert editor._pan_zoom_hint.winfo_ismapped()
-    assert editor._pan_zoom_hint.cget("text") == t(
+    assert editor._preview_card._pan_zoom_hint.winfo_ismapped()
+    assert editor._preview_card._pan_zoom_hint.cget("text") == t(
         "segments_preview_pan_zoom_hint"
     )
-    assert editor._zoom_out_btn.winfo_ismapped()
-    assert editor._zoom_label.cget("text") == "100%"
-    assert editor._zoom_in_btn.winfo_ismapped()
-    assert not editor._reset_view_btn.winfo_ismapped()
-    assert editor._reset_view_btn.cget("text") == t(
+    assert editor._preview_card._zoom_out_btn.winfo_ismapped()
+    assert editor._preview_card._zoom_label.cget("text") == "100%"
+    assert editor._preview_card._zoom_in_btn.winfo_ismapped()
+    assert not editor._preview_card._reset_view_btn.winfo_ismapped()
+    assert editor._preview_card._reset_view_btn.cget("text") == t(
         "segments_preview_reset_view"
     )
 
-    editor._zoom_in_btn.invoke()
+    editor._preview_card._zoom_in_btn.invoke()
     editor.update()
-    assert editor._reset_view_btn.winfo_ismapped()
+    assert editor._preview_card._reset_view_btn.winfo_ismapped()
 
-    editor._reset_preview_view()
+    editor._preview_card._reset_view()
     editor.update()
-    assert not editor._reset_view_btn.winfo_ismapped()
+    assert not editor._preview_card._reset_view_btn.winfo_ismapped()
 
 
 @pytest.mark.parametrize("factor", [1.0, 1.25, 1.5, 2.0, 3.0])
@@ -622,12 +629,12 @@ def test_save_remembers_detection_and_projection_settings_on_video(build_editor)
 
 def test_suggest_mask_button_locked_during_scan(build_editor) -> None:
     editor = build_editor()
-    assert editor._suggest_btn.cget("text") == t("segments_suggest_mask")
-    assert editor._suggest_btn in editor._lockable_widgets()
+    assert editor._preview_card.suggest_button.cget("text") == t("segments_suggest_mask")
+    assert editor._preview_card.suggest_button in editor._lockable_widgets()
     editor._scan_panel._set_locked(True)
-    assert editor._suggest_btn.cget("state") == "disabled"
+    assert editor._preview_card.suggest_button.cget("state") == "disabled"
     editor._scan_panel._set_locked(False)
-    assert editor._suggest_btn.cget("state") == "normal"
+    assert editor._preview_card.suggest_button.cget("state") == "normal"
 
 
 def test_suggest_mask_grabs_full_frame_and_opens_dialog(build_editor, monkeypatch) -> None:
@@ -641,7 +648,7 @@ def test_suggest_mask_grabs_full_frame_and_opens_dialog(build_editor, monkeypatc
     editor = build_editor()
     editor._suggest_mask()
     assert editor._suggest_busy
-    assert editor._suggest_btn.cget("state") == "disabled"
+    assert editor._preview_card.suggest_button.cget("state") == "disabled"
     editor._preview_worker.grab_full.assert_called_once_with()
 
     from PIL import Image
@@ -652,7 +659,7 @@ def test_suggest_mask_grabs_full_frame_and_opens_dialog(build_editor, monkeypatc
 
     opened["on_closed"]()
     assert not editor._suggest_busy
-    assert editor._suggest_btn.cget("state") == "normal"
+    assert editor._preview_card.suggest_button.cget("state") == "normal"
 
 
 def test_feedback_upload_events_show_toast(build_editor, monkeypatch) -> None:
@@ -674,37 +681,37 @@ def test_feedback_upload_events_show_toast(build_editor, monkeypatch) -> None:
 
 def test_inspector_sets_the_model_and_seed_of_the_selected_range(build_editor, tk_root) -> None:
     editor = build_editor(settings=AppSettings(ltx_seed=42))
-    editor._timeline_create(1.0, 2.0)
-    editor._timeline_create(4.0, 5.0)
+    editor._ranges.create(1.0, 2.0)
+    editor._ranges.create(4.0, 5.0)
     tk_root.update()
     assert editor._inspector.winfo_manager() == "grid"
-    assert editor._range_model.get() == "basicvsrpp"
-    assert not editor._seed_entry.winfo_manager()
+    assert editor._inspector._range_model.get() == "basicvsrpp"
+    assert not editor._inspector._seed_entry.winfo_manager()
 
-    editor._model_radios["ltx"].invoke()
+    editor._inspector._model_radios["ltx"].invoke()
     tk_root.update()
     assert editor._state.selected_segment.restoration == SegmentRestoration("ltx", 42)
-    assert editor._seed_entry.get() == "42"
+    assert editor._inspector._seed_entry.get() == "42"
 
-    editor._seed_entry.delete(0, "end")
-    editor._seed_entry.insert(0, "777")
-    editor._commit_seed_entry()
+    editor._inspector._seed_entry.delete(0, "end")
+    editor._inspector._seed_entry.insert(0, "777")
+    editor._inspector._commit_seed_entry()
     assert editor._state.selected_segment.restoration == SegmentRestoration("ltx", 777)
 
-    editor._use_for_all_btn.invoke()
+    editor._inspector._use_for_all_btn.invoke()
     assert {s.restoration for s in editor._state.segments} == {SegmentRestoration("ltx", 777)}
     assert editor._timeline._segments == editor._state.segments
 
-    editor._undo()
+    editor._ranges.undo()
     assert editor._state.segments[0].restoration == SegmentRestoration("basicvsrpp", None)
 
 
 def test_new_ranges_follow_the_job_model_and_rows_name_it(build_editor, tk_root) -> None:
     editor = build_editor(settings=AppSettings(restoration_model="ltx", ltx_seed=9))
-    editor._timeline_create(1.0, 2.0)
+    editor._ranges.create(1.0, 2.0)
     tk_root.update()
     assert editor._state.segments[0].restoration == SegmentRestoration("ltx", 9)
-    texts = [w.cget("text") for w in editor._segment_action_widgets if isinstance(w, ctk.CTkButton)]
+    texts = [w.cget("text") for w in editor._ranges._segment_action_widgets if isinstance(w, ctk.CTkButton)]
     assert any(f"{t('model_' + model_key('ltx', LTX_DEFAULT_MODEL))} 9" in text for text in texts)
 
 
@@ -713,11 +720,11 @@ def test_ltx_is_blocked_with_a_reason_when_it_cannot_run(build_editor, tk_root) 
     editor = build_editor(job=job, ltx_unavailable_reason="model_ltx_not_installed"
     )
     assert editor._notice.cget("text") == t("segments_ltx_ranges_unavailable")
-    editor._timeline_create(1.0, 2.0)
+    editor._ranges.create(1.0, 2.0)
     tk_root.update()
-    assert editor._model_radios["ltx"].cget("state") == "disabled"
-    editor._select_range(1)
-    assert editor._model_radios["ltx"].cget("state") == "normal"
+    assert editor._inspector._model_radios["ltx"].cget("state") == "disabled"
+    editor._ranges.select(1)
+    assert editor._inspector._model_radios["ltx"].cget("state") == "normal"
 
 
 class _FakeSeedWorker:
@@ -772,11 +779,11 @@ def test_restore_preview_renders_an_ltx_range_then_lets_the_user_compare_and_pic
     editor._preview_source = Image.new("RGB", (160, 90), "red")
     tk_root.update()
 
-    editor._toggle_restoration_preview()
+    editor._restore.toggle()
     worker = _FakeSeedWorker.instances[0]
     assert worker.work_dir == tmp_path
     assert worker.requests[0][:2] == (job.segments[0], 5)
-    assert editor._restore_active
+    assert editor._restore._active
     assert shown_message(editor._preview) == t("segments_preview_ltx_rendering", seed=5)
     assert not editor._seeds._render_btn.winfo_manager()
     worker.events.put(SeedProgress(5, "denoise", 0.5, 70.0, 1))
@@ -791,7 +798,7 @@ def test_restore_preview_renders_an_ltx_range_then_lets_the_user_compare_and_pic
     assert 1.0 <= editor._current < 2.0
     assert editor._preview_display_source().getpixel((0, 0))[2] > 200
 
-    editor._new_range_seed()
+    editor._inspector._new_range_seed()
     new_seed = editor._state.selected_segment.restoration.ltx_seed
     tk_root.update()
     assert shown_message(editor._preview) == t("segments_preview_ltx_not_rendered", seed=new_seed)
@@ -809,7 +816,7 @@ def test_restore_preview_renders_an_ltx_range_then_lets_the_user_compare_and_pic
     editor._seeds._chip_widgets[-1].invoke()
     assert editor._state.selected_segment.restoration == SegmentRestoration("ltx", 5)
 
-    editor._toggle_restoration_preview()
+    editor._restore.toggle()
     assert editor._preview_display_source().getpixel((0, 0))[0] > 200
 
     editor._claim_gpu_for_scan()
@@ -826,7 +833,7 @@ def test_playback_over_a_rendered_ltx_range_shows_each_seed_frame(build_editor, 
     editor = build_editor(job=job)
     editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
     editor._seek(1.0)
-    editor._toggle_restoration_preview()
+    editor._restore.toggle()
     frames = []
     for seconds, color in ((1.0, "blue"), (1.5, "green")):
         path = tmp_path / f"{seconds}.jpg"
@@ -858,10 +865,10 @@ def test_restore_preview_asks_before_a_long_ltx_render(build_editor, monkeypatch
     editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
     editor._seek(1.5)
 
-    editor._toggle_restoration_preview()
+    editor._restore.toggle()
 
     assert asked == [t("segments_ltx_render_confirm", seed=5, duration="6m 0s")]
-    assert editor._restore_active is answer
+    assert editor._restore._active is answer
     assert bool(_FakeSeedWorker.instances) is answer
 
 
@@ -891,19 +898,19 @@ def test_closing_the_app_closes_the_segment_editor_and_its_seed_frames(jasna_app
         segment_editor.messagebox, "askyesno", lambda _title, message, parent: asked.append(message) or stop_render
     )
     _BlockingSeedRenderer.started.clear()
-    panel = jasna_app._queue_panel
-    panel.set_segment_editor_context(AppSettings, lambda: False, lambda _owner, _busy: None, lambda: None)
+    monkeypatch.setattr(jasna_app._settings_panel, "get_settings", AppSettings)
+    monkeypatch.setattr(jasna_app._settings_panel, "ltx_unavailable_reason", lambda: None)
     work_dir = tmp_path / "videos"
     work_dir.mkdir()
     job = JobItem(work_dir / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
-    panel._edit_segments(job)
-    editor = panel._segment_editor
+    jasna_app._edit_segments(job)
+    editor = jasna_app._segment_editor
     metadata = _fake_metadata()
     preview.events.put(segment_editor.PreviewLoaded(metadata, resolve_vr_mode("auto", metadata, job.path)))
     editor._poll_workers()
     editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
     editor._seek(1.5)
-    editor._toggle_restoration_preview()
+    editor._restore.toggle()
     assert _BlockingSeedRenderer.started.wait(5)
 
     jasna_app._on_close()
@@ -931,25 +938,25 @@ def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(build_editor, tk
     settings = replace(AppSettings(), ltx_model="undistilled")
     editor = build_editor(job=job, settings=settings)
     editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
-    editor._select_range(0)
+    editor._ranges.select(0)
     editor._preview_source = Image.new("RGB", (160, 90), "red")
     tk_root.update()
     editor._seek(1.5)
-    editor._toggle_restoration_preview()
+    editor._restore.toggle()
     worker = _FakeSeedWorker.instances[0]
     worker.events.put(SeedReady(5, _seed_frames(tmp_path, 5, "blue"), 1))
     editor._poll_workers()
-    editor._new_range_seed()
+    editor._inspector._new_range_seed()
     _seed_chip(editor, "5").invoke()
     tk_root.update()
 
-    assert editor._model_radios["ltx"].cget("text") == t("model_ltx_undistilled")
+    assert editor._inspector._model_radios["ltx"].cget("text") == t("model_ltx_undistilled")
     expected = {
-        "tip_segments_restore_with": editor._restore_with_label,
-        "tip_model_basicvsrpp": editor._model_radios["basicvsrpp"],
-        "tip_segments_use_for_all": editor._use_for_all_btn,
-        "tip_ltx_seed": editor._seed_entry,
-        "tip_ltx_new_seed": editor._new_seed_btn,
+        "tip_segments_restore_with": editor._inspector._restore_with_label,
+        "tip_model_basicvsrpp": editor._inspector._model_radios["basicvsrpp"],
+        "tip_segments_use_for_all": editor._inspector._use_for_all_btn,
+        "tip_ltx_seed": editor._inspector._seed_entry,
+        "tip_ltx_new_seed": editor._inspector._new_seed_btn,
         "tip_segments_ltx_render": editor._seeds._render_btn,
         "tip_segments_seed_cancel": editor._seeds._cancel_btn,
     }
@@ -959,11 +966,11 @@ def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(build_editor, tk
     use = [w for w in editor._seeds._chip_widgets if w.cget("text") == t("segments_seed_use")]
     assert chips and chips[0] in tips[t("tip_segments_seed_chip")]
     assert use and use[0] in tips[t("tip_segments_seed_use")]
-    assert editor._ltx_radio_tooltip._text == t("tip_model_ltx_undistilled")
+    assert editor._inspector._ltx_radio_tooltip._text == t("tip_model_ltx_undistilled")
 def test_range_controls_fit_their_content_while_the_list_keeps_its_rows() -> None:
-    assert segment_editor.range_controls_height(500, 200, 156) == 200
-    assert segment_editor.range_controls_height(320, 200, 156) == 164
-    assert segment_editor.range_controls_height(200, 200, 156) == 100
+    assert segment_range_panel.range_controls_height(500, 200, 156) == 200
+    assert segment_range_panel.range_controls_height(320, 200, 156) == 164
+    assert segment_range_panel.range_controls_height(200, 200, 156) == 100
 
 
 def _visible_in(widget, viewport) -> bool:
@@ -975,9 +982,9 @@ def test_range_list_keeps_three_rows_beside_a_busy_seed_inspector(build_editor, 
     editor = build_editor()
     editor.geometry("1856x880")
     for start in (1.0, 4.0, 7.0, 10.0):
-        editor._timeline_create(start, start + 1.0)
-    editor._select_range(0)
-    editor._model_radios["ltx"].invoke()
+        editor._ranges.create(start, start + 1.0)
+    editor._ranges.select(0)
+    editor._inspector._model_radios["ltx"].invoke()
     key = segment_seed_panel.range_key(editor._state.selected_segment)
     editor._seeds._tried[key] = {1: (), 2: ()}
     editor._seeds._shown = (key, 2)
@@ -987,27 +994,27 @@ def test_range_list_keeps_three_rows_beside_a_busy_seed_inspector(build_editor, 
     for _ in range(5):
         tk_root.update()
 
-    rows = editor._segment_list.winfo_children()
-    viewport = editor._segment_list._parent_canvas
+    rows = editor._ranges._segment_list.winfo_children()
+    viewport = editor._ranges._segment_list._parent_canvas
     assert all(_visible_in(row, viewport) for row in rows[:3])
-    assert editor._range_controls._parent_canvas.yview() == (0.0, 1.0)
-    assert _visible_in(editor._seeds._chips, editor._range_controls._parent_canvas)
-    assert editor._range_action.grid_info()["row"] == 0
+    assert editor._ranges.controls._parent_canvas.yview() == (0.0, 1.0)
+    assert _visible_in(editor._seeds._chips, editor._ranges.controls._parent_canvas)
+    assert editor._ranges._range_action.grid_info()["row"] == 0
     editor._seeds._running = None
 
 
 def test_range_times_stack_and_controls_scroll_at_minimum_size(build_editor, tk_root) -> None:
     editor = build_editor()
     editor.geometry("900x640")
-    editor._timeline_create(1.0, 2.0)
-    editor._model_radios["ltx"].invoke()
+    editor._ranges.create(1.0, 2.0)
+    editor._inspector._model_radios["ltx"].invoke()
     for _ in range(5):
         tk_root.update()
 
-    assert editor._end_entry.grid_info()["row"] == 1
-    assert editor._range_action.grid_info()["row"] == 2
-    assert editor._range_controls._parent_canvas.yview()[1] < 1.0
-    assert editor._segment_list._parent_canvas.winfo_height() > 0
+    assert editor._ranges._end_entry.grid_info()["row"] == 1
+    assert editor._ranges._range_action.grid_info()["row"] == 2
+    assert editor._ranges.controls._parent_canvas.yview()[1] < 1.0
+    assert editor._ranges._segment_list._parent_canvas.winfo_height() > 0
 
 
 def test_range_list_keeps_its_rows_on_select_seeks_and_scrolls_to_the_selection(build_editor, tk_root) -> None:
@@ -1015,19 +1022,19 @@ def test_range_list_keeps_its_rows_on_select_seeks_and_scrolls_to_the_selection(
     editor = build_editor(job=JobItem(Path("video.mp4"), segments=ranges))
     editor.geometry("1400x1000")
     tk_root.update()
-    rows = list(editor._segment_rows)
-    canvas = editor._segment_list._parent_canvas
+    rows = list(editor._ranges._segment_rows)
+    canvas = editor._ranges._segment_list._parent_canvas
     assert canvas.yview()[0] == 0.0
 
-    editor._select_range_from_list(19)
+    editor._ranges._select_from_list(19)
     tk_root.update()
 
-    assert editor._segment_rows == rows
+    assert editor._ranges._segment_rows == rows
     assert editor._current == pytest.approx(38.0)
     assert rows[19].cget("fg_color") == segment_editor.Colors.PRIMARY_DARK
     assert rows[0].cget("fg_color") == segment_editor.Colors.BG_CARD
     top, bottom = canvas.yview()
-    height = editor._segment_list.winfo_height()
+    height = editor._ranges._segment_list.winfo_height()
     assert top > 0.0
     assert top <= rows[19].winfo_y() / height
     assert (rows[19].winfo_y() + rows[19].winfo_height()) / height <= bottom + 1e-6
@@ -1044,8 +1051,8 @@ def test_footer_shows_the_ltx_share_only_when_a_range_uses_ltx(build_editor, tk_
         "segments_model_split", ltx="00:00:10", percent=25.0, standard="00:00:30"
     )
 
-    editor._select_range(1)
-    editor._delete_range(1)
+    editor._ranges.select(1)
+    editor._ranges._delete_range(1)
     tk_root.update()
     assert not editor._model_split_bar.winfo_ismapped()
     assert not editor._model_split.winfo_ismapped()
@@ -1053,16 +1060,16 @@ def test_footer_shows_the_ltx_share_only_when_a_range_uses_ltx(build_editor, tk_
 
 def test_restore_preview_uses_basicvsrpp_outside_an_ltx_range(build_editor, monkeypatch, tmp_path) -> None:
     preview_worker = MagicMock()
-    monkeypatch.setattr(segment_editor, "RestorationPreviewWorker", MagicMock(return_value=preview_worker))
+    monkeypatch.setattr(segment_restore_preview, "RestorationPreviewWorker", MagicMock(return_value=preview_worker))
     monkeypatch.setattr(segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: 60.0)
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
     editor._seek(5.0)
-    editor._toggle_restoration_preview()
+    editor._restore.toggle()
     assert preview_worker.request.call_args[0][1].restoration_model == "basicvsrpp"
 
     editor._seek(1.5)
-    editor._request_restoration_preview()
+    editor._restore.request()
     assert preview_worker.request.call_count == 1
     assert shown_message(editor._preview) == t("segments_preview_ltx_not_rendered", seed=5)
     assert editor._seeds._render_btn.winfo_manager()
@@ -1073,8 +1080,8 @@ def test_ltx_render_button_enables_once_the_keyframes_arrive(build_editor, monke
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
     editor._seek(1.5)
-    editor._restore_active = True
-    editor._request_restoration_preview()
+    editor._restore._active = True
+    editor._restore.request()
     assert editor._seeds._render_btn.cget("state") == "disabled"
 
     editor._preview_worker.events.put(
@@ -1093,10 +1100,10 @@ def test_ltx_render_estimate_is_worked_out_once_per_range(build_editor, monkeypa
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
     editor._seek(1.5)
-    editor._restore_active = True
+    editor._restore._active = True
 
     for _ in range(3):
-        editor._request_restoration_preview()
+        editor._restore.request()
 
     assert estimated == [job.segments[0]]
 
@@ -1136,3 +1143,39 @@ def test_scan_overlay_tags_each_mosaic_with_its_size(build_editor, auto, percent
 
     expected = Image.new("RGB", (1, 1), getattr(segment_editor.Colors, color)).getpixel((0, 0))
     assert overlaid.getpixel((802, 447)) == expected
+
+def test_closing_the_editor_cancels_its_pending_timers(restoring_editor, tk_root) -> None:
+    editor, _worker = restoring_editor
+    editor._restore.schedule()
+    editor._scan_panel._on_threshold(0.5)
+    pending = {editor._poll_after, editor._restore._after, editor._scan_panel._threshold_after}
+
+    editor._finish_close()
+
+    assert not pending & scheduled_after_ids(tk_root)
+
+
+class _SlowStoppingRestorationWorker(RestorationPreviewWorker):
+    """Runs on after being closed until ``finish`` is set."""
+
+    finish = threading.Event()
+
+    def _run(self) -> None:
+        self._closed.wait()
+        self.finish.wait(5)
+
+
+def test_join_workers_waits_up_to_the_timeout_for_workers_closed_with_the_editor(build_editor, monkeypatch) -> None:
+    monkeypatch.setattr(segment_restore_preview, "RestorationPreviewWorker", _SlowStoppingRestorationWorker)
+    _SlowStoppingRestorationWorker.finish.clear()
+    editor = build_editor()
+    editor._restore.toggle()
+    worker = editor._restore._worker
+    editor._finish_close()
+
+    editor.join_workers(timeout=0.01)
+    assert worker._thread.is_alive()
+
+    _SlowStoppingRestorationWorker.finish.set()
+    editor.join_workers(timeout=5)
+    assert not worker._thread.is_alive()

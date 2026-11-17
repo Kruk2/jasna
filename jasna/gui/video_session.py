@@ -10,11 +10,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Hashable, Mapping
 
 from jasna.gui.models import AppSettings
+from jasna.gui.queues import CommandWorker
 from jasna.session_config import SessionConfig, ltx_unsupported_options
 from jasna.session_factory import ImageSession, RestorationSession
 
 if TYPE_CHECKING:
     import torch
+
+    from jasna.media.probe import VideoMetadata
+    from jasna.pipeline import Pipeline
+    from jasna.segments import SegmentRange
 
 
 def video_session_key(settings: AppSettings) -> tuple:
@@ -145,6 +150,23 @@ def build_video_session(
     return build_restoration_session(config, log_callback=log)
 
 
+def build_preview_pipeline(
+    settings: AppSettings,
+    session: RestorationSession,
+    path: Path,
+    metadata: "VideoMetadata",
+    *,
+    segments: "tuple[SegmentRange, ...]" = (),
+) -> "Pipeline":
+    """A ``Pipeline`` over the video at ``path`` for a preview pass (it never writes the output)."""
+    from jasna.session_factory import build_pipeline
+
+    config = video_session_config(settings, codec=settings.codec, encoder_settings={})
+    pipeline = build_pipeline(config, session, path, path, segments=segments)
+    pipeline.prepare(metadata)
+    return pipeline
+
+
 def build_image_session(
     settings: AppSettings,
     *,
@@ -228,3 +250,53 @@ class SessionCache:
             session.close()
         finally:
             release_session_memory(session.device)
+
+
+class PreviewPipelineWorker(CommandWorker):
+    """A ``CommandWorker`` that runs each command (with a ``settings`` field) over a preview
+    pipeline of one video. The session is cached per ``video_session_key`` and the pipeline
+    rebuilt when the command's settings change; a command superseded while they load is skipped."""
+
+    def __init__(
+        self, path: Path, metadata: "VideoMetadata", *, thread_name: str, on_stopped: Callable[[], None]
+    ) -> None:
+        super().__init__(thread_name)
+        self.path = path
+        self.metadata = metadata
+        self._on_stopped = on_stopped
+        self._pipeline = None
+        self._pipeline_settings: AppSettings | None = None
+        self._sessions = SessionCache(on_close=self._drop_pipeline)
+
+    def _drop_pipeline(self) -> None:
+        self._pipeline = None
+
+    def _load_session(self, command) -> RestorationSession:
+        raise NotImplementedError
+
+    def _build_pipeline(self, command, session: RestorationSession) -> "Pipeline":
+        return build_preview_pipeline(command.settings, session, self.path, self.metadata)
+
+    def _run_command(self, command, pipeline: "Pipeline", session: RestorationSession) -> None:
+        raise NotImplementedError
+
+    def _report_failure(self, command, exc: Exception) -> None:
+        raise NotImplementedError
+
+    def _run(self) -> None:
+        try:
+            while (command := self._next_command()) is not None:
+                try:
+                    session = self._sessions.get(command.settings, lambda: self._load_session(command))
+                    if self._pipeline is None or command.settings != self._pipeline_settings:
+                        self._pipeline = self._build_pipeline(command, session)
+                        self._pipeline_settings = command.settings
+                    if self._superseded():
+                        continue
+                    self._run_command(command, self._pipeline, session)
+                except Exception as exc:
+                    if not self._superseded():
+                        self._report_failure(command, exc)
+        finally:
+            self._sessions.close()
+            self._on_stopped()

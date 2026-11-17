@@ -15,10 +15,10 @@ from pathlib import Path
 
 from PIL import Image
 
-from jasna.gui.queues import replace_pending
 from jasna.gui.models import AppSettings
 from jasna.gui.preview_frames import downscaled_size, gpu_frame_image, preview_image
-from jasna.gui.video_session import SessionCache, build_video_session
+from jasna.gui.queues import Cancel
+from jasna.gui.video_session import PreviewPipelineWorker, build_video_session
 from jasna.session_factory import RestorationSession
 from jasna.media.probe import VideoMetadata
 from jasna.vr180 import left_eye
@@ -62,19 +62,8 @@ RestorationEvent = RestorationStatus | RestorationFrame | RestorationClip | Rest
 class _Request:
     center_seconds: float
     settings: AppSettings
-    projection: str
     generation: int
     playback: bool
-
-
-@dataclass(frozen=True)
-class _Stop:
-    pass
-
-
-@dataclass(frozen=True)
-class _Cancel:
-    pass
 
 
 @dataclass(frozen=True)
@@ -194,7 +183,7 @@ class _PlaybackFrameCollector:
         )
 
 
-class RestorationPreviewWorker:
+class RestorationPreviewWorker(PreviewPipelineWorker):
     """Background worker that restores one bounded window per request.
 
     Requests are coalesced (queue of one); a new request cancels the in-flight
@@ -210,24 +199,11 @@ class RestorationPreviewWorker:
         max_size: tuple[int, int] = (640, 360),
         on_stopped: Callable[[], None],
     ) -> None:
-        self.path = Path(path)
-        self.metadata = metadata
-        self.max_size = max_size
-        self._on_stopped = on_stopped
-        self.events: queue.Queue[RestorationEvent] = queue.Queue()
-        self._commands: queue.Queue[_Request | _Cancel | _Stop] = queue.Queue(maxsize=1)
-        self._closed = threading.Event()
-        self._generation = 0
-        self._active_cancel: threading.Event | None = None
-        self._cancel_lock = threading.Lock()
-        self._thread = threading.Thread(
-            target=self._run,
-            name=f"restoration-preview-{self.path.name}",
-            daemon=True,
+        super().__init__(
+            Path(path), metadata, thread_name=f"restoration-preview-{Path(path).name}", on_stopped=on_stopped
         )
-
-    def start(self) -> None:
-        self._thread.start()
+        self.max_size = max_size
+        self.events: queue.Queue[RestorationEvent] = queue.Queue()
 
     def request(
         self,
@@ -239,100 +215,38 @@ class RestorationPreviewWorker:
     ) -> int:
         self._generation += 1
         self._cancel_active_pass()
-        self._replace_command(
+        self._send(
             _Request(
                 center_seconds=max(0.0, float(center_seconds)),
-                settings=settings,
-                projection=projection,
+                settings=replace(settings, vr_projection=projection),
                 generation=self._generation,
                 playback=bool(playback),
             )
         )
         return self._generation
 
-    def close(self) -> None:
-        if self._closed.is_set():
-            return
-        self._closed.set()
-        self._replace_command(_Stop(), allow_closed=True)
-        self._cancel_active_pass()
-
     def cancel(self) -> None:
         if self._closed.is_set():
             return
         self._generation += 1
         self._cancel_active_pass()
-        self._replace_command(_Cancel())
+        self._send(Cancel())
 
-    def _cancel_active_pass(self) -> None:
-        with self._cancel_lock:
-            if self._active_cancel is not None:
-                self._active_cancel.set()
-
-    def _replace_command(
-        self,
-        command: _Request | _Cancel | _Stop,
-        *,
-        allow_closed: bool = False,
-    ) -> None:
-        if self._closed.is_set() and not allow_closed:
-            return
-        replace_pending(self._commands, command)
-
-    def _run(self) -> None:
-        pipeline = None
-        pipeline_key: tuple[AppSettings, str] | None = None
-
-        def drop_pipeline() -> None:
-            nonlocal pipeline
-            pipeline = None
-
-        def load_session(command: _Request) -> RestorationSession:
-            self.events.put(RestorationStatus("loading_models", command.generation))
-            return build_video_session(
-                command.settings,
-                log=lambda msg: self.events.put(RestorationStatus(msg, command.generation)),
-            )
-
-        sessions = SessionCache(on_close=drop_pipeline)
-        try:
-            while not self._closed.is_set():
-                try:
-                    command = self._commands.get(timeout=0.1)
-                except queue.Empty:
-                    continue
-                if isinstance(command, _Stop):
-                    break
-                if isinstance(command, _Cancel):
-                    continue
-                try:
-                    session = sessions.get(command.settings, lambda: load_session(command))
-                    if pipeline is None or (command.settings, command.projection) != pipeline_key:
-                        pipeline = self._build_pipeline(command.settings, command.projection, session)
-                        pipeline_key = (command.settings, command.projection)
-                    if not self._commands.empty() or self._closed.is_set():
-                        continue
-                    self.events.put(RestorationStatus("restoring", command.generation))
-                    result = self._run_preview_pass(command, pipeline)
-                    if result is not None:
-                        self.events.put(result)
-                except Exception as exc:
-                    if not self._closed.is_set():
-                        self.events.put(RestorationFailed(str(exc), command.generation))
-        finally:
-            sessions.close()
-            self._on_stopped()
-
-    def _build_pipeline(self, settings: AppSettings, projection: str, session: RestorationSession):
-        from jasna.gui.video_session import video_session_config
-        from jasna.session_factory import build_pipeline
-
-        config = replace(
-            video_session_config(settings, codec=settings.codec, encoder_settings={}), vr_projection=projection
+    def _load_session(self, command: _Request) -> RestorationSession:
+        self.events.put(RestorationStatus("loading_models", command.generation))
+        return build_video_session(
+            command.settings,
+            log=lambda msg: self.events.put(RestorationStatus(msg, command.generation)),
         )
-        pipeline = build_pipeline(config, session, self.path, self.path)
-        pipeline.prepare(self.metadata)
-        return pipeline
+
+    def _run_command(self, command: _Request, pipeline, session: RestorationSession) -> None:
+        self.events.put(RestorationStatus("restoring", command.generation))
+        result = self._run_preview_pass(command, pipeline)
+        if result is not None:
+            self.events.put(result)
+
+    def _report_failure(self, command: _Request, exc: Exception) -> None:
+        self.events.put(RestorationFailed(str(exc), command.generation))
 
     def _run_preview_pass(self, command: _Request, pipeline) -> RestorationFrame | RestorationClip | None:
         from jasna.pipeline_threads import run_restoration_pass
@@ -344,19 +258,15 @@ class RestorationPreviewWorker:
             if command.playback
             else preview_window(self.metadata, command.center_seconds, settings.max_clip_size)
         )
-        cancel_event = threading.Event()
-        with self._cancel_lock:
-            self._active_cancel = cancel_event
-
         from jasna.media.lut import lut_applier
 
-        lut = lut_applier(settings.lut_path, pipeline.device)
-        collector = (
-            _PlaybackFrameCollector(self.metadata, self.max_size, lut, stereo=stereo)
-            if command.playback
-            else _CenterFrameCollector(window.center_pts, cancel_event, lut, stereo=stereo)
-        )
-        try:
+        with self._cancellable_pass() as cancel_event:
+            lut = lut_applier(settings.lut_path, pipeline.device)
+            collector = (
+                _PlaybackFrameCollector(self.metadata, self.max_size, lut, stereo=stereo)
+                if command.playback
+                else _CenterFrameCollector(window.center_pts, cancel_event, lut, stereo=stereo)
+            )
             error = run_restoration_pass(
                 pipeline,
                 self.metadata,
@@ -365,13 +275,10 @@ class RestorationPreviewWorker:
                 seek_ts=window.seek_ts if window.seek_ts > 0 else None,
                 use_async_secondary=False,
                 end_pts=window.end_pts,
-                poll=lambda: not self._commands.empty() or self._closed.is_set(),
+                poll=self._superseded,
             )
-        finally:
-            with self._cancel_lock:
-                self._active_cancel = None
 
-        superseded = not self._commands.empty() or self._closed.is_set()
+        superseded = self._superseded()
         if error is not None and not collector.done and not superseded:
             raise error
         if not superseded:

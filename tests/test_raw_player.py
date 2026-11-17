@@ -4,6 +4,7 @@ import subprocess
 import threading
 from contextlib import nullcontext
 from fractions import Fraction
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -366,6 +367,42 @@ def test_source_has_audio_reports_ffprobe_failure(monkeypatch) -> None:
 
     with pytest.raises(OSError, match="ffprobe audio probe failed: invalid media"):
         raw_player.source_has_audio("broken.mp4")
+
+
+def _probe(path) -> tuple:
+    probed: list[tuple] = []
+    done = threading.Event()
+    raw_player.probe_video(path, lambda *result: (probed.append(result), done.set()))
+    assert done.wait(5)
+    return probed[0]
+
+
+def _fail(error: Exception):
+    def raise_error(_path):
+        raise error
+
+    return raise_error
+
+
+def test_probe_video_reports_the_metadata_and_audio_of_a_readable_video(monkeypatch) -> None:
+    monkeypatch.setattr(raw_player, "get_video_meta_data", lambda _path: METADATA)
+    monkeypatch.setattr(raw_player, "source_has_audio", lambda _path: True)
+
+    assert _probe(Path("video.mp4")) == (METADATA, True, "")
+
+
+def test_probe_video_passes_on_an_audio_probe_failure_for_playback(monkeypatch) -> None:
+    failure = OSError("ffprobe audio probe failed")
+    monkeypatch.setattr(raw_player, "get_video_meta_data", lambda _path: METADATA)
+    monkeypatch.setattr(raw_player, "source_has_audio", _fail(failure))
+
+    assert _probe(Path("video.mp4")) == (METADATA, failure, "")
+
+
+def test_probe_video_reports_an_unreadable_video(monkeypatch) -> None:
+    monkeypatch.setattr(raw_player, "get_video_meta_data", _fail(ValueError("no video stream")))
+
+    assert _probe(Path("broken.mp4")) == (None, False, "no video stream")
 
 
 def test_vlc_audio_clock_uses_audio_only_player(monkeypatch) -> None:

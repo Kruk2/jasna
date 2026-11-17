@@ -14,6 +14,20 @@ class SegmentEditResult:
     merged_count: int = 0
 
 
+class RangeOutOfBoundsError(ValueError):
+    """A range starts or ends after the end of the video."""
+
+
+def snap_to_frame(seconds: float, *, duration: float, fps: float) -> float:
+    """Clamp a timestamp to the video and snap it to the nearest frame."""
+    value = min(duration, max(0.0, float(seconds)))
+    return min(duration, max(0.0, round(value * fps) / fps))
+
+
+def _overlap_count(segment: SegmentRange, others) -> int:
+    return sum(existing.start <= segment.end and segment.start <= existing.end for existing in others)
+
+
 @dataclass(frozen=True)
 class _Snapshot:
     segments: tuple[SegmentRange, ...]
@@ -81,10 +95,16 @@ class SegmentEditorState:
 
     def snap(self, seconds: float) -> float:
         """Clamp a timestamp to the video and snap it to the nearest frame."""
+        return snap_to_frame(seconds, duration=self.duration, fps=self.fps)
 
-        value = min(self.duration, max(0.0, float(seconds)))
-        snapped = round(value * self.fps) / self.fps
-        return min(self.duration, max(0.0, snapped))
+    def new_range_at(self, seconds: float) -> tuple[float, float]:
+        """Bounds of a new range at ``seconds``: one second long (at least a frame), the last
+        second of the video when ``seconds`` is at its end."""
+        start = self.snap(seconds)
+        end = self.snap(min(self.duration, start + max(1.0, 1 / self.fps)))
+        if end <= start:
+            return self.snap(max(0.0, self.duration - 1.0)), self.duration
+        return start, end
 
     def select(self, index: int | None) -> None:
         if index is None:
@@ -109,10 +129,7 @@ class SegmentEditorState:
     def add(self, start: float, end: float) -> SegmentEditResult:
         start, end = self._validated_bounds(start, end)
         segment = SegmentRange(start, end, self.default_restoration)
-        overlaps = sum(
-            existing.start <= segment.end and segment.start <= existing.end
-            for existing in self.segments
-        )
+        overlaps = _overlap_count(segment, self.segments)
         self._record_change()
         self.segments = normalize_segments((*self.segments, segment), duration=self.duration)
         self.selected_index = self._index_containing(segment)
@@ -129,10 +146,7 @@ class SegmentEditorState:
             segment for index, segment in enumerate(self.segments)
             if index != original_index
         ]
-        overlaps = sum(
-            existing.start <= replacement.end and replacement.start <= existing.end
-            for existing in remaining
-        )
+        overlaps = _overlap_count(replacement, remaining)
         self._record_change()
         self.segments = normalize_segments((*remaining, replacement), duration=self.duration)
         self.selected_index = self._index_containing(replacement)
@@ -145,11 +159,7 @@ class SegmentEditorState:
 
         fresh = [
             replace(candidate, restoration=candidate.restoration or self.default_restoration)
-            for candidate in ranges
-            if not any(
-                existing.start <= candidate.start and existing.end >= candidate.end
-                for existing in self.segments
-            )
+            for candidate in self.uncovered(ranges)
         ]
         if not fresh:
             return 0
@@ -160,6 +170,14 @@ class SegmentEditorState:
         self.selected_index = None
         self.clear_marks()
         return len(fresh)
+
+    def uncovered(self, ranges: tuple[SegmentRange, ...]) -> tuple[SegmentRange, ...]:
+        """The ``ranges`` no single range of the editor already covers."""
+        return tuple(
+            candidate
+            for candidate in ranges
+            if not any(existing.start <= candidate.start and existing.end >= candidate.end for existing in self.segments)
+        )
 
     def set_selected_restoration(self, restoration: SegmentRestoration) -> bool:
         """Give the selected range ``restoration``; returns whether anything changed."""
@@ -236,6 +254,8 @@ class SegmentEditorState:
         return True
 
     def _validated_bounds(self, start: float, end: float) -> tuple[float, float]:
+        if start > self.duration or end > self.duration + 1e-6:
+            raise RangeOutOfBoundsError("segment must end within the video")
         snapped_start = self.snap(start)
         snapped_end = self.snap(end)
         if snapped_end <= snapped_start:

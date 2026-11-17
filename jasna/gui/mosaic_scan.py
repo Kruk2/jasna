@@ -18,10 +18,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from jasna.gui.queues import replace_pending
+from jasna.gui.queues import CommandWorker
 from jasna.gui.models import AppSettings
 from jasna.media.probe import VideoMetadata
-from jasna.mosaic_scan import SCAN_MASK_HW, mosaic_sizes, sample_seconds, scan_batch, scan_sample_stride
+from jasna.mosaic_scan import (
+    SCAN_MASK_HW,
+    mosaic_sizes,
+    sampled_batches,
+    scan_batch,
+    scan_batches,
+    scan_sample_stride,
+)
 
 SCAN_SCORE_FLOOR = 0.05
 SCAN_VRAM_RESERVE_BYTES = 750 * 1024**2
@@ -144,11 +151,6 @@ class ScanStorageSpilled:
 class _MaskRequest:
     seconds: float
     generation: int
-
-
-@dataclass(frozen=True)
-class _Close:
-    pass
 
 
 ScanEvent = (
@@ -312,7 +314,7 @@ class _ScanTensorCollector:
         return scores, masks
 
 
-class MosaicScanWorker:
+class MosaicScanWorker(CommandWorker):
     """One-shot background scan of a whole video with the detection model.
 
     Decodes with ``VideoReader(frame_stride=N)``, runs the configured
@@ -331,6 +333,7 @@ class MosaicScanWorker:
         stride_seconds: float,
         on_stopped: Callable[[], None] | None = None,
     ) -> None:
+        super().__init__(f"mosaic-scan-{Path(path).name}")
         self.path = Path(path)
         self.metadata = metadata
         self.settings = settings
@@ -338,45 +341,18 @@ class MosaicScanWorker:
         self._on_stopped = on_stopped
         self.events: queue.Queue[ScanEvent] = queue.Queue()
         self._stop_scan = threading.Event()
-        self._closed = threading.Event()
-        self._commands: queue.Queue[_MaskRequest | _Close] = queue.Queue(maxsize=1)
-        self._mask_generation = 0
-        self._thread = threading.Thread(
-            target=self._run,
-            name=f"mosaic-scan-{self.path.name}",
-            daemon=True,
-        )
-
-    def start(self) -> None:
-        self._thread.start()
 
     def stop(self) -> None:
         self._stop_scan.set()
 
     def close(self) -> None:
-        if self._closed.is_set():
-            return
-        self._closed.set()
         self._stop_scan.set()
-        self._replace_command(_Close(), allow_closed=True)
-
-    def join(self, timeout: float | None = None) -> None:
-        self._thread.join(timeout=timeout)
+        super().close()
 
     def request_mask(self, seconds: float) -> int:
-        self._mask_generation += 1
-        self._replace_command(_MaskRequest(max(0.0, float(seconds)), self._mask_generation))
-        return self._mask_generation
-
-    def _replace_command(
-        self,
-        command: _MaskRequest | _Close,
-        *,
-        allow_closed: bool = False,
-    ) -> None:
-        if self._closed.is_set() and not allow_closed:
-            return
-        replace_pending(self._commands, command)
+        self._generation += 1
+        self._send(_MaskRequest(max(0.0, float(seconds)), self._generation))
+        return self._generation
 
     def _run(self) -> None:
         try:
@@ -442,7 +418,6 @@ class MosaicScanWorker:
         metadata = self.metadata
         device = torch.device("cuda:0")
         duration = float(metadata.duration)
-        time_base = float(metadata.time_base)
         frame_stride = scan_sample_stride(metadata.video_fps, seconds=self.stride_seconds)
         sample_stride_seconds = frame_stride / float(metadata.video_fps)
         batch_size = default_detection_batch_size(device)
@@ -478,13 +453,9 @@ class MosaicScanWorker:
                     decode_backend=self.settings.decode_backend,
                 )
                 with reader:
-                    start_pts = reader.start_pts
-                    for batch, pts_list in reader.frames(
-                        seek_ts=start_s if index else None
-                    ):
+                    for batch, sample_times in sampled_batches(reader, seek_ts=start_s if index else None):
                         if self._stop_scan.is_set():
                             break
-                        sample_times = [sample_seconds(pts, start_pts, time_base) for pts in pts_list]
                         keep = segment_sample_indices(
                             sample_times, start_s, end_s, is_last=is_last
                         )
@@ -600,13 +571,7 @@ class MosaicScanWorker:
         self.events.put(ScanCompleted(result, stopped))
 
     def _serve_mask_requests(self, detector) -> None:
-        while not self._closed.is_set():
-            try:
-                command = self._commands.get(timeout=0.1)
-            except queue.Empty:
-                continue
-            if isinstance(command, _Close):
-                return
+        while (command := self._next_command()) is not None:
             try:
                 event = self._detect_mask(detector, command)
             except Exception as exc:
@@ -631,14 +596,12 @@ class MosaicScanWorker:
             decode_backend=self.settings.decode_backend,
         )
         with reader:
-            batch_and_pts = next(reader.frames(seek_ts=command.seconds), None)
-            if batch_and_pts is None:
+            scanned = next(scan_batches(detector, reader, seek_ts=command.seconds), None)
+            if scanned is None:
                 raise RuntimeError("Could not decode the requested preview frame")
-            batch, pts_list = batch_and_pts
-            scores, masks = scan_batch(detector, batch, batch_size)
-            seconds = sample_seconds(pts_list[0], reader.start_pts, float(metadata.time_base))
+            times, scores, masks = scanned
             return ScanMaskReady(
-                seconds=seconds,
+                seconds=times[0],
                 score=float(scores[0].cpu()),
                 mask=masks[0].to(torch.uint8).cpu(),
                 generation=command.generation,

@@ -10,7 +10,7 @@ from typing import Iterator
 import av
 from PIL import Image
 
-from jasna.gui.queues import replace_pending
+from jasna.gui.queues import CommandWorker, Stop
 from jasna.media.container_utils import demux_video
 from jasna.media.probe import VideoMetadata, get_video_meta_data, resolve_video_start_pts
 from jasna.media.splice import KeyframeIndex, probe_keyframes
@@ -73,16 +73,10 @@ class _Previous:
     generation: int
 
 
-@dataclass(frozen=True)
-class _Stop:
-    pass
-
-
 PreviewEvent = PreviewLoaded | PreviewKeyframes | PreviewFrame | PreviewFullFrame | PreviewEnded | PreviewFailed
-_Command = _Seek | _Next | _Previous | _Stop
 
 
-class SegmentPreviewWorker:
+class SegmentPreviewWorker(CommandWorker):
     """Single-threaded PyAV preview decoder controlled by coalesced commands."""
 
     def __init__(
@@ -92,27 +86,17 @@ class SegmentPreviewWorker:
         max_size: tuple[int, int] = (960, 540),
         vr_mode: str = "auto",
     ) -> None:
+        super().__init__(f"segment-preview-{Path(path).name}")
         self.path = Path(path)
         self.max_size = max_size
         self.vr_mode = str(vr_mode)
         self._stereo = "off"
         self.events: queue.Queue[PreviewEvent] = queue.Queue()
-        self._commands: queue.Queue[_Command] = queue.Queue(maxsize=1)
-        self._closed = threading.Event()
         self._grab_requested = threading.Event()
-        self._generation = 0
-        self._thread = threading.Thread(
-            target=self._run,
-            name=f"segment-preview-{self.path.name}",
-            daemon=True,
-        )
-
-    def start(self) -> None:
-        self._thread.start()
 
     def seek(self, seconds: float) -> int:
         self._generation += 1
-        self._replace_command(_Seek(max(0.0, float(seconds)), self._generation))
+        self._send(_Seek(max(0.0, float(seconds)), self._generation))
         return self._generation
 
     def next_frame(self) -> None:
@@ -123,24 +107,13 @@ class SegmentPreviewWorker:
 
     def previous_frame(self, seconds: float) -> int:
         self._generation += 1
-        self._replace_command(_Previous(max(0.0, float(seconds)), self._generation))
+        self._send(_Previous(max(0.0, float(seconds)), self._generation))
         return self._generation
 
     def grab_full(self) -> None:
         """Emit the shown frame at native resolution, once there is one; seeks asked meanwhile
         still run first."""
         self._grab_requested.set()
-
-    def close(self) -> None:
-        if self._closed.is_set():
-            return
-        self._closed.set()
-        self._replace_command(_Stop(), allow_closed=True)
-
-    def _replace_command(self, command: _Command, *, allow_closed: bool = False) -> None:
-        if self._closed.is_set() and not allow_closed:
-            return
-        replace_pending(self._commands, command)
 
     def _run(self) -> None:
         try:
@@ -172,12 +145,9 @@ class SegmentPreviewWorker:
                                 self._to_full_image(last_frame),
                             )
                         )
-                    try:
-                        command = self._commands.get(timeout=0.1)
-                    except queue.Empty:
+                    command = self._poll_command()
+                    if command is None or isinstance(command, Stop):
                         continue
-                    if isinstance(command, _Stop):
-                        break
                     if isinstance(command, _Seek):
                         frame, decoded = self._seek(
                             container,
