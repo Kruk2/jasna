@@ -18,7 +18,7 @@ from jasna.accelerator import (
     stream_context,
     vendor_for_device,
 )
-from jasna.media.container_utils import demux_video, idle_decoder_threads
+from jasna.media.container_utils import demux_video, idle_decoder_threads, keyframe_seek_pts
 from jasna.media.probe import VideoMetadata, resolve_video_start_pts
 from jasna.media.cuda_kernel import create_stream, destroy_stream
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
@@ -133,38 +133,6 @@ def _first_shown_pts(seek_ts: float | None, start_pts: int, time_base: Fraction)
     if seek_ts is None:
         return start_pts
     return start_pts + max(0, round(seek_ts / time_base))
-
-
-def _keyframe_seek_pts(container, stream, target_pts: int) -> int:
-    """The timestamp to seek ``stream`` to so decoding starts at a keyframe shown at or before
-    ``target_pts``. Most demuxers land a seek on such a keyframe. MPEG-TS seeks by decode time
-    and takes every packet for a keyframe, so its seek lands mid-GOP and the decoder starts at
-    the next keyframe; there, step back until a keyframe shows up and seek to its decode time."""
-    container.seek(target_pts, stream=stream, backward=True)
-    landing = next(demux_video(container, stream), None)
-    if landing is None or landing.is_keyframe:
-        return target_pts
-    step = round(1 / stream.time_base)
-    while True:
-        seek_pts = target_pts - step
-        container.seek(seek_pts, stream=stream, backward=True)
-        keyframe_dts = None
-        landing_dts = None
-        for packet in demux_video(container, stream):
-            if packet.dts is None:
-                continue
-            if landing_dts is None:
-                landing_dts = packet.dts
-            if packet.dts > target_pts:
-                break
-            if packet.is_keyframe and packet.pts is not None and packet.pts <= target_pts:
-                keyframe_dts = packet.dts
-        if keyframe_dts is not None:
-            return keyframe_dts
-        # A seek before the first packet lands on it: the whole start was searched.
-        if landing_dts is None or landing_dts > seek_pts:
-            return seek_pts
-        step *= 2
 
 
 def _vali_seek_seconds(seek_ts: float, start_pts: int, time_base: Fraction) -> float:
@@ -346,7 +314,7 @@ class _ValiFrameSource:
         if seek_ts is not None:
             start_pts, time_base = self.metadata.start_pts, self.metadata.time_base
             with av.open(self.file, metadata_errors="replace") as container:
-                seek_pts = _keyframe_seek_pts(
+                seek_pts = keyframe_seek_pts(
                     container, container.streams.video[0], _first_shown_pts(seek_ts, start_pts, time_base)
                 )
             seek_ctx = self._vali.SeekContext(
@@ -586,7 +554,7 @@ class _PyAvFrameSource:
         if seek_ts is not None:
             target_pts = _first_shown_pts(seek_ts, self.start_pts, self.video_stream.time_base)
             self.container.seek(
-                _keyframe_seek_pts(self.container, self.video_stream, target_pts),
+                keyframe_seek_pts(self.container, self.video_stream, target_pts),
                 stream=self.video_stream,
                 backward=True,
             )

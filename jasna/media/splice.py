@@ -19,6 +19,7 @@ from jasna.media.audio_utils import aac_reencode_args
 from jasna.media.container_utils import (
     CREATION_TIME,
     MOV_SUFFIXES,
+    keyframe_seek_pts,
     log_stream_plan,
     output_creation_time,
     source_stream_plan,
@@ -619,8 +620,9 @@ def create_copy_fragment(
         in_stream = src.streams.video[0]
         out_stream = dst.add_stream_from_template(in_stream)
         length_size, length_prefixed = _nal_framing(in_stream, codec)
-        src.seek(span.start_pts, stream=in_stream, backward=True)
+        src.seek(keyframe_seek_pts(src, in_stream, span.start_pts), stream=in_stream, backward=True)
         carried = b""
+        first_pts = None
         for packet in src.demux(in_stream):
             if not packet.size:
                 continue
@@ -633,6 +635,8 @@ def create_copy_fragment(
             access_unit, carried = carried + data[:cut], data[cut:]
             if packet.pts is None or not (span.start_pts <= packet.pts < span.end_pts):
                 continue
+            if first_pts is None:
+                first_pts = packet.pts
             if access_unit != data:
                 packet = _repacked(packet, access_unit)
             packet.pts -= span.start_pts
@@ -640,6 +644,12 @@ def create_copy_fragment(
                 packet.dts -= span.start_pts
             packet.stream = out_stream
             dst.mux(packet)
+    # A copy missing its keyframe decodes nothing until the next one: fail instead of losing that GOP.
+    if span.start_pts in index.pts and first_pts != span.start_pts:
+        raise RuntimeError(
+            f"Could not copy the video from its keyframe at {index.seconds_for_pts(span.start_pts):.3f}s; "
+            "the source's timestamps do not allow an exact cut there"
+        )
 
 
 def _repacked(packet: av.Packet, payload: bytes) -> av.Packet:

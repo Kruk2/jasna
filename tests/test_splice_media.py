@@ -158,6 +158,81 @@ def test_copy_span_stops_reading_at_its_end_with_the_same_packets(tmp_path: Path
     assert packets == _fragment_packets(read_to_end)
 
 
+def test_copy_span_that_cannot_start_on_its_keyframe_fails(tmp_path: Path) -> None:
+    source = tmp_path / "b-frames.ts"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc2=size=160x96:rate=12:duration=2",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-g", "12", "-keyint_min", "12", "-bf", "3", "-x264-params", "scenecut=0",
+        str(source),
+    )
+    index = probe_keyframes(source, get_video_meta_data(str(source)))
+    # The second frame is a B-frame: in decode order the P-frame shown after it comes first.
+    b_frame = index.pts[0] + round(1 / (12 * index.time_base))
+    index = replace(index, pts=tuple(sorted((*index.pts, b_frame))))
+
+    with pytest.raises(RuntimeError, match="from its keyframe"):
+        create_copy_fragment(source, SpliceSpan("copy", b_frame, index.end_pts), index, tmp_path / "copy.nut", codec="h264")
+
+
+def _decoded_frames(path: Path) -> list[tuple[float, np.ndarray]]:
+    """(seconds past the video start, RGB picture) per decoded frame."""
+    with av.open(str(path)) as container:
+        stream = container.streams.video[0]
+        return [
+            (float((frame.pts - stream.start_time) * stream.time_base), frame.to_ndarray(format="rgb24"))
+            for frame in container.decode(stream)
+        ]
+
+
+def _audio_packet_count(path: Path) -> int:
+    with av.open(str(path)) as container:
+        return sum(1 for packet in container.demux(audio=0) if packet.size)
+
+
+@pytest.mark.parametrize("container", ["ts", "mp4"])
+def test_copy_spans_keep_every_frame_and_the_audio(tmp_path: Path, container: str) -> None:
+    # MPEG-TS seeks by decode time: a copy that seeks to its keyframe's pts lands after
+    # the keyframe's packet when B-frames delay its pts, and loses the whole GOP.
+    source = tmp_path / f"source.{container}"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc2=size=160x96:rate=12:duration=6",
+        "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000:duration=6",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-g", "12", "-keyint_min", "12", "-bf", "3", "-x264-params", "scenecut=0",
+        "-c:a", "aac",
+        str(source),
+    )
+    index = probe_keyframes(source, get_video_meta_data(str(source)))
+    assert len(index.pts) == 6
+    # Two GOPs per span: a copy that loses its first GOP still decodes, just shorter.
+    bounds = (index.start_pts, index.pts[2], index.pts[4], index.end_pts)
+    fragments = []
+    for span_index, (start, end) in enumerate(zip(bounds, bounds[1:])):
+        raw = tmp_path / f"raw-{span_index}.nut"
+        create_copy_fragment(source, SpliceSpan("copy", start, end), index, raw, codec="h264")
+        normalized = tmp_path / f"part-{span_index}.ts"
+        normalize_fragment(raw, normalized, codec="h264")
+        fragments.append((normalized, float((end - start) * index.time_base)))
+    assembled = tmp_path / "assembled.ts"
+    concatenate_fragments(fragments, manifest=tmp_path / "parts.ffconcat", destination=assembled, codec="h264")
+    output = tmp_path / "output.mkv"
+
+    mux_final_output(assembled, source, output, codec="h264", comment=COMMENT)
+
+    source_frames, output_frames = _decoded_frames(source), _decoded_frames(output)
+    assert [seconds for seconds, _ in output_frames] == pytest.approx(
+        [seconds for seconds, _ in source_frames], abs=0.002
+    )
+    assert all(np.array_equal(out, src) for (_, out), (_, src) in zip(output_frames, source_frames))
+    assert _audio_packet_count(output) == _audio_packet_count(source)
+    remuxed = tmp_path / "remuxed.mkv"
+    _ffmpeg("-i", str(source), "-c", "copy", str(remuxed))
+    assert _video_delay_after_audio(output) == pytest.approx(_video_delay_after_audio(remuxed), abs=0.002)
+
+
 
 _LATE_VIDEO_ENCODERS = [
     ("h264", "libx264", ["-g", "12", "-keyint_min", "12", "-sc_threshold", "0"]),
