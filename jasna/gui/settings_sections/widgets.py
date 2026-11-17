@@ -8,6 +8,7 @@ import customtkinter as ctk
 
 from jasna.gui import scaling
 from jasna.gui.components import Tooltip
+from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
 from jasna.gui.theme import Colors, Fonts
 
@@ -34,6 +35,14 @@ def add_setting_label(row, label_key: str, tooltip_key: str | None = None, *, in
     else:
         label.pack(side="left")
         tip.pack(side="left", padx=4)
+
+
+def folder_button(master, command, *, background: str, height: int) -> ctk.CTkButton:
+    """The folder-icon button beside a path entry; the caller packs it."""
+    return ctk.CTkButton(
+        master, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=height,
+        fg_color=background, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY, command=command,
+    )
 
 
 # One slider length and one right-aligned value column keep the rows lined up.

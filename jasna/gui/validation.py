@@ -3,6 +3,7 @@ from jasna.gui.locales import t
 from jasna.media.media_files import is_image
 from jasna.os_utils import tvai_setup_problems
 from jasna.segments import job_models
+from jasna.session_config import ltx_unsupported_options
 
 
 def _uses_ltx(job: JobItem, settings: AppSettings) -> bool:
@@ -33,11 +34,12 @@ def validate_gui_start(settings: AppSettings, jobs: list[JobItem], *, ltx_availa
         if needs_ltx:
             errors.append(t("error_ltx_ranges_unavailable", files=", ".join(needs_ltx)))
 
-    # Without auto split an LTX job drops TVAI (ltx_unsupported_options); auto split keeps it.
-    if settings.restoration_model == "ltx" and not settings.ltx_auto_split:
-        return errors
-
-    if settings.secondary_restoration != "tvai":
+    ltx_drops_secondary = settings.restoration_model == "ltx" and "secondary_restoration" in ltx_unsupported_options(
+        auto_split=settings.ltx_auto_split,
+        secondary_restoration=settings.secondary_restoration,
+        denoise_strength=settings.denoise_strength,
+    )
+    if settings.secondary_restoration != "tvai" or ltx_drops_secondary:
         return errors
 
     return errors + [

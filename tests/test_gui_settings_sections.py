@@ -809,3 +809,18 @@ def test_every_setting_the_user_changes_marks_the_preset_modified(panel_factory,
     _change_like_a_user(_USER_CHANGES[change](panel))
 
     assert _preset_label(panel) == t("preset_modified", name="🔒 Default")
+
+
+@pytest.mark.parametrize(
+    ("vendor", "expected"),
+    [(AcceleratorVendor.NVIDIA, True), (AcceleratorVendor.AMD, True), (AcceleratorVendor.CPU, False)],
+)
+def test_settings_panel_says_whether_ltx_runs_on_this_pc(panel_factory, monkeypatch, vendor, expected) -> None:
+    from jasna import system_requirements
+
+    monkeypatch.setattr(system_requirements, "old_linux_kernel_for_ltx", lambda: None)
+    panel = panel_factory(False)
+
+    panel.set_gpu_support(vendor=vendor, blackwell=False, frame_generation=False)
+
+    assert panel.ltx_runs_on_this_pc() is expected

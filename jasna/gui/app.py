@@ -29,7 +29,6 @@ from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.user_settings import read_settings
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui import saved_queue, tray
-from jasna.gui.ltx_models import card_unavailable_reason
 from jasna.gui.models import AppSettings, JobStatus, PresetManager
 from jasna.gui.start_flow import StartBlock, StartBlocked, read_ltx_license, start_blocker
 from jasna.gui.validation import any_job_uses_ltx, job_is_resumable
@@ -92,7 +91,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._job_start_times: dict[int, float] = {}
         self._processing_start_time: float = 0.0
         self._preview_gpu_owners: set[object] = set()
-        self._gpu_vendor: AcceleratorVendor | None = None
         self._video_player_dialog = None
         self._segment_editor = None
         self._closing_after_player = False
@@ -296,7 +294,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         )
 
     def _set_gpu_support(self, vendor: AcceleratorVendor, blackwell: bool, frame_generation: bool) -> None:
-        self._gpu_vendor = vendor
         self._settings_panel.set_gpu_support(vendor=vendor, blackwell=blackwell, frame_generation=frame_generation)
 
     def _stop_system_stats_poller(self):
@@ -594,7 +591,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             settings,
             jobs,
             ltx_ready=self._settings_panel.ltx_unavailable_reason() is None,
-            ltx_runs_on_this_pc=card_unavailable_reason(self._gpu_vendor) is None,
+            ltx_runs_on_this_pc=self._settings_panel.ltx_runs_on_this_pc(),
             ltx_downloadable=self._ltx_models.state.downloadable,
             dlss5_installed=self._dlss5_runtime.installed,
             ltx_license=lambda: read_ltx_license(self._ltx_models.directory, settings),
@@ -618,7 +615,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
         trial = settings.ltx_trial and any_job_uses_ltx(jobs, settings)
         if trial:
-            Toast.show(self, t("toast_ltx_trial"), "warning")
+            Toast.show(self, t("toast_ltx_trial"), "warning", rely=0.9)
             self._log_panel.warning(t("toast_ltx_trial"))
         self._control_bar.set_trial(trial)
         if not continuing:

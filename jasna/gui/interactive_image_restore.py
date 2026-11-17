@@ -9,16 +9,12 @@ from PIL import Image
 from jasna.gui.components import grab_modal
 from jasna.gui import scaling
 from jasna.gui.locales import t
-from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, AppSettings
-from jasna.gui.image_restore_worker import ImageRestoreWorker
+from jasna.gui.models import AppSettings
+from jasna.gui.image_restore_worker import ImageRestoreWorker, save_restored_image
 from jasna.gui.queues import MainThreadCalls
-from jasna.media.media_files import folder_output_path, unique_path
 from jasna.gui.theme import Colors, Fonts, Sizing
 
-
-def interactive_output_path(input_path: Path, output_folder: str, output_pattern: str) -> Path:
-    input_path = Path(input_path)
-    return unique_path(folder_output_path(output_folder or input_path.parent, input_path, output_pattern or DEFAULT_OUTPUT_PATTERN))
+_SMALLEST_PREVIEW = (360, 260)
 
 
 def _dialog_geometry_for_image(image_size: tuple[int, int], screen_size: tuple[int, int]) -> tuple[int, int, int, int]:
@@ -28,12 +24,13 @@ def _dialog_geometry_for_image(image_size: tuple[int, int], screen_size: tuple[i
     max_window_h = max(520, screen_h - 80)
     horizontal_chrome = 36
     vertical_chrome = 170
-    max_preview_w = max(360, max_window_w - horizontal_chrome)
-    max_preview_h = max(260, max_window_h - vertical_chrome)
+    min_preview_w, min_preview_h = _SMALLEST_PREVIEW
+    max_preview_w = max(min_preview_w, max_window_w - horizontal_chrome)
+    max_preview_h = max(min_preview_h, max_window_h - vertical_chrome)
 
     scale = min(max_preview_w / image_w, max_preview_h / image_h, 1.0)
-    preview_w = max(360, int(image_w * scale))
-    preview_h = max(260, int(image_h * scale))
+    preview_w = max(min_preview_w, int(image_w * scale))
+    preview_h = max(min_preview_h, int(image_h * scale))
     window_w = min(max_window_w, preview_w + horizontal_chrome)
     window_h = min(max_window_h, preview_h + vertical_chrome)
     return window_w, window_h, preview_w, preview_h
@@ -52,6 +49,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
     ):
         super().__init__(master)
         self._main_thread = MainThreadCalls(self, 50)
+        self.withdraw()
         self._paths = [Path(p) for p in image_paths]
         self._settings = settings
         self._output_folder = output_folder
@@ -73,15 +71,12 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         self._current_mask = None
         self._photo = None
 
-        image_size = _read_image_size(self._paths[0])
-        # Logical screen: the geometry it returns feeds both geometry() and CTk widget
-        # sizes, which are multiplied by the scaling factor again at render time.
-        logical_screen = scaling.to_logical(self, *scaling.screen_rect(self)[2:])
-        self._window_w, self._window_h, self._preview_w, self._preview_h = _dialog_geometry_for_image(image_size, logical_screen)
+        self._preview_w, self._preview_h = _SMALLEST_PREVIEW
 
         self._worker = ImageRestoreWorker(
             self._paths,
             settings,
+            on_first_image_size=lambda size: self._main_thread.post(lambda: self._first_image_sized(size)),
             on_rendered=lambda *rendered: self._main_thread.post(lambda: self._finish_render(*rendered)),
             on_failed=lambda token, exc: self._main_thread.post(lambda: self._fail_render(token, exc)),
             on_stopped=on_stopped,
@@ -93,11 +88,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         self.protocol("WM_DELETE_WINDOW", self._close)
 
         self._build_ui()
-        self._center(master)
-        grab_modal(self)
-
         self._worker.start()
-        self._request_render()
 
     def _build_ui(self) -> None:
         outer = ctk.CTkFrame(self, fg_color="transparent")
@@ -237,11 +228,20 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
 
         self._refresh_header()
 
-    def _center(self, master) -> None:
+    def _show_sized_for(self, image_size: tuple[int, int]) -> None:
+        # Logical screen: the geometry it returns feeds both geometry() and CTk widget
+        # sizes, which are multiplied by the scaling factor again at render time.
+        logical_screen = scaling.to_logical(self, *scaling.screen_rect(self)[2:])
+        window_w, window_h, self._preview_w, self._preview_h = _dialog_geometry_for_image(image_size, logical_screen)
+        self._image_label.configure(width=self._preview_w, height=self._preview_h)
         self.update_idletasks()
-        scaling.place_centered_on_parent(
-            self, master, *scaling.to_physical(self, self._window_w, self._window_h)
-        )
+        scaling.place_centered_on_parent(self, self.master, *scaling.to_physical(self, window_w, window_h))
+        self.deiconify()
+        grab_modal(self)
+
+    def _first_image_sized(self, image_size: tuple[int, int]) -> None:
+        self._show_sized_for(image_size)
+        self._request_render()
 
     def _refresh_header(self) -> None:
         path = self._paths[self._index]
@@ -299,6 +299,8 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
     def _fail_render(self, token: int, exc: Exception) -> None:
         if self._closed or token != self._token:
             return
+        if self.state() == "withdrawn":
+            self._show_sized_for(_SMALLEST_PREVIEW)
         message = str(exc)
         self._status.configure(text=message, text_color=Colors.STATUS_ERROR)
         self._save.configure(state="disabled")
@@ -322,13 +324,25 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
     def _save_current(self) -> None:
         if self._current_result is None:
             return
-        from jasna.media import image_io
+        token = self._token
+        save_restored_image(
+            self._paths[self._index],
+            self._output_folder,
+            self._output_pattern,
+            self._current_result,
+            lambda path, error: self._main_thread.post(lambda: self._saved(token, path, error)),
+        )
 
-        path = interactive_output_path(self._paths[self._index], self._output_folder, self._output_pattern)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        image_io.write_image_rgb_chw(path, self._current_result)
-        self._status.configure(text=t("interactive_saved", path=str(path)), text_color=Colors.STATUS_COMPLETED)
+    def _saved(self, token: int, path: Path | None, error: Exception | None) -> None:
+        if error is not None:
+            message = str(error)
+            self._on_log("ERROR", message)
+            if token == self._token:
+                self._status.configure(text=message, text_color=Colors.STATUS_ERROR)
+            return
         self._on_log("INFO", f"Wrote {path}")
+        if token == self._token:
+            self._status.configure(text=t("interactive_saved", path=str(path)), text_color=Colors.STATUS_COMPLETED)
 
     def _close(self) -> None:
         self._closed = True
@@ -345,8 +359,3 @@ def _ctk_image_from_chw(chw_uint8, max_w: int, max_h: int):
     rgb = chw_uint8.transpose(1, 2, 0)
     image = Image.fromarray(rgb, mode="RGB")
     return ctk.CTkImage(light_image=image, dark_image=image, size=size)
-
-
-def _read_image_size(path: Path) -> tuple[int, int]:
-    with Image.open(path) as image:
-        return image.size

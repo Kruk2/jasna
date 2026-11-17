@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
 from jasna.gui.validation import validate_gui_start
@@ -91,12 +93,29 @@ def test_validate_gui_start_blocks_ltx_ranges_only_when_ltx_cannot_run() -> None
     ]
 
 
-def test_validate_gui_start_checks_tvai_for_ltx_only_with_auto_split(monkeypatch) -> None:
+@pytest.mark.parametrize("denoise_strength", ["none", "medium"])
+@pytest.mark.parametrize("secondary_restoration", ["none", "unet-4x", "tvai", "rtx-super-res"])
+@pytest.mark.parametrize(
+    ("restoration_model", "auto_split", "tvai_checked"),
+    [
+        ("basicvsrpp", False, True),
+        ("basicvsrpp", True, True),
+        ("ltx", False, False),
+        ("ltx", True, True),
+    ],
+)
+def test_validate_gui_start_checks_tvai_only_when_the_job_keeps_it(
+    monkeypatch, restoration_model, auto_split, tvai_checked, secondary_restoration, denoise_strength
+) -> None:
     monkeypatch.delenv("TVAI_MODEL_DATA_DIR", raising=False)
     monkeypatch.delenv("TVAI_MODEL_DIR", raising=False)
-    ltx = AppSettings(restoration_model="ltx", secondary_restoration="tvai")
-
-    assert validate_gui_start(ltx, [], ltx_available=True) == []
-    assert t("error_tvai_data_dir_not_set") in validate_gui_start(
-        AppSettings(restoration_model="ltx", ltx_auto_split=True, secondary_restoration="tvai"), [], ltx_available=True
+    settings = AppSettings(
+        restoration_model=restoration_model,
+        ltx_auto_split=auto_split,
+        secondary_restoration=secondary_restoration,
+        denoise_strength=denoise_strength,
     )
+
+    errors = validate_gui_start(settings, [], ltx_available=True)
+
+    assert (t("error_tvai_data_dir_not_set") in errors) is (tvai_checked and secondary_restoration == "tvai")

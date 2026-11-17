@@ -134,10 +134,15 @@ def test_startup_warns_when_an_older_version_left_dlls_in_the_folder(jasna_app, 
     assert _logged_warnings(jasna_app) == [message for _title, message in expected]
 
 
+@pytest.mark.parametrize("os_name", ["nt", "posix"])
 @pytest.mark.parametrize("amd", [True, False])
-def test_system_checks_check_amf_only_on_amd(monkeypatch, amd):
+def test_system_checks_run_exactly_the_shown_checks(monkeypatch, amd, os_name):
+    import os
+
     from jasna import accelerator, os_utils, system_requirements
     from jasna.gui import system_checks
+
+    monkeypatch.setattr(os, "name", os_name)
 
     for name in ("check_ascii_install_path", "check_gpu_driver_version", "check_windows_nvidia_sysmem_fallback_policy"):
         monkeypatch.setattr(system_requirements, name, lambda: (True, ""))
@@ -150,6 +155,8 @@ def test_system_checks_check_amf_only_on_amd(monkeypatch, amd):
     system_checks.run_system_checks(results)
 
     assert ("amf" in results) is amd
+    assert ("sysmem" in results) is (os_name == "nt")
+    assert sorted(results) == sorted(system_checks.system_check_keys())
 
 
 def test_system_checks_do_not_probe_the_gpu_with_an_old_driver(monkeypatch):

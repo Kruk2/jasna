@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import math
 import queue
-import sys
 import time
 import tkinter as tk
 from dataclasses import replace
@@ -17,6 +16,7 @@ from jasna.gui import scaling
 from jasna.gui.components import grab_modal
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
+from jasna.gui.player_settings_card import PlayerSettingsCard
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.raw_player import (
     PREROLL_SECONDS,
@@ -31,14 +31,10 @@ from jasna.gui.raw_player import (
     VlcUnavailableError,
     probe_video,
 )
-from jasna.gui.settings_sections.widgets import ValueOptionMenu
-from jasna.gui.theme import Colors, Fonts, Sizing
+from jasna.gui.theme import Colors, Fonts
+from jasna.gui.windows_playback import WindowsTimerResolution, create_native_video_renderer
 from jasna.media.probe import VideoMetadata
 from jasna.media.media_files import VIDEO_EXTENSIONS
-from jasna.mosaic.detection_registry import (
-    detection_model_choices,
-    recommended_score_threshold,
-)
 
 _TICK_SECONDS = 1 / 60
 _TICK_MS = round(_TICK_SECONDS * 1000)
@@ -52,101 +48,6 @@ _BUFFER_STATUS_INTERVAL_SECONDS = 0.25
 _SEEK_UPDATE_INTERVAL_SECONDS = 0.1
 
 logger = logging.getLogger(__name__)
-
-
-def _load_windows_multimedia_timer():
-    import ctypes
-
-    return ctypes.WinDLL("winmm")
-
-
-class _WindowsTimerResolution:
-    def __init__(self) -> None:
-        self._timer = None
-        if sys.platform != "win32":
-            return
-        timer = _load_windows_multimedia_timer()
-        if timer.timeBeginPeriod(1) != 0:
-            raise OSError("Windows could not enable 1 ms timer resolution")
-        self._timer = timer
-
-    def close(self) -> None:
-        if self._timer is None:
-            return
-        timer = self._timer
-        self._timer = None
-        if timer.timeEndPeriod(1) != 0:
-            raise OSError("Windows could not restore timer resolution")
-
-
-def _load_windows_video_backend():
-    import ctypes
-
-    import cv2
-    import numpy as np
-
-    return cv2, np, ctypes.WinDLL("user32", use_last_error=True)
-
-
-class _WindowsVideoRenderer:
-    _SW_HIDE = 0
-    _SW_SHOWNA = 8
-    _GWL_STYLE = -16
-    _WS_CHILD = 0x40000000
-    _WS_VISIBLE = 0x10000000
-
-    def __init__(self, host) -> None:
-        self._cv2, self._np, self._user32 = _load_windows_video_backend()
-        self._title = f"JasnaVideo-{id(self):x}"
-        self._cv2.namedWindow(self._title, self._cv2.WINDOW_NORMAL)
-        self._hwnd = self._user32.FindWindowW(None, self._title)
-        if not self._hwnd:
-            self._cv2.destroyWindow(self._title)
-            raise OSError("OpenCV did not create a Windows video surface")
-        self._user32.ShowWindow(self._hwnd, self._SW_HIDE)
-        self._user32.SetParent(self._hwnd, host.winfo_id())
-        self._user32.SetWindowLongW(
-            self._hwnd,
-            self._GWL_STYLE,
-            self._WS_CHILD | self._WS_VISIBLE,
-        )
-        self._user32.EnableWindow(self._hwnd, False)
-        self._size: tuple[int, int] | None = None
-        self._bgr = None
-        self._visible = False
-
-    def display(self, image: Image.Image, size: tuple[int, int]) -> None:
-        if image.size != size:
-            image = image.resize(size, Image.Resampling.BILINEAR)
-        rgb = self._np.asarray(image)
-        if self._bgr is None or self._bgr.shape != rgb.shape:
-            self._bgr = self._np.empty_like(rgb)
-        self._cv2.cvtColor(rgb, self._cv2.COLOR_RGB2BGR, dst=self._bgr)
-        if self._size != size:
-            self._user32.MoveWindow(self._hwnd, 0, 0, *size, True)
-            self._size = size
-        self._cv2.imshow(self._title, self._bgr)
-        self._cv2.pollKey()
-        if not self._visible:
-            self._user32.ShowWindow(self._hwnd, self._SW_SHOWNA)
-            self._visible = True
-
-    def hide(self) -> None:
-        if self._visible:
-            self._user32.ShowWindow(self._hwnd, self._SW_HIDE)
-            self._visible = False
-
-    def close(self) -> None:
-        if not self._hwnd:
-            return
-        self._cv2.destroyWindow(self._title)
-        self._hwnd = 0
-
-
-def _create_native_video_renderer(host):
-    if sys.platform != "win32":
-        return None
-    return _WindowsVideoRenderer(host)
 
 
 def next_player_tick(previous_deadline: float, now: float) -> tuple[float, int]:
@@ -203,19 +104,6 @@ def player_dialog_size(
         min(max_width, max(minimum_size[0], view_width + chrome_size[0])),
         min(max_height, max(minimum_size[1], view_height + chrome_size[1])),
     )
-
-
-def available_player_secondary_restorations() -> tuple[str, ...]:
-    from jasna.accelerator import is_amd_device, is_nvidia_device
-    from jasna.engine_paths import UNET4X_ONNX_ENC_PATH, UNET4X_ONNX_PATH
-
-    values = ["none"]
-    if is_nvidia_device():
-        values.append("rtx-super-res")
-    if is_nvidia_device() or is_amd_device():
-        if UNET4X_ONNX_PATH.exists() or UNET4X_ONNX_ENC_PATH.exists():
-            values.append("unet-4x")
-    return tuple(values)
 
 
 def format_player_time(seconds: float) -> str:
@@ -282,7 +170,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._build_ui()
         self.update_idletasks()
         self._show_centered(master)
-        self._native_renderer = _create_native_video_renderer(self._video_surface)
+        self._native_renderer = create_native_video_renderer(self._video_surface)
         grab_modal(self)
         self.bind("<F11>", self._toggle_fullscreen)
         self.bind("<Escape>", self._exit_fullscreen)
@@ -290,7 +178,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self.bind("<Right>", lambda event: self._seek_relative(_SEEK_STEP_SECONDS, event))
         self.bind("<space>", self._space_pressed)
         self.bind("<Motion>", self._fullscreen_mouse_moved, add="+")
-        self._timer_resolution = _WindowsTimerResolution()
+        self._timer_resolution = WindowsTimerResolution()
         self._next_tick_at = time.monotonic() + _TICK_SECONDS
         self.after(_TICK_MS, self._tick)
         if initial_path is not None:
@@ -430,104 +318,8 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         )
         self._status.pack(side="right", fill="x", expand=True)
 
-        self._settings_card = ctk.CTkFrame(
-            self._outer,
-            fg_color=Colors.BG_CARD,
-            corner_radius=Sizing.BORDER_RADIUS,
-        )
+        self._settings_card = PlayerSettingsCard(self._outer, self._base_settings, self._request_pipeline_reload)
         self._settings_card.grid(row=3, column=0, sticky="ew", pady=(2, 10))
-        self._settings_card.grid_columnconfigure(1, weight=1)
-        self._settings_card.grid_columnconfigure(3, weight=1)
-        ctk.CTkLabel(
-            self._settings_card,
-            text=t("player_detection_model"),
-            text_color=Colors.TEXT_PRIMARY,
-        ).grid(row=0, column=0, padx=(12, 6), pady=10, sticky="w")
-        models = detection_model_choices()
-        self._model = ctk.CTkOptionMenu(
-            self._settings_card,
-            values=models,
-            command=self._model_changed,
-            fg_color=Colors.BG_PANEL,
-            button_color=Colors.BG_PANEL,
-            button_hover_color=Colors.BORDER_LIGHT,
-            dropdown_fg_color=Colors.BG_PANEL,
-            dropdown_hover_color=Colors.PRIMARY,
-            text_color=Colors.TEXT_PRIMARY,
-            width=160,
-        )
-        selected_model = (
-            self._base_settings.detection_model
-            if self._base_settings.detection_model in models
-            else models[0]
-        )
-        self._model.set(selected_model)
-        self._model.grid(row=0, column=1, padx=(0, 14), pady=10, sticky="w")
-
-        ctk.CTkLabel(
-            self._settings_card,
-            text=t("player_secondary"),
-            text_color=Colors.TEXT_PRIMARY,
-        ).grid(row=0, column=2, padx=(0, 6), pady=10, sticky="w")
-        secondary_values = available_player_secondary_restorations()
-        self._secondary = ValueOptionMenu(
-            self._settings_card,
-            options={
-                value: {
-                    "none": t("secondary_none"),
-                    "rtx-super-res": t("secondary_rtx_super_res"),
-                    "unet-4x": t("secondary_unet_4x"),
-                }[value]
-                for value in secondary_values
-            },
-            command=self._secondary_changed,
-            fg_color=Colors.BG_PANEL,
-            button_color=Colors.BG_PANEL,
-            button_hover_color=Colors.BORDER_LIGHT,
-            dropdown_fg_color=Colors.BG_PANEL,
-            dropdown_hover_color=Colors.PRIMARY,
-            text_color=Colors.TEXT_PRIMARY,
-            width=180,
-        )
-        initial_secondary = (
-            self._base_settings.secondary_restoration
-            if self._base_settings.secondary_restoration in secondary_values
-            else "none"
-        )
-        self._secondary.set_value(initial_secondary)
-        self._secondary.grid(row=0, column=3, padx=(0, 14), pady=10, sticky="w")
-
-        ctk.CTkLabel(
-            self._settings_card,
-            text=t("player_detection_threshold"),
-            text_color=Colors.TEXT_PRIMARY,
-        ).grid(row=1, column=0, padx=(12, 6), pady=(0, 10), sticky="w")
-        threshold_row = ctk.CTkFrame(self._settings_card, fg_color="transparent")
-        threshold_row.grid(
-            row=1,
-            column=1,
-            columnspan=3,
-            padx=(0, 14),
-            pady=(0, 10),
-            sticky="ew",
-        )
-        self._threshold = ctk.CTkSlider(
-            threshold_row,
-            from_=0,
-            to=1,
-            number_of_steps=20,
-            command=self._threshold_changed,
-        )
-        self._threshold.pack(side="left", fill="x", expand=True)
-        self._threshold.set(self._base_settings.detection_score_threshold)
-        self._threshold.bind("<ButtonRelease-1>", self._threshold_released)
-        self._threshold_value = ctk.CTkLabel(
-            threshold_row,
-            text=f"{self._base_settings.detection_score_threshold:.2f}",
-            width=42,
-            text_color=Colors.TEXT_PRIMARY,
-        )
-        self._threshold_value.pack(side="left", padx=(8, 0))
 
         self._actions = ctk.CTkFrame(self._outer, fg_color="transparent")
         self._actions.grid(row=4, column=0, sticky="ew")
@@ -674,13 +466,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._set_status(t("player_loading_models"), Colors.STATUS_PENDING)
 
     def _playback_settings(self) -> AppSettings:
-        return replace(
-            self._base_settings,
-            restoration_model="basicvsrpp",
-            detection_model=self._model.get(),
-            detection_score_threshold=float(self._threshold.get()),
-            secondary_restoration=self._secondary.get_value(),
-        )
+        return replace(self._settings_card.apply_to(self._base_settings), restoration_model="basicvsrpp")
 
     def _tick(self) -> None:
         if self._closed:
@@ -874,21 +660,6 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._last_frame_image = None
         self._set_status(t("player_restoring"), Colors.STATUS_PENDING)
 
-    def _model_changed(self, model: str) -> None:
-        threshold = recommended_score_threshold(model)
-        self._threshold.set(threshold)
-        self._threshold_value.configure(text=f"{threshold:.2f}")
-        self._request_pipeline_reload()
-
-    def _threshold_changed(self, value: float) -> None:
-        self._threshold_value.configure(text=f"{float(value):.2f}")
-
-    def _threshold_released(self, _event=None) -> None:
-        self._request_pipeline_reload()
-
-    def _secondary_changed(self, _value: str) -> None:
-        self._request_pipeline_reload()
-
     def _request_pipeline_reload(self) -> None:
         if self._worker is None or self._clock is None or self._stopping:
             return
@@ -1038,11 +809,8 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             self._choose_video()
 
     def _set_config_enabled(self, enabled: bool) -> None:
-        state = "normal" if enabled else "disabled"
-        self._choose_btn.configure(state=state)
-        self._model.configure(state=state)
-        self._threshold.configure(state=state)
-        self._secondary.configure(state=state)
+        self._choose_btn.configure(state="normal" if enabled else "disabled")
+        self._settings_card.set_enabled(enabled)
 
     def _set_status(self, text: str, color: str) -> None:
         value = (text, color)

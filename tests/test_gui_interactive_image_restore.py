@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jasna.gui.interactive_image_restore import _dialog_geometry_for_image, interactive_output_path
+import threading
+
+import numpy as np
+import pytest
+from PIL import Image
+
+from jasna.gui import video_session
+from jasna.gui.image_restore_worker import interactive_output_path
+from jasna.gui.interactive_image_restore import InteractiveImageRestoreDialog, _dialog_geometry_for_image
+from jasna.gui.locales import t
+from jasna.gui.models import AppSettings
 
 
 def test_dialog_geometry_fits_entire_image_when_screen_allows() -> None:
@@ -84,3 +94,84 @@ def test_interactive_restore_holds_the_gpu_until_its_worker_stops(jasna_app, mon
     assert jasna_app._preview_gpu_busy
     opened[0]["on_stopped"]()
     assert not jasna_app._preview_gpu_busy
+
+
+@pytest.fixture
+def open_image_dialog(tk_root, tmp_path, monkeypatch):
+    """Opens a real dialog over one image whose model never loads; returns it and its log."""
+
+    def missing_model(_settings, *, log):
+        raise FileNotFoundError("model missing")
+
+    monkeypatch.setattr(video_session, "build_image_session", missing_model)
+    dialogs = []
+
+    def open_dialog(image_path):
+        logs: list[tuple[str, str]] = []
+        dialog = InteractiveImageRestoreDialog(
+            tk_root,
+            [image_path],
+            AppSettings(),
+            str(tmp_path / "out"),
+            "",
+            on_log=lambda level, message: logs.append((level, message)),
+            on_stopped=lambda: None,
+        )
+        dialogs.append(dialog)
+        return dialog, logs
+
+    yield open_dialog
+    for dialog in dialogs:
+        dialog._close()
+
+
+def _run_next_worker_event(dialog) -> None:
+    dialog._main_thread._pending.get(timeout=5)()
+
+
+def _image(tmp_path: Path) -> Path:
+    path = tmp_path / "input.png"
+    Image.new("RGB", (800, 600)).save(path)
+    return path
+
+
+def test_dialog_stays_hidden_until_the_first_image_size_arrives(open_image_dialog, tmp_path) -> None:
+    dialog, logs = open_image_dialog(_image(tmp_path))
+    assert dialog.state() == "withdrawn"
+
+    _run_next_worker_event(dialog)
+    assert dialog.state() == "normal"
+    assert (dialog._preview_w, dialog._preview_h) == (800, 600)
+
+    _run_next_worker_event(dialog)
+    assert dialog._status.cget("text") == "model missing"
+    assert logs == [("ERROR", "model missing")]
+
+
+def test_dialog_shows_an_unreadable_first_image_error(open_image_dialog, tmp_path) -> None:
+    dialog, logs = open_image_dialog(tmp_path / "missing.png")
+
+    _run_next_worker_event(dialog)
+
+    assert dialog.state() == "normal"
+    assert "missing.png" in dialog._status.cget("text")
+    assert logs[0][0] == "ERROR"
+
+
+def test_save_writes_on_a_background_thread_and_reports_the_path(open_image_dialog, tmp_path) -> None:
+    dialog, logs = open_image_dialog(_image(tmp_path))
+    _run_next_worker_event(dialog)
+    _run_next_worker_event(dialog)
+    image = np.zeros((3, 6, 8), dtype=np.uint8)
+    dialog._finish_render(dialog._token, 0, 0, image, image, image)
+
+    dialog._save.invoke()
+    for thread in threading.enumerate():
+        if thread.name == "image-restore-save":
+            thread.join()
+    _run_next_worker_event(dialog)
+
+    saved = tmp_path / "out" / "input_restored.png"
+    assert Image.open(saved).size == (8, 6)
+    assert dialog._status.cget("text") == t("interactive_saved", path=str(saved))
+    assert logs[-1] == ("INFO", f"Wrote {saved}")

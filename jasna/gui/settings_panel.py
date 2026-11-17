@@ -114,7 +114,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._scroll.scroll_to_top()
 
     def _show_toast(self, message: str, type_: str):
-        Toast.show(self.winfo_toplevel(), message, type_)
+        Toast.show(self.winfo_toplevel(), message, type_, rely=0.9)
 
     def _build_scrollable(self):
         self._scroll = AutoHidingScrollableFrame(
@@ -164,6 +164,9 @@ class SettingsPanel(ctk.CTkFrame):
     def ltx_unavailable_reason(self) -> str | None:
         """Locale key saying why the chosen LTX model cannot run now, or None when it can."""
         return self._model_section.unavailable_reason()
+
+    def ltx_runs_on_this_pc(self) -> bool:
+        return self._model_section.ltx_runs_on_this_pc()
 
     def set_ltx_trial(self, trial: bool):
         self._model_section.set_trial(trial)

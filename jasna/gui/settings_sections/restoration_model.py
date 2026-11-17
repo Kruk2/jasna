@@ -327,6 +327,10 @@ class RestorationModelSection:
     def _set_seed(self, seed: int) -> None:
         set_entry_text(self._widgets["ltx_seed"], str(seed))
 
+    def ltx_runs_on_this_pc(self) -> bool:
+        """Whether this PC can run LTX at all (a trial at least), whatever is installed."""
+        return card_unavailable_reason(self._vendor) is None
+
     def unavailable_reason(self) -> str | None:
         """Why the chosen LTX model cannot restore right now (None when it can)."""
         return run_unavailable_reason(
@@ -373,7 +377,7 @@ class RestorationModelSection:
         """The chosen model, or BasicVSR++ when LTX cannot run; switches to the installed
         precision when only that one is there."""
         state = self._ltx_models.state
-        if self._model.get() != "ltx" or card_unavailable_reason(self._vendor) is not None:
+        if self._model.get() != "ltx" or not self.ltx_runs_on_this_pc():
             return "basicvsrpp"
         model, fast = self._ltx_model.get_value(), self._fast()
         if not self._trial() and not state.usable(model, fast) and state.installed(model, not fast):

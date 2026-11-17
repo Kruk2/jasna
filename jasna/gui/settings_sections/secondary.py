@@ -8,7 +8,6 @@ from tkinter import filedialog
 
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui.components import Tooltip
-from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
     Row,
@@ -16,6 +15,7 @@ from jasna.gui.settings_sections.widgets import (
     add_setting_label,
     bind_edits,
     create_slider_value_label,
+    folder_button,
     get_tooltip,
     layout_rows,
     option_menu,
@@ -95,11 +95,9 @@ class SecondarySection:
         )
         self._widgets["tvai_ffmpeg_path"].pack(side="left", fill="x", expand=True, padx=(0, 4))
         bind_edits(self._widgets["tvai_ffmpeg_path"], self._on_modified)
-        ctk.CTkButton(
-            tvai_path_input_row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
-            fg_color=Colors.BG_PANEL, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
-            command=self._browse_tvai_ffmpeg
-        ).pack(side="right")
+        folder_button(tvai_path_input_row, self._browse_tvai_ffmpeg, background=Colors.BG_PANEL, height=28).pack(
+            side="right"
+        )
 
         tvai_model_row = self._card_menu_row(
             tvai_inner, "tvai_model", "model", {model: model for model in _TVAI_MODELS}, width=100

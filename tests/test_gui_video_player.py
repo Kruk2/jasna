@@ -13,14 +13,12 @@ from PIL import Image
 from factories import video_metadata
 from jasna.gui import raw_player
 from jasna.gui import video_player as video_player_module
+from jasna.gui import windows_playback
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.raw_player import PlayerFrame
-from jasna.gui.video_player import (
-    VideoPlayerDialog,
-    available_player_secondary_restorations,
-    format_player_time,
-)
+from jasna.gui.player_settings_card import available_player_secondary_restorations
+from jasna.gui.video_player import VideoPlayerDialog, format_player_time
 
 
 def test_format_player_time_handles_minutes_and_hours() -> None:
@@ -59,14 +57,14 @@ def test_windows_player_timer_resolution_is_scoped(monkeypatch) -> None:
         ),
         timeEndPeriod=lambda milliseconds: calls.append(("end", milliseconds)) or 0,
     )
-    monkeypatch.setattr(video_player_module.sys, "platform", "win32")
+    monkeypatch.setattr(windows_playback.sys, "platform", "win32")
     monkeypatch.setattr(
-        video_player_module,
+        windows_playback,
         "_load_windows_multimedia_timer",
         lambda: timer,
     )
 
-    resolution = video_player_module._WindowsTimerResolution()
+    resolution = windows_playback.WindowsTimerResolution()
     resolution.close()
     resolution.close()
 
@@ -75,23 +73,23 @@ def test_windows_player_timer_resolution_is_scoped(monkeypatch) -> None:
 
 def test_player_timer_resolution_does_nothing_off_windows(monkeypatch) -> None:
     load_timer = MagicMock()
-    monkeypatch.setattr(video_player_module.sys, "platform", "linux")
+    monkeypatch.setattr(windows_playback.sys, "platform", "linux")
     monkeypatch.setattr(
-        video_player_module,
+        windows_playback,
         "_load_windows_multimedia_timer",
         load_timer,
     )
 
-    resolution = video_player_module._WindowsTimerResolution()
+    resolution = windows_playback.WindowsTimerResolution()
     resolution.close()
 
     load_timer.assert_not_called()
 
 
 def test_native_video_renderer_is_windows_only(monkeypatch) -> None:
-    monkeypatch.setattr(video_player_module.sys, "platform", "linux")
+    monkeypatch.setattr(windows_playback.sys, "platform", "linux")
 
-    assert video_player_module._create_native_video_renderer(object()) is None
+    assert windows_playback.create_native_video_renderer(object()) is None
 
 
 class _FakePlayerWorker:
@@ -161,7 +159,7 @@ def test_player_starts_in_file_picker_state_and_closes_once(player) -> None:
 
     assert dialog._play_btn.cget("state") == "disabled"
     assert dialog._choose_btn.cget("state") == "normal"
-    assert int(dialog._secondary.grid_info()["column"]) == 3
+    assert int(dialog._settings_card._secondary.grid_info()["column"]) == 3
 
     dialog.request_close()
     dialog.request_close()
@@ -205,7 +203,7 @@ def test_setting_change_reloads_at_current_position_with_the_standard_model(play
     dialog, worker, _closed = _playing_dialog(player, AppSettings(restoration_model="ltx"))
     dialog._seek_relative(30.0)
 
-    dialog._secondary_changed("none")
+    dialog._settings_card._secondary._on_label_selected(t("secondary_none"))
 
     assert worker.positions[-1] == 30.0
     assert worker.settings.restoration_model == "basicvsrpp"
@@ -238,7 +236,7 @@ def test_closing_while_playing_stops_the_worker_first(player) -> None:
 
 
 def test_same_sized_frames_reuse_the_scaled_tk_image(player, monkeypatch) -> None:
-    monkeypatch.setattr(video_player_module, "_create_native_video_renderer", lambda _host: None)
+    monkeypatch.setattr(video_player_module, "create_native_video_renderer", lambda _host: None)
     dialog, _closed = player()
     first = PlayerFrame(0.0, Image.new("RGB", (640, 360), "red"), 0)
     second = PlayerFrame(0.0, Image.new("RGB", (640, 360), "blue"), 0)
@@ -317,8 +315,7 @@ def test_player_secondary_options_follow_gpu_and_model_availability(
 ) -> None:
     from jasna import accelerator, engine_paths
 
-    monkeypatch.setattr(accelerator, "is_nvidia_device", lambda: True)
-    monkeypatch.setattr(accelerator, "is_amd_device", lambda: False)
+    monkeypatch.setattr(accelerator, "vendor_for_device", lambda: accelerator.AcceleratorVendor.NVIDIA)
     monkeypatch.setattr(engine_paths, "UNET4X_ONNX_PATH", tmp_path / "missing.onnx")
     monkeypatch.setattr(engine_paths, "UNET4X_ONNX_ENC_PATH", tmp_path / "missing.enc")
 
@@ -331,11 +328,10 @@ def test_player_secondary_options_follow_gpu_and_model_availability(
         "unet-4x",
     )
 
-    monkeypatch.setattr(accelerator, "is_nvidia_device", lambda: False)
-    monkeypatch.setattr(accelerator, "is_amd_device", lambda: True)
+    monkeypatch.setattr(accelerator, "vendor_for_device", lambda: accelerator.AcceleratorVendor.AMD)
     assert available_player_secondary_restorations() == ("none", "unet-4x")
 
-    monkeypatch.setattr(accelerator, "is_amd_device", lambda: False)
+    monkeypatch.setattr(accelerator, "vendor_for_device", lambda: accelerator.AcceleratorVendor.CPU)
     assert available_player_secondary_restorations() == ("none",)
 
 
@@ -378,3 +374,27 @@ def test_player_does_not_open_while_processing(jasna_app, monkeypatch) -> None:
     jasna_app._open_video_player(Path("/videos/queued.mp4"))
 
     assert jasna_app._video_player_dialog is None
+
+
+def test_player_settings_card_picks_model_threshold_and_falls_back_to_known_choices(tk_root) -> None:
+    from jasna.gui.player_settings_card import PlayerSettingsCard
+    from jasna.mosaic.detection_registry import detection_model_choices, recommended_score_threshold
+
+    changes: list[bool] = []
+    card = PlayerSettingsCard(
+        tk_root,
+        AppSettings(detection_model="retired-model", secondary_restoration="tvai"),
+        lambda: changes.append(True),
+    )
+    first_model = detection_model_choices()[0]
+    assert card.apply_to(AppSettings()).detection_model == first_model
+    assert card.apply_to(AppSettings()).secondary_restoration == "none"
+
+    last_model = detection_model_choices()[-1]
+    card._model.set(last_model)
+    card._model._on_label_selected(last_model)
+
+    settings = card.apply_to(AppSettings())
+    assert settings.detection_model == last_model
+    assert settings.detection_score_threshold == pytest.approx(recommended_score_threshold(last_model), abs=0.05)
+    assert changes == [True]

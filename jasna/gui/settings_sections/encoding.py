@@ -5,7 +5,7 @@ from tkinter import filedialog
 
 from jasna.accelerator import vendor_for_device
 from jasna.gui.components import Tooltip
-from jasna.gui.icons import CompactSwitch, create_icon
+from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
     SLIDER_WIDTH,
@@ -13,6 +13,7 @@ from jasna.gui.settings_sections.widgets import (
     add_setting_label,
     bind_edits,
     create_slider_value_label,
+    folder_button,
     layout_rows,
     option_menu,
     set_entry_text,
@@ -147,7 +148,7 @@ class EncodingSection:
         )
         self._widgets["lut_path"].pack(side="left", fill="x", expand=True, padx=(0, 4))
 
-        self._browse_button(lut_input_row, self._browse_lut_path)
+        folder_button(lut_input_row, self._browse_lut_path, background=Colors.BG_CARD, height=28).pack(side="right")
 
         args_label_row = ctk.CTkFrame(inner, fg_color="transparent")
         add_setting_label(args_label_row, "custom_args", "encoder_custom_args")
@@ -164,7 +165,9 @@ class EncodingSection:
             text_color=Colors.TEXT_PRIMARY, placeholder_text=t("working_directory_placeholder"),
         )
         self._widgets["working_directory"].pack(side="left", fill="x", expand=True, padx=(0, 4))
-        self._browse_button(working_dir_input_row, self._browse_working_directory)
+        folder_button(
+            working_dir_input_row, self._browse_working_directory, background=Colors.BG_CARD, height=28
+        ).pack(side="right")
         for key in _PATH_ENTRIES:
             bind_edits(self._widgets[key], self._on_modified)
 
@@ -185,14 +188,6 @@ class EncodingSection:
             Row(working_dir_row, label_gap, "expert"),
             Row(working_dir_input_row, input_gap, "expert"),
         ]
-
-    @staticmethod
-    def _browse_button(row, command) -> None:
-        ctk.CTkButton(
-            row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
-            fg_color=Colors.BG_CARD, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
-            command=command,
-        ).pack(side="right")
 
     def layout(self, level: str, *, standard: bool, ltx: bool) -> bool:
         layout_rows(self._rows, level, standard=standard, ltx=ltx)

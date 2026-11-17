@@ -1,7 +1,6 @@
 """First-run wizard for dependency checking."""
 
 import logging
-import os
 import sys
 import time
 import webbrowser
@@ -13,7 +12,7 @@ from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import get_locale, t
 from jasna.gui.components import KofiButton, UnifansButton, XianyuButton, grab_modal, shows_xianyu_seller
-from jasna.gui.system_checks import WARNING_ONLY_CHECKS, evaluate_check_results, start_system_checks
+from jasna.gui.system_checks import evaluate_check_results, is_warning_only, start_system_checks, system_check_keys
 
 logger = logging.getLogger(__name__)
 _WINDOW_WIDTH = 820
@@ -104,21 +103,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._checks_frame.pack(fill="both", expand=True, padx=40, pady=20)
 
         self._check_labels = {}
-        checks = [
-            ("ascii_path", t("wizard_check_ascii_path")),
-            ("ffprobe", t("wizard_check_ffprobe")),
-            ("gpu", t("wizard_check_gpu")),
-            ("cuda", t("wizard_check_cuda")),
-            ("driver", t("wizard_check_driver")),
-        ]
-        if os.name == "nt":
-            checks.append(("sysmem", t("wizard_check_sysmem")))
-        from jasna.accelerator import is_amd_device
-
-        if is_amd_device():
-            checks.append(("amf", t("wizard_check_amf")))
-        
-        for key, label in checks:
+        for key in system_check_keys():
             row = ctk.CTkFrame(self._checks_frame, fg_color="transparent")
             row.pack(fill="x", padx=20, pady=8)
             
@@ -133,7 +118,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             
             name_label = ctk.CTkLabel(
                 row,
-                text=label,
+                text=t(f"wizard_check_{key}"),
                 font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
                 text_color=Colors.TEXT_PRIMARY,
             )
@@ -243,7 +228,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             passed, info = self._check_results.get(key, (False, t("wizard_not_checked")))
             if passed:
                 icon, color = "✓", Colors.STATUS_COMPLETED
-            elif key in WARNING_ONLY_CHECKS or (key == "driver" and passed is None):
+            elif is_warning_only(key, passed):
                 icon, color = "⚠", Colors.STATUS_WARNING
             else:
                 icon, color = "✕", Colors.STATUS_ERROR

@@ -5,10 +5,9 @@ from typing import Callable
 
 import customtkinter as ctk
 
-from jasna.gui.components import Tooltip
-from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN
+from jasna.gui.settings_sections.widgets import add_info_icon, folder_button
 from jasna.gui.theme import Colors, Fonts, Sizing
 
 
@@ -43,9 +42,7 @@ class OutputLocationBar(ctk.CTkFrame):
             command=lambda: self.set_folder(""),
         )
         self._same_as_input_btn.pack(side="right")
-        output_tip = ctk.CTkLabel(output_label_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        output_tip.pack(side="left", padx=4)
-        Tooltip(output_tip, t("tip_output_location"))
+        add_info_icon(output_label_row, t("tip_output_location")).pack(side="left", padx=4)
 
         output_row = ctk.CTkFrame(self, fg_color="transparent")
         output_row.pack(fill="x")
@@ -62,16 +59,8 @@ class OutputLocationBar(ctk.CTkFrame):
         self._output_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
         self._output_entry.bind("<KeyRelease>", self._on_folder_typed)
 
-        self._output_browse_btn = ctk.CTkButton(
-            output_row,
-            text="",
-            image=create_icon("folder", 16, Colors.TEXT_PRIMARY),
-            fg_color=Colors.BG_CARD,
-            hover_color=Colors.BORDER_LIGHT,
-            text_color=Colors.TEXT_PRIMARY,
-            width=32,
-            height=Sizing.INPUT_HEIGHT,
-            command=self._on_browse,
+        self._output_browse_btn = folder_button(
+            output_row, self._on_browse, background=Colors.BG_CARD, height=Sizing.INPUT_HEIGHT
         )
         self._output_browse_btn.pack(side="right")
 
@@ -85,9 +74,7 @@ class OutputLocationBar(ctk.CTkFrame):
             anchor="w",
         )
         pattern_label.pack(side="left")
-        pattern_tip = ctk.CTkLabel(pattern_label_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        pattern_tip.pack(side="left", padx=4)
-        Tooltip(pattern_tip, t("tip_output_pattern"))
+        add_info_icon(pattern_label_row, t("tip_output_pattern")).pack(side="left", padx=4)
         self._pattern_entry = ctk.CTkEntry(
             self,
             placeholder_text=DEFAULT_OUTPUT_PATTERN,

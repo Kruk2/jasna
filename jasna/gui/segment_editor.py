@@ -754,7 +754,7 @@ class SegmentEditor(ctk.CTkToplevel):
     def _show_toast(self, message: str, type_: str) -> None:
         if self._closed.is_set():
             return
-        Toast(self, message, type_).place(relx=0.5, rely=0.92, anchor="center")
+        Toast.show(self, message, type_, rely=0.92)
 
     def _refresh_all(self) -> None:
         if self._state is None:

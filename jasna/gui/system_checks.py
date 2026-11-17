@@ -13,7 +13,21 @@ from jasna.gui.workers import run_in_background
 
 logger = logging.getLogger(__name__)
 
-WARNING_ONLY_CHECKS = {"sysmem"}
+def system_check_keys() -> tuple[str, ...]:
+    """The checks this PC runs, in display order."""
+    from jasna.accelerator import is_amd_device
+
+    keys = ["ascii_path", "ffprobe", "gpu", "cuda", "driver"]
+    if os.name == "nt":
+        keys.append("sysmem")
+    if is_amd_device():
+        keys.append("amf")
+    return tuple(keys)
+
+
+def is_warning_only(key: str, passed: bool | None) -> bool:
+    """A failed check that only warns: the Windows sysmem policy, or a driver version that could not be read."""
+    return key == "sysmem" or (key == "driver" and passed is None)
 
 
 def evaluate_check_results(
@@ -27,7 +41,7 @@ def evaluate_check_results(
     passed = {key: results.get(key, (False, ""))[0] for key in keys}
     all_passed = all(passed.values())
     has_required_failure = any(
-        not ok and key not in WARNING_ONLY_CHECKS and not (key == "driver" and ok is None)
+        not ok and not is_warning_only(key, ok)
         for key, ok in passed.items()
     )
     return all_passed, has_required_failure
@@ -35,6 +49,7 @@ def evaluate_check_results(
 
 def run_system_checks(results: dict[str, tuple[bool | None, str]]) -> None:
     """Fill ``results`` one check at a time, so a caller that stops waiting still sees the finished ones."""
+    keys = system_check_keys()
     results["ascii_path"] = system_requirements.check_ascii_install_path()
     results["ffprobe"] = check_ffprobe()
     results["driver"] = system_requirements.check_gpu_driver_version()
@@ -43,11 +58,9 @@ def run_system_checks(results: dict[str, tuple[bool | None, str]]) -> None:
     else:
         results["gpu"] = check_gpu()
         results["cuda"] = check_cuda()
-    if os.name == "nt":
+    if "sysmem" in keys:
         results["sysmem"] = system_requirements.check_windows_nvidia_sysmem_fallback_policy()
-    from jasna.accelerator import is_amd_device
-
-    if is_amd_device():
+    if "amf" in keys:
         results["amf"] = check_amf()
 
 
