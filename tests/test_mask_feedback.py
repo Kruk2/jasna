@@ -3,11 +3,11 @@ from __future__ import annotations
 import io
 import json
 import zipfile
-from types import SimpleNamespace
 
 import pytest
 from PIL import Image
 
+from factories import scheduled_after_ids, tk_event
 from jasna.gui import mask_feedback
 from jasna.gui.preview_canvas import PREVIEW_ZOOM_STEP, image_to_canvas
 
@@ -111,7 +111,7 @@ def test_upload_worker_reports_failure(monkeypatch):
 
 def _click_image(dialog, image_x, image_y):
     x, y = image_to_canvas(image_x, image_y, view=dialog._canvas.transform())
-    dialog._on_press(SimpleNamespace(x=round(x), y=round(y)))
+    dialog._on_press(tk_event(x=round(x), y=round(y)))
 
 
 def test_dialog_draws_and_submits_polygons(tk_root):
@@ -184,7 +184,7 @@ def test_dialog_click_outside_frame_snaps_to_edge(tk_root):
         tk_root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None
     )
     tk_root.update()
-    dialog._on_press(SimpleNamespace(x=0, y=0))
+    dialog._on_press(tk_event(x=0, y=0))
     assert dialog._draft == [(0.0, 0.0)]
     dialog._cancel()
 
@@ -272,7 +272,7 @@ def test_click_above_canvas_snaps_point_to_top_edge(tk_root):
     inside_x, _ = image_to_canvas(320, 0, view=dialog._canvas.transform())
 
     dialog._on_global_press(
-        SimpleNamespace(
+        tk_event(
             widget=dialog, x_root=canvas_x + round(inside_x), y_root=canvas_y - 40
         )
     )
@@ -280,7 +280,7 @@ def test_click_above_canvas_snaps_point_to_top_edge(tk_root):
     assert dialog._draft[0][1] == 0.0
 
     dialog._on_global_press(
-        SimpleNamespace(
+        tk_event(
             widget=dialog._submit_btn._canvas,
             x_root=canvas_x + 10,
             y_root=canvas_y + 10,
@@ -291,8 +291,6 @@ def test_click_above_canvas_snaps_point_to_top_edge(tk_root):
 
 
 def test_closing_the_dialog_cancels_its_pending_redraw(tk_root):
-    from factories import scheduled_after_ids
-
     tk_root.update()
     dialog = mask_feedback.MaskSuggestDialog(
         tk_root, Image.new("RGB", (640, 360)), on_submit=lambda polygons: None

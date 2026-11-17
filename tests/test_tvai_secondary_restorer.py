@@ -2,9 +2,9 @@
 for Topaz's ffmpeg (a script that echoes rawvideo frames with TVAI's output delay)."""
 from __future__ import annotations
 
+import os
 import sys
 import threading
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -43,9 +43,7 @@ while len(stdin.read({_FRAME_BYTES})) == {_FRAME_BYTES}:
     pass
 """
 _EXIT_WITHOUT_READING_WHEN_TOLD = """
-import os, time
-while not os.path.exists(sys.argv[0] + ".exit"):
-    time.sleep(0.01)
+open(sys.argv[0] + ".exit").read()
 sys.exit(1)
 """
 
@@ -261,6 +259,7 @@ def test_push_fails_instead_of_waiting_forever_when_ffmpeg_dies(tvai_install):
     # ffmpeg reads nothing, so the worker's writer is stuck on the first clip and the second
     # fills the write queue: the third push is waiting for room when ffmpeg exits.
     ffmpeg = tvai_install(_EXIT_WITHOUT_READING_WHEN_TOLD)
+    os.mkfifo(ffmpeg + ".exit")
     restorer = _restorer(ffmpeg)
     restorer.push_clip(_numbered_frames(0, 1), keep_start=0, keep_end=1)
     restorer.push_clip(torch.zeros(360, 3, 256, 256), keep_start=0, keep_end=360)
@@ -274,7 +273,8 @@ def test_push_fails_instead_of_waiting_forever_when_ffmpeg_dies(tvai_install):
 
     pusher = threading.Thread(target=push_third_clip, daemon=True)
     pusher.start()
-    Path(ffmpeg + ".exit").touch()
+    with open(ffmpeg + ".exit", "w"):  # closing the fifo lets ffmpeg exit
+        pass
     pusher.join(timeout=30)
     finished = not pusher.is_alive()
     if finished:

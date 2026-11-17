@@ -1,4 +1,5 @@
 import importlib
+import importlib.machinery
 import importlib.util
 import logging
 import inspect
@@ -8,7 +9,6 @@ from pathlib import Path
 import subprocess
 import sys
 import sysconfig
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -128,8 +128,8 @@ def test_frozen_ltx_sources_support_inspect_without_a_jasna_directory(monkeypatc
         path.parent.mkdir(parents=True, exist_ok=True)
         linecache.cache[str(path)] = (len(source), None, source.splitlines(keepends=True), str(path))
         path.write_text("def probe(value):\n    return 'replaced'\n")
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: SimpleNamespace(
-        origin=str(tmp_path / (name.replace(".", "/") + ".py"))))
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: importlib.machinery.ModuleSpec(
+        name, None, origin=str(tmp_path / (name.replace(".", "/") + ".py"))))
     _frozen.register_ltx_sources(tmp_path)
     filename = str(tmp_path / Path(*module.split(".")).with_suffix(".py"))
     namespace = {}

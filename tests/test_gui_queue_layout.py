@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from tkinterdnd2.TkinterDnD import DnDEvent
 
+from factories import tk_event
 from jasna.gui.models import JobItem, JobStatus
 from jasna.gui import queue_panel as queue_panel_module
 from jasna.gui.queue_panel import QueuePanel
@@ -187,7 +188,7 @@ def test_dragging_on_a_later_page_reorders_within_that_page(tk_root) -> None:
     dragged_job = panel.get_jobs()[20]
     dragged = panel._job_widgets[20]
     target = panel._job_widgets[22]
-    event = SimpleNamespace(y_root=target.winfo_rooty() + target.winfo_height() // 2 + 1)
+    event = tk_event(y_root=target.winfo_rooty() + target.winfo_height() // 2 + 1)
 
     panel._on_widget_drag_move(dragged, event)
 
@@ -391,6 +392,8 @@ def test_dropped_paths_with_spaces_and_braces_are_queued_as_dropped(tk_root, tmp
         path.touch()
     panel = QueuePanel(tk_root)
 
-    panel._on_file_drop(SimpleNamespace(data=tk_root.tk.call("list", *map(str, dropped))))
+    drop = DnDEvent()
+    drop.data = tk_root.tk.call("list", *map(str, dropped))
+    panel._on_file_drop(drop)
 
     assert [job.path for job in panel.get_jobs()] == dropped

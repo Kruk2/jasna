@@ -16,6 +16,7 @@ from factories import AnsweredReply, NullProgressBar, answered_at_once, track_pl
 from jasna.ltx import compose_pass, encode_pass, inference, restore, resume_files, speed, vram_budget
 from jasna.ltx import progress as ltx_progress
 from jasna.ltx import spans as ltx_spans
+from jasna.ltx.blocks import OpaqueBlockStore
 from jasna.ltx.camera import WINDOW_FRAMES, CropFrame
 from jasna.ltx.model_files import LtxModelFiles
 from jasna.ltx.plan import plan_video
@@ -67,7 +68,7 @@ class _Transformer:
 
     def __init__(self, path, device, free_vram):
         self.conditions = [None] * 8
-        self.blocks = SimpleNamespace(resident=40, count=48)
+        self.blocks = OpaqueBlockStore(None, torch.device("cpu"), count=48, resident=40)
 
     def denoise_chain(self, references, seeds, window_hop, advance):
         _Transformer.seeds.append(list(seeds))
@@ -329,14 +330,22 @@ def test_decode_window_converts_a_float32_decode(monkeypatch):
     assert frames[:, 0, 0, 0].tolist() == [0, 128, 255]
 
 
-def _composer(monkeypatch, decode, composite, starts=(0, 3)):
+def _window_latents(directory: Path, count: int) -> resume_files.LatentStore:
+    """Latents of ``count`` windows, each a scalar holding its window index."""
+    store = resume_files.LatentStore(directory, "final")
+    for index in range(count):
+        store.put(index, torch.tensor(float(index)))
+    return store
+
+
+def _composer(tmp_path, monkeypatch, decode, composite, starts=(0, 3)):
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
     plan = track_plan(Window(index, 0, start, 13, (crop,) * 13, index) for index, start in enumerate(starts))
     monkeypatch.setattr(compose_pass, "_decode_window", decode)
     monkeypatch.setattr(compose_pass, "composite_frame", composite)
     decodes = ThreadPoolExecutor(max_workers=1)
     composer = compose_pass._SegmentComposer(
-        [plan], None, SimpleNamespace(get=lambda index: index), seed=0, feather=1, budget=lambda canvas: 0,
+        [plan], None, _window_latents(tmp_path, len(starts)), seed=0, feather=1, budget=lambda canvas: 0,
         device=torch.device("cpu"), bar=NullProgressBar(), decodes=decodes, receives=decodes, latent_reads=decodes, stream=None,
         super_res=None, projector=None,
     )
@@ -348,21 +357,21 @@ def _composer(monkeypatch, decode, composite, starts=(0, 3)):
     [((0, 3), [0] * 3 + [1] * 13), ((0, 3, 6), [0] * 3 + [1] * 3 + [2] * 13)],
     ids=["the next window", "two windows ahead"],
 )
-def test_composer_decodes_windows_ahead_while_earlier_frames_are_composited(monkeypatch, starts, expected):
+def test_composer_decodes_windows_ahead_while_earlier_frames_are_composited(tmp_path, monkeypatch, starts, expected):
     last_started = threading.Event()
     started_before_frame_2 = []
 
     def decode(decoder, latent, seed, canvas, budget, device):
-        if latent == len(starts) - 1:
+        if int(latent) == len(starts) - 1:
             last_started.set()
-        return torch.full((13, 3, 4, 4), latent, dtype=torch.uint8)
+        return torch.full((13, 3, 4, 4), int(latent), dtype=torch.uint8)
 
     def composite(source, candidates, *, feather, projector):
         if int(source[0, 0, 0]) == 2:
             started_before_frame_2.append(last_started.wait(timeout=5))
         return torch.stack([c.canvas for c in candidates]).max(0).values
 
-    composer, decodes = _composer(monkeypatch, decode, composite, starts)
+    composer, decodes = _composer(tmp_path, monkeypatch, decode, composite, starts)
     try:
         out = [int(composer.frame(torch.full((3, 4, 4), i, dtype=torch.uint8))[0, 0, 0]) for i in range(len(expected))]
     finally:
@@ -371,23 +380,23 @@ def test_composer_decodes_windows_ahead_while_earlier_frames_are_composited(monk
     assert out == expected
 
 
-def test_composer_decodes_nothing_before_its_first_frame(monkeypatch):
+def test_composer_decodes_nothing_before_its_first_frame(tmp_path, monkeypatch):
     decoded = []
 
     def decode(decoder, latent, seed, canvas, budget, device):
         decoded.append(latent)
-        return torch.full((13, 3, 4, 4), latent, dtype=torch.uint8)
+        return torch.full((13, 3, 4, 4), int(latent), dtype=torch.uint8)
 
-    composer, decodes = _composer(monkeypatch, decode, lambda source, candidates, *, feather: source)
+    composer, decodes = _composer(tmp_path, monkeypatch, decode, lambda source, candidates, *, feather: source)
     decodes.shutdown()
     assert decoded == []
 
 
-def test_composer_raises_a_failed_window_decode(monkeypatch):
+def test_composer_raises_a_failed_window_decode(tmp_path, monkeypatch):
     def decode(decoder, latent, seed, canvas, budget, device):
         raise RuntimeError("decode failed")
 
-    composer, decodes = _composer(monkeypatch, decode, lambda source, candidates, *, feather: source)
+    composer, decodes = _composer(tmp_path, monkeypatch, decode, lambda source, candidates, *, feather: source)
     try:
         with pytest.raises(RuntimeError, match="decode failed"):
             composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8))
@@ -428,7 +437,7 @@ class _WorkerDecodes:
         return Reply()
 
 
-def test_worker_decodes_the_next_window_while_the_last_frames_cross_the_pipe(monkeypatch):
+def test_worker_decodes_the_next_window_while_the_last_frames_cross_the_pipe(tmp_path, monkeypatch):
     """The next window goes to the worker before the last one's frames are read, its budget read
     only once the last decode was answered, and windows still reach the frames in start order."""
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
@@ -441,7 +450,7 @@ def test_worker_decodes_the_next_window_while_the_last_frames_cross_the_pipe(mon
     worker = _WorkerDecodes(len(windows))
     decodes, receives, latent_reads = (ThreadPoolExecutor(max_workers=1) for _ in range(3))
     composer = compose_pass._SegmentComposer(
-        [plan], inference.WorkerDecoder(worker), SimpleNamespace(get=lambda index: index), seed=0, feather=1,
+        [plan], inference.WorkerDecoder(worker), _window_latents(tmp_path, len(windows)), seed=0, feather=1,
         budget=worker.free_bytes, device=torch.device("cpu"), bar=NullProgressBar(), decodes=decodes, receives=receives,
         latent_reads=latent_reads, stream=None, super_res=None, projector=None,
     )
@@ -1005,13 +1014,18 @@ _NEEDS_CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CU
     ("device", "gpu_bytes"),
     [("cpu", 0), pytest.param("cuda", 0, marks=_NEEDS_CUDA), pytest.param("cuda", 1 << 30, marks=_NEEDS_CUDA)],
 )
-def test_segment_encoder_feeds_each_window_its_crops_padded_with_the_last(device, gpu_bytes):
+def test_segment_encoder_feeds_each_window_its_crops_padded_with_the_last(tmp_path, device, gpu_bytes):
     crop = CropFrame(crop_box=(0, 0, 8, 8), resize_hw=(8, 8), pad=(0, 0, 0, 0))
     windows = (Window(0, 0, 1, 3, (crop,) * 3, 0), Window(1, 0, 2, 2, (crop,) * 2, 1), Window(2, 0, 4, 1, (crop,), 2))
-    encoded = {}
-    store = SimpleNamespace(put=lambda index, latent: encoded.__setitem__(index, latent.cpu()))
+    encoded = []
+
+    def encode(pixels):
+        encoded.append(pixels.cpu())
+        return pixels
+
+    store = resume_files.LatentStore(tmp_path, "reference")
     buffers = encode_pass._WindowBuffers(torch.device(device), gpu_bytes)
-    encodes = encode_pass._WindowEncodes(lambda pixels: pixels, buffers, torch.device(device), NullProgressBar())
+    encodes = encode_pass._WindowEncodes(encode, buffers, torch.device(device), NullProgressBar())
     encoder = encode_pass._SegmentEncoder([track_plan(windows)], store, buffers, encodes, None)
     try:
         for value in range(5):
@@ -1026,9 +1040,11 @@ def test_segment_encoder_feeds_each_window_its_crops_padded_with_the_last(device
         pixels = torch.tensor(frames, dtype=torch.float32).view(1, 1, -1, 1, 1).expand(1, 3, -1, 8, 8)
         return pixels.div(127.5).sub(1.0).to(half_dtype(torch.device(device)))
 
+    assert len(encoded) == 3
     assert torch.equal(encoded[0], expected([10, 20, 30]))
     assert torch.equal(encoded[1], expected([20, 30]))
     assert torch.equal(encoded[2], expected([40]))
+    assert [store.has(index) for index in range(3)] == [True] * 3
 
 
 def _two_window_encoder(encode, directory):
@@ -1128,7 +1144,7 @@ def _encode_two_windows(encode, store):
         encodes.close()
 
 
-def test_the_encoder_runs_the_next_window_while_a_latent_is_written():
+def test_the_encoder_runs_the_next_window_while_a_latent_is_written(tmp_path):
     second_encoded = threading.Event()
     calls = []
     waited = []
@@ -1139,20 +1155,19 @@ def test_the_encoder_runs_the_next_window_while_a_latent_is_written():
             second_encoded.set()
         return pixels
 
-    def put(index, latent):
-        if index == 0:
-            waited.append(second_encoded.wait(timeout=5))
+    class SlowFirstWrite(resume_files.LatentStore):
+        def put(self, index, latent):
+            if index == 0:
+                waited.append(second_encoded.wait(timeout=5))
+            super().put(index, latent)
 
-    _encode_two_windows(encode, SimpleNamespace(put=put))
+    _encode_two_windows(encode, SlowFirstWrite(tmp_path, "reference"))
     assert waited == [True]
 
 
-def test_a_failed_latent_write_fails_the_encode_pass():
-    def put(index, latent):
-        raise OSError("disk full")
-
-    with pytest.raises(OSError, match="disk full"):
-        _encode_two_windows(lambda pixels: pixels, SimpleNamespace(put=put))
+def test_a_failed_latent_write_fails_the_encode_pass(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        _encode_two_windows(lambda pixels: pixels, resume_files.LatentStore(tmp_path / "missing", "reference"))
 
 
 def test_window_buffers_reuse_an_encoded_windows_buffer():

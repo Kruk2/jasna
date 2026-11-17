@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from fractions import Fraction
-from types import SimpleNamespace
+from factories import video_metadata
 
 import numpy as np
 
@@ -233,7 +233,7 @@ class _BatchReader:
         self._batches = batches
         self.batch_size = batch_size
         self.start_pts = start_pts
-        self.metadata = SimpleNamespace(time_base=time_base)
+        self.metadata = video_metadata(time_base=time_base)
 
     def frames(self, *, seek_ts=None):
         return iter(self._batches)

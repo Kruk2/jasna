@@ -3,12 +3,12 @@ from __future__ import annotations
 import queue
 import threading
 from fractions import Fraction
-from types import SimpleNamespace
 
 import pytest
 import torch
 
-from factories import video_metadata
+from factories import make_pipeline, video_metadata
+from jasna.gui.engine_preflight import EnginePreflightResult
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.queues import Cancel, Stop
 from jasna.gui.restoration_preview import (
@@ -203,14 +203,10 @@ def test_restoration_worker_marks_playback_requests() -> None:
     worker.close()
 
 
-def _preview_pipeline() -> SimpleNamespace:
-    return SimpleNamespace(
-        vr_projection="auto",
-        configure_vr=lambda metadata: None,
-        vr_resolution=SimpleNamespace(resolved="off"),
-        stereo=None,
-        device=torch.device("cpu"),
-    )
+def _preview_pipeline():
+    pipeline = make_pipeline()
+    pipeline.configure_vr(_metadata())
+    return pipeline
 
 
 @pytest.mark.parametrize(
@@ -273,7 +269,7 @@ def _queue_jobs(app, tmp_path, statuses) -> list:
 def start_calls(jasna_app, monkeypatch) -> dict[str, list]:
     """What Start validated and handed to the processor; neither validation nor processing runs."""
     calls: dict[str, list] = {"validated": [], "started": []}
-    preflight = SimpleNamespace(missing=())
+    preflight = EnginePreflightResult(requirements=())
 
     def validate(settings, jobs, **_kwargs):
         calls["validated"].append(list(jobs))

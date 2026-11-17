@@ -92,6 +92,41 @@ def _mov_container_options(suffix: str, *, fmp4: bool) -> dict[str, str]:
     return {"movflags": flags}
 
 
+class EncodeOrder:
+    """Pairs frames, in arrival order, with the smallest PTS still waiting once more than
+    ``hold`` frames wait. A repeated PTS moves up by one and handed-out PTS always increase."""
+
+    def __init__(self, *, hold: int, pts_origin: int):
+        self._hold = hold
+        self._pts_origin = pts_origin
+        self._frames: deque = deque()
+        self._pts_heap: list[int] = []
+        self._pts_waiting: set[int] = set()
+        self._last_pts: int | None = None
+
+    def __len__(self) -> int:
+        return len(self._frames)
+
+    def push(self, frame, pts: int) -> None:
+        pts = int(pts) - self._pts_origin
+        while pts in self._pts_waiting:
+            pts += 1
+        heapq.heappush(self._pts_heap, pts)
+        self._frames.append(frame)
+        self._pts_waiting.add(pts)
+
+    def pop(self, *, flush: bool) -> tuple[object, int] | None:
+        """The next frame and its PTS, or ``None`` while it should wait for more frames."""
+        if len(self._frames) <= self._hold and not (flush and self._frames):
+            return None
+        pts = heapq.heappop(self._pts_heap)
+        self._pts_waiting.remove(pts)
+        if self._last_pts is not None and pts <= self._last_pts:
+            pts = self._last_pts + 1
+        self._last_pts = pts
+        return self._frames.popleft(), pts
+
+
 class VideoEncoder:
     def __init__(
         self,
@@ -268,10 +303,7 @@ class VideoEncoder:
                 dtype=torch.uint16 if self.spec.ten_bit else torch.uint8,
                 pin_memory=True,
             )
-        self.pts_heap: list[int] = []
-        self.frame_buffer: deque = deque()
-        self.pts_set: set[int] = set()
-        self._last_emitted_pts: int | None = None
+        self._order = EncodeOrder(hold=ENCODE_BUFFER_SIZE // 2, pts_origin=self.pts_origin)
         self._video_started = False
         self._options_validated = False
         self._worker_error: Exception | None = None
@@ -293,7 +325,7 @@ class VideoEncoder:
     def _close(self, *, flush_video: bool, copy_rest_of_source: bool) -> None:
         try:
             if flush_video:
-                while self.frame_buffer:
+                while self._order:
                     self._process_buffer(flush_all=True)
             self._encode_queue.join()
             self._encode_queue.put(self._stop_sentinel)
@@ -363,22 +395,10 @@ class VideoEncoder:
         if threshold is not None:
             self._source_streams.pump(threshold)
 
-    def _clamp_pts_monotonic(self, pts: int) -> int:
-        last = self._last_emitted_pts
-        if last is not None and pts <= last:
-            pts = last + 1
-        self._last_emitted_pts = pts
-        return pts
-
     def _process_buffer(self, flush_all=False):
-        if len(self.frame_buffer) > (ENCODE_BUFFER_SIZE // 2) or (flush_all and self.frame_buffer):
-            frame_to_encode = self.frame_buffer.popleft()
-            pts_to_assign = heapq.heappop(self.pts_heap)
-            self.pts_set.remove(pts_to_assign)
-            pts_to_assign = self._clamp_pts_monotonic(pts_to_assign)
-            self._encode_queue.put(
-                self._build_encode_item(frame_to_encode, pts_to_assign)
-            )
+        ready = self._order.pop(flush=flush_all)
+        if ready is not None:
+            self._encode_queue.put(self._build_encode_item(*ready))
 
     def _encoder_open_error(self, exc: Exception) -> RuntimeError:
         message = (
@@ -463,10 +483,5 @@ class VideoEncoder:
     def encode(self, frame: torch.Tensor, pts: int):
         if self._worker_error is not None:
             raise self._worker_error
-        pts = int(pts) - self.pts_origin
-        while pts in self.pts_set:
-            pts += 1
-        heapq.heappush(self.pts_heap, pts)
-        self.frame_buffer.append(frame)
-        self.pts_set.add(pts)
+        self._order.push(frame, pts)
         self._process_buffer()

@@ -582,8 +582,8 @@ def test_amd_native_block_launches_comfy_kitchens_hip_attention_tile(monkeypatch
     weights = {"attn1.q_norm.weight": None, "attn1.k_norm.weight": None, "attn2.q_norm.weight": None,
                "scale_shift_table": None}
     weights |= {f"{name}.qdata": None for name in T.LINEAR_NAMES} | {f"{name}.scales": None for name in T.LINEAR_NAMES}
-    cond = SimpleNamespace(block_rows=None)
-    rope = SimpleNamespace(cos=None, sin=None)
+    cond = T.StepConditioning(block_rows=None, output_rows=None, prompt_rows=None)
+    rope = T.Rope(cos=None, sin=None)
     forward(weights, torch.zeros(1, 8192, 1), cond, (None, None), rope)
     assert calls[0][-2:] == (kernel_policy.AMD_ATTENTION_KEY_TILE, False)
 

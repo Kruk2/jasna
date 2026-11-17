@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import customtkinter as ctk
 import pytest
 
+from factories import tk_event
 from jasna.gui import components, job_list_item
 from jasna.gui.components import StatusPill, grab_modal
 from jasna.gui.job_list_item import JobListItem
@@ -85,7 +85,7 @@ def test_queue_overflow_menu_uses_button_and_right_click_coordinates(tk_root, re
     assert recording_menu[0].popup == (button.winfo_rootx(), button.winfo_rooty() + button.winfo_height())
     assert recording_menu[0].commands[0]["label"] == "open_containing_folder"
 
-    assert item._show_action_menu(SimpleNamespace(x_root=30, y_root=40)) == "break"
+    assert item._show_action_menu(tk_event(x_root=30, y_root=40)) == "break"
     assert recording_menu[0].popup == (30, 40)
 
 

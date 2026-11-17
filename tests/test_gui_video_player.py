@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from factories import video_metadata
+from factories import tk_event, video_metadata
 from jasna.gui import raw_player
 from jasna.gui import video_player as video_player_module
 from jasna.gui import windows_playback
@@ -259,9 +259,9 @@ def test_fullscreen_hides_chrome_and_shows_controls_at_the_bottom_edge(player) -
     assert dialog._fullscreen_btn.cget("text") == t("player_exit_fullscreen")
 
     bottom = dialog.winfo_rooty() + dialog.winfo_height() - 1
-    dialog._fullscreen_mouse_moved(SimpleNamespace(x_root=100, y_root=bottom))
+    dialog._fullscreen_mouse_moved(tk_event(x_root=100, y_root=bottom))
     assert dialog._bottom_panel.winfo_manager() == "place"
-    dialog._fullscreen_mouse_moved(SimpleNamespace(x_root=100, y_root=dialog.winfo_rooty()))
+    dialog._fullscreen_mouse_moved(tk_event(x_root=100, y_root=dialog.winfo_rooty()))
     assert not dialog._bottom_panel.winfo_manager()
 
     dialog._toggle_fullscreen()

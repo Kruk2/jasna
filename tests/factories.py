@@ -7,6 +7,7 @@ import struct
 import subprocess
 import sys
 import threading
+import tkinter
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
@@ -829,6 +830,13 @@ def shown_message(canvas) -> str:
 def scheduled_after_ids(widget) -> set[str]:
     """Ids of the Tk ``after`` callbacks still waiting to run."""
     return set(widget.tk.splitlist(widget.tk.call("after", "info")))
+
+
+def tk_event(**fields) -> tkinter.Event:
+    """A Tk event carrying only the ``fields`` its handler reads, as Tk fills them in."""
+    event = tkinter.Event()
+    event.__dict__.update(fields)
+    return event
 
 
 class FakeFrameGeneration:

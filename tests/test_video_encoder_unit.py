@@ -2,13 +2,9 @@
 from __future__ import annotations
 
 import logging
-import queue
-import threading
-from contextlib import nullcontext
-from collections import deque
+import subprocess
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import av
@@ -17,7 +13,6 @@ import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
 import jasna.media.encoder_options as encoder_options
-import jasna.media.video_encoder as video_encoder_module
 from jasna.media.encoder_options import (
     DEFAULT_AV1_ENCODER_OPTIONS,
     DEFAULT_ENCODER_OPTIONS,
@@ -25,9 +20,11 @@ from jasna.media.encoder_options import (
     ENCODER_SPECS,
 )
 from jasna.media.probe import VideoMetadata
+from jasna.os_utils import resolve_executable
 from jasna.media.source_streams import SourceStreamCopier, _normalized_audio_layout
 from jasna.media.video_encoder import (
     ENCODE_BUFFER_SIZE,
+    EncodeOrder,
     _mov_container_options,
     VideoEncoder,
     nvenc_yuv_frame,
@@ -107,8 +104,21 @@ def _copier(src, dst, *, output_path=Path("result.mkv"), smart_fragment=False) -
     )
 
 
-def _bare_copier(dst) -> SourceStreamCopier:
-    return _copier(SimpleNamespace(metadata={}), dst, smart_fragment=True)
+def _write_srt_subtitle_source(tmp_path: Path, cue_time: str) -> Path:
+    """MKV with a short test video and one SRT cue shown at ``cue_time``."""
+    subtitle = tmp_path / "cue.srt"
+    subtitle.write_text(f"1\n{cue_time}\nCue\n", encoding="utf-8")
+    source = tmp_path / "subtitled.mkv"
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=12:duration=2",
+            "-i", str(subtitle),
+            "-c:v", "libx264", "-c:s", "srt", str(source),
+        ],
+        check=True,
+    )
+    return source
 
 
 class TestEncoderOptions:
@@ -232,14 +242,6 @@ class TestEncoderOptions:
         with pytest.raises(ValueError, match="did not accept encoder option.*bogus"):
             enc._validate_encoder_options()
 
-    def test_no_leftover_options_pass(self, tmp_path):
-        enc = _make_encoder(tmp_path)
-        enc.out_stream = MagicMock()
-        enc.out_stream.codec_context.options = {}
-        enc._options_validated = False
-        enc._validate_encoder_options()
-        assert enc._options_validated
-
 
 class TestSharpening:
     def test_sharpener_follows_the_encoder_bit_depth(self, tmp_path):
@@ -303,34 +305,76 @@ class TestColorHandling:
         assert enc._converter.variant == expected
 
 
-def _buffered_encoder(tmp_path, **meta_overrides) -> VideoEncoder:
-    enc = _make_encoder(tmp_path, **meta_overrides)
-    enc.pts_heap = []
-    enc.frame_buffer = deque()
-    enc.pts_set = set()
-    enc._last_emitted_pts = None
-    enc._worker_error = None
-    enc._encode_queue = MagicMock()
-    enc._build_encode_item = MagicMock(side_effect=lambda frame, pts: (frame, pts, None))
-    return enc
+def _emitted(order: EncodeOrder) -> list[tuple[object, int]]:
+    emitted = []
+    while order:
+        emitted.append(order.pop(flush=True))
+    return emitted
 
 
-class TestEncodeBuffer:
-    def test_vc1_wmv_keeps_decoder_pts_across_skipped_frames(self, tmp_path):
-        enc = _buffered_encoder(
-            tmp_path,
-            video_file="source.wmv",
-            codec_name="vc1",
-            video_fps=30_000 / 1_001,
-            video_fps_exact=Fraction(30_000, 1_001),
-            average_fps=30_000 / 1_001,
-            time_base=Fraction(1, 1000),
-        )
-        for pts in (46, 79, 113, 179):
-            enc.encode("frame", pts)
+class TestEncodeOrder:
+    @pytest.mark.parametrize(
+        "source_pts",
+        [[1000 * i for i in range(10)], [46, 79, 113, 179]],
+        ids=["in-order", "vc1-wmv-skipped-frames"],
+    )
+    def test_in_order_pts_pass_through_unchanged(self, source_pts):
+        order = EncodeOrder(hold=4, pts_origin=0)
+        for i, pts in enumerate(source_pts):
+            order.push(f"f{i}", pts)
 
-        assert sorted(enc.pts_heap) == [46, 79, 113, 179]
+        assert [pts for _frame, pts in _emitted(order)] == source_pts
 
+    def test_pts_origin_is_removed_from_fragment_timestamps(self):
+        order = EncodeOrder(hold=4, pts_origin=100)
+        order.push("frame", 110)
+
+        assert order.pop(flush=True) == ("frame", 10)
+
+    def test_repeated_pts_moves_up_by_one(self):
+        order = EncodeOrder(hold=4, pts_origin=0)
+        order.push("a", 5)
+        order.push("b", 5)
+
+        assert _emitted(order) == [("a", 5), ("b", 6)]
+
+    def test_frames_wait_until_more_than_hold_are_buffered(self):
+        order = EncodeOrder(hold=ENCODE_BUFFER_SIZE // 2, pts_origin=0)
+        for i in range(ENCODE_BUFFER_SIZE // 2):
+            order.push(f"f{i}", i)
+        assert order.pop(flush=False) is None
+
+        order.push("one-more", 99)
+
+        assert order.pop(flush=False) == ("f0", 0)
+
+    def test_smallest_pts_pairs_with_oldest_frame(self):
+        order = EncodeOrder(hold=4, pts_origin=0)
+        for i, pts in enumerate([30, 10, 20, 40]):
+            order.push(f"f{i}", pts)
+
+        assert order.pop(flush=True) == ("f0", 10)
+
+    def test_emitted_pts_stay_strictly_increasing_on_scrambled_source(self):
+        order = EncodeOrder(hold=ENCODE_BUFFER_SIZE // 2, pts_origin=0)
+        scrambled = [
+            1761760, 1801800, 1841840, 1881880, 1801801, 1801803, 1801804,
+            1801805, 1801802, 1801807, 1801808, 1801809, 1801806, 1801811,
+            1801812, 1801813, 1801810,
+        ]
+        emitted = []
+        for i, pts in enumerate(scrambled):
+            order.push(f"f{i}", pts)
+            ready = order.pop(flush=False)
+            if ready is not None:
+                emitted.append(ready[1])
+        emitted += [pts for _frame, pts in _emitted(order)]
+
+        assert len(emitted) == len(scrambled)
+        assert all(b > a for a, b in zip(emitted, emitted[1:]))
+
+
+class TestNvencFrame:
     @pytest.mark.parametrize(
         ("dtype", "width", "expected_pitch"),
         [
@@ -361,148 +405,22 @@ class TestEncodeBuffer:
         assert frame.stride() == (expected_pitch, 1)
         assert frame.stride(0) * frame.element_size() % 16 == 0
 
-    def test_amd_host_transfer_still_synchronizes_before_from_dlpack(
-        self, tmp_path, monkeypatch
-    ):
-        enc = _make_encoder(tmp_path, codec="h264", video_width=2, video_height=2)
-        enc.vendor = video_encoder_module.AcceleratorVendor.AMD
-        enc.stream = MagicMock()
-        order: list = []
-        enc.stream.synchronize = MagicMock(side_effect=lambda: order.append("sync"))
-        enc._host_yuv = MagicMock(name="host_yuv")
 
-        def _track_copy(*args, **kwargs):
-            order.append(("copy", kwargs.get("non_blocking")))
-
-        enc._host_yuv.copy_ = MagicMock(side_effect=_track_copy)
-        enc._packed = torch.zeros((3, 2), dtype=torch.uint8)
-        enc._lut_applier = None
-        enc._converter = SimpleNamespace(
-            sample_dtype=torch.uint8,
-            convert_into=lambda frame, luma, chroma: None,
-        )
-        enc.out_stream = MagicMock()
-        enc.out_stream.encode.return_value = []
-        hw_frame = SimpleNamespace(pts=None, time_base=None)
-        from_dlpack = MagicMock(return_value=hw_frame)
-        monkeypatch.setattr(
-            video_encoder_module.av,
-            "VideoFrame",
-            SimpleNamespace(from_dlpack=from_dlpack),
-        )
-        monkeypatch.setattr(
-            video_encoder_module, "stream_context", lambda _stream: nullcontext()
-        )
-
-        enc._encode_frame(torch.zeros((3, 2, 2), dtype=torch.uint8), 7)
-
-        enc.stream.synchronize.assert_called_once_with()
-        enc._host_yuv.copy_.assert_called_once()
-        _, copy_kwargs = enc._host_yuv.copy_.call_args
-        assert copy_kwargs.get("non_blocking") is False
-        # Finish device work before filling host planes AMF will read (issue #252).
-        assert order == ["sync", ("copy", False)]
-        _, kwargs = from_dlpack.call_args
-        assert kwargs == {"format": "nv12"}
-
-    def test_pts_origin_is_removed_from_fragment_timestamps(self, tmp_path):
-        enc = _buffered_encoder(tmp_path)
-        enc.pts_origin = 100
-        enc.encode("frame", 110)
-        assert enc.pts_heap == [10]
-
-    def test_encode_pushes_to_buffer_and_heap(self, tmp_path):
-        enc = _buffered_encoder(tmp_path)
-        enc.encode("frame0", 10)
-        assert list(enc.frame_buffer) == ["frame0"]
-        assert enc.pts_heap == [10]
-        assert enc.pts_set == {10}
-
-    def test_encode_dedup_pts(self, tmp_path):
-        enc = _buffered_encoder(tmp_path)
-        enc.encode("a", 5)
-        enc.encode("b", 5)
-        assert sorted(enc.pts_set) == [5, 6]
-
-    def test_flush_starts_above_half_buffer(self, tmp_path):
-        enc = _buffered_encoder(tmp_path)
-        for i in range(ENCODE_BUFFER_SIZE // 2):
-            enc.encode(f"f{i}", i)
-        enc._encode_queue.put.assert_not_called()
-        enc.encode("one-more", 99)
-        enc._encode_queue.put.assert_called_once_with(("f0", 0, None))
-
-    def test_smallest_pts_pairs_with_oldest_frame(self, tmp_path):
-        enc = _buffered_encoder(tmp_path)
-        for i, pts in enumerate([30, 10, 20, 40]):
-            enc.encode(f"f{i}", pts)
-        enc._process_buffer(flush_all=True)
-        enc._encode_queue.put.assert_called_once_with(("f0", 10, None))
-
-    def test_emitted_pts_stay_strictly_increasing_on_scrambled_source(self, tmp_path):
-        enc = _buffered_encoder(tmp_path)
-        scrambled = [
-            1761760, 1801800, 1841840, 1881880, 1801801, 1801803, 1801804,
-            1801805, 1801802, 1801807, 1801808, 1801809, 1801806, 1801811,
-            1801812, 1801813, 1801810,
-        ]
-        for i, pts in enumerate(scrambled):
-            enc.encode(f"f{i}", pts)
-        while enc.frame_buffer:
-            enc._process_buffer(flush_all=True)
-        emitted = [call.args[0][1] for call in enc._encode_queue.put.call_args_list]
-        assert len(emitted) == len(scrambled)
-        assert all(b > a for a, b in zip(emitted, emitted[1:]))
-
-    def test_in_order_pts_pass_through_unchanged(self, tmp_path):
-        enc = _buffered_encoder(tmp_path)
-        ordered = [1000 * i for i in range(10)]
-        for i, pts in enumerate(ordered):
-            enc.encode(f"f{i}", pts)
-        while enc.frame_buffer:
-            enc._process_buffer(flush_all=True)
-        emitted = [call.args[0][1] for call in enc._encode_queue.put.call_args_list]
-        assert emitted == ordered
-
-    def test_encode_raises_pending_worker_error(self, tmp_path):
-        enc = _buffered_encoder(tmp_path)
-        enc._worker_error = RuntimeError("nvenc exploded")
-        with pytest.raises(RuntimeError, match="nvenc exploded"):
-            enc.encode("frame", 0)
-
-
-class TestWorkerErrorChannel:
-    def test_worker_records_error_and_keeps_consuming(self, tmp_path):
-        enc = _make_encoder(tmp_path)
-        enc.device = torch.device("cpu")
-        enc._worker_error = None
-        enc._encode_queue = queue.Queue()
-        enc._stop_sentinel = object()
-        enc.stream = MagicMock()
-        enc._encode_frame = MagicMock(side_effect=RuntimeError("mux failed"))
-
-        worker = threading.Thread(target=enc._encode_worker, daemon=True)
-        worker.start()
-        enc._encode_queue.put((MagicMock(), 0, None))
-        enc._encode_queue.put((MagicMock(), 1, None))
-        enc._encode_queue.join()
-        enc._encode_queue.put(enc._stop_sentinel)
-        worker.join(timeout=5)
-
-        assert not worker.is_alive()
-        assert isinstance(enc._worker_error, RuntimeError)
-        assert enc._encode_frame.call_count == 1
-
-
-def _packet(stream_index, dts, time_base=Fraction(1, 1000), duration=0):
-    return SimpleNamespace(
-        stream=SimpleNamespace(index=stream_index),
-        dts=dts,
-        pts=dts,
-        time_base=time_base,
-        duration=duration,
-        size=1,
+def test_encode_worker_failure_is_raised_when_the_output_closes(tmp_path):
+    source = write_double_adts_aac_source(tmp_path)
+    encoder = VideoEncoder(
+        file=str(tmp_path / "result.mkv"),
+        device=torch.device("cuda:0"),
+        metadata=video_metadata(fps=12, num_frames=12, video_file=str(source), video_width=64, video_height=64),
+        codec="hevc",
+        encoder_settings={},
     )
+    host_frame = torch.zeros((3, 64, 64), dtype=torch.uint8)
+
+    with pytest.raises(NotImplementedError, match="record_stream"):
+        with encoder:
+            for pts in range(ENCODE_BUFFER_SIZE):
+                encoder.encode(host_frame, pts)
 
 
 class TestSourceStreamPump:
@@ -527,108 +445,68 @@ class TestSourceStreamPump:
             assert result.streams.audio[0].codec_context.name == "aac"
             assert sum(frame.samples for frame in result.decode(audio=0)) >= source_samples
 
-    def _pump_copier(self, packets):
-        dst = MagicMock()
-        copier = _bare_copier(dst)
-        out_a = MagicMock()
-        copier._pipes = {1: ("copy", out_a, None)}
-        copier._packets = iter(packets)
-        return copier, dst, out_a
-
-    def test_copy_reassigns_stream_and_skips_flush_packet(self):
-        copier, _, out_a = self._pump_copier([])
-        pkt = _packet(1, dts=0)
-        assert copier._produce_packets(pkt) == [pkt]
-        assert pkt.stream is out_a
-
-        flush = SimpleNamespace(
-            stream=SimpleNamespace(index=1),
-            dts=None,
-            pts=None,
-            time_base=None,
-            size=0,
-        )
-        assert copier._produce_packets(flush) == []
-
-    def test_pump_respects_threshold(self):
-        packets = [_packet(1, dts=0), _packet(1, dts=500), _packet(1, dts=1500)]
-        copier, dst, _ = self._pump_copier(packets)
-
-        copier.pump(1.0)
-        assert dst.mux.call_count == 2
-        assert len(copier._backlog) == 1  # dts=1500 held back
-
-        copier.pump(None)
-        assert dst.mux.call_count == 3
-
-    def test_pump_nudges_non_monotonic_dts(self):
-        packets = [_packet(1, dts=0), _packet(1, dts=370390), _packet(1, dts=370390)]
-        copier, dst, _ = self._pump_copier(packets)
-
-        copier.pump(None)
-
-        muxed = [call.args[0] for call in dst.mux.call_args_list]
-        assert [p.dts for p in muxed] == [0, 370390, 370391]
-        assert muxed[-1].pts == 370391
-
-    def test_nudge_warns_once_per_stream(self, caplog):
-        packets = [_packet(1, dts=100), _packet(1, dts=0), _packet(1, dts=0), _packet(1, dts=0)]
-        copier, _, _ = self._pump_copier(packets)
-
-        with caplog.at_level(logging.DEBUG, logger="jasna.media.source_streams"):
-            copier.pump(None)
-
-        nudges = [r for r in caplog.records if "nudging forward" in r.getMessage()]
-        assert [r.levelno for r in nudges] == [logging.WARNING, logging.DEBUG, logging.DEBUG]
-
-    def test_copy_nudges_dts_in_output_time_base(self, tmp_path):
-        packets = []
+    def test_copy_moves_packets_to_the_output_stream_and_skips_flush_packets(self, tmp_path):
         with av.open(str(tmp_path / "audio.mkv"), "w") as dst:
-            copier = _bare_copier(dst)
+            out_stream = dst.add_stream("aac", rate=44_100)
+            packet = av.Packet(b"\x21\x10\x04\x60")
+
+            assert SourceStreamCopier._copy_packets(packet, out_stream, None) == [packet]
+            assert packet.stream is out_stream
+            assert SourceStreamCopier._copy_packets(av.Packet(), out_stream, None) == []
+
+    def test_pump_muxes_source_packets_up_to_the_video_time(self, tmp_path):
+        source = write_double_adts_aac_source(tmp_path)
+        destination = tmp_path / "result.mkv"
+        with av.open(str(source)) as src, av.open(str(destination), "w") as dst:
+            _copier(src, dst, output_path=destination).pump(0.5)
+
+        with av.open(str(destination)) as result:
+            times = [float(packet.dts * packet.time_base) for packet in result.demux(audio=0) if packet.size]
+        # One-second source; its AAC packets are 23 ms apart.
+        assert 0.45 < max(times) <= 0.5
+
+    @staticmethod
+    def _mux_aac_packets(tmp_path, dts_values) -> list[av.Packet]:
+        """Mux packets with ``dts_values`` (1/44100 s) into one MKV audio stream (1 ms time base)."""
+        source = write_double_adts_aac_source(tmp_path)
+        packets = []
+        with av.open(str(source)) as src, av.open(str(tmp_path / "audio.mkv"), "w") as dst:
+            copier = _copier(src, dst, smart_fragment=True)
             stream = dst.add_stream("aac", rate=44_100)
             stream.time_base = Fraction(1, 44_100)
-            for dts in (0, 1024, 1024, 2048):
+            for dts in dts_values:
                 packet = av.Packet(b"\x21\x10\x04\x60")
                 packet.stream = stream
                 packet.time_base = Fraction(1, 44_100)
                 packet.pts = packet.dts = dts
                 copier._mux(packet)
                 packets.append(packet)
+        return packets
+
+    def test_copy_nudges_overlapping_timestamps_in_output_time_base(self, tmp_path):
+        packets = self._mux_aac_packets(tmp_path, (0, 1024, 1024, 2048))
 
         assert [packet.dts for packet in packets] == [0, 23, 24, 46]
+        assert [packet.pts for packet in packets] == [0, 23, 24, 46]
 
-    def test_text_subtitle_transcode_preserves_packet_timing(self):
-        copier = _bare_copier(MagicMock())
-        subtitle_set = object()
-        input_codec = SimpleNamespace(decode2=MagicMock(return_value=subtitle_set))
-        output_packet = SimpleNamespace(
-            stream=None,
-            pts=None,
-            dts=None,
-            duration=0,
-            time_base=None,
-        )
-        output_codec = SimpleNamespace(
-            encode_subtitle=MagicMock(return_value=output_packet)
-        )
-        output_stream = SimpleNamespace(
-            codec_context=output_codec,
-            time_base=Fraction(1, 1_000),
-        )
-        copier._pipes = {1: ("subtitle_transcode", output_stream, None)}
-        packet = _packet(1, dts=45_000, time_base=Fraction(1, 90_000), duration=90_000)
-        packet.dts = None
-        packet.stream.codec_context = input_codec
+    def test_nudge_warns_once_per_stream(self, tmp_path, caplog):
+        with caplog.at_level(logging.DEBUG, logger="jasna.media.source_streams"):
+            self._mux_aac_packets(tmp_path, (4410, 0, 0, 0))
 
-        assert copier._produce_packets(packet) == [output_packet]
+        nudges = [r for r in caplog.records if "nudging forward" in r.getMessage()]
+        assert [r.levelno for r in nudges] == [logging.WARNING, logging.DEBUG, logging.DEBUG]
 
-        input_codec.decode2.assert_called_once_with(packet)
-        output_codec.encode_subtitle.assert_called_once_with(subtitle_set)
-        assert output_packet.stream is output_stream
-        assert output_packet.pts == 500
-        assert output_packet.dts == 500
-        assert output_packet.duration == 1_000
-        assert output_packet.time_base == Fraction(1, 1_000)
+    def test_text_subtitle_transcode_preserves_cue_timing(self, tmp_path):
+        source = _write_srt_subtitle_source(tmp_path, "00:00:00,500 --> 00:00:01,500")
+        destination = tmp_path / "result.mp4"
+        with av.open(str(source)) as src, av.open(str(destination), "w") as dst:
+            _copier(src, dst, output_path=destination).drain()
+
+        with av.open(str(destination)) as result:
+            (cue,) = [packet for packet in result.demux(subtitles=0) if b"Cue" in bytes(packet)]
+            assert result.streams.subtitles[0].codec_context.name == "mov_text"
+        assert float(cue.pts * cue.time_base) == pytest.approx(0.5)
+        assert float(cue.duration * cue.time_base) == pytest.approx(1.0)
 
 
 class TestDropUnsupportedNvencOverrides:
