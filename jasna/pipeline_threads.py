@@ -621,10 +621,14 @@ def run_restoration_pass(
 
     blend_buffer = BlendBuffer(vr_projector=pipeline.vr_projector)
     crop_buffers: dict[int, CropBuffer] = {}
-    vram_offloader = VramOffloader(device=device, blend_buffer=blend_buffer, crop_buffers=crop_buffers)
-    if encode_heartbeat is not None:
-        vram_offloader.set_encode_heartbeat(encode_heartbeat)
-    vram_offloader.set_pipeline_queues(clip_queue, secondary_queue, encode_queue, metadata_queue)
+    vram_offloader = VramOffloader(
+        device=device,
+        blend_buffer=blend_buffer,
+        crop_buffers=crop_buffers,
+        frame_queues={"clip_queue": clip_queue, "secondary_queue": secondary_queue, "encode_queue": encode_queue},
+        metadata_queue=metadata_queue,
+        encode_heartbeat=encode_heartbeat,
+    )
     ctx = PassContext(
         device=device,
         restoration_pipeline=restoration_pipeline,

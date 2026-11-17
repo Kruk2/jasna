@@ -20,7 +20,7 @@ from jasna.media.encoder_options import nvenc_vram_beside_ltx, resolve_encoder_o
 from jasna.media.encoder_settings import require_encodable_size
 from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
 from jasna.media.video_encoder import VideoEncoder
-from jasna.media.frame_rate import resolve_frame_rate_retarget
+from jasna.media.frame_rate import FrameRateRetarget, resolve_frame_rate_retarget
 from jasna.media.lut import CubeLut, parse_cube_file
 from jasna.media.splice import (
     H264_SMART_MAX_B_FRAMES,
@@ -254,19 +254,12 @@ class Pipeline:
         metadata,
         encoder_ctx: VideoEncoder,
         progress: Progressbar,
+        frame_rate: FrameRateRetarget,
+        output_frame_count: int,
         seek_ts: float | None = None,
         end_pts: int | None = None,
         effect_ranges: tuple[tuple[int, int], ...] | None = None,
-        output_frame_count: int | None = None,
     ) -> None:
-        frame_rate = resolve_frame_rate_retarget(
-            metadata.video_fps_exact,
-            enabled=self.config.retarget_high_fps,
-            measured_fps=metadata.average_fps,
-        )
-        if output_frame_count is None:
-            output_frame_count = frame_rate.output_frame_count(metadata.num_frames)
-
         encode_heartbeat: list[float] = [time.monotonic()]
         frame_writer = self._frame_writer(_OfflineFrameWriter(encoder_ctx, encode_heartbeat), metadata)
         try:
@@ -345,7 +338,7 @@ class Pipeline:
                 "Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported."
             )
 
-    def _resolve_frame_rate(self, metadata):
+    def _resolve_frame_rate(self, metadata) -> FrameRateRetarget:
         frame_rate = resolve_frame_rate_retarget(
             metadata.video_fps_exact,
             enabled=self.config.retarget_high_fps,
@@ -447,6 +440,7 @@ class Pipeline:
                 metadata=metadata,
                 encoder_ctx=encoder_ctx,
                 progress=progress,
+                frame_rate=frame_rate,
                 effect_ranges=effect_ranges,
                 output_frame_count=output_frame_count,
             )
@@ -670,6 +664,7 @@ class Pipeline:
             self._run_full(metadata, effect_ranges=steps.full_reencode_ranges)
             return
         segments_of, ltx_spans, standard_spans = steps.segments_of, steps.ltx_spans, steps.standard_spans
+        frame_rate = self._resolve_frame_rate(metadata)
         smart_encoder_settings = resolve_smart_encoder_settings(
             self.config.codec,
             metadata,
@@ -749,6 +744,7 @@ class Pipeline:
                         metadata=metadata,
                         encoder_ctx=fragment_encoder(fragments, span_index, span),
                         progress=progress,
+                        frame_rate=frame_rate,
                         seek_ts=index.seconds_for_pts(span.start_pts),
                         end_pts=span.end_pts,
                         effect_ranges=span.effect_ranges,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from queue import Queue
 from types import SimpleNamespace
 
 import pytest
@@ -141,7 +142,14 @@ class TestVramOffloaderLoop:
         blend_buffer.register_frame(0, {1})
         blend_buffer.add_result(_make_sr(track_id=1, start_frame=0, frame_count=1))
 
-        offloader = VramOffloader(device=torch.device("cpu"), blend_buffer=blend_buffer, crop_buffers={})
+        offloader = VramOffloader(
+            device=torch.device("cpu"),
+            blend_buffer=blend_buffer,
+            crop_buffers={},
+            frame_queues={},
+            metadata_queue=Queue(),
+            encode_heartbeat=None,
+        )
         offloader.start()
         assert emptied.wait(timeout=30)
         offloader.stop()

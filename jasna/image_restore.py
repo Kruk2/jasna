@@ -39,14 +39,10 @@ class PreparedImageRestore:
     img_rgb: np.ndarray
     groups: list[PreparedImageRestoreGroup]
 
-    @property
-    def has_detections(self) -> bool:
-        return bool(self.groups)
-
 
 def clamp_strength(strength: float) -> float:
     """SDEdit strength is clamped to <= 0.7 (DPMSolver crashes near >= 0.75 and
-    0.25-0.8 are visually identical; see plan §7)."""
+    0.25-0.8 are visually identical)."""
     s = float(strength)
     if s <= 0.0:
         raise ValueError("--sd15-strength must be > 0")

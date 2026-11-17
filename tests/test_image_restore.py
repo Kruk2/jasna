@@ -109,7 +109,7 @@ class TestPreparedImageRestore:
 
         prepared = prepare_image_restore(img, detector, device=torch.device("cpu"), fp16=False)
         assert detector.calls == 1
-        assert prepared.has_detections
+        assert len(prepared.groups) == 1
 
         out_a = render_prepared_image(prepared, restorer, steps=5, strength=0.6, seed=7, freeu=None)
         out_b = render_prepared_image(prepared, restorer, steps=5, strength=0.6, seed=8, freeu=None)
@@ -127,7 +127,7 @@ class TestPreparedImageRestore:
         prepared = prepare_image_restore(img, detector, device=torch.device("cpu"), fp16=False)
         out = render_prepared_image(prepared, restorer, steps=5, strength=0.6, seed=7, freeu=None)
 
-        assert not prepared.has_detections
+        assert prepared.groups == []
         assert np.array_equal(out, img)
         assert out is not img
         assert restorer.seeds == []

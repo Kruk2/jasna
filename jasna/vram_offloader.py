@@ -8,11 +8,13 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
+from queue import Queue
 
 import torch
 
 from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer, RawCrop
+from jasna.frame_queue import FrameQueue
 from jasna.pipeline_items import SecondaryRestoreResult
 
 _log = logging.getLogger(__name__)
@@ -123,11 +125,18 @@ def stall_warning_due(now: float, last_encode: float, last_warning: float) -> tu
 
 
 class VramOffloader:
+    """Moves restored frames and crops to the CPU when the GPU runs low, and logs the queues
+    when encoding stalls; ``encode_heartbeat[0]`` is the last encode time (None: no stall check)."""
+
     def __init__(
         self,
         device: torch.device,
         blend_buffer: BlendBuffer,
         crop_buffers: dict[int, CropBuffer],
+        *,
+        frame_queues: dict[str, FrameQueue],
+        metadata_queue: Queue,
+        encode_heartbeat: list[float] | None,
     ) -> None:
         self._device = device
         self._blend_buffer = blend_buffer
@@ -139,11 +148,11 @@ class VramOffloader:
         self.stats = VramStats()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="VramOffloader", daemon=True)
-        self._last_encode_time: list[float] | None = None
+        self._last_encode_time = encode_heartbeat
         self._last_stall_warn_time: float = 0.0
         self._stall_check_paused = False
-        self._pipeline_queues: dict[str, object] | None = None
-        self._metadata_queue: object | None = None
+        self._frame_queues = frame_queues
+        self._metadata_queue = metadata_queue
 
         _log.info(
             "VramOffloader: threshold=%d MiB (total=%d MiB, safetynet=%d MiB)",
@@ -151,23 +160,6 @@ class VramOffloader:
             gpu_total // _MIB,
             VRAM_SAFETYNET // _MIB,
         )
-
-    def set_encode_heartbeat(self, shared_time: list[float]) -> None:
-        self._last_encode_time = shared_time
-
-    def set_pipeline_queues(
-        self,
-        clip_queue: object,
-        secondary_queue: object,
-        encode_queue: object,
-        metadata_queue: object,
-    ) -> None:
-        self._pipeline_queues = {
-            "clip_queue": clip_queue,
-            "secondary_queue": secondary_queue,
-            "encode_queue": encode_queue,
-        }
-        self._metadata_queue = metadata_queue
 
     def start(self) -> None:
         self._thread.start()
@@ -213,13 +205,9 @@ class VramOffloader:
     def _dump_stall_diagnostics(self, elapsed: float) -> None:
         lines: list[str] = [f"=== ENCODE STALL DIAGNOSTICS (stalled {elapsed:.0f}s) ==="]
 
-        if self._pipeline_queues:
-            for name, q in self._pipeline_queues.items():
-                lines.append(f"  {name}: items={q.qsize()} frames={q.current_frames} max_frames={q.max_frames}")
-        if self._metadata_queue is not None:
-            lines.append(
-                f"  metadata_queue: items~={self._metadata_queue.qsize()} maxsize={self._metadata_queue.maxsize}"
-            )
+        for name, q in self._frame_queues.items():
+            lines.append(f"  {name}: items={q.qsize()} frames={q.current_frames} max_frames={q.max_frames}")
+        lines.append(f"  metadata_queue: items~={self._metadata_queue.qsize()} maxsize={self._metadata_queue.maxsize}")
         lines.extend(f"  {line}" for line in self._blend_buffer.debug_lines())
         crop_sizes = {k: v.frame_count for k, v in list(self._crop_buffers.items())}
         lines.append(f"  crop_buffers: track_ids={list(crop_sizes)} sizes={crop_sizes}")
