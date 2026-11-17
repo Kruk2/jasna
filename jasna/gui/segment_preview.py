@@ -12,7 +12,7 @@ import av
 from PIL import Image
 
 from jasna.gui.queues import CommandWorker, Stop
-from jasna.media.container_utils import demux_video, idle_decoder_threads
+from jasna.media.container_utils import demux_video, idle_decoder_threads, keyframe_seek_pts
 from jasna.media.probe import VideoMetadata, get_video_meta_data, resolve_video_start_pts
 from jasna.media.splice import KeyframeIndex, probe_keyframes
 from jasna.vr180 import VrModeResolution, resolve_vr_mode
@@ -191,7 +191,7 @@ class SegmentPreviewWorker(CommandWorker):
 
     def _seek(self, container, stream, seconds: float, start_pts: int):
         target_pts = start_pts + round(float(seconds) / stream.time_base)
-        container.seek(target_pts, stream=stream, backward=True)
+        container.seek(keyframe_seek_pts(container, stream, target_pts), stream=stream, backward=True)
         decoded = _decode_video(container, stream)
         closest = None
         for frame in decoded:
@@ -203,11 +203,8 @@ class SegmentPreviewWorker(CommandWorker):
     def _previous(self, container, stream, seconds: float, start_pts: int):
         target_pts = start_pts + round(float(seconds) / stream.time_base)
         one_second_pts = max(1, round(1.0 / stream.time_base))
-        container.seek(
-            max(start_pts, target_pts - one_second_pts),
-            stream=stream,
-            backward=True,
-        )
+        seek_pts = keyframe_seek_pts(container, stream, max(start_pts, target_pts - one_second_pts))
+        container.seek(seek_pts, stream=stream, backward=True)
         decoded = _decode_video(container, stream)
         previous = None
         for frame in decoded:

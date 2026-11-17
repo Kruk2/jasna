@@ -91,6 +91,31 @@ def test_preview_worker_loads_seeks_and_decodes_sequentially(tmp_path) -> None:
         worker.close()
 
 
+def test_preview_worker_seeks_to_a_keyframe_of_an_mpeg_ts_source(tmp_path) -> None:
+    source = tmp_path / "preview.ts"
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=12:duration=3",
+            "-c:v", "libx264", "-g", "12", "-keyint_min", "12", "-bf", "3", "-x264-params", "scenecut=0",
+            str(source),
+        ],
+        check=True,
+        **subprocess_no_window_kwargs(),
+    )
+    worker = SegmentPreviewWorker(source, max_size=(80, 80))
+    worker.start()
+
+    try:
+        _next_event(worker, PreviewLoaded)
+        worker.seek(1.0)
+        assert _next_event(worker, PreviewFrame).seconds == 1.0
+        worker.previous_frame(1.0)
+        assert _next_event(worker, PreviewFrame).seconds == pytest.approx(1.0 - 1 / 12)
+    finally:
+        worker.close()
+
+
 def test_preview_worker_coalesces_pending_seeks() -> None:
     worker = SegmentPreviewWorker("unused.mp4")
 
