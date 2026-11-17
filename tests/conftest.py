@@ -164,9 +164,13 @@ def make_jasna_app(monkeypatch, tmp_path, user_config_dir):
 
     from jasna import engine_paths, os_utils, system_requirements, update_check
     from jasna.accelerator import AcceleratorVendor
-    from jasna.gui import app as app_module, system_checks
+    from jasna.gui import app as app_module, system_checks, system_stats
 
     monkeypatch.setattr(system_checks, "warm_up_cuda", lambda: (AcceleratorVendor.NVIDIA, True, True))
+    # The real reading runs nvidia-smi: its thread would outlive the window, and a garbage
+    # collection on it then waits forever for the closed window to free a Tk image.
+    idle = system_stats.SystemStats(gpu_util=0, vram_util=0, ram_util=0, cpu_util=0)
+    monkeypatch.setattr(system_stats, "read_system_stats", lambda: idle)
     monkeypatch.setattr(update_check, "fetch_latest_release", lambda: None)
     monkeypatch.setattr(system_requirements, "install_on_hard_disk", lambda: False)
     monkeypatch.setattr(os_utils, "windows_module_loaded", lambda _name: False)
