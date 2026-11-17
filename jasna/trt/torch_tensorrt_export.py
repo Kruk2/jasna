@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import warnings
+from pathlib import Path
 
 import torch
 
 from jasna._frozen import is_frozen
+from jasna.os_utils import commit_file
 from jasna.trt import BUILDER_OPTIMIZATION_LEVEL
 
 logger = logging.getLogger(__name__)
@@ -120,10 +123,18 @@ def compile_and_save_torchtrt_dynamo(
             if sys.platform == "linux" and is_frozen():
                 from jasna.protection.export_cache import save
                 save(trt_gm, output_path)
-            elif has_dynamic:
-                _save_with_dynamic_shapes(trt_gm, output_path, inputs, device, dtype)
             else:
-                torch_tensorrt.save(trt_gm, output_path, inputs=inputs)
+                # Saved whole or not at all: a file at ``output_path`` counts as a compiled engine.
+                partial = Path(f"{output_path}.{os.getpid()}.part")
+                try:
+                    if has_dynamic:
+                        _save_with_dynamic_shapes(trt_gm, str(partial), inputs, device, dtype)
+                    else:
+                        torch_tensorrt.save(trt_gm, str(partial), inputs=inputs)
+                except BaseException:
+                    partial.unlink(missing_ok=True)
+                    raise
+                commit_file(partial, Path(output_path))
         finally:
             fake_reg_logger.setLevel(prev_level)
     del trt_gm

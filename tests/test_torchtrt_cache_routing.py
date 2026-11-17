@@ -68,6 +68,38 @@ def test_frozen_compilation_uses_the_runtime_writer(monkeypatch):
     assert seen == [(module, path)]
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_a_source_engine_file_is_saved_whole_or_not_at_all(tmp_path, monkeypatch, fails):
+    monkeypatch.setattr(exports, "is_frozen", lambda: False)
+    monkeypatch.setattr(exports, "_mute_torch_tensorrt", lambda: None)
+    monkeypatch.setattr(torch.cuda, "device", lambda device: nullcontext())
+
+    def save(module, path, inputs):
+        with open(path, "wb") as out:
+            out.write(b"half")
+            if fails:
+                raise OSError("disk full")
+            out.write(b" and the rest")
+
+    monkeypatch.setitem(sys.modules, "torch_tensorrt", SimpleNamespace(
+        Input=type("Input", (), {}), compile=lambda *args, **kwargs: torch.nn.Identity(), save=save))
+    engine = tmp_path / "module.engine"
+
+    def compile_engine():
+        exports.compile_and_save_torchtrt_dynamo(
+            module=torch.nn.Identity(), inputs=[torch.ones(2)], output_path=str(engine),
+            dtype=torch.float32, workspace_size_bytes=1024, message="compile", device=torch.device("cpu"))
+
+    if fails:
+        with pytest.raises(OSError, match="disk full"):
+            compile_engine()
+    else:
+        compile_engine()
+
+    saved = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    assert saved == ({} if fails else {"module.engine": b"half and the rest"})
+
+
 def test_source_export_remains_loadable_on_cpu(tmp_path, monkeypatch):
     monkeypatch.setattr(exports, "is_frozen", lambda: False)
     monkeypatch.setattr(exports, "_mute_torch_tensorrt", lambda: None)
