@@ -36,9 +36,6 @@ from jasna.ltx.tracks import (
     support_box,
 )
 from jasna.ltx.windows import Window, window_starts
-
-# kept importable from this module for callers outside this package
-from jasna.ltx.windows import window_hop as window_hop
 from jasna.tracking.clip_tracker import shorter_than_min_duration
 from jasna.vr180 import StereoLayout
 
