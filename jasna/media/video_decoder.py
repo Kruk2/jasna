@@ -135,6 +135,38 @@ def _first_shown_pts(seek_ts: float | None, start_pts: int, time_base: Fraction)
     return start_pts + max(0, round(seek_ts / time_base))
 
 
+def _keyframe_seek_pts(container, stream, target_pts: int) -> int:
+    """The timestamp to seek ``stream`` to so decoding starts at a keyframe shown at or before
+    ``target_pts``. Most demuxers land a seek on such a keyframe. MPEG-TS seeks by decode time
+    and takes every packet for a keyframe, so its seek lands mid-GOP and the decoder starts at
+    the next keyframe; there, step back until a keyframe shows up and seek to its decode time."""
+    container.seek(target_pts, stream=stream, backward=True)
+    landing = next(demux_video(container, stream), None)
+    if landing is None or landing.is_keyframe:
+        return target_pts
+    step = round(1 / stream.time_base)
+    while True:
+        seek_pts = target_pts - step
+        container.seek(seek_pts, stream=stream, backward=True)
+        keyframe_dts = None
+        landing_dts = None
+        for packet in demux_video(container, stream):
+            if packet.dts is None:
+                continue
+            if landing_dts is None:
+                landing_dts = packet.dts
+            if packet.dts > target_pts:
+                break
+            if packet.is_keyframe and packet.pts is not None and packet.pts <= target_pts:
+                keyframe_dts = packet.dts
+        if keyframe_dts is not None:
+            return keyframe_dts
+        # A seek before the first packet lands on it: the whole start was searched.
+        if landing_dts is None or landing_dts > seek_pts:
+            return seek_pts
+        step *= 2
+
+
 def _vali_seek_seconds(seek_ts: float, start_pts: int, time_base: Fraction) -> float:
     """The seconds to hand VALI so it starts decoding at or before the target. VALI seeks the file
     to those seconds plus the stream start, then skips frames whose pts is below those seconds
@@ -241,6 +273,7 @@ class _ValiFrameSource:
         self.device = device
         self.metadata = metadata
         self.frame_stride = frame_stride
+        self.start_pts = metadata.start_pts
         self.decoder = None
         self.surface = None
         self._raw_stream, self.stream = _create_blocking_cuda_stream(device)
@@ -311,8 +344,13 @@ class _ValiFrameSource:
         if seek_ts == 0 and self._first_pts is not None:
             seek_ts = None
         if seek_ts is not None:
+            start_pts, time_base = self.metadata.start_pts, self.metadata.time_base
+            with av.open(self.file, metadata_errors="replace") as container:
+                seek_pts = _keyframe_seek_pts(
+                    container, container.streams.video[0], _first_shown_pts(seek_ts, start_pts, time_base)
+                )
             seek_ctx = self._vali.SeekContext(
-                seek_ts=_vali_seek_seconds(seek_ts, self.metadata.start_pts, self.metadata.time_base)
+                seek_ts=_vali_seek_seconds(float((seek_pts - start_pts) * time_base), start_pts, time_base)
             )
         shown = _shown_frames(
             self._decoded_pts(seek_ctx),
@@ -363,82 +401,46 @@ class _ValiFrameSource:
         destroy_stream(raw_stream)
 
 
-class VideoReader:
+class _PyAvFrameSource:
+    """FFmpeg decoding through PyAV, converted by the shared GPU kernel: NVDEC through the CUDA
+    hwaccel on NVIDIA, the AMF decoders on AMD, software decoding uploaded to the GPU otherwise
+    or with ``software_only``."""
+
     def __init__(
         self,
         file: str,
         batch_size: int,
         device: torch.device,
         metadata: VideoMetadata,
-        *,
-        frame_stride: int = 1,
-        decode_backend: DecodeBackendName = "auto",
+        frame_stride: int,
+        vendor: AcceleratorVendor,
+        software_only: bool,
     ):
-        frame_stride = int(frame_stride)
-        if frame_stride <= 0:
-            raise ValueError("frame_stride must be > 0")
-        self.device = device
         self.file = file
         self.batch_size = batch_size
+        self.device = device
         self.metadata = metadata
         self.frame_stride = frame_stride
-        self.decode_backend = decode_backend
-        self.vendor = vendor_for_device(device)
-        self._decoder_ctx = None
-        self._vali_source: _ValiFrameSource | None = None
-        self._prefetcher: BatchPrefetcher | None = None
-        self._software_only = False
-
-    def __enter__(self):
-        current_stream(self.device)
-        backend = self.decode_backend
-        path = _decode_path(backend, self.metadata.codec_name, self.vendor)
-        if path == "vali":
-            if self.vendor is AcceleratorVendor.NVIDIA:
-                try:
-                    self._vali_source = _ValiFrameSource(
-                        self.file,
-                        self.batch_size,
-                        self.device,
-                        self.metadata,
-                        self.frame_stride,
-                    )
-                except (ImportError, RuntimeError, ValueError) as exc:
-                    if backend == "vali":
-                        raise VideoDecodeError(f"VALI cannot decode {self.file}: {exc}") from exc
-                    log.warning(
-                        "VALI cannot decode %s (codec %s): %s; falling back to PyAV",
-                        self.file,
-                        self.metadata.codec_name,
-                        exc,
-                    )
-                else:
-                    self.width = self._vali_source.width
-                    self.height = self._vali_source.height
-                    log.info("Using VALI NVDEC decoder for %s", self.file)
-                    return self
-            else:
-                raise VideoDecodeError("The VALI decode backend requires an NVIDIA device")
-        software_only = path == "pyav-sw"
+        self.vendor = vendor
         self._software_only = software_only
+        self._decoder_ctx = None
+        self._raw_stream: int | None = None
         try:
-            if not software_only and self.vendor is AcceleratorVendor.NVIDIA:
-                self.container = av.open(
-                    self.file, hwaccel=_cuda_hwaccel(self.device), metadata_errors="replace"
-                )
+            if not software_only and vendor is AcceleratorVendor.NVIDIA:
+                self.container = av.open(file, hwaccel=_cuda_hwaccel(device), metadata_errors="replace")
             else:
-                self.container = av.open(self.file, metadata_errors="replace")
+                self.container = av.open(file, metadata_errors="replace")
             self.video_stream = self.container.streams.video[0]
         except av.FFmpegError as e:
-            raise VideoDecodeError(f"Failed to open {self.file}: {e}") from e
+            raise VideoDecodeError(f"Failed to open {file}: {e}") from e
 
         ctx = self.video_stream.codec_context
         if software_only:
             ctx.thread_type = "AUTO"
-        elif self.vendor is AcceleratorVendor.AMD:
+        elif vendor is AcceleratorVendor.AMD:
             self._setup_amf_decoder(ctx)
         elif not ctx.is_hwaccel:
-            if self.vendor is AcceleratorVendor.NVIDIA:
+            if vendor is AcceleratorVendor.NVIDIA:
                 self._setup_nvdec_decoder(ctx)
             else:
                 # Definite software decode: let FFmpeg pick frame/slice threading.
@@ -448,15 +450,11 @@ class VideoReader:
         self.height = ctx.height
         self._full_range = (
             ctx.color_range == int(AvColorRange.JPEG)
-            or self.metadata.color_range == AvColorRange.JPEG
+            or metadata.color_range == AvColorRange.JPEG
         )
-        self._raw_stream: int | None = None
-        return self
 
     @property
     def start_pts(self) -> int:
-        if self._vali_source is not None:
-            return self.metadata.start_pts
         return resolve_video_start_pts(
             self.video_stream.start_time,
             self.metadata.start_pts,
@@ -549,12 +547,7 @@ class VideoReader:
                 exc,
             )
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        if self._vali_source is not None:
-            source, self._vali_source = self._vali_source, None
-            source.close()
-            return
-        self._close_prefetcher()
+    def close(self, error_in_flight: bool) -> None:
         idle_decoder_threads(self.video_stream.codec_context)
         self.container.close()
         self._decoder_ctx = None
@@ -563,7 +556,7 @@ class VideoReader:
         try:
             destroy_stream(self._raw_stream)
         except RuntimeError:
-            if exc_type is None:
+            if not error_in_flight:
                 raise
             log.warning("Could not destroy the decode stream while handling another error", exc_info=True)
 
@@ -591,8 +584,9 @@ class VideoReader:
 
     def _decoded_frames(self, seek_ts: float | None):
         if seek_ts is not None:
+            target_pts = _first_shown_pts(seek_ts, self.start_pts, self.video_stream.time_base)
             self.container.seek(
-                _first_shown_pts(seek_ts, self.start_pts, self.video_stream.time_base),
+                _keyframe_seek_pts(self.container, self.video_stream, target_pts),
                 stream=self.video_stream,
                 backward=True,
             )
@@ -617,35 +611,7 @@ class VideoReader:
             group.append(frame)
         return group
 
-    def _close_prefetcher(self) -> None:
-        if self._prefetcher is not None:
-            prefetcher, self._prefetcher = self._prefetcher, None
-            prefetcher.close()
-
-    def frames(
-        self,
-        seek_ts: float | None = None,
-    ) -> Iterator[tuple[torch.Tensor, list[int]]]:
-        if self.vendor is not AcceleratorVendor.AMD:
-            yield from self._decoded_batches(seek_ts)
-            return
-        # AMD decodes on the CPU (AMF downloads every surface), so decode on a
-        # thread of its own instead of between the consumer's batches.
-        self._close_prefetcher()
-        prefetcher = BatchPrefetcher(self._decoded_batches(seek_ts), self.device)
-        self._prefetcher = prefetcher
-        try:
-            yield from prefetcher
-        finally:
-            prefetcher.close()
-
-    def _decoded_batches(self, seek_ts: float | None) -> Iterator[tuple[torch.Tensor, list[int]]]:
-        # With seek_ts, strided selection re-anchors at the first decoded frame
-        # after the seek instead of the start of the file: sample phase is only
-        # stable relative to the seek target.
-        if self._vali_source is not None:
-            yield from self._vali_source.frames(seek_ts)
-            return
+    def frames(self, seek_ts: float | None) -> Iterator[tuple[torch.Tensor, list[int]]]:
         # The first decoded frame's format is the final backend decision: a codec
         # can advertise a CUDA config and still fall back to software when
         # hardware initialization rejects a profile or pixel format. Dispatch
@@ -808,3 +774,107 @@ class VideoReader:
             stream.synchronize()
             group = next_group
             yield batch, pts
+
+
+class VideoReader:
+    def __init__(
+        self,
+        file: str,
+        batch_size: int,
+        device: torch.device,
+        metadata: VideoMetadata,
+        *,
+        frame_stride: int = 1,
+        decode_backend: DecodeBackendName = "auto",
+    ):
+        frame_stride = int(frame_stride)
+        if frame_stride <= 0:
+            raise ValueError("frame_stride must be > 0")
+        self.device = device
+        self.file = file
+        self.batch_size = batch_size
+        self.metadata = metadata
+        self.frame_stride = frame_stride
+        self.decode_backend = decode_backend
+        self.vendor = vendor_for_device(device)
+        self._source: _ValiFrameSource | _PyAvFrameSource | None = None
+        self._prefetcher: BatchPrefetcher | None = None
+
+    def __enter__(self):
+        current_stream(self.device)
+        backend = self.decode_backend
+        path = _decode_path(backend, self.metadata.codec_name, self.vendor)
+        if path == "vali":
+            if self.vendor is AcceleratorVendor.NVIDIA:
+                try:
+                    self._source = _ValiFrameSource(
+                        self.file,
+                        self.batch_size,
+                        self.device,
+                        self.metadata,
+                        self.frame_stride,
+                    )
+                except (ImportError, RuntimeError, ValueError) as exc:
+                    if backend == "vali":
+                        raise VideoDecodeError(f"VALI cannot decode {self.file}: {exc}") from exc
+                    log.warning(
+                        "VALI cannot decode %s (codec %s): %s; falling back to PyAV",
+                        self.file,
+                        self.metadata.codec_name,
+                        exc,
+                    )
+                else:
+                    self.width = self._source.width
+                    self.height = self._source.height
+                    log.info("Using VALI NVDEC decoder for %s", self.file)
+                    return self
+            else:
+                raise VideoDecodeError("The VALI decode backend requires an NVIDIA device")
+        self._source = _PyAvFrameSource(
+            self.file,
+            self.batch_size,
+            self.device,
+            self.metadata,
+            self.frame_stride,
+            self.vendor,
+            path == "pyav-sw",
+        )
+        self.width = self._source.width
+        self.height = self._source.height
+        return self
+
+    @property
+    def start_pts(self) -> int:
+        return self._source.start_pts
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if isinstance(self._source, _PyAvFrameSource):
+            self._close_prefetcher()
+            self._source.close(error_in_flight=exc_type is not None)
+        else:
+            self._source.close()
+
+    def _close_prefetcher(self) -> None:
+        if self._prefetcher is not None:
+            prefetcher, self._prefetcher = self._prefetcher, None
+            prefetcher.close()
+
+    def frames(
+        self,
+        seek_ts: float | None = None,
+    ) -> Iterator[tuple[torch.Tensor, list[int]]]:
+        # With seek_ts, strided selection re-anchors at the first decoded frame
+        # after the seek instead of the start of the file: sample phase is only
+        # stable relative to the seek target.
+        if self.vendor is not AcceleratorVendor.AMD:
+            yield from self._source.frames(seek_ts)
+            return
+        # AMD decodes on the CPU (AMF downloads every surface), so decode on a
+        # thread of its own instead of between the consumer's batches.
+        self._close_prefetcher()
+        prefetcher = BatchPrefetcher(self._source.frames(seek_ts), self.device)
+        self._prefetcher = prefetcher
+        try:
+            yield from prefetcher
+        finally:
+            prefetcher.close()

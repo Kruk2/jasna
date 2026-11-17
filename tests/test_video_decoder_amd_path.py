@@ -10,12 +10,8 @@ import pytest
 import torch
 
 import jasna.media.video_decoder as module
-from factories import video_metadata, write_dated_source
+from factories import write_dated_source
 from jasna.media.probe import get_video_meta_data
-
-
-def _reader() -> module.VideoReader:
-    return module.VideoReader("soft.mkv", 3, torch.device("cuda:0"), video_metadata(num_frames=3))
 
 
 class _Batch:
@@ -104,15 +100,15 @@ def test_amd_reader_exit_stops_the_prefetcher_before_closing_the_container(monke
     reader = module.VideoReader(str(source), 3, torch.device("cuda:0"), get_video_meta_data(str(source)))
     packets_readable_when_decoding_stopped: list = []
 
-    def decoded_batches(_seek_ts):
+    def decoded_batches(source, _seek_ts):
         try:
             for i in range(1000):
                 yield _Batch(i), [i]
         finally:
-            packets = itertools.islice(reader.container.demux(video=0), 1)
+            packets = itertools.islice(source.container.demux(video=0), 1)
             packets_readable_when_decoding_stopped.append(len(list(packets)))
 
-    monkeypatch.setattr(reader, "_decoded_batches", decoded_batches)
+    monkeypatch.setattr(module._PyAvFrameSource, "frames", decoded_batches)
     reader.__enter__()
     frames = reader.frames()
     next(frames)
@@ -123,18 +119,74 @@ def test_amd_reader_exit_stops_the_prefetcher_before_closing_the_container(monke
 
 
 @pytest.mark.usefixtures("nvidia_vendor")
-def test_nvidia_reader_decodes_on_the_calling_thread(monkeypatch):
-    reader = _reader()
+def test_nvidia_reader_decodes_on_the_calling_thread(monkeypatch, tmp_path):
+    monkeypatch.setattr(module, "current_stream", lambda _device: None)
+    source = write_dated_source(tmp_path / "source.mp4")
     threads: list = []
 
-    def decoded_batches(_seek_ts):
+    def decoded_batches(_source, _seek_ts):
         threads.append(threading.current_thread().name)
         yield "batch", [0]
 
-    monkeypatch.setattr(reader, "_decoded_batches", decoded_batches)
+    monkeypatch.setattr(module._PyAvFrameSource, "frames", decoded_batches)
+    with module.VideoReader(
+        str(source), 3, torch.device("cuda:0"), get_video_meta_data(str(source)), decode_backend="pyav-sw"
+    ) as reader:
+        batches = list(reader.frames())
 
-    assert list(reader.frames()) == [("batch", [0])]
+    assert batches == [("batch", [0])]
     assert threads == [threading.current_thread().name]
+
+
+class _AmfDecoder:
+    """An AMF decoder context that rejects what PyAV 18 rejects on a decoder: assigning a
+    time_base, or None for a rational."""
+
+    def __init__(self, name: str):
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "opened", False)
+
+    def __setattr__(self, name, value):
+        if name == "time_base":
+            raise RuntimeError("Cannot access 'time_base' as a decoder")
+        if name in {"framerate", "sample_aspect_ratio"} and value is None:
+            raise AttributeError("'NoneType' object has no attribute 'numerator'")
+        object.__setattr__(self, name, value)
+
+    def open(self, strict=False):
+        object.__setattr__(self, "opened", True)
+
+
+class _AmfCodecContext:
+    @staticmethod
+    def create(name: str, mode: str) -> _AmfDecoder:
+        return _AmfDecoder(name)
+
+
+def _write_h264_without_aspect_ratio(path):
+    with av.open(str(path), "w") as container:
+        stream = container.add_stream("libx264", rate=12)
+        stream.width, stream.height, stream.pix_fmt = 64, 64, "yuv420p"
+        for _ in range(3):
+            frame = av.VideoFrame.from_ndarray(np.zeros((96, 64), dtype=np.uint8), format="yuv420p")
+            container.mux(stream.encode(frame))
+        container.mux(stream.encode(None))
+    return path
+
+
+@pytest.mark.parametrize("write_source", [write_dated_source, _write_h264_without_aspect_ratio])
+def test_amd_source_opens_the_amf_decoder_of_the_stream_codec(monkeypatch, tmp_path, write_source):
+    monkeypatch.setattr(module.av, "CodecContext", _AmfCodecContext)
+    path = str(write_source(tmp_path / "source.mp4"))
+    source = module._PyAvFrameSource(
+        path, 3, torch.device("cuda:0"), get_video_meta_data(path), 1, module.AcceleratorVendor.AMD, False
+    )
+    decoder = source._decoder_ctx
+    source.close(error_in_flight=False)
+
+    assert (decoder.name, decoder.opened) == ("h264_amf", True)
+    assert decoder.sample_aspect_ratio == 1
+    assert decoder.framerate == 12
 
 
 def _write_clip(path, encoder: str, pix_fmt: str, options: dict[str, str], frame_count: int) -> None:
@@ -159,7 +211,8 @@ def _decode_all(path, backend: str) -> tuple[torch.Tensor, list[int], str | None
         for batch, batch_pts in reader.frames():
             batches.append(batch.cpu())
             pts += batch_pts
-        decoder = reader._decoder_ctx.name if reader._decoder_ctx is not None else None
+        decoder_ctx = reader._source._decoder_ctx
+        decoder = decoder_ctx.name if decoder_ctx is not None else None
     return torch.cat(batches), pts, decoder
 
 

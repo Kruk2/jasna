@@ -13,7 +13,7 @@ import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
 from factories import video_metadata, yuv_to_rgb
-from jasna.media.video_decoder import VideoReader
+from jasna.media.video_decoder import VideoReader, _PyAvFrameSource
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
@@ -199,7 +199,7 @@ def test_hardware_input_never_enters_software_path(tmp_path, monkeypatch):
     def _boom(self, decoded, group):
         raise AssertionError("hardware-decodable input entered the software path")
 
-    monkeypatch.setattr(VideoReader, "_frames_software", _boom)
+    monkeypatch.setattr(_PyAvFrameSource, "_frames_software", _boom)
     with VideoReader(str(path), batch_size=6, device=DEVICE, metadata=metadata) as reader:
         total = sum(len(pts) for _, pts in reader.frames())
     assert total == n
@@ -224,7 +224,7 @@ def _gpu_supports_av1_nvdec() -> bool:
 @pytest.mark.skipif(not _gpu_supports_av1_nvdec(), reason="GPU has no AV1 NVDEC")
 def test_av1_decodes_on_nvdec_not_software(tmp_path, monkeypatch):
     # PyAV's default AV1 decoder (libdav1d) has no NVDEC hwaccel config, so
-    # av.open decodes AV1 in software. _setup_nvdec_decoder swaps in the native
+    # av.open decodes AV1 in software. The NVDEC setup swaps in the native
     # av1 decoder, which does, keeping AV1 on the hardware path. Dimensions stay
     # above NVDEC's AV1 minimum coded size (~128px) so the GPU path is exercised.
     w, h, n = 256, 144, 12
@@ -236,7 +236,7 @@ def test_av1_decodes_on_nvdec_not_software(tmp_path, monkeypatch):
     def _boom(self, decoded, group):
         raise AssertionError("AV1 input entered the software path instead of NVDEC")
 
-    monkeypatch.setattr(VideoReader, "_frames_software", _boom)
+    monkeypatch.setattr(_PyAvFrameSource, "_frames_software", _boom)
     with VideoReader(str(path), batch_size=6, device=DEVICE, metadata=metadata) as reader:
         batches = [(batch, pts) for batch, pts in reader.frames()]
     assert batches
@@ -254,6 +254,6 @@ def test_subminimum_av1_uses_software_decoder(tmp_path):
     metadata = _metadata(path, w, h, n, codec_name="av1")
 
     with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
-        assert reader._decoder_ctx is None
+        assert reader._source._decoder_ctx is None
         total = sum(len(pts) for _, pts in reader.frames())
     assert total == n

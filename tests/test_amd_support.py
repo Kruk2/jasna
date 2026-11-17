@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -168,117 +167,6 @@ def test_streaming_encoder_selects_amf(monkeypatch, tmp_path) -> None:
     assert cmd[cmd.index("-c:v") + 1] == "h264_amf"
     assert "-qvbr_quality_level" in cmd
     assert "h264_nvenc" not in cmd
-
-
-def test_amf_decoder_context_is_created(monkeypatch) -> None:
-    import jasna.media.video_decoder as module
-
-    decoder = MagicMock()
-    monkeypatch.setattr(
-        module.av,
-        "CodecContext",
-        SimpleNamespace(create=MagicMock(return_value=decoder)),
-    )
-    reader = module.VideoReader(
-        "input.mp4",
-        4,
-        torch.device("cuda:0"),
-        _metadata(),
-    )
-    source = SimpleNamespace(
-        name="h264",
-        extradata=b"header",
-        width=16,
-        height=16,
-        time_base=Fraction(1, 30),
-        framerate=Fraction(30, 1),
-        sample_aspect_ratio=Fraction(1, 1),
-        thread_type=None,
-    )
-    reader._setup_amf_decoder(source)
-    create = module.av.CodecContext.create
-    assert create.call_args.args[:2] == ("h264_amf", "r")
-    decoder.open.assert_called_once_with(strict=False)
-    assert reader._decoder_ctx is decoder
-
-
-def test_amf_decoder_accepts_missing_source_rationals(monkeypatch) -> None:
-    import jasna.media.video_decoder as module
-
-    class FakeDecoder:
-        def __setattr__(self, name, value):
-            if name in {"framerate", "sample_aspect_ratio"} and value is None:
-                raise AttributeError("'NoneType' object has no attribute 'numerator'")
-            object.__setattr__(self, name, value)
-
-        def open(self, strict=False):
-            self.opened = True
-
-    decoder = FakeDecoder()
-    monkeypatch.setattr(
-        module.av,
-        "CodecContext",
-        SimpleNamespace(create=MagicMock(return_value=decoder)),
-    )
-    reader = module.VideoReader(
-        "input.mp4", 4, torch.device("cuda:0"), _metadata()
-    )
-    source = SimpleNamespace(
-        name="h264",
-        extradata=b"header",
-        width=16,
-        height=16,
-        framerate=None,
-        sample_aspect_ratio=None,
-        thread_type=None,
-    )
-
-    reader._setup_amf_decoder(source)
-
-    assert decoder.sample_aspect_ratio == Fraction(1, 1)
-    assert decoder.opened is True
-
-
-def test_amf_decoder_survives_pyav18_time_base_regression(monkeypatch) -> None:
-    import jasna.media.video_decoder as module
-
-    class FakeDecoder:
-        def __init__(self):
-            object.__setattr__(self, "opened", False)
-
-        def __setattr__(self, name, value):
-            if name == "time_base":
-                raise RuntimeError("Cannot access 'time_base' as a decoder")
-            object.__setattr__(self, name, value)
-
-        def open(self, strict=False):
-            object.__setattr__(self, "opened", True)
-
-    decoder = FakeDecoder()
-    monkeypatch.setattr(
-        module.av,
-        "CodecContext",
-        SimpleNamespace(create=MagicMock(return_value=decoder)),
-    )
-    reader = module.VideoReader(
-        "input.mp4",
-        4,
-        torch.device("cuda:0"),
-        _metadata(),
-    )
-    source = SimpleNamespace(
-        name="hevc",
-        extradata=b"header",
-        width=16,
-        height=16,
-        time_base=Fraction(1, 30),
-        framerate=Fraction(30, 1),
-        sample_aspect_ratio=Fraction(1, 1),
-        thread_type=None,
-    )
-    reader._setup_amf_decoder(source)
-    assert decoder.opened is True
-    assert reader._decoder_ctx is decoder
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

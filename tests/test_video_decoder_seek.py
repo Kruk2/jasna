@@ -121,6 +121,43 @@ class TestSeekBehavior:
 
         assert pts == expected
 
+    @pytest.mark.parametrize("backend", ["vali", "pyav-hw", "pyav-sw"])
+    @pytest.mark.parametrize("container", ["ts", "mp4"])
+    def test_every_backend_seeks_to_the_first_frame_at_or_after_the_target(self, tmp_path, backend, container):
+        if backend == "vali" and torch.version.hip is not None:
+            pytest.skip("VALI decodes with NVDEC")
+        import subprocess
+
+        import av
+        from jasna.os_utils import resolve_executable
+
+        # MPEG-TS seeks by decode time and indexes every packet as a keyframe, so a plain seek lands mid-GOP.
+        source = tmp_path / f"gop.{container}"
+        subprocess.run(
+            [resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+             "-f", "lavfi", "-i", "testsrc2=size=256x256:rate=12:duration=5",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-bf", "3", "-g", "12", "-keyint_min", "12",
+             "-x264-params", "scenecut=0", str(source)],
+            check=True,
+        )
+        metadata = get_video_meta_data(str(source))
+        with av.open(str(source)) as decoded:
+            all_pts = sorted(frame.pts for frame in decoded.decode(video=0))
+
+        first_pts = {}
+        for seek_ts in (0.0, 1.0, 2.25, 4.5):
+            with VideoReader(
+                str(source), batch_size=8, device=torch.device("cuda:0"), metadata=metadata, decode_backend=backend
+            ) as reader:
+                pts = [int(p) for _, batch_pts in reader.frames(seek_ts=seek_ts) for p in batch_pts]
+            first_pts[seek_ts] = pts[:1]
+
+        expected = {
+            seek_ts: [pts for pts in all_pts if pts >= metadata.start_pts + round(seek_ts / metadata.time_base)][:1]
+            for seek_ts in first_pts
+        }
+        assert first_pts == expected
+
     @pytest.mark.parametrize("backend", ["auto", "vali", "pyav-hw", "pyav-sw"])
     @pytest.mark.parametrize("seek_ts", [None, 0.0])
     def test_every_backend_reads_exactly_the_shown_frames_of_a_mid_gop_cut(self, tmp_path, backend, seek_ts):

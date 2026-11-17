@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import av
 import pytest
 import torch
 from av.codec.context import ThreadType
@@ -24,38 +25,25 @@ def _metadata():
     )
 
 
-def _reader(monkeypatch, vendor: AcceleratorVendor, backend: str = "auto") -> module.VideoReader:
+def _reader(
+    monkeypatch, vendor: AcceleratorVendor, backend: str = "auto", file: str = "input.mp4"
+) -> module.VideoReader:
     monkeypatch.setattr(module, "vendor_for_device", lambda _device: vendor)
     monkeypatch.setattr(module, "current_stream", lambda _device: None)
-    return module.VideoReader("input.mp4", 4, torch.device("cuda:0"), _metadata(), decode_backend=backend)
+    return module.VideoReader(file, 4, torch.device("cuda:0"), _metadata(), decode_backend=backend)
 
 
-def _fake_container(is_hwaccel: bool) -> MagicMock:
-    ctx = SimpleNamespace(
-        is_hwaccel=is_hwaccel,
-        width=16,
-        height=16,
-        color_range=0,
-        thread_type=None,
-        name="h264",
-    )
-    container = MagicMock()
-    container.streams.video = [SimpleNamespace(codec_context=ctx)]
-    return container
-
-
-def test_auto_backend_falls_back_to_pyav_when_vali_fails(monkeypatch, caplog) -> None:
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_auto_backend_falls_back_to_pyav_hwaccel_when_vali_fails(monkeypatch, caplog, tmp_path) -> None:
     def broken_vali(*args, **kwargs):
         raise module.VideoDecodeError("vali is broken")
 
     monkeypatch.setattr(module, "_ValiFrameSource", broken_vali)
-    monkeypatch.setattr(module.av, "open", MagicMock(return_value=_fake_container(True)))
-    reader = _reader(monkeypatch, AcceleratorVendor.NVIDIA)
-    with caplog.at_level("WARNING"):
-        reader.__enter__()
-    assert reader._vali_source is None
+    reader = _reader(monkeypatch, AcceleratorVendor.NVIDIA, file=str(write_dated_source(tmp_path / "source.mp4")))
+    with caplog.at_level("WARNING"), reader:
+        hwaccel = reader._source.video_stream.codec_context.is_hwaccel
     assert "falling back to PyAV" in caplog.text
-    assert "hwaccel" in module.av.open.call_args.kwargs
+    assert hwaccel
 
 
 def test_forced_vali_backend_raises_on_failure(monkeypatch) -> None:
@@ -82,7 +70,7 @@ def test_pyav_sw_backend_decodes_on_the_cpu_without_hardware_decoders(monkeypatc
     reader = module.VideoReader(str(source), 4, torch.device("cuda:0"), _metadata(), decode_backend="pyav-sw")
 
     with caplog.at_level("INFO", logger=module.__name__), reader:
-        context = reader.video_stream.codec_context
+        context = reader._source.video_stream.codec_context
         decoding = (context.thread_type, context.is_hwaccel)
 
     assert decoding == (ThreadType.AUTO, False)
@@ -105,18 +93,19 @@ def test_decode_path_for_codec(backend, codec, vendor, expected) -> None:
     assert module._decode_path(backend, codec, vendor) == expected
 
 
-def test_pyav_reader_skips_frames_without_planes(monkeypatch) -> None:
+def test_pyav_source_skips_frames_without_planes(monkeypatch, tmp_path) -> None:
     # FFmpeg's VC-1 NVDEC hwaccel returns one empty frame when a stream starts
     # with a P frame (a cut that is not keyframe aligned).
-    empty = SimpleNamespace(pts=33, planes=())
-    picture = SimpleNamespace(pts=33, planes=("y", "uv"))
-    reader = _reader(monkeypatch, AcceleratorVendor.NVIDIA)
-    reader.container = None
-    reader.video_stream = None
-    packet = SimpleNamespace(pts=33)
-    monkeypatch.setattr(module, "demux_video", lambda _container, _stream: [packet])
-    monkeypatch.setattr(reader, "_decode_packet", lambda _packet, errors: ([empty, picture], errors))
-    assert list(reader._decoded_frames(None)) == [picture]
+    empty = av.VideoFrame()
+    picture = av.VideoFrame(16, 16, "yuv420p")
+    path = str(write_dated_source(tmp_path / "source.mp4"))
+    source = module._PyAvFrameSource(
+        path, 4, torch.device("cuda:0"), _metadata(), 1, AcceleratorVendor.NVIDIA, True
+    )
+    monkeypatch.setattr(source, "_decode_packet", lambda _packet, errors: ([empty, picture], errors))
+    frames = list(source._decoded_frames(None))
+    source.close(error_in_flight=False)
+    assert frames and all(frame is picture for frame in frames)
 
 
 def test_frames_before_the_stream_start_are_dropped_before_the_stride() -> None:
@@ -218,10 +207,8 @@ def _frame(pts: int, message: str = ""):
 _EOF = (False, _FakeVali.TaskExecInfo.END_OF_STREAM, None, "")
 
 
-def _vali_source(batch_size: int = 2, frame_stride: int = 1) -> module._ValiFrameSource:
-    return module._ValiFrameSource(
-        "input.mp4", batch_size, torch.device("cpu"), _metadata(), frame_stride
-    )
+def _vali_source(batch_size: int = 2, frame_stride: int = 1, file: str = "input.mp4") -> module._ValiFrameSource:
+    return module._ValiFrameSource(file, batch_size, torch.device("cpu"), _metadata(), frame_stride)
 
 
 def test_vali_source_batches_and_final_partial_batch(monkeypatch) -> None:
@@ -292,10 +279,10 @@ def test_vali_source_reads_a_seek_to_the_start_from_its_first_frame(monkeypatch)
     assert calls == [None, None, None]
 
 
-def test_vali_source_seek_discards_smoke_frame(monkeypatch) -> None:
+def test_vali_source_seek_discards_smoke_frame(monkeypatch, tmp_path) -> None:
     script = [_frame(0), _frame(30720), _frame(31232), _EOF]
     calls, _converter = _install_fake_vali(monkeypatch, script)
-    source = _vali_source(batch_size=2)
+    source = _vali_source(batch_size=2, file=str(write_dated_source(tmp_path / "source.mp4")))
     batches = list(source.frames(2.0))
     assert [pts for _batch, pts in batches] == [[30720, 31232]]
     assert calls[0] is None
@@ -362,10 +349,10 @@ def test_vali_keeps_frame_order_when_the_sps_sets_no_reorder_limit(tmp_path) -> 
     torch.testing.assert_close(vali_levels, software_levels, atol=2, rtol=0)
 
 
-def test_vali_source_seek_with_stride_reanchors_at_seek(monkeypatch) -> None:
+def test_vali_source_seek_with_stride_reanchors_at_seek(monkeypatch, tmp_path) -> None:
     script = [_frame(0)] + [_frame(pts) for pts in (30720, 31232, 31744, 32256)] + [_EOF]
     _install_fake_vali(monkeypatch, script)
-    source = _vali_source(batch_size=2, frame_stride=2)
+    source = _vali_source(batch_size=2, frame_stride=2, file=str(write_dated_source(tmp_path / "source.mp4")))
     batches = list(source.frames(2.0))
     assert [pts for _batch, pts in batches] == [[30720, 31744]]
 
