@@ -11,14 +11,23 @@ All heavy imports (torch, restorers, pipeline) stay inside the functions.
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, get_args
 
-from jasna.session_config import RestorationModelName, SessionConfig, ltx_unsupported_options
+from jasna.session_config import (
+    RestorationModelName,
+    SecondaryRestorationName,
+    SessionConfig,
+    UpscaleModelName,
+    ltx_unsupported_options,
+)
 
 if TYPE_CHECKING:
     import torch
+
+    from jasna.accelerator import AcceleratorVendor
 
     from jasna.ltx.model_files import LtxModelFiles
     from jasna.ltx.super_res import LtxSuperRes
@@ -29,6 +38,7 @@ if TYPE_CHECKING:
     from jasna.pipeline import Pipeline
     from jasna.progressbar import ProgressCallback
     from jasna.restorer.restoration_pipeline import RestorationPipeline
+    from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
     from jasna.segments import SegmentRange
     from jasna.upscale import FrameUpscaler, Size
 
@@ -42,15 +52,15 @@ logger = logging.getLogger(__name__)
 class RestorationSession:
     device: "torch.device"
     restoration_pipeline: "RestorationPipeline | None"
+    log_callback: Callable[[str], None] | None
     ltx_files: "LtxModelFiles | None" = None
     ltx_super_res: "LtxSuperRes | None" = None
     _detection_key: tuple | None = None
     _detection_model: "DetectionModel | None" = None
 
     def detection_model_for(self, config: SessionConfig) -> "DetectionModel":
-        """The detector for ``config``, reused across videos until its settings change."""
-        from jasna.mosaic.detection_registry import build_detection_model
-
+        """The detector for ``config``, its engine compiled when missing, reused across videos
+        until its settings change."""
         key = (
             config.detection_model_name,
             config.detection_model_path,
@@ -61,13 +71,15 @@ class RestorationSession:
         if key != self._detection_key:
             if self._detection_model is not None:
                 self._detection_model.close()
-            self._detection_model = build_detection_model(
+                self._detection_model, self._detection_key = None, None
+            self._detection_model = build_compiled_detection_model(
                 config.detection_model_name,
                 config.detection_model_path,
-                batch_size=config.batch_size,
                 device=self.device,
-                score_threshold=config.detection_score_threshold,
+                batch_size=config.batch_size,
                 fp16=config.fp16,
+                score_threshold=config.detection_score_threshold,
+                log_callback=self.log_callback,
             )
             self._detection_key = key
         return self._detection_model
@@ -120,6 +132,45 @@ def build_compiled_detection_model(
     )
 
 
+@dataclass
+class ImageSession:
+    """The mosaic detector and SD 1.5 inpaint restorer that restore still images."""
+
+    detector: "DetectionModel"
+    restorer: "Sd15InpaintRestorer"
+    device: "torch.device"
+    fp16: bool
+
+    def close(self) -> None:
+        self.detector.close()
+        self.restorer.close()
+
+
+def build_image_session(
+    detection_model_name: str,
+    detection_model_path: Path,
+    *,
+    device: "torch.device",
+    batch_size: int,
+    fp16: bool,
+    score_threshold: float,
+    log_callback: Callable[[str], None] | None,
+) -> ImageSession:
+    from jasna.engine_paths import SD15_DIR
+    from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
+
+    detector = build_compiled_detection_model(
+        detection_model_name,
+        detection_model_path,
+        device=device,
+        batch_size=batch_size,
+        fp16=fp16,
+        score_threshold=score_threshold,
+        log_callback=log_callback,
+    )
+    return ImageSession(detector, Sd15InpaintRestorer(SD15_DIR, device, fp16), device, fp16)
+
+
 def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
     if config.secondary_restoration == "none":
         return None
@@ -145,8 +196,8 @@ def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
             device=device,
             scale=int(config.rtx_scale),
             quality=config.rtx_quality,
-            denoise=None if config.rtx_denoise == "none" else config.rtx_denoise,
-            deblur=None if config.rtx_deblur == "none" else config.rtx_deblur,
+            denoise=config.rtx_denoise,
+            deblur=config.rtx_deblur,
         )
     raise ValueError(f"Unsupported secondary restoration: {config.secondary_restoration}")
 
@@ -227,6 +278,29 @@ def build_frame_upscaler(
     raise ValueError(f"Unsupported upscale model: {config.upscale_model}")
 
 
+def secondary_restorations_for(vendor: "AcceleratorVendor") -> tuple[SecondaryRestorationName, ...]:
+    """The secondary restorers a GPU of ``vendor`` can run."""
+    from jasna.accelerator import AcceleratorVendor
+
+    if vendor is AcceleratorVendor.NVIDIA:
+        return get_args(SecondaryRestorationName)
+    if vendor is AcceleratorVendor.AMD:
+        return ("none", "unet-4x")
+    return ("none",)
+
+
+def upscale_models_for(vendor: "AcceleratorVendor", platform: str) -> tuple[UpscaleModelName, ...]:
+    """The whole-video upscalers a GPU of ``vendor`` can run on ``platform``: the AI networks on
+    NVIDIA and AMD, RTX Super Res only on NVIDIA, DLSS 5 only on NVIDIA under Windows."""
+    from jasna.accelerator import AcceleratorVendor
+
+    if vendor is AcceleratorVendor.NVIDIA:
+        return ("none", "span", "realplksr", "rtx-super-res", *(("dlss5",) if platform == "win32" else ()))
+    if vendor is AcceleratorVendor.AMD:
+        return ("none", "span", "realplksr")
+    return ("none",)
+
+
 def build_restoration_session(
     config: SessionConfig,
     *,
@@ -234,7 +308,7 @@ def build_restoration_session(
 ) -> RestorationSession:
     import torch
 
-    from jasna.accelerator import is_amd_device, log_amd_backend, supports_frame_generation
+    from jasna.accelerator import is_amd_device, log_amd_backend, supports_frame_generation, vendor_for_device
 
     device = torch.device(config.device)
     if is_amd_device(device):
@@ -243,18 +317,19 @@ def build_restoration_session(
         raise ValueError(FRAME_GENERATION_NEEDS_RTX_40)
     if config.tvai_denoise and config.secondary_restoration != "tvai":
         raise ValueError("TVAI Denoise requires secondary restoration 'tvai'")
-    if is_amd_device(device) and config.secondary_restoration not in ("none", "unet-4x"):
+    vendor = vendor_for_device(device)
+    if config.secondary_restoration not in secondary_restorations_for(vendor):
         raise ValueError(
             f"Secondary restoration '{config.secondary_restoration}' is not available in the AMD build yet"
         )
-    if is_amd_device(device) and config.upscale_model == "rtx-super-res":
-        raise ValueError(UPSCALE_RTX_NEEDS_NVIDIA)
     if config.upscale_model == "dlss5":
         from jasna.upscale.dlss5 import dlss5_runtime_dir, dlss5_unavailable_reason
 
         reason = dlss5_unavailable_reason(device, dlss5_runtime_dir())
         if reason:
             raise ValueError(reason)
+    elif config.upscale_model not in upscale_models_for(vendor, sys.platform):
+        raise ValueError(UPSCALE_RTX_NEEDS_NVIDIA)
     if config.restoration_model_name == "ltx" and ltx_unsupported_options(
         auto_split=config.ltx_auto_split_percent is not None,
         secondary_restoration=config.secondary_restoration,
@@ -264,7 +339,7 @@ def build_restoration_session(
             "LTX restoration supports Unet 4x, TVAI or denoise only with LTX auto split, "
             "where they apply to the BasicVSR++ parts"
         )
-    session = RestorationSession(device=device, restoration_pipeline=None)
+    session = RestorationSession(device=device, restoration_pipeline=None, log_callback=log_callback)
     provide_restoration_models(
         config, session, frozenset({config.restoration_model_name}), log_callback=log_callback
     )
@@ -282,7 +357,7 @@ def provide_restoration_models(
     if "basicvsrpp" in models and session.restoration_pipeline is None:
         session.restoration_pipeline = _build_basicvsrpp_pipeline(config, session.device, log_callback=log_callback)
     if "ltx" in models and session.ltx_files is None:
-        session.ltx_files = _ltx_model_files(config, session.device, log_callback=log_callback)
+        session.ltx_files = _ltx_model_files(config, session.device)
     if "ltx" in models and config.secondary_restoration == "rtx-super-res" and session.ltx_super_res is None:
         from jasna.ltx.super_res import LtxSuperRes
 
@@ -333,10 +408,7 @@ FRAME_GENERATION_NEEDS_RTX_40 = "Frame generation needs an NVIDIA RTX 40-series 
 UPSCALE_RTX_NEEDS_NVIDIA = "RTX Super Res upscaling needs an NVIDIA GPU"
 
 
-def _ltx_model_files(
-    config: SessionConfig, device: "torch.device", *, log_callback: Callable[[str], None] | None
-) -> "LtxModelFiles":
-    from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
+def _ltx_model_files(config: SessionConfig, device: "torch.device") -> "LtxModelFiles":
     from jasna.ltx.model_files import LtxModelFiles
 
     from jasna.accelerator import TRITON_HIP_ARCHITECTURES, amd_gpu_architecture, is_amd_device, supports_nvfp4
@@ -354,29 +426,16 @@ def _ltx_model_files(
         from jasna.ltx.model_files import LTX_TRIAL_NOTICE
 
         logger.warning(LTX_TRIAL_NOTICE)
-        files = LtxModelFiles.placeholder(
+        return LtxModelFiles.placeholder(
             config.ltx_model, fast=config.ltx_fast, encoder=config.ltx_vae_encoder, decoder=config.ltx_vae_decoder
         )
-    else:
-        files = LtxModelFiles.from_dir(
-            config.model_path("ltx"),
-            config.ltx_model,
-            fast=config.ltx_fast,
-            encoder=config.ltx_vae_encoder,
-            decoder=config.ltx_vae_decoder,
-        )
-    ensure_engines_compiled(
-        EngineCompilationRequest(
-            device=str(device),
-            fp16=bool(config.fp16),
-            detection=True,
-            detection_model_name=config.detection_model_name,
-            detection_model_path=str(config.detection_model_path),
-            detection_batch_size=int(config.batch_size),
-        ),
-        log_callback=log_callback,
+    return LtxModelFiles.from_dir(
+        config.model_path("ltx"),
+        config.ltx_model,
+        fast=config.ltx_fast,
+        encoder=config.ltx_vae_encoder,
+        decoder=config.ltx_vae_decoder,
     )
-    return files
 
 
 def segment_job_config(config: SessionConfig, source_codec: str, input_video: Path) -> SessionConfig:
@@ -476,7 +535,13 @@ def plan_segment_job(
     if config.lut_path is not None or config.sharpen_strength > 0:
         logger.info("%s: a color LUT or sharpening is set, so the parts without ranges are encoded again", source.name)
         plan = plan.reencoding_copies()
-    return SegmentJob(segment_job_config(config, spliced.codec, source), plan)
+    job_config = segment_job_config(config, spliced.codec, source)
+    if job_config.fmp4:
+        logger.warning(
+            "Fragmented MP4 is not available with segment processing; the output is assembled after processing finishes"
+        )
+        job_config = replace(job_config, fmp4=False)
+    return SegmentJob(job_config, plan)
 
 
 def ltx_auto_split(
@@ -525,6 +590,21 @@ def ltx_auto_split(
         )
 
     return _auto_split_job(config, input_video, output_video, scan)
+
+
+def plan_job(
+    config: SessionConfig,
+    session: RestorationSession,
+    input_video: Path,
+    output_video: Path,
+    ranges_job: SegmentJob | None,
+    *,
+    progress_callback: "ProgressCallback | None",
+) -> SegmentJob | None:
+    """The job's ranges: the ones the user set win over the LTX auto split."""
+    if ranges_job is not None:
+        return ranges_job
+    return ltx_auto_split(config, session, input_video, output_video, progress_callback=progress_callback)
 
 
 def _auto_split_job(
@@ -584,7 +664,11 @@ def find_resume_output(
     from jasna.job_resume import ResumeJob, ResumeMismatchError, saved_outputs
     from jasna.media.probe import get_video_meta_data
 
-    for saved in saved_outputs(config, output):
+    candidates = saved_outputs(config, output)
+    if not candidates:
+        return None
+    metadata = get_video_meta_data(str(source))
+    for saved in candidates:
         try:
             job = (
                 plan_segment_job(config, source, splice_source(config, source, saved), segments) if segments
@@ -592,7 +676,6 @@ def find_resume_output(
             )
         except ResumeMismatchError:
             continue
-        metadata = get_video_meta_data(str(source))
         checkpoint = (
             ResumeJob(config, source, saved, metadata, None) if job is None
             else ResumeJob(job.config, source, saved, metadata, job.splice_plan)

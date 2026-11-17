@@ -8,23 +8,20 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, get_args
 
-from jasna import __version__
-from jasna.cli_help import CLI_HELP
+from jasna.cli_parser import BASICVSRPP_ONLY_ARG_DESTS, CLI_RESTORATION_MODELS, LTX_ONLY_ARG_DESTS, build_parser
 from jasna.engine_paths import default_restoration_model_path
 from jasna.media.probe import UnsupportedVideoError
-from jasna.os_utils import (
+from jasna.os_utils import check_amd_amf_runtime, confirm_in_terminal, escape_unencodable_output
+from jasna.system_requirements import (
     AMD_DRIVER_URL,
     AMF_LINUX_INSTALL_URL,
     LTX_MIN_LINUX_KERNEL,
     MIN_DRIVER_VERSION,
-    check_amd_amf_runtime,
     check_ascii_install_path,
     check_gpu_driver_version,
     check_required_executables,
     check_supported_gpu,
     check_windows_nvidia_sysmem_fallback_policy,
-    confirm_in_terminal,
-    escape_unencodable_output,
     gpu_check_error,
     install_on_hard_disk,
     leftover_install_dll,
@@ -32,63 +29,13 @@ from jasna.os_utils import (
 )
 from jasna.session_config import (
     DEFAULT_CODEC,
-    DEFAULT_DETECTION_MODEL_NAME,
-    DEFAULT_MAX_CLIP_SIZE,
-    DEFAULT_MAX_DETECTION_GAP,
-    DEFAULT_MIN_DETECTION_DURATION,
-    DEFAULT_TEMPORAL_OVERLAP,
-    DEFAULT_UPSCALE_HEIGHT,
-    DEFAULT_UPSCALE_STRENGTH,
-    LTX_DEFAULT_MODEL,
-    LTX_DEFAULT_OVERLAP,
-    LTX_DEFAULT_SEED,
-    LTX_OVERLAP_CHOICES,
-    RTX_DEFAULT_DEBLUR,
-    RTX_DEFAULT_DENOISE,
-    RTX_DEFAULT_QUALITY,
-    RTX_DEFAULT_SCALE,
-    SD15_DEFAULT_SEED,
-    SD15_DEFAULT_STEPS,
-    SD15_DEFAULT_STRENGTH,
-    SD15_DEFAULT_VARIANTS,
-    TVAI_DEFAULT_ARGS,
-    TVAI_DEFAULT_FFMPEG_PATH,
-    TVAI_DEFAULT_MODEL,
-    TVAI_DEFAULT_SCALE,
-    TVAI_DEFAULT_WORKERS,
-    UPSCALE_DLSS5_DEFAULT_INTENSITY,
-    UPSCALE_DLSS5_DEFAULT_PRESET,
-    UPSCALE_DLSS5_DEFAULT_STYLE,
-    UPSCALE_HEIGHTS,
-    UPSCALE_RTX_DEFAULT_DEBLUR,
-    UPSCALE_RTX_DEFAULT_DENOISE,
-    UPSCALE_RTX_DEFAULT_QUALITY,
     DecodeBackendName,
-    Dlss5PresetName,
-    Dlss5StyleName,
-    LtxModelName,
-    LtxVaeName,
-    RestorationModelName,
-    RtxLevelName,
-    RtxQualityName,
     SessionConfig,
-    UpscaleModelName,
     ltx_unsupported_options,
 )
 
 if TYPE_CHECKING:
     from jasna.session_factory import SegmentJob
-
-# CLI restoration model name -> (restoration backend, LTX model variant).
-CLI_RESTORATION_MODELS: dict[str, tuple[RestorationModelName, LtxModelName]] = {
-    "basicvsrpp": ("basicvsrpp", LTX_DEFAULT_MODEL),
-    "ltx-basic": ("ltx", "distilled1"),
-    "ltx": ("ltx", "distilled2"),
-    "ltx-4step": ("ltx", "distilled4"),
-    "ltx-8step": ("ltx", "distilled"),
-    "ltx-undistilled": ("ltx", "undistilled"),
-}
-
 
 
 def batch_size_from_args(args: argparse.Namespace) -> int:
@@ -119,7 +66,7 @@ def _session_config_from_args(
     restoration_model_path: Path,
     lut_path: str | None,
 ) -> SessionConfig:
-    from jasna.ltx.plan import window_hop
+    from jasna.ltx.windows import window_hop
 
     return SessionConfig(
         device=str(args.device),
@@ -181,558 +128,12 @@ def _session_config_from_args(
     )
 
 
-def _resolve_cli_encoder_settings(
-    raw_settings: str,
-    *,
-    cq: int | None,
-    codec: str,
-    vendor,
-) -> dict[str, object]:
-    from jasna.media.encoder_settings import cq_controls, parse_encoder_settings, resolve_encoder_settings
-
-    settings = parse_encoder_settings(raw_settings)
-    duplicates = cq_controls(settings, vendor)
-    if len(duplicates) > 1:
-        raise ValueError(
-            "--encoder-settings contains multiple CQ controls: "
-            f"{', '.join(duplicates)}; use only one"
-        )
-    if cq is not None and duplicates:
-        raise ValueError(
-            "--cq conflicts with --encoder-settings "
-            f"{', '.join(duplicates)}; use only one CQ control"
-        )
-    return resolve_encoder_settings(settings, cq=cq, codec=codec, vendor=vendor)
-
-
-class _ShortErrorParser(argparse.ArgumentParser):
-    def error(self, message: str):
-        self.exit(2, f"{self.prog}: error: {message}\nRun '{self.prog} --help' to see all options.\n")
-
-
 @contextmanager
 def _usage_errors(parser: argparse.ArgumentParser):
     try:
         yield
     except (ValueError, FileNotFoundError) as exc:
         parser.error(str(exc))
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = _ShortErrorParser(prog="jasna")
-    parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("--benchmark", action="store_true", help="Run benchmarks instead of processing video")
-    parser.add_argument("--input", required=False, type=str, default=None, help="Path to input video, image, or folder")
-    parser.add_argument(
-        "--output",
-        required=False,
-        type=str,
-        default=None,
-        help="Path to output file, or output folder when --input is a folder",
-    )
-    parser.add_argument(
-        "--output-pattern",
-        type=str,
-        default=None,
-        help=(
-            "Filename template for folder input, matching the GUI pattern behavior. "
-            "Use {original} for the input stem. Default: {original}_out with each input extension. "
-            "Images keep their source extension; videos use the template extension when provided."
-        ),
-    )
-    parser.add_argument(
-        "--working-directory",
-        type=str,
-        default=None,
-        help="Directory for temporary files created while assembling segment output (default: the output video's directory)",
-    )
-    parser.add_argument("--batch-size", type=int, default=None)
-    parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument(
-        "--fp16",
-        default=True,
-        action=argparse.BooleanOptionalAction,
-        help=CLI_HELP["fp16"],
-    )
-    parser.add_argument(
-        "--log-level",
-        type=str,
-        default="error",
-        choices=["debug", "info", "warning", "error"],
-        help="Logging level (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--no-progress",
-        action="store_true",
-        help="Disable the progress bar.",
-    )
-
-    restoration = parser.add_argument_group("Restoration")
-    restoration.add_argument(
-        "--restoration-model-name",
-        type=str,
-        default="basicvsrpp",
-        choices=list(CLI_RESTORATION_MODELS),
-        help=CLI_HELP["restoration_model_name"],
-    )
-    restoration.add_argument(
-        "--restoration-model-path",
-        type=str,
-        default=None,
-        help=CLI_HELP["restoration_model_path"],
-    )
-    restoration.add_argument(
-        "--ltx-large-canvas",
-        default=False,
-        action=argparse.BooleanOptionalAction,
-        help=CLI_HELP["ltx_large_canvas"],
-    )
-    restoration.add_argument(
-        "--ltx-overlap",
-        type=int,
-        default=LTX_DEFAULT_OVERLAP,
-        choices=LTX_OVERLAP_CHOICES,
-        help=CLI_HELP["ltx_overlap"],
-    )
-    for part in ("encoder", "decoder"):
-        restoration.add_argument(
-            f"--ltx-vae-{part}",
-            default="auto",
-            choices=get_args(LtxVaeName),
-            help=CLI_HELP[f"ltx_vae_{part}"],
-        )
-    restoration.add_argument(
-        "--ltx-seed",
-        type=int,
-        default=LTX_DEFAULT_SEED,
-        help=CLI_HELP["ltx_seed"],
-    )
-    restoration.add_argument(
-        "--ltx-fast",
-        default=False,
-        action=argparse.BooleanOptionalAction,
-        help=CLI_HELP["ltx_fast"],
-    )
-    restoration.add_argument(
-        "--ltx-trial",
-        default=False,
-        action=argparse.BooleanOptionalAction,
-        help=CLI_HELP["ltx_trial"],
-    )
-    restoration.add_argument(
-        "--ltx-auto-split",
-        type=float,
-        default=None,
-        metavar="PERCENT",
-        help=CLI_HELP["ltx_auto_split"],
-    )
-    restoration.add_argument(
-        "--compile-basicvsrpp",
-        default=True,
-        action=argparse.BooleanOptionalAction,
-        help=CLI_HELP["compile_basicvsrpp"],
-    )
-    restoration.add_argument(
-        "--max-clip-size",
-        type=int,
-        default=DEFAULT_MAX_CLIP_SIZE,
-        help=CLI_HELP["max_clip_size"],
-    )
-    restoration.add_argument(
-        "--temporal-overlap",
-        type=int,
-        default=DEFAULT_TEMPORAL_OVERLAP,
-        help=CLI_HELP["temporal_overlap"],
-    )
-    restoration.add_argument(
-        "--denoise",
-        type=str,
-        default="none",
-        choices=["none", "low", "medium", "high"],
-        help=CLI_HELP["denoise"],
-    )
-
-    secondary = parser.add_argument_group("2nd restoration")
-    secondary.add_argument(
-        "--secondary-restoration",
-        type=str,
-        default="none",
-        choices=["none", "unet-4x", "tvai", "rtx-super-res"],
-        help=CLI_HELP["secondary_restoration"],
-    )
-
-    sd15 = parser.add_argument_group("SD 1.5 image restoration")
-    sd15.add_argument(
-        "--image-restoration-model-name",
-        type=str,
-        default="sd-15-jav",
-        choices=["sd-15-jav"],
-        help="Restoration model for still-image input (image-only). Images auto-route here; no need to set --restoration-model-name.",
-    )
-    sd15.add_argument(
-        "--sd15-steps",
-        type=int,
-        default=SD15_DEFAULT_STEPS,
-        help="More steps = more detail, but slower (default: %(default)s)",
-    )
-    sd15.add_argument(
-        "--sd15-strength",
-        type=float,
-        default=SD15_DEFAULT_STRENGTH,
-        help="How much of the image is redrawn, up to 0.7. Higher = bigger changes (default: %(default)s)",
-    )
-    sd15.add_argument(
-        "--sd15-freeu",
-        default=True,
-        action=argparse.BooleanOptionalAction,
-        help="Small extra detail boost; turn off if results look over-sharpened (default: %(default)s)",
-    )
-    sd15.add_argument(
-        "--sd15-seed",
-        type=int,
-        default=SD15_DEFAULT_SEED,
-        help="Starting number for the random result. Same seed = same result (default: %(default)s)",
-    )
-    sd15.add_argument(
-        "--sd15-variants",
-        type=int,
-        default=SD15_DEFAULT_VARIANTS,
-        help="Save N versions (name_v1 … name_vN), each with the next seed, so you can pick the best (default: %(default)s)",
-    )
-
-    license_group = parser.add_argument_group("Activation")
-    license_group.add_argument(
-        "--license-code",
-        type=str,
-        help=CLI_HELP["license_code"],
-    )
-    license_group.add_argument(
-        "--online",
-        action="store_true",
-        help=CLI_HELP["online"],
-    )
-    license_group.add_argument(
-        "--activation-status",
-        action="store_true",
-        help=CLI_HELP["activation_status"],
-    )
-
-    rtx = parser.add_argument_group("RTX Super Res")
-    rtx.add_argument(
-        "--rtx-scale",
-        type=int,
-        default=RTX_DEFAULT_SCALE,
-        choices=[2, 4],
-        help="RTX Super Res upscale factor for BasicVSR++; LTX always upscales 2x (default: %(default)s)",
-    )
-    rtx.add_argument(
-        "--rtx-quality",
-        type=str,
-        default=RTX_DEFAULT_QUALITY,
-        choices=["low", "medium", "high", "ultra"],
-        help="RTX Super Res upscale quality (default: %(default)s)",
-    )
-    rtx.add_argument(
-        "--rtx-denoise",
-        type=str,
-        default=RTX_DEFAULT_DENOISE,
-        choices=["none", "low", "medium", "high", "ultra"],
-        help="RTX Super Res denoise level, none to disable (default: %(default)s)",
-    )
-    rtx.add_argument(
-        "--rtx-deblur",
-        type=str,
-        default=RTX_DEFAULT_DEBLUR,
-        choices=["none", "low", "medium", "high", "ultra"],
-        help="RTX Super Res deblur level, none to disable (default: %(default)s)",
-    )
-
-    upscale = parser.add_argument_group("Upscale whole video")
-    upscale.add_argument(
-        "--upscale",
-        type=str,
-        default="none",
-        choices=list(get_args(UpscaleModelName)),
-        help=CLI_HELP["upscale"],
-    )
-    upscale.add_argument(
-        "--upscale-height",
-        type=int,
-        default=DEFAULT_UPSCALE_HEIGHT,
-        choices=list(UPSCALE_HEIGHTS),
-        help=CLI_HELP["upscale_height"],
-    )
-    upscale.add_argument(
-        "--upscale-strength",
-        type=float,
-        default=DEFAULT_UPSCALE_STRENGTH,
-        help=CLI_HELP["upscale_strength"],
-    )
-    upscale.add_argument(
-        "--upscale-rtx-quality",
-        type=str,
-        default=UPSCALE_RTX_DEFAULT_QUALITY,
-        choices=list(get_args(RtxQualityName)),
-        help=CLI_HELP["upscale_rtx_quality"],
-    )
-    upscale.add_argument(
-        "--upscale-rtx-denoise",
-        type=str,
-        default=UPSCALE_RTX_DEFAULT_DENOISE,
-        choices=list(get_args(RtxLevelName)),
-        help=CLI_HELP["upscale_rtx_denoise"],
-    )
-    upscale.add_argument(
-        "--upscale-rtx-deblur",
-        type=str,
-        default=UPSCALE_RTX_DEFAULT_DEBLUR,
-        choices=list(get_args(RtxLevelName)),
-        help=CLI_HELP["upscale_rtx_deblur"],
-    )
-    upscale.add_argument(
-        "--upscale-dlss5-preset",
-        type=str,
-        default=UPSCALE_DLSS5_DEFAULT_PRESET,
-        choices=list(get_args(Dlss5PresetName)),
-        help=CLI_HELP["upscale_dlss5_preset"],
-    )
-    upscale.add_argument(
-        "--upscale-dlss5-style",
-        type=str,
-        default=UPSCALE_DLSS5_DEFAULT_STYLE,
-        choices=list(get_args(Dlss5StyleName)),
-        help=CLI_HELP["upscale_dlss5_style"],
-    )
-    upscale.add_argument(
-        "--upscale-dlss5-intensity",
-        type=float,
-        default=UPSCALE_DLSS5_DEFAULT_INTENSITY,
-        help=CLI_HELP["upscale_dlss5_intensity"],
-    )
-
-    tvai = parser.add_argument_group("Topaz Video")
-    tvai.add_argument(
-        "--tvai-ffmpeg-path",
-        type=str,
-        default=TVAI_DEFAULT_FFMPEG_PATH,
-        help=CLI_HELP["tvai_ffmpeg_path"],
-    )
-    tvai.add_argument(
-        "--tvai-model",
-        type=str,
-        default=TVAI_DEFAULT_MODEL,
-        help=CLI_HELP["tvai_model"],
-    )
-    tvai.add_argument(
-        "--tvai-scale",
-        type=int,
-        default=TVAI_DEFAULT_SCALE,
-        choices=[1, 2, 4],
-        help=CLI_HELP["tvai_scale"],
-    )
-    tvai.add_argument(
-        "--tvai-args",
-        type=str,
-        default=TVAI_DEFAULT_ARGS,
-        help='Extra options for the Topaz model, for advanced users (default: %(default)s)',
-    )
-    tvai.add_argument(
-        "--tvai-workers",
-        type=int,
-        default=TVAI_DEFAULT_WORKERS,
-        help=CLI_HELP["tvai_workers"],
-    )
-    tvai.add_argument(
-        "--tvai-denoise",
-        default=False,
-        action="store_true",
-        help=CLI_HELP["tvai_denoise"],
-    )
-
-    detection = parser.add_argument_group("Detection")
-    detection.add_argument(
-        "--detection-model",
-        type=str,
-        default=DEFAULT_DETECTION_MODEL_NAME,
-        help=(
-            "Detection model name. Installed models are discovered from model_weights/; "
-            "rfdetr-v6 (fast), rfdetr-vr-v1 (VR180) and lada-yolo-v4 are bundled with Jasna, "
-            "rfdetr-v6-large (higher quality) and zelefans-vr-yolo-v2 are optional downloads "
-            "(default: %(default)s)"
-        ),
-    )
-    detection.add_argument(
-        "--detection-model-path",
-        type=str,
-        default="",
-        help=(
-            'Optional path to detection weights. If not set, uses "model_weights/<detection-model>": '
-            ".onnx for RF-DETR on NVIDIA, .pt for RF-DETR on AMD and for YOLO."
-        ),
-    )
-    detection.add_argument(
-        "--detection-score-threshold",
-        type=float,
-        default=None,
-        help=CLI_HELP["detection_score_threshold"],
-    )
-    detection.add_argument(
-        "--max-detection-gap",
-        type=int,
-        default=DEFAULT_MAX_DETECTION_GAP,
-        help=CLI_HELP["max_detection_gap"],
-    )
-    detection.add_argument(
-        "--min-detection-duration",
-        type=int,
-        default=DEFAULT_MIN_DETECTION_DURATION,
-        help=CLI_HELP["min_detection_duration"],
-    )
-    detection.add_argument(
-        "--scene-detection",
-        default=True,
-        action=argparse.BooleanOptionalAction,
-        help=CLI_HELP["scene_detection"],
-    )
-
-    projection = parser.add_argument_group("VR projection")
-    projection.add_argument(
-        "--vr-mode",
-        type=str,
-        default="auto",
-        choices=["auto", "off", "sbs", "sbs-fisheye", "tb"],
-        help=CLI_HELP["vr_mode"],
-    )
-
-    streaming = parser.add_argument_group("Streaming")
-    streaming.add_argument(
-        "--stream",
-        action="store_true",
-        help="Enable HLS streaming mode (no file output). Serves processed video via HTTP for playback in VLC/browser.",
-    )
-    streaming.add_argument(
-        "--stream-port",
-        type=int,
-        default=8765,
-        help="HTTP port for HLS streaming server (default: %(default)s)",
-    )
-    streaming.add_argument(
-        "--stream-segment-duration",
-        type=float,
-        default=4.0,
-        help="HLS segment duration in seconds (default: %(default)s)",
-    )
-    streaming.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="Do not open a browser window when starting streaming mode.",
-    )
-
-    encoding = parser.add_argument_group("Encoding")
-    encoding.add_argument(
-        "--codec",
-        type=lambda value: str(value).lower(),
-        default=None,
-        choices=["hevc", "h264", "av1"],
-        help=CLI_HELP["codec"],
-    )
-    encoding.add_argument(
-        "--cq",
-        type=int,
-        default=None,
-        help=CLI_HELP["cq"],
-    )
-    encoding.add_argument(
-        "--encoder-settings",
-        type=str,
-        default="",
-        help=CLI_HELP["encoder_settings"],
-    )
-    encoding.add_argument(
-        "--lut",
-        type=str,
-        default="",
-        help="Path to a .cube color LUT (1D or 3D) applied on GPU before encoding.",
-    )
-    encoding.add_argument(
-        "--sharpen",
-        type=float,
-        default=0.0,
-        help=(
-            "Sharpen the picture on GPU before encoding, from 0 (off) to 1 "
-            "(strongest). Matches the ffmpeg cas filter."
-        ),
-    )
-    encoding.add_argument(
-        "--retarget-high-fps",
-        action="store_true",
-        help=(
-            "For offline exports, map 60 fps to 30 fps and 59.94 fps to 29.97 fps "
-            "by processing every second frame. Other source rates are unchanged."
-        ),
-    )
-    encoding.add_argument(
-        "--frame-generation",
-        type=str,
-        default="none",
-        choices=["none", "2x"],
-        help=CLI_HELP["frame_generation"],
-    )
-    encoding.add_argument(
-        "--fmp4",
-        action="store_true",
-        help=(
-            "Write .mp4/.mov output as fragmented MP4, so the file can be played "
-            "while processing runs and stays playable after an interruption. "
-            "Not available with --stream or --segments."
-        ),
-    )
-    encoding.add_argument(
-        "--segments",
-        type=str,
-        default="",
-        help=(
-            "Restore only selected ranges and smart-render the rest, for example "
-            "10-25,01:10-01:30. Output codec must match the H.264, HEVC, or AV1 input."
-        ),
-    )
-
-    post_export = parser.add_argument_group("Post-export action")
-    post_export.add_argument(
-        "--post-export-action",
-        type=str,
-        default="none",
-        choices=["none", "shutdown", "command"],
-        help=CLI_HELP["post_export_action"],
-    )
-    post_export.add_argument(
-        "--post-export-command",
-        type=str,
-        default="",
-        help="Shell command to run when --post-export-action=command.",
-    )
-    post_export.add_argument(
-        "--post-export-video-command",
-        type=str,
-        default="",
-        help=CLI_HELP["post_export_video_command"],
-    )
-
-    benchmark_group = parser.add_argument_group("Benchmark")
-    benchmark_group.add_argument(
-        "--benchmark-filter",
-        type=str,
-        default=None,
-        help="Only run benchmarks whose name contains this string (e.g. 'basicvsrpp')",
-    )
-    benchmark_group.add_argument(
-        "--benchmark-video",
-        type=str,
-        action="append",
-        default=None,
-        help="Video path for benchmark (can be repeated). Default: test_clip1_1080p.mp4, test_clip1_2160p.mp4",
-    )
-    return parser
 
 
 def _check_system(args: argparse.Namespace) -> None:
@@ -796,16 +197,9 @@ def _configure_logging(level: int) -> None:
 
 def _configure_runtime(args: argparse.Namespace) -> None:
     _configure_logging(getattr(logging, args.log_level.upper()))
+    from jasna.bootstrap import configure_process
 
-    from jasna._suppress_noise import install as _install_noise_filters
-    _install_noise_filters()
-
-    from jasna._frozen import patch_frozen_torch
-    patch_frozen_torch()
-    from jasna.engine_paths import configure_torch_compile_cache
-    configure_torch_compile_cache()
-    from jasna.accelerator import configure_rocm_process_env
-    configure_rocm_process_env()
+    configure_process()
 
 
 def _plan_folder(
@@ -873,6 +267,47 @@ def _plan_segments(
         return plan_segment_job(config, input_video, spliced, segments)
     except SmartRenderCompatibilityError as exc:
         parser.error(str(exc))
+
+
+def _restore_images(args: argparse.Namespace, jobs: list[tuple[Path, Path]], *, folder_total: int | None) -> None:
+    """Restore each ``(input, output)`` still image with one model load; a folder batch
+    (``folder_total`` inputs, its images first) prints its progress."""
+    import torch
+
+    from jasna.engine_paths import SD15_DIR
+    from jasna.image_restore import ImageRestoreOptions, restore_image_file
+    from jasna.mosaic.detection_registry import resolve_detection_model
+    from jasna.restorer.sd15_download import ensure_sd15_bundle
+    from jasna.session_factory import build_image_session
+
+    ensure_sd15_bundle(SD15_DIR)
+    detection_model_name, detection_model_path, score_threshold = resolve_detection_model(
+        str(args.detection_model), str(args.detection_model_path), args.detection_score_threshold
+    )
+    options = ImageRestoreOptions(
+        steps=int(args.sd15_steps),
+        strength=float(args.sd15_strength),
+        seed=int(args.sd15_seed),
+        variants=int(args.sd15_variants),
+        freeu=bool(args.sd15_freeu),
+    )
+    session = build_image_session(
+        detection_model_name,
+        detection_model_path,
+        device=torch.device(str(args.device)),
+        batch_size=batch_size_from_args(args),
+        fp16=bool(args.fp16),
+        score_threshold=score_threshold,
+        log_callback=None,
+    )
+    try:
+        for index, (input_path, output_base) in enumerate(jobs, start=1):
+            if folder_total is not None:
+                print(f"[{index}/{folder_total}] Processing {input_path.name} -> {output_base.name}")
+            for path in restore_image_file(session, options, input_path, output_base):
+                logging.getLogger(__name__).info("Wrote %s", path)
+    finally:
+        session.close()
 
 
 def _run_streaming(args: argparse.Namespace, make_pipeline, input_video: Path | None) -> None:
@@ -1021,13 +456,13 @@ def _ensure_dlss5_runtime(config: SessionConfig) -> None:
     from jasna.upscale.dlss5 import (
         DLSS5_RELEASE_PAGE,
         DLSS5_RELEASE_SIZE,
-        DLSS5_RUNTIME_FILES,
         download_dlss5_runtime,
         dlss5_runtime_dir,
+        missing_runtime_files,
     )
 
     directory = dlss5_runtime_dir()
-    if all((directory / name).is_file() for name in DLSS5_RUNTIME_FILES):
+    if not missing_runtime_files(directory):
         return
     size = f"{DLSS5_RELEASE_SIZE / 1e6:.0f} MB"
     message = (
@@ -1043,13 +478,6 @@ def _ensure_dlss5_runtime(config: SessionConfig) -> None:
 
     with tqdm(total=DLSS5_RELEASE_SIZE, unit="B", unit_scale=True, desc="DLSS 5 download") as bar:
         download_dlss5_runtime(directory, lambda done, total: bar.update(done - bar.n))
-
-
-LTX_ONLY_ARG_DESTS = (
-    "ltx_fast", "ltx_large_canvas", "ltx_overlap", "ltx_vae_encoder", "ltx_vae_decoder", "ltx_seed", "ltx_trial",
-    "ltx_auto_split",
-)
-BASICVSRPP_ONLY_ARG_DESTS = ("compile_basicvsrpp",)
 
 
 def _reject_options_of_other_restoration_backend(
@@ -1171,6 +599,8 @@ def _main() -> None:
         start_pc_license_refresh()
     if args.benchmark:
         from jasna.benchmark import run_benchmark_cli
+
+        _configure_runtime(args)
         run_benchmark_cli(args)
         return
 
@@ -1268,8 +698,8 @@ def _main() -> None:
                 parser.error(f"{model_option} supports --denoise only with --ltx-auto-split")
         _reject_options_of_other_restoration_backend(parser, args, restoration_backend)
 
-    _check_system(args)
     _configure_runtime(args)
+    _check_system(args)
     if args.frame_generation != "none" and not input_is_image:
         from jasna.accelerator import supports_frame_generation
         from jasna.session_factory import FRAME_GENERATION_NEEDS_RTX_40
@@ -1283,21 +713,17 @@ def _main() -> None:
     if input_is_dir:
         folder_images, folder_videos, folder_output_dir = _plan_folder(parser, args, input_video, output_video)
         if folder_images:
-            from jasna.image_restore import run_image_restoration_folder
-            run_image_restoration_folder(
+            _restore_images(
                 args,
-                folder_images,
-                folder_output_dir,
-                output_pattern=args.output_pattern,
-                progress_total=len(folder_images) + len(folder_videos),
+                [(image, folder_output_path(folder_output_dir, image, args.output_pattern)) for image in folder_images],
+                folder_total=len(folder_images) + len(folder_videos),
             )
         if not folder_videos:
             _run_post_export_action()
             return
 
     if input_is_image:
-        from jasna.image_restore import run_image_restoration
-        run_image_restoration(args)
+        _restore_images(args, [(input_video, output_video)], folder_total=None)
         _run_post_export_action()
         return
 
@@ -1327,7 +753,9 @@ def _main() -> None:
     from jasna.accelerator import device_context, vendor_for_device
 
     with _usage_errors(parser):
-        encoder_settings = _resolve_cli_encoder_settings(
+        from jasna.media.encoder_settings import resolve_custom_encoder_settings
+
+        encoder_settings = resolve_custom_encoder_settings(
             str(args.encoder_settings),
             cq=args.cq,
             codec=codec,
@@ -1351,13 +779,13 @@ def _main() -> None:
     _ensure_ltx_model(config, segment_job.splice_plan.segments if segment_job is not None else None)
     _ensure_dlss5_runtime(config)
 
-    from jasna.session_factory import build_job_pipeline, build_restoration_session, ltx_auto_split
+    from jasna.session_factory import build_job_pipeline, build_restoration_session, plan_job
 
     with device_context(config.device):
         session = build_restoration_session(config, log_callback=None)
 
         def make_pipeline(vid_input: Path, out_path: Path):
-            job = segment_job or ltx_auto_split(config, session, vid_input, out_path, progress_callback=None)
+            job = plan_job(config, session, vid_input, out_path, segment_job, progress_callback=None)
             return build_job_pipeline(config, session, vid_input, out_path, job, progress_callback=None)
 
         def output_path_for(vid: Path) -> Path:

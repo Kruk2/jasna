@@ -5,6 +5,22 @@ import sys
 from pathlib import Path
 
 
+def configure_process() -> None:
+    """Process-wide setup each entry point (CLI, GUI, engine compiler) runs before its first GPU
+    use: torch's noise filters, the frozen-build torch shims, the torch.compile cache and the
+    ROCm environment defaults."""
+    from jasna._frozen import patch_frozen_torch
+    from jasna._suppress_noise import install as install_noise_filters
+    from jasna.engine_paths import configure_torch_compile_cache
+
+    install_noise_filters()
+    patch_frozen_torch()
+    configure_torch_compile_cache()
+    from jasna.accelerator import configure_rocm_process_env
+
+    configure_rocm_process_env()
+
+
 def sanitize_sys_path_for_local_dev(package_dir: Path) -> None:
     package_dir = package_dir.resolve()
     repo_root = package_dir.parent.resolve()

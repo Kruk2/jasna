@@ -1,33 +1,21 @@
 import importlib.util
 import subprocess
 import sys
-from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
 
-from factories import FakeFrameGeneration, session_config, video_metadata
+from factories import FakeFrameGeneration, RecordingWriter, session_config, video_metadata
 from jasna.frame_generation import FrameGenerationWriter
 from jasna.media.splice import SmartRenderCompatibilityError
 from jasna.media.video_encoder import resolve_encoder_options, AcceleratorVendor
 from jasna.session_factory import FRAME_GENERATION_NEEDS_RTX_40, build_restoration_session, splice_source
 
 
-class _Writer:
-    def __init__(self):
-        self.written: list[tuple[int, int]] = []
-        self.finished = self.closed = False
-
-    def write(self, frame, pts):
-        self.written.append((int(frame.flatten()[0]), pts))
-
-    def finish(self):
-        self.finished = True
-
-    def close(self):
-        self.closed = True
+def _values(writer: RecordingWriter) -> list[tuple[int, int]]:
+    return [(int(frame.flatten()[0]), pts) for frame, pts in writer.written]
 
 
 def _frame(value: int) -> torch.Tensor:
@@ -38,8 +26,8 @@ def _generate_mean(previous, current):
     return ((previous.int() + current.int()) // 2).to(torch.uint8)
 
 
-def _write(pts: list[int]) -> tuple[_Writer, FakeFrameGeneration]:
-    writer, generate = _Writer(), FakeFrameGeneration(_generate_mean)
+def _write(pts: list[int]) -> tuple[RecordingWriter, FakeFrameGeneration]:
+    writer, generate = RecordingWriter(), FakeFrameGeneration(_generate_mean)
     frame_generation = FrameGenerationWriter(writer, generate)
     for value, frame_pts in zip(range(0, 100, 10), pts):
         frame_generation.write(_frame(value), frame_pts)
@@ -51,7 +39,7 @@ def _write(pts: list[int]) -> tuple[_Writer, FakeFrameGeneration]:
 def test_a_frame_is_generated_at_each_midpoint_and_the_last_frame_fills_its_interval():
     writer, generate = _write([0, 3, 6])
 
-    assert writer.written == [(0, 0), (5, 3), (10, 6), (15, 9), (20, 12), (20, 15)]
+    assert _values(writer) == [(0, 0), (5, 3), (10, 6), (15, 9), (20, 12), (20, 15)]
     assert generate.calls == 2
     assert writer.finished and writer.closed and generate.closed
 
@@ -65,18 +53,18 @@ def test_variable_frame_intervals_keep_their_midpoints():
 def test_one_frame_is_written_once():
     writer, generate = _write([5])
 
-    assert writer.written == [(0, 10)]
+    assert _values(writer) == [(0, 10)]
     assert generate.calls == 0
 
 
 def test_a_stopped_job_closes_without_the_held_frame():
-    writer, generate = _Writer(), FakeFrameGeneration(_generate_mean)
+    writer, generate = RecordingWriter(), FakeFrameGeneration(_generate_mean)
     frame_generation = FrameGenerationWriter(writer, generate)
     frame_generation.write(_frame(0), 0)
     frame_generation.write(_frame(10), 1)
     frame_generation.close()
 
-    assert writer.written == [(0, 0), (5, 1)]
+    assert _values(writer) == [(0, 0), (5, 1)]
     assert not writer.finished and writer.closed and generate.closed
 
 

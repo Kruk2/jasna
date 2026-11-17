@@ -15,28 +15,19 @@ def _make_raw_crop(value: int = 0) -> RawCrop:
 
 
 class TestCropBufferSplitOverlap:
-    def test_split_creates_child_with_overlap_crops(self):
+    @pytest.mark.parametrize(
+        ("parent_frames", "overlap_len", "start"), [(5, 2, 3), (3, 3, 0)], ids=["tail", "full-overlap"]
+    )
+    def test_split_creates_child_with_overlap_crops(self, parent_frames, overlap_len, start):
         parent = CropBuffer(track_id=0, start_frame=0)
-        for i in range(5):
+        for i in range(parent_frames):
             parent.add(_make_raw_crop(value=i))
 
-        child = parent.split_overlap(overlap_len=2, new_track_id=1, new_start_frame=3)
+        child = parent.split_overlap(overlap_len=overlap_len, new_track_id=1, new_start_frame=start)
 
-        assert child.track_id == 1
-        assert child.start_frame == 3
-        assert child.frame_count == 2
-        assert child.crops[0].crop.unique().item() == 3
-        assert child.crops[1].crop.unique().item() == 4
-
-    def test_split_does_not_modify_parent(self):
-        parent = CropBuffer(track_id=0, start_frame=0)
-        for i in range(5):
-            parent.add(_make_raw_crop(value=i))
-
-        child = parent.split_overlap(overlap_len=2, new_track_id=1, new_start_frame=3)
-
-        assert parent.frame_count == 5
-        assert child.frame_count == 2
+        assert (child.track_id, child.start_frame, child.frame_count) == (1, start, overlap_len)
+        assert [crop.crop.unique().item() for crop in child.crops] == list(range(parent_frames - overlap_len, parent_frames))
+        assert parent.frame_count == parent_frames
 
     def test_split_child_is_shallow_copy(self):
         parent = CropBuffer(track_id=0, start_frame=0)
@@ -57,14 +48,6 @@ class TestCropBufferSplitOverlap:
         child.add(_make_raw_crop(value=99))
 
         assert parent.frame_count == 3
-        assert child.frame_count == 3
-
-    def test_split_full_overlap(self):
-        parent = CropBuffer(track_id=0, start_frame=0)
-        for i in range(3):
-            parent.add(_make_raw_crop(value=i))
-
-        child = parent.split_overlap(overlap_len=3, new_track_id=1, new_start_frame=0)
         assert child.frame_count == 3
 
 

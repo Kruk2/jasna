@@ -21,6 +21,8 @@ from jasna.media.probe import VideoMetadata
 log = logging.getLogger(__name__)
 
 _FORWARD_SEEK_THRESHOLD = 5
+MAX_SEGMENTS_AHEAD = 3
+"""Segments the encoder may run ahead of the player."""
 SEGMENT_WAIT_SECONDS = 30.0
 
 _PAGE_HTML = """\
@@ -130,6 +132,13 @@ class SegmentTimeline:
         return math.floor(Fraction(str(seconds)) * self.fps / self.frames_per_segment)
 
 
+def clear_segments(directory: Path) -> None:
+    """Delete the HLS segments and playlists in ``directory``."""
+    for pattern in ("*.ts", "*.m3u8"):
+        for path in directory.glob(pattern):
+            path.unlink(missing_ok=True)
+
+
 def _generate_vod_playlist(timeline: SegmentTimeline, start_segment: int = 0) -> tuple[str, int]:
     segment_count = timeline.segment_count
     first = max(0, min(start_segment, segment_count - 1))
@@ -201,8 +210,8 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
         if path == "/status":
             streaming = self._state.is_loaded
             resp: dict = {"streaming": streaming}
-            if streaming and self._state._current_video_path is not None:
-                resp["path"] = str(self._state._current_video_path)
+            if streaming and self._state.current_video_path is not None:
+                resp["path"] = str(self._state.current_video_path)
             self._send_json(resp)
             return
 
@@ -300,7 +309,7 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
                 return
             same_video = (
                 self._state.is_loaded
-                and self._state._current_video_path == Path(video_path)
+                and self._state.current_video_path == Path(video_path)
             )
             if same_video:
                 if start > 0:
@@ -378,7 +387,6 @@ class HlsStreamingServer:
         self,
         segment_duration: float = 4.0,
         port: int = 8765,
-        max_segments_ahead: int = 3,
     ):
         self.segment_duration = float(segment_duration)
         self.port = int(port)
@@ -394,7 +402,7 @@ class HlsStreamingServer:
         self._initial_start_seconds = 0.0
         self.initial_start_segment = 0
         self.playback_epoch = 0
-        self._current_video_path: Path | None = None
+        self.current_video_path: Path | None = None
         self._video_selected = threading.Event()
         self.video_change = threading.Event()
         self._first_segment_ready = threading.Event()
@@ -403,7 +411,7 @@ class HlsStreamingServer:
         self.seek_requested = threading.Event()
         self.seek_target_segment: int = -1
 
-        self._max_segments_kept: int = 2 * max_segments_ahead
+        self._max_segments_kept: int = 2 * MAX_SEGMENTS_AHEAD
 
         self._demand_lock = threading.Condition()
         self._highest_requested_segment: int = -1
@@ -429,7 +437,7 @@ class HlsStreamingServer:
         self._initial_start_seconds = max(0.0, start)
         with self._seek_lock:
             self.playback_epoch += 1
-        self._current_video_path = path
+        self.current_video_path = path
         with self._demand_lock:
             if self.metadata is not None:
                 self.stop_current()
@@ -470,10 +478,7 @@ class HlsStreamingServer:
         self._finished = False
         self.video_change.clear()
         if self.segments_dir:
-            for f in self.segments_dir.glob("*.ts"):
-                f.unlink(missing_ok=True)
-            for f in self.segments_dir.glob("*.m3u8"):
-                f.unlink(missing_ok=True)
+            clear_segments(self.segments_dir)
 
     @property
     def playlist_text(self) -> str:
@@ -655,6 +660,7 @@ class HlsStreamingServer:
 
         handler = partial(_StreamRequestHandler, server_state=self)
         self._httpd = _ThreadingHTTPServer(("0.0.0.0", self.port), handler)
+        self.port = self._httpd.server_address[1]
         self._thread = threading.Thread(
             target=self._httpd.serve_forever,
             name="HlsHttpServer",
@@ -676,12 +682,7 @@ class HlsStreamingServer:
 
     def _cleanup_segments(self) -> None:
         if self.segments_dir and self.segments_dir.exists():
-            for f in self.segments_dir.iterdir():
-                try:
-                    f.unlink()
-                except OSError:
-                    pass
-            try:
-                self.segments_dir.rmdir()
-            except OSError:
-                pass
+            shutil.rmtree(
+                self.segments_dir,
+                onexc=lambda _function, path, error: log.warning("Could not remove %s: %s", path, error),
+            )

@@ -1,51 +1,32 @@
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
 
-import pytest
-
-from jasna.image_restore import run_image_restoration, run_image_restoration_folder
-from jasna.main import build_parser
+from factories import cli_args, cli_image_models, run_cli, write_test_image
 
 
-def test_image_folder_progress_and_output_pattern(tmp_path: Path, capsys):
-    image = tmp_path / "photo.png"
-    out_dir = tmp_path / "out"
+def test_image_folder_restores_every_image_with_progress_and_output_pattern(tmp_path: Path, capsys):
+    folder = tmp_path / "in"
+    folder.mkdir()
+    for name in ("a.png", "b.jpg"):
+        write_test_image(folder / name)
+    model_args = cli_args(tmp_path)[4:]
 
-    def run_jobs(_args, jobs, progress_callback=None):
-        assert jobs == [(image, out_dir / "photo_restored.png")]
-        assert progress_callback is not None
-        progress_callback(1, jobs[0][0], jobs[0][1])
+    with cli_image_models():
+        run_cli([
+            "--input", str(folder), "--output", str(tmp_path / "out"),
+            "--output-pattern", "{original}_restored.mp4", *model_args,
+        ])
 
-    with patch("jasna.image_restore._run_image_jobs", side_effect=run_jobs):
-        run_image_restoration_folder(
-            SimpleNamespace(),
-            [image],
-            out_dir,
-            output_pattern="{original}_restored.mp4",
-            progress_offset=2,
-            progress_total=4,
-        )
-
-    assert "[3/4] Processing photo.png -> photo_restored.png" in capsys.readouterr().out
+    assert sorted(path.name for path in (tmp_path / "out").iterdir()) == ["a_restored.png", "b_restored.jpg"]
+    printed = capsys.readouterr().out
+    assert "[1/2] Processing a.png -> a_restored.png" in printed
+    assert "[2/2] Processing b.jpg -> b_restored.jpg" in printed
 
 
-@pytest.mark.parametrize("folder", [False, True])
-def test_image_jobs_use_current_cli_arguments_without_late_activation(tmp_path, folder):
-    pytest.importorskip("jasna.protection.license_store")
-    image = tmp_path / "photo.png"
-    output = tmp_path / "restored.png"
-    args = build_parser().parse_args([
-        "--input", str(image), "--output", str(output), "--device", "cpu",
-    ])
-    with (
-        patch("jasna.protection.license_store.set_license") as activate,
-        patch("jasna.restorer.sd15_download.ensure_sd15_bundle", side_effect=RuntimeError("model setup reached")) as prepare,
-        pytest.raises(RuntimeError, match="model setup reached"),
-    ):
-        if folder:
-            run_image_restoration_folder(args, [image], tmp_path / "out")
-        else:
-            run_image_restoration(args)
-    prepare.assert_called_once()
-    activate.assert_not_called()
+def test_a_single_image_writes_one_file_per_variant(tmp_path: Path):
+    image = write_test_image(tmp_path / "photo.png")
+    model_args = cli_args(tmp_path)[4:]
+
+    with cli_image_models():
+        run_cli(["--input", str(image), "--output", str(tmp_path / "restored.png"), "--sd15-variants", "2", *model_args])
+
+    assert (tmp_path / "restored_v1.png").is_file() and (tmp_path / "restored_v2.png").is_file()

@@ -4,7 +4,6 @@ import logging
 import inspect
 import linecache
 import os
-from contextlib import nullcontext
 from pathlib import Path
 import subprocess
 import sys
@@ -92,17 +91,8 @@ def test_importing_pipeline_does_not_patch_frozen_torch():
             sys.modules.pop("jasna.pipeline", None)
 
 
-@pytest.fixture
-def root_log_level():
-    """The CLI sets the root log level for its whole process; keep it from reaching later tests."""
-    level = logging.getLogger().level
-    yield
-    logging.getLogger().setLevel(level)
-
-
-def test_cli_main_patches_frozen_torch(tmp_path, root_log_level):
-    with (patch("jasna._frozen.patch_frozen_torch") as spy,
-          patch("jasna.accelerator.device_context", return_value=nullcontext())):
+def test_cli_main_patches_frozen_torch(tmp_path):
+    with patch("jasna._frozen.patch_frozen_torch") as spy:
         run_cli(cli_args(tmp_path))
     spy.assert_called()
 

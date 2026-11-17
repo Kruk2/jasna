@@ -9,18 +9,26 @@ import sys
 import pytest
 
 
-@pytest.fixture(params=["absent", "empty"])
-def public_checkout(tmp_path, request):
-    source = Path(__file__).parents[1] / "jasna"
-    shutil.copytree(source, tmp_path / "jasna", ignore=shutil.ignore_patterns("protection", "__pycache__"))
+def _copy_public_source(root: Path) -> Path:
+    shutil.copytree(
+        Path(__file__).parents[1] / "jasna", root / "jasna", ignore=shutil.ignore_patterns("protection", "__pycache__")
+    )
+    return root
+
+
+@pytest.fixture(scope="module", params=["absent", "empty"])
+def public_checkout(tmp_path_factory, request):
+    """The public source without the private protection package (absent, or an empty folder).
+    One copy serves every test of this module: the tests only read it and keep their settings in their own ``tmp_path``."""
+    root = _copy_public_source(tmp_path_factory.mktemp(f"public-{request.param}"))
     if request.param == "empty":
-        (tmp_path / "jasna" / "protection").mkdir()
-    return tmp_path
+        (root / "jasna" / "protection").mkdir()
+    return root
 
 
-def run_public(checkout, script):
-    environment = {**os.environ, "PYTHONPATH": str(checkout), "APPDATA": str(checkout / "config"),
-                   "XDG_CONFIG_HOME": str(checkout / "config"), "CUDA_VISIBLE_DEVICES": "", "PYTHONIOENCODING": "utf-8"}
+def run_public(checkout, config_dir, script):
+    environment = {**os.environ, "PYTHONPATH": str(checkout), "APPDATA": str(config_dir),
+                   "XDG_CONFIG_HOME": str(config_dir), "CUDA_VISIBLE_DEVICES": "", "PYTHONIOENCODING": "utf-8"}
     environment.pop("JASNA_MAIN_PID", None)
     prefix = """
 import sys
@@ -31,8 +39,8 @@ sys.meta_path[:] = [finder for finder in sys.meta_path
                           env=environment, capture_output=True, encoding="utf-8", timeout=30)
 
 
-def test_public_startup_imports_and_license_status(public_checkout):
-    result = run_public(public_checkout, """
+def test_public_startup_imports_and_license_status(public_checkout, tmp_path):
+    result = run_public(public_checkout, tmp_path, """
 from jasna.gui import components, activation_worker
 from jasna import session_factory, engine_compiler, image_restore
 from jasna.license_api import protection_available
@@ -51,8 +59,8 @@ assert 'jasna.protection.lease' not in sys.modules
 
 
 @pytest.mark.parametrize("argument", ["--help", "--version"])
-def test_public_cli_help_and_version(public_checkout, argument):
-    result = run_public(public_checkout, f"""
+def test_public_cli_help_and_version(public_checkout, argument, tmp_path):
+    result = run_public(public_checkout, tmp_path, f"""
 import runpy
 sys.argv = ['jasna', {argument!r}]
 runpy.run_module('jasna', run_name='__main__')
@@ -61,8 +69,8 @@ runpy.run_module('jasna', run_name='__main__')
     assert result.stdout.strip()
 
 
-def test_public_activation_reports_unavailable_without_traceback(public_checkout):
-    result = run_public(public_checkout, """
+def test_public_activation_reports_unavailable_without_traceback(public_checkout, tmp_path):
+    result = run_public(public_checkout, tmp_path, """
 import runpy
 sys.argv = ['jasna', '--license-code', 'fake']
 runpy.run_module('jasna', run_name='__main__')
@@ -84,8 +92,8 @@ for operation in operations:
 """
 
 
-def test_public_encrypted_models_fail_before_opening_data(public_checkout):
-    result = run_public(public_checkout, """
+def test_public_encrypted_models_fail_before_opening_data(public_checkout, tmp_path):
+    result = run_public(public_checkout, tmp_path, """
 from pathlib import Path
 from jasna.ltx.model_files import LtxModelFiles, open_tensors
 from jasna.restorer.sd15_inpaint_restorer import _read_checkpoint
@@ -100,19 +108,19 @@ assert not read_install_state(Path('missing'), 'auto', 'auto').downloadable
     assert result.returncode == 0, result.stderr
 
 
-def test_public_unet4x_fails_before_opening_data(public_checkout):
+def test_public_unet4x_fails_before_opening_data(public_checkout, tmp_path):
     pytest.importorskip("tensorrt")
-    result = run_public(public_checkout, """
+    result = run_public(public_checkout, tmp_path, """
 from jasna.restorer.unet4x_secondary_restorer import compile_unet4x_engine, Unet4xSecondaryRestorer
 operations = (lambda: compile_unet4x_engine('cpu'), lambda: Unet4xSecondaryRestorer(device='cpu'))
 """ + _ASSERT_EVERY_OPERATION_NEEDS_PROTECTION)
     assert result.returncode == 0, result.stderr
 
 
-def test_public_activation_dialog_stays_disabled(public_checkout):
+def test_public_activation_dialog_stays_disabled(public_checkout, tmp_path):
     if sys.platform == "linux" and not os.environ.get("DISPLAY"):
         pytest.skip("GUI check needs a display")
-    result = run_public(public_checkout, """
+    result = run_public(public_checkout, tmp_path, """
 import customtkinter as ctk
 from jasna.gui.components import LicenseDialog
 from jasna.gui.locales import t
@@ -128,8 +136,8 @@ root.destroy()
     assert result.returncode == 0, result.stderr
 
 
-def test_frozen_missing_protection_cannot_use_public_fallback(public_checkout):
-    result = run_public(public_checkout, """
+def test_frozen_missing_protection_cannot_use_public_fallback(public_checkout, tmp_path):
+    result = run_public(public_checkout, tmp_path, """
 sys.frozen = True
 from jasna.license_api import protection_available
 from jasna.gui.activation_worker import start_license_info
@@ -143,11 +151,12 @@ assert info is None and isinstance(error, ImportError), results
     assert result.returncode == 0, result.stderr
 
 
-def test_installed_broken_protection_keeps_its_error(public_checkout):
-    protection = public_checkout / "jasna" / "protection"
-    protection.mkdir(exist_ok=True)
+def test_installed_broken_protection_keeps_its_error(tmp_path):
+    checkout = _copy_public_source(tmp_path / "checkout")
+    protection = checkout / "jasna" / "protection"
+    protection.mkdir()
     (protection / "__init__.py").write_text("raise RuntimeError('provider initialization failed')\n")
-    result = run_public(public_checkout, """
+    result = run_public(checkout, tmp_path / "config", """
 from jasna.license_api import protection_available
 from jasna.gui.activation_worker import start_license_info
 assert protection_available()

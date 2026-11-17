@@ -13,10 +13,11 @@ from jasna.accelerator import AcceleratorVendor
 from jasna.job_resume import ResumeJob
 from jasna.ltx.model_files import LtxModelFiles
 from jasna.media.splice import KeyframeIndex, SmartRenderCompatibilityError, SplicePlan, SpliceSpan
-from jasna.pipeline import Pipeline
+from jasna.pipeline import Pipeline, smart_render_steps
 from jasna.segments import SegmentRange, SegmentRestoration
 
 LTX = SegmentRestoration("ltx", 42)
+STANDARD = SegmentRestoration("basicvsrpp", None)
 METADATA = video_metadata(fps=30, num_frames=240, profile="Main")
 FOUR_SPANS = (
     SpliceSpan("copy", 0, 60),
@@ -28,14 +29,7 @@ TRIAL_FILES = LtxModelFiles.placeholder("distilled2", fast=False)
 ONE_RENDER = (SpliceSpan("copy", 0, 60), SpliceSpan("render", 60, 120, ((75, 90),)), SpliceSpan("copy", 120, 240))
 
 
-@pytest.fixture(autouse=True)
-def _cpu_gpu_memory():
-    """The pipelines here run on the CPU, which has no GPU memory to sample."""
-    with (
-        patch("jasna.pipeline.device_used_bytes", return_value=0),
-        patch("jasna.pipeline.device_free_bytes", return_value=0),
-    ):
-        yield
+pytestmark = pytest.mark.usefixtures("cpu_gpu_memory")
 
 
 def _segment_pipeline(tmp_path, segments, spans, *, max_b_frames=0, **overrides) -> Pipeline:
@@ -83,7 +77,6 @@ def _smart_run(vendor=AcceleratorVendor.NVIDIA):
         patch("jasna.pipeline.normalize_fragment"),
         patch("jasna.pipeline.concatenate_fragments") as concatenate,
         patch("jasna.pipeline.mux_final_output") as mux,
-        patch.object(Pipeline, "_run_full") as run_full,
         patch.object(Pipeline, "_run_pass") as run_pass,
         patch.object(Pipeline, "_run_ltx_spans") as run_ltx_spans,
         patch.object(Pipeline, "ltx_segment_render", return_value=MagicMock(large_canvas=True)),
@@ -93,7 +86,7 @@ def _smart_run(vendor=AcceleratorVendor.NVIDIA):
         run_pass.side_effect = lambda **_kwargs: Path(encoder.call_args.args[0]).write_bytes(b"restored")
         yield dict(
             encoder=encoder, progressbar=progressbar, copy_fragment=copy_fragment, concatenate=concatenate,
-            mux=mux, run_full=run_full, run_pass=run_pass, run_ltx_spans=run_ltx_spans, reencode_span=reencode_span,
+            mux=mux, run_pass=run_pass, run_ltx_spans=run_ltx_spans, reencode_span=reencode_span,
         )
 
 
@@ -160,6 +153,41 @@ def test_smart_run_stops_at_a_span_that_wrote_no_frames(tmp_path) -> None:
     mocks["mux"].assert_not_called()
 
 
+def _steps(segments, spans, *, codec="h264", max_b_frames=0, vendor=AcceleratorVendor.NVIDIA, default=STANDARD):
+    plan = SplicePlan(
+        index=KeyframeIndex((0, 60, 120, 180), Fraction(1, 30), 0, 240, max_b_frames=max_b_frames),
+        spans=spans,
+        segments=segments,
+    )
+    return smart_render_steps(plan, METADATA, default, codec, vendor)
+
+
+def test_smart_render_steps_split_the_spans_between_ltx_and_the_standard_pass() -> None:
+    steps = _steps((SegmentRange(2.5, 3.0), SegmentRange(6.5, 7.0, LTX)), FOUR_SPANS)
+
+    assert steps.segments_of == {
+        FOUR_SPANS[1]: (SegmentRange(2.5, 3.0, STANDARD),),
+        FOUR_SPANS[3]: (SegmentRange(6.5, 7.0, LTX),),
+    }
+    assert (steps.ltx_spans, steps.standard_spans) == (frozenset({FOUR_SPANS[3]}), frozenset({FOUR_SPANS[1]}))
+    assert (steps.standard_frames, steps.ltx_frames, steps.full_reencode_ranges) == (60, 60, None)
+
+
+def test_ranges_without_a_model_follow_the_job_model() -> None:
+    steps = _steps((SegmentRange(2.5, 3.0),), ONE_RENDER, default=SegmentRestoration("ltx", 5))
+
+    assert steps.segments_of == {ONE_RENDER[1]: (SegmentRange(2.5, 3.0, SegmentRestoration("ltx", 5)),)}
+    assert (steps.ltx_spans, steps.standard_spans) == (frozenset({ONE_RENDER[1]}), frozenset())
+
+
+def test_a_render_span_resolving_to_two_models_is_rejected() -> None:
+    segments = (SegmentRange(2.2, 2.4), SegmentRange(3.0, 3.2, STANDARD))
+    spans = (SpliceSpan("copy", 0, 60), SpliceSpan("render", 60, 120, ((66, 72), (90, 96))), SpliceSpan("copy", 120, 240))
+
+    with pytest.raises(SmartRenderCompatibilityError):
+        _steps(segments, spans, default=SegmentRestoration("ltx", 5))
+
+
 @pytest.mark.parametrize(
     ("vendor", "max_b_frames", "full_reencode"),
     [
@@ -169,18 +197,12 @@ def test_smart_run_stops_at_a_span_that_wrote_no_frames(tmp_path) -> None:
         (AcceleratorVendor.NVIDIA, 8, True),
     ],
 )
-def test_smart_run_reencodes_everything_only_when_h264_exceeds_the_encoder_b_frame_cap(
-    tmp_path, vendor, max_b_frames, full_reencode
+def test_everything_is_encoded_again_only_when_h264_exceeds_the_encoder_b_frame_cap(
+    vendor, max_b_frames, full_reencode
 ) -> None:
-    pipeline = _smart_pipeline(tmp_path, (SegmentRange(2.5, 3.0),), ONE_RENDER, max_b_frames=max_b_frames)
+    steps = _steps((SegmentRange(2.5, 3.0),), ONE_RENDER, max_b_frames=max_b_frames, vendor=vendor)
 
-    with _smart_run(vendor) as mocks:
-        pipeline._run_smart(METADATA)
-
-    assert mocks["run_full"].called is full_reencode
-    assert mocks["run_pass"].called is not full_reencode
-    if full_reencode:
-        assert mocks["run_full"].call_args.kwargs["effect_ranges"] == ((75, 90),)
+    assert steps.full_reencode_ranges == (((75, 90),) if full_reencode else None)
 
 
 def test_mixed_job_batches_ltx_spans_and_keeps_fragments_in_span_order(tmp_path) -> None:
@@ -235,30 +257,10 @@ def test_ltx_estimate_on_variable_frame_rate_video_uses_the_mean_frame_rate(tmp_
     assert mocks["run_pass"].call_args.kwargs["output_frame_count"] == 60
 
 
-def test_segments_on_the_job_model_follow_an_ltx_job(tmp_path) -> None:
-    pipeline = _smart_pipeline(tmp_path, (SegmentRange(2.5, 3.0),), ONE_RENDER, restoration_model_name="ltx")
-
-    with _smart_run() as mocks:
-        pipeline._run_smart(METADATA)
-
-    mocks["run_pass"].assert_not_called()
-    (_, _, _, ltx_spans, _, _), _ = mocks["run_ltx_spans"].call_args
-    assert ltx_spans[0][1] == (SegmentRange(2.5, 3.0, SegmentRestoration("ltx", 5)),)
-
-
-def test_a_render_span_resolving_to_two_models_is_rejected(tmp_path) -> None:
-    segments = (SegmentRange(2.2, 2.4), SegmentRange(3.0, 3.2, SegmentRestoration("basicvsrpp", None)))
-    spans = (SpliceSpan("copy", 0, 60), SpliceSpan("render", 60, 120, ((66, 72), (90, 96))), SpliceSpan("copy", 120, 240))
-    pipeline = _smart_pipeline(tmp_path, segments, spans, restoration_model_name="ltx")
-
-    with _smart_run(), pytest.raises(SmartRenderCompatibilityError):
-        pipeline._run_smart(METADATA)
-
-
 @pytest.mark.parametrize("look", [{"sharpen_strength": 0.4}, {"lut_path": "look.cube"}], ids=["sharpen", "lut"])
 def test_a_job_with_a_look_encodes_the_parts_between_ranges_again_so_the_look_covers_them(tmp_path, look) -> None:
     if "lut_path" in look:
-        (tmp_path / look["lut_path"]).write_bytes(b"0 0 0\n")
+        (tmp_path / look["lut_path"]).write_text("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n")
         look = {"lut_path": str(tmp_path / look["lut_path"])}
     pipeline = _smart_pipeline(tmp_path, (SegmentRange(2.5, 3.0), SegmentRange(6.5, 7.0, LTX)), FOUR_SPANS, **look)
     pipeline.splice_plan = pipeline.splice_plan.reencoding_copies()
@@ -289,7 +291,7 @@ def test_reencoded_span_writes_every_decoded_frame_and_closes_its_writer(tmp_pat
     batches = [(torch.zeros(2, 3, 4, 4), [60, 61]), (torch.zeros(1, 3, 4, 4), [62])]
     writer, progress = MagicMock(), MagicMock()
 
-    with patch("jasna.ltx.restore.video_frames", return_value=lambda: iter(batches)) as frames:
+    with patch("jasna.ltx.spans.video_frames", return_value=lambda: iter(batches)) as frames:
         pipeline._reencode_span(METADATA, pipeline.splice_plan.index, SpliceSpan("copy", 60, 120), writer, progress)
 
     assert (frames.call_args.kwargs["seek_ts"], frames.call_args.kwargs["end_pts"]) == (2.0, 120)
@@ -297,33 +299,6 @@ def test_reencoded_span_writes_every_decoded_frame_and_closes_its_writer(tmp_pat
     assert [update.args[0] for update in progress.update.call_args_list] == [2, 1]
     writer.finish.assert_called_once_with()
     writer.close.assert_called_once_with()
-
-
-@pytest.mark.parametrize(
-    ("model", "segments", "expected"),
-    [
-        ("basicvsrpp", None, "_run_full"),
-        ("ltx", None, "_run_ltx"),
-        ("ltx", (SegmentRange(0.01, 0.02),), "_run_smart"),
-    ],
-)
-def test_run_routes_by_the_job_model_and_segments(tmp_path, model, segments, expected) -> None:
-    pipeline = make_pipeline(
-        restoration_model_name=model, segments=segments, ltx_files=TRIAL_FILES,
-        input_video=tmp_path / "input.mp4", output_video=tmp_path / "output.mp4",
-    )
-    pipeline.input_video.touch()
-
-    with (
-        patch("jasna.pipeline.get_video_meta_data", return_value=video_metadata()),
-        patch.object(Pipeline, "_run_full") as run_full,
-        patch.object(Pipeline, "_run_ltx") as run_ltx,
-        patch.object(Pipeline, "_run_smart") as run_smart,
-    ):
-        pipeline.run()
-
-    ran = {"_run_full": run_full, "_run_ltx": run_ltx, "_run_smart": run_smart}
-    assert [name for name, method in ran.items() if method.called] == [expected]
 
 
 def test_ltx_smart_resume_keeps_completed_fragments_and_retries_partial_span(tmp_path):

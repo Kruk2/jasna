@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import logging
-from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 from jasna.tracking.blending import dilate_ellipse
+from jasna.tracking.clip_tracker import iou_groups
+
+if TYPE_CHECKING:
+    from jasna.session_factory import ImageSession
 
 logger = logging.getLogger(__name__)
 
@@ -49,42 +53,6 @@ def clamp_strength(strength: float) -> float:
     if s > SD15_MAX_STRENGTH:
         logger.warning("SD 1.5 strength %g is above the maximum; using %g", s, SD15_MAX_STRENGTH)
     return min(s, SD15_MAX_STRENGTH)
-
-
-def _iou(a: np.ndarray, b: np.ndarray) -> float:
-    x1 = max(a[0], b[0])
-    y1 = max(a[1], b[1])
-    x2 = min(a[2], b[2])
-    y2 = min(a[3], b[3])
-    inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
-    area_a = (a[2] - a[0]) * (a[3] - a[1])
-    area_b = (b[2] - b[0]) * (b[3] - b[1])
-    union = area_a + area_b - inter
-    return inter / union if union > 0 else 0.0
-
-
-def group_boxes_by_iou(boxes: np.ndarray, iou_threshold: float) -> list[list[int]]:
-    """Union-find grouping of overlapping boxes (ported from crop_utils)."""
-    n = len(boxes)
-    parent = list(range(n))
-
-    def find(x: int) -> int:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    for i in range(n):
-        for j in range(i + 1, n):
-            if _iou(boxes[i], boxes[j]) >= iou_threshold:
-                pi, pj = find(i), find(j)
-                if pi != pj:
-                    parent[pi] = pj
-
-    groups: dict[int, list[int]] = {}
-    for i in range(n):
-        groups.setdefault(find(i), []).append(i)
-    return list(groups.values())
 
 
 def variant_output_paths(base: Path, num_variants: int) -> list[Path]:
@@ -133,7 +101,7 @@ def prepare_image_restore(
         return PreparedImageRestore(img_chw_u8=img_chw_u8.copy(), img_rgb=img_rgb, groups=[])
 
     groups = []
-    for indices in group_boxes_by_iou(boxes, SD15_IOU_THRESHOLD):
+    for indices in iou_groups(boxes, SD15_IOU_THRESHOLD, inclusive=True):
         group_mask = _build_group_mask(masks, indices, h, w, SD15_EXPAND_PIXELS)
         merged = _union_bbox(boxes, indices)
         crop_bbox = compute_crop_bbox(merged, w, h, SD15_RESTORATION_SIZE)
@@ -222,86 +190,39 @@ def restore_image(
     return outputs
 
 
-def run_image_restoration(args) -> None:
-    input_path = Path(args.input)
-    output_base = Path(args.output) if args.output else input_path.with_stem(input_path.stem + "_out")
-    _run_image_jobs(args, [(input_path, output_base)])
+@dataclass(frozen=True)
+class ImageRestoreOptions:
+    """How each still image is restored; ``strength`` is clamped and ``variants`` is at least 1."""
+
+    steps: int
+    strength: float
+    seed: int
+    variants: int
+    freeu: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "strength", clamp_strength(self.strength))
+        object.__setattr__(self, "variants", max(1, int(self.variants)))
 
 
-def run_image_restoration_folder(
-    args,
-    input_paths: list[Path],
-    output_dir: Path,
-    *,
-    output_pattern: str | None = None,
-    progress_offset: int = 0,
-    progress_total: int | None = None,
-) -> None:
-    """Restore every image in ``input_paths``, writing into ``output_dir`` (one
-    shared model load for the whole batch)."""
-    from jasna.media.media_files import folder_output_path
-
-    jobs = [(Path(p), folder_output_path(output_dir, p, output_pattern)) for p in input_paths]
-    total = progress_total or len(jobs)
-
-    def progress(i: int, input_path: Path, output_base: Path) -> None:
-        print(f"[{progress_offset + i}/{total}] Processing {input_path.name} -> {output_base.name}")
-
-    _run_image_jobs(args, jobs, progress_callback=progress)
-
-
-def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None) -> None:
-    from jasna.engine_paths import SD15_DIR
+def restore_image_file(
+    session: ImageSession, options: ImageRestoreOptions, input_path: Path, output_base: Path
+) -> list[Path]:
+    """Restore ``input_path`` into ``output_base`` (``name_vN`` files for several variants);
+    returns the files written."""
+    from jasna.accelerator import device_context
     from jasna.media import image_io
-    from jasna.mosaic.detection_registry import resolve_detection_model
-    from jasna.main import batch_size_from_args
-    from jasna.session_factory import build_compiled_detection_model
-    from jasna.restorer.sd15_download import ensure_sd15_bundle
-    from jasna.restorer.sd15_inpaint_restorer import DEFAULT_FREEU, Sd15InpaintRestorer
+    from jasna.restorer.sd15_inpaint_restorer import DEFAULT_FREEU
 
-    if not jobs:
-        return
-
-    device = torch.device(str(args.device))
-    fp16 = bool(args.fp16)
-    batch_size = batch_size_from_args(args)
-
-    ensure_sd15_bundle(SD15_DIR)
-
-    detection_model_name, detection_model_path, score_threshold = resolve_detection_model(
-        str(args.detection_model), str(args.detection_model_path), args.detection_score_threshold
-    )
-
-    num_variants = max(1, int(args.sd15_variants))
-    freeu = dict(DEFAULT_FREEU) if bool(args.sd15_freeu) else None
-    strength = clamp_strength(args.sd15_strength)
-
-    detector = build_compiled_detection_model(
-        detection_model_name,
-        detection_model_path,
-        device=device,
-        batch_size=batch_size,
-        fp16=fp16,
-        score_threshold=score_threshold,
-        log_callback=None,
-    )
-    restorer = Sd15InpaintRestorer(SD15_DIR, device, fp16)
-    try:
-        for i, (input_path, output_base) in enumerate(jobs, start=1):
-            logger.info("[%d/%d] Processing %s", i, len(jobs), input_path.name)
-            if progress_callback is not None:
-                progress_callback(i, input_path, output_base)
-            img = image_io.read_image_rgb_chw(input_path)
-            with torch.cuda.device(device) if device.type == "cuda" else nullcontext():
-                outputs = restore_image(
-                    img, detector, restorer,
-                    device=device, fp16=fp16,
-                    steps=int(args.sd15_steps), strength=strength, seed=int(args.sd15_seed),
-                    num_variants=num_variants, freeu=freeu,
-                )
-            for path, out in zip(variant_output_paths(output_base, num_variants), outputs):
-                image_io.write_image_rgb_chw(path, out)
-                logger.info("Wrote %s", path)
-    finally:
-        detector.close()
-        restorer.close()
+    image = image_io.read_image_rgb_chw(input_path)
+    with device_context(session.device):
+        outputs = restore_image(
+            image, session.detector, session.restorer,
+            device=session.device, fp16=session.fp16,
+            steps=options.steps, strength=options.strength, seed=options.seed,
+            num_variants=options.variants, freeu=dict(DEFAULT_FREEU) if options.freeu else None,
+        )
+    paths = variant_output_paths(output_base, options.variants)
+    for path, output in zip(paths, outputs):
+        image_io.write_image_rgb_chw(path, output)
+    return paths

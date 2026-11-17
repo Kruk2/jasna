@@ -19,16 +19,15 @@ from jasna.frame_queue import FrameQueue
 from jasna.media.probe import VideoMetadata
 from jasna.media.video_decoder import VideoReader
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
-from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryLoopStats, _SENTINEL
+from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryLoopStats, SENTINEL
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
 from jasna.pipeline_timing import LoopTimer
 from jasna.progressbar import Progressbar
-from jasna.restorer import RestorationPipeline
+from jasna.restorer.restoration_pipeline import RestorationPipeline
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.session_config import DecodeBackendName
 from jasna.tracking.clip_tracker import ClipTracker
 from jasna.tracking.scene_detector import SceneCutDetector
-from jasna.vr180 import StereoLayout
 from jasna.vram_offloader import VramOffloader
 
 log = logging.getLogger(__name__)
@@ -134,8 +133,8 @@ def decode_detect_loop(
     finally:
         log.info(timer.summary())
         log.debug("[decode] thread exiting")
-        ctx.clip_queue.put(_SENTINEL)
-        ctx.metadata_queue.put(_SENTINEL)
+        ctx.clip_queue.put(SENTINEL)
+        ctx.metadata_queue.put(SENTINEL)
 
 
 def _detect_batches(
@@ -149,13 +148,13 @@ def _detect_batches(
     progress: Progressbar | None,
 ) -> None:
     tracker = ClipTracker(
-        max_clip_size=pipeline.max_clip_size,
-        temporal_overlap=pipeline.temporal_overlap,
-        max_detection_gap=pipeline.max_detection_gap,
+        max_clip_size=pipeline.config.max_clip_size,
+        temporal_overlap=pipeline.config.temporal_overlap,
+        max_detection_gap=pipeline.config.max_detection_gap,
     )
-    scene_detector = SceneCutDetector() if pipeline.scene_detection else None
-    discard_margin = pipeline.temporal_overlap
-    blend_frames = pipeline.temporal_overlap // 3
+    scene_detector = SceneCutDetector() if pipeline.config.scene_detection else None
+    discard_margin = pipeline.config.temporal_overlap
+    blend_frames = pipeline.config.temporal_overlap // 3
     target_hw = (int(ctx.metadata.video_height), int(ctx.metadata.video_width))
     frame_idx = 0 if ctx.seek_ts is None else _estimate_start_frame(ctx.metadata, ctx.seek_ts)
     frame_shape = target_hw
@@ -174,7 +173,7 @@ def _detect_batches(
             frame_shape=frame_shape,
             discard_margin=discard_margin,
             blend_frames=blend_frames,
-            min_detection_duration=pipeline.min_detection_duration,
+            min_detection_duration=pipeline.config.min_detection_duration,
         )
         if scene_detector is not None:
             scene_detector.reset()
@@ -197,7 +196,7 @@ def _detect_batches(
 
         frame_shape = (int(frames.shape[-2]), int(frames.shape[-1]))
         if ctx.error_holder:
-            raise ctx.error_holder[0]
+            return
 
         batch_start = frame_idx
         with timer.measure("detect-track"):
@@ -223,10 +222,10 @@ def _detect_batches(
                     discard_margin=discard_margin,
                     blend_frames=blend_frames,
                     stereo=pipeline.stereo,
-                    min_detection_duration=pipeline.min_detection_duration,
+                    min_detection_duration=pipeline.config.min_detection_duration,
                     scene_detector=scene_detector,
                     vr_projector=pipeline.vr_projector,
-                ).next_frame_idx
+                )
         ctx.debug_memory.snapshot("decode", f"frame_start={batch_start} batch={effective_bs}")
         if progress is not None:
             progress.update(effective_bs)
@@ -252,7 +251,7 @@ def primary_restore_loop(ctx: PassContext) -> None:
             except Empty:
                 continue
             ctx.primary_idle_event.clear()
-            if item is _SENTINEL:
+            if item is SENTINEL:
                 break
             clip_item: ClipRestoreItem = item
             with timer.measure("restore"):
@@ -279,7 +278,7 @@ def primary_restore_loop(ctx: PassContext) -> None:
     finally:
         log.info(timer.summary())
         log.debug("[primary] thread exiting")
-        ctx.secondary_queue.put(_SENTINEL)
+        ctx.secondary_queue.put(SENTINEL)
 
 
 def secondary_restore_loop(ctx: PassContext) -> None:
@@ -294,11 +293,11 @@ def secondary_restore_loop(ctx: PassContext) -> None:
                     item = ctx.secondary_queue.get(timeout=0.1)
             except Empty:
                 continue
-            if item is _SENTINEL:
+            if item is SENTINEL:
                 break
             pr: PrimaryRestoreResult = item
             with timer.measure("restore"):
-                restored_frames = restoration_pipeline._run_secondary(
+                restored_frames = restoration_pipeline.run_secondary(
                     pr.primary_raw,
                     pr.keep_start,
                     pr.keep_end,
@@ -318,7 +317,7 @@ def secondary_restore_loop(ctx: PassContext) -> None:
     finally:
         log.info(timer.summary())
         log.debug("[secondary] thread exiting")
-        ctx.encode_queue.put(_SENTINEL)
+        ctx.encode_queue.put(SENTINEL)
 
 
 def blend_encode_loop(ctx: PassContext, frame_writer: PassFrameWriter, vram_offloader: VramOffloader) -> None:
@@ -343,7 +342,7 @@ def blend_encode_loop(ctx: PassContext, frame_writer: PassFrameWriter, vram_offl
                 while not secondary_done:
                     try:
                         sr_item = encode_queue.get_nowait()
-                        if sr_item is _SENTINEL:
+                        if sr_item is SENTINEL:
                             secondary_done = True
                         else:
                             blend_buffer.add_result(sr_item)
@@ -357,7 +356,7 @@ def blend_encode_loop(ctx: PassContext, frame_writer: PassFrameWriter, vram_offl
                         meta_item = ctx.metadata_queue.get(timeout=0.05)
                 except Empty:
                     continue
-                if meta_item is _SENTINEL:
+                if meta_item is SENTINEL:
                     break
                 meta: FrameMeta = meta_item
                 with timer.measure("decode"):
@@ -368,13 +367,13 @@ def blend_encode_loop(ctx: PassContext, frame_writer: PassFrameWriter, vram_offl
                         if ctx.stop_event.is_set():
                             break
                         if ctx.error_holder:
-                            raise ctx.error_holder[0]
+                            return
                         if secondary_done:
                             log.error("[blend-encode] frame %d not ready but secondary is done", meta.frame_idx)
                             break
                         try:
                             sr_item = encode_queue.get(timeout=0.1)
-                            if sr_item is _SENTINEL:
+                            if sr_item is SENTINEL:
                                 secondary_done = True
                                 continue
                             blend_buffer.add_result(sr_item)
@@ -460,7 +459,7 @@ def run_async_secondary(ctx: PassContext) -> SecondaryLoopStats:
                     item = ctx.secondary_queue.get(timeout=0.1)
                 except Empty:
                     continue
-                if item is _SENTINEL:
+                if item is SENTINEL:
                     break
                 pr: PrimaryRestoreResult = item  # type: ignore[assignment]
                 t0 = time.monotonic()
@@ -488,9 +487,8 @@ def run_async_secondary(ctx: PassContext) -> SecondaryLoopStats:
     def _forward_completed() -> int:
         nonlocal clips_popped
         forwarded = 0
-        for seq, frames_np in restorer.pop_completed():
+        for seq, batch in restorer.pop_completed():
             pr = pending_prs.pop(seq)
-            batch = restorer._to_tensors(frames_np)
             if batch.numel() > 0 and pr.frame_device.type != "cpu":
                 batch = batch.to(pr.frame_device, non_blocking=True)
             tensors = list(batch.unbind(0)) if batch.numel() > 0 else []
@@ -583,7 +581,7 @@ def async_secondary_restore_loop(ctx: PassContext) -> None:
             log.exception("[secondary-async] thread crashed")
             ctx.error_holder.append(e)
     finally:
-        ctx.encode_queue.put(_SENTINEL)
+        ctx.encode_queue.put(SENTINEL)
 
 
 def run_restoration_pass(
@@ -612,7 +610,7 @@ def run_restoration_pass(
     """
     device = pipeline.device
     restoration_pipeline = pipeline.restoration_pipeline
-    max_clip_size = pipeline.max_clip_size
+    max_clip_size = pipeline.config.max_clip_size
     secondary_workers = max(1, int(restoration_pipeline.secondary_num_workers))
 
     clip_queue = FrameQueue(max_frames=max_clip_size)
@@ -621,7 +619,7 @@ def run_restoration_pass(
     metadata_queue: Queue[FrameMeta | object] = Queue(maxsize=max_clip_size * 5)
     queues = (clip_queue, secondary_queue, encode_queue, metadata_queue)
 
-    blend_buffer = BlendBuffer(device=device, vr_projector=pipeline.vr_projector)
+    blend_buffer = BlendBuffer(vr_projector=pipeline.vr_projector)
     crop_buffers: dict[int, CropBuffer] = {}
     vram_offloader = VramOffloader(device=device, blend_buffer=blend_buffer, crop_buffers=crop_buffers)
     if encode_heartbeat is not None:
@@ -631,8 +629,8 @@ def run_restoration_pass(
         device=device,
         restoration_pipeline=restoration_pipeline,
         input_video=str(pipeline.input_video),
-        decode_backend=pipeline.decode_backend,
-        batch_size=pipeline.batch_size,
+        decode_backend=pipeline.config.decode_backend,
+        batch_size=pipeline.config.batch_size,
         metadata=metadata,
         seek_ts=seek_ts,
         frame_stride=frame_stride,

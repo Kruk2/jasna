@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
@@ -74,12 +75,12 @@ class Progressbar:
         self.total_frames = total_frames
         self.callback = callback
         self.frames_processed = 0
-        self.frame_processing_durations_buffer: list[float] = []
         self.frame_processing_durations_buffer_min_len = min(
             total_frames - 1, int(video_fps * 2)  # Show FPS/ETA after 2 seconds of data
         )
-        self.frame_processing_durations_buffer_max_len = min(
-            total_frames - 1, int(video_fps * 30)  # Use last 30 seconds for averaging
+        # Averages the last 30 seconds.
+        self.frame_processing_durations_buffer: deque[float] = deque(
+            maxlen=max(1, min(total_frames - 1, int(video_fps * 30)))
         )
         self.error = False
         self.disable = disable
@@ -134,10 +135,7 @@ class Progressbar:
 
         # Store per-frame duration when processing multiple frames
         per_frame_duration = duration / n if n > 0 else duration
-        for _ in range(n):
-            if len(self.frame_processing_durations_buffer) >= self.frame_processing_durations_buffer_max_len:
-                self.frame_processing_durations_buffer.pop(0)
-            self.frame_processing_durations_buffer.append(per_frame_duration)
+        self.frame_processing_durations_buffer.extend([per_frame_duration] * n)
 
         self._update_time_remaining_and_speed()
         self.tqdm.update(n)

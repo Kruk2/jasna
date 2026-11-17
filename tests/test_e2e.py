@@ -3,34 +3,28 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 from importlib.util import find_spec
 from fractions import Fraction
 from pathlib import Path
 
+import av
 import numpy as np
 import pytest
 import torch
+from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
-from jasna.media.probe import get_video_meta_data, VideoMetadata
+from factories import session_config
+from jasna.media.probe import get_video_meta_data
 
 TEST_CLIP = Path("assets/test_clip1_1080p.mp4")
 REQUIRES_TEST_CLIP = pytest.mark.skipif(not TEST_CLIP.exists(), reason="test clip not found")
 REQUIRES_CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
 
 RESTORATION_MODEL_PTH = Path("model_weights/lada_mosaic_restoration_model_generic_v1.2.pth")
-RESTORATION_ENGINE_CLIP10 = Path("model_weights/lada_mosaic_restoration_model_generic_v1.2_clip10.trt_fp16.win.engine")
 RFDETR_ONNX = Path("model_weights/rfdetr-v5.onnx")
 
-def _nvvfx_available() -> bool:
-    return find_spec("nvvfx") is not None
-
-REQUIRES_NVVFX = pytest.mark.skipif(not _nvvfx_available(), reason="nvvfx (RTX Video Effects) not available")
+REQUIRES_NVVFX = pytest.mark.skipif(find_spec("nvvfx") is None, reason="nvvfx (RTX Video Effects) not available")
 REQUIRES_RFDETR = pytest.mark.skipif(not RFDETR_ONNX.exists(), reason="rfdetr-v5 ONNX not found")
-REQUIRES_RESTORER = pytest.mark.skipif(
-    not (RESTORATION_ENGINE_CLIP10.exists() or RESTORATION_MODEL_PTH.exists()),
-    reason="restoration model weights not found",
-)
 REQUIRES_RESTORER_PTH = pytest.mark.skipif(
     not RESTORATION_MODEL_PTH.exists(),
     reason="restoration model PTH weights not found",
@@ -46,51 +40,40 @@ def _tvai_available() -> bool:
     )
 
 REQUIRES_TVAI = pytest.mark.skipif(not _tvai_available(), reason="TVAI environment not configured")
-TVAI_ARGS = "model=iris-2:scale=1:preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1"
+TVAI_ARGS = "preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1"
 
 _TEMPORAL_OVERLAPS = [pytest.param(0, id="overlap0"), pytest.param(8, id="overlap8")]
 
 
 @REQUIRES_TEST_CLIP
-class TestVideoMetadataE2E:
-    def test_metadata_basic(self):
-        meta = get_video_meta_data(str(TEST_CLIP))
-        assert meta.video_width == 1920
-        assert meta.video_height == 1080
-        assert meta.video_fps == pytest.approx(30.0)
-        assert meta.codec_name == "hevc"
-        assert meta.num_frames == 300
-        assert meta.is_10bit is False
+def test_metadata_of_the_test_clip():
+    meta = get_video_meta_data(str(TEST_CLIP))
 
-    def test_metadata_types(self):
-        meta = get_video_meta_data(str(TEST_CLIP))
-        assert isinstance(meta.video_fps_exact, Fraction)
-        assert isinstance(meta.time_base, Fraction)
-        assert isinstance(meta.duration, float)
-        assert meta.duration > 0
-
-    def test_metadata_color(self):
-        from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
-        meta = get_video_meta_data(str(TEST_CLIP))
-        assert meta.color_space == AvColorspace.ITU709
-        assert meta.color_range == AvColorRange.MPEG
+    assert (meta.video_width, meta.video_height, meta.codec_name, meta.num_frames, meta.is_10bit) == (
+        1920, 1080, "hevc", 300, False
+    )
+    assert meta.video_fps == pytest.approx(30.0)
+    assert isinstance(meta.video_fps_exact, Fraction) and isinstance(meta.time_base, Fraction)
+    assert meta.duration > 0
+    assert (meta.color_space, meta.color_range) == (AvColorspace.ITU709, AvColorRange.MPEG)
 
 
 @REQUIRES_TEST_CLIP
 @REQUIRES_CUDA
 class TestVideoDecoderE2E:
-    def test_decode_first_batch(self):
+    @pytest.mark.parametrize("batch_size", [1, 4])
+    def test_decode_first_batch(self, batch_size):
         meta = get_video_meta_data(str(TEST_CLIP))
         from jasna.media.video_decoder import VideoReader
 
         device = torch.device("cuda:0")
-        with VideoReader(str(TEST_CLIP), batch_size=4, device=device, metadata=meta) as reader:
-            for frames, pts_list in reader.frames():
-                assert frames.shape == (4, 3, 1080, 1920)
-                assert frames.dtype == torch.uint8
-                assert frames.device.type == "cuda"
-                assert len(pts_list) == 4
-                break
+        with VideoReader(str(TEST_CLIP), batch_size=batch_size, device=device, metadata=meta) as reader:
+            frames, pts_list = next(iter(reader.frames()))
+
+        assert frames.shape == (batch_size, 3, 1080, 1920)
+        assert frames.dtype == torch.uint8
+        assert frames.device.type == "cuda"
+        assert len(pts_list) == batch_size
 
     def test_decode_all_frames_count(self):
         meta = get_video_meta_data(str(TEST_CLIP))
@@ -102,17 +85,6 @@ class TestVideoDecoderE2E:
             for frames, pts_list in reader.frames():
                 total += len(pts_list)
         assert total == 300
-
-    def test_decode_batch_size_1(self):
-        meta = get_video_meta_data(str(TEST_CLIP))
-        from jasna.media.video_decoder import VideoReader
-
-        device = torch.device("cuda:0")
-        with VideoReader(str(TEST_CLIP), batch_size=1, device=device, metadata=meta) as reader:
-            for frames, pts_list in reader.frames():
-                assert frames.shape[0] == 1
-                assert len(pts_list) == 1
-                break
 
 
 @REQUIRES_TEST_CLIP
@@ -189,51 +161,15 @@ class TestEncoderE2E:
         assert out_meta.num_frames >= 20
 
 
-# ---------------------------------------------------------------------------
-# Spy helpers — wrap real methods to count calls, no mocking
-# ---------------------------------------------------------------------------
-
-
-class _DetectionSpy:
-    """Wraps a detection model callable to count batches and detected mosaics."""
-
-    def __init__(self, model):
-        self._model = model
-        self.batch_count = 0
-        self.total_detections = 0
-        self.frames_with_detections = 0
-        self._lock = threading.Lock()
-
-    def __call__(self, frames, *, target_hw):
-        result = self._model(frames, target_hw=target_hw)
-        with self._lock:
-            self.batch_count += 1
-            for boxes in result.boxes_xyxy:
-                if len(boxes) > 0:
-                    self.frames_with_detections += 1
-                    self.total_detections += len(boxes)
-        return result
-
-
-class _MethodSpy:
-    """Counts calls to an instance method while executing the original."""
-
-    def __init__(self, obj, method_name):
-        self._original = getattr(obj, method_name)
-        self.call_count = 0
-        self._lock = threading.Lock()
-        setattr(obj, method_name, self)
-
-    def __call__(self, *args, **kwargs):
-        result = self._original(*args, **kwargs)
-        with self._lock:
-            self.call_count += 1
-        return result
-
-
-# ---------------------------------------------------------------------------
-# Full Pipeline.run() E2E tests — real video, real models, no mocking
-# ---------------------------------------------------------------------------
+def _changed_share_per_frame(source: Path, output: Path) -> np.ndarray:
+    """Per frame, the share of pixels whose output differs from the source by more than
+    encoding noise does."""
+    with av.open(str(source)) as source_container, av.open(str(output)) as output_container:
+        shares = [
+            float((np.abs(a.to_ndarray(format="gray").astype(np.int16) - b.to_ndarray(format="gray")) > 48).mean())
+            for a, b in zip(source_container.decode(video=0), output_container.decode(video=0), strict=True)
+        ]
+    return np.array(shares)
 
 
 @REQUIRES_TEST_CLIP
@@ -241,114 +177,48 @@ class _MethodSpy:
 @REQUIRES_RFDETR
 @REQUIRES_RESTORER_PTH
 class TestFullPipelineE2E:
+    """Restores the test clip through the CLI and GUI path: ``SessionConfig`` ->
+    ``build_restoration_session`` -> ``build_pipeline``."""
 
-    EXPECTED_FRAMES = 300
-    BATCH_SIZE = 4
+    def _restore(self, tmp_path, **overrides) -> Path:
+        from jasna.session_factory import build_pipeline, build_restoration_session
 
-    def _build(
-        self,
-        tmp_path,
-        *,
-        secondary_restorer=None,
-        temporal_overlap=8,
-        denoise_strength=None,
-    ):
-        from factories import make_pipeline
-        from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-        from jasna.restorer.denoise import DenoiseStrength
-        from jasna.restorer.restoration_pipeline import RestorationPipeline
-
-        device = torch.device("cuda:0")
         output = tmp_path / "output.mkv"
-
-        ds = denoise_strength if denoise_strength is not None else DenoiseStrength.NONE
-
-        restorer = BasicvsrppMosaicRestorer(
-            checkpoint_path=str(RESTORATION_MODEL_PTH),
-            device=device,
+        config = session_config(
+            device="cuda:0",
+            batch_size=4,
+            detection_model_name="rfdetr-v5",
+            detection_model_path=RFDETR_ONNX,
+            restoration_model_path=RESTORATION_MODEL_PTH,
+            compile_basicvsrpp=False,
             max_clip_size=60,
-            use_tensorrt=False,
-            fp16=True,
-        )
-        rp = RestorationPipeline(
-            restorer=restorer,
-            secondary_restorer=secondary_restorer,
-            denoise_strength=ds,
-        )
-
-        from jasna.mosaic.detection_registry import build_detection_model
-
-        pipeline = make_pipeline(
-            input_video=TEST_CLIP,
-            output_video=output,
-            detection_model=build_detection_model(
-                "rfdetr-v5",
-                RFDETR_ONNX,
-                batch_size=self.BATCH_SIZE,
-                device=device,
-                score_threshold=0.25,
-                fp16=True,
-            ),
-            detection_score_threshold=0.25,
-            restoration_pipeline=rp,
-            codec="hevc",
-            encoder_settings={},
-            batch_size=self.BATCH_SIZE,
-            device=device,
-            max_clip_size=60,
-            temporal_overlap=temporal_overlap,
             max_detection_gap=0,
             min_detection_duration=0,
-            fp16=True,
+            codec="hevc",
+            encoder_settings={},
             disable_progress=True,
+            **overrides,
         )
+        session = build_restoration_session(config, log_callback=None)
+        try:
+            build_pipeline(config, session, TEST_CLIP, output).run()
+        finally:
+            session.close()
+        return output
 
-        det_spy = _DetectionSpy(pipeline.detection_model)
-        pipeline.detection_model = det_spy
-
-        primary_spy = _MethodSpy(rp, "prepare_and_run_primary")
-        secondary_spy = _MethodSpy(rp, "build_secondary_result")
-
-        return pipeline, output, det_spy, primary_spy, secondary_spy
-
-    def _assert_output_video(self, output):
-        assert output.exists()
-        assert output.stat().st_size > 1024, "output video suspiciously small"
-
+    def _assert_restored_video(self, output: Path) -> None:
         meta = get_video_meta_data(str(output))
-        assert meta.num_frames == self.EXPECTED_FRAMES
-        assert meta.video_width == 1920
-        assert meta.video_height == 1080
-        assert meta.codec_name == "hevc"
+        assert (meta.num_frames, meta.video_width, meta.video_height, meta.codec_name) == (300, 1920, 1080, "hevc")
         assert meta.video_fps == pytest.approx(30.0)
 
-        from jasna.media.video_decoder import VideoReader
-
-        device = torch.device("cuda:0")
-        with VideoReader(str(output), batch_size=4, device=device, metadata=meta) as reader:
-            for frames, pts_list in reader.frames():
-                assert frames.dtype == torch.uint8
-                assert frames.any(), "decoded output frames should not be all black"
-                break
-
-        return meta
+        changed = _changed_share_per_frame(TEST_CLIP, output)
+        assert changed.max() > 0.001, "no mosaic was restored"
+        assert np.median(changed) < 0.05, "restoration changed more than the mosaic areas"
 
     def test_normal_restoration(self, tmp_path):
-        pipeline, output, det_spy, primary_spy, secondary_spy = self._build(tmp_path)
-        pipeline.run()
+        output = self._restore(tmp_path)
 
-        self._assert_output_video(output)
-
-        expected_batches = self.EXPECTED_FRAMES // self.BATCH_SIZE
-        assert det_spy.batch_count == expected_batches
-        assert det_spy.total_detections > 0, "test clip should contain detectable mosaics"
-        assert det_spy.frames_with_detections > 0
-
-        assert primary_spy.call_count > 0, "at least one clip should be restored"
-        assert secondary_spy.call_count == primary_spy.call_count
-
-        import av
-
+        self._assert_restored_video(output)
         with av.open(str(output)) as container:
             (comment,) = [value for key, value in container.metadata.items() if key.lower() == "comment"]
         tag = json.loads(comment)
@@ -359,135 +229,31 @@ class TestFullPipelineE2E:
     @REQUIRES_TVAI
     @pytest.mark.parametrize("overlap", _TEMPORAL_OVERLAPS)
     def test_tvai_secondary(self, tmp_path, overlap):
-        from jasna.restorer.denoise import DenoiseStrength
-        from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
-
-        tvai = TvaiSecondaryRestorer(
-            ffmpeg_path=TVAI_FFMPEG_PATH,
+        output = self._restore(
+            tmp_path,
+            secondary_restoration="tvai",
+            tvai_ffmpeg_path=TVAI_FFMPEG_PATH,
+            tvai_model="iris-2",
+            tvai_scale=1,
             tvai_args=TVAI_ARGS,
-            scale=1,
-            num_workers=2,
+            tvai_workers=2,
+            temporal_overlap=overlap,
+            denoise_strength="low",
         )
-        try:
-            pipeline, output, det_spy, primary_spy, secondary_spy = self._build(
-                tmp_path,
-                secondary_restorer=tvai,
-                temporal_overlap=overlap,
-                denoise_strength=DenoiseStrength.LOW,
-            )
-            pipeline.run()
-        finally:
-            tvai.close()
 
-        self._assert_output_video(output)
-        assert det_spy.total_detections > 0
-        assert primary_spy.call_count > 0
-        assert secondary_spy.call_count == primary_spy.call_count
+        self._assert_restored_video(output)
 
     @REQUIRES_NVVFX
     @pytest.mark.parametrize("overlap", _TEMPORAL_OVERLAPS)
     def test_rtx_secondary(self, tmp_path, overlap):
-        from jasna.restorer.denoise import DenoiseStrength
-        from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
-
-        rtx = RtxSuperresSecondaryRestorer(
-            device=torch.device("cuda:0"),
-            scale=4,
-            quality="high",
-            denoise="medium",
+        output = self._restore(
+            tmp_path,
+            secondary_restoration="rtx-super-res",
+            rtx_scale=4,
+            rtx_quality="high",
+            rtx_denoise="medium",
+            temporal_overlap=overlap,
+            denoise_strength="low",
         )
-        try:
-            pipeline, output, det_spy, primary_spy, secondary_spy = self._build(
-                tmp_path,
-                secondary_restorer=rtx,
-                temporal_overlap=overlap,
-                denoise_strength=DenoiseStrength.LOW,
-            )
-            pipeline.run()
-        finally:
-            rtx.close()
 
-        self._assert_output_video(output)
-        assert det_spy.total_detections > 0
-        assert primary_spy.call_count > 0
-        assert secondary_spy.call_count == primary_spy.call_count
-
-
-# ---------------------------------------------------------------------------
-# Helpers for restoration pipeline E2E tests
-# ---------------------------------------------------------------------------
-
-NUM_CLIP_FRAMES = 6
-
-def _make_restorer(device: torch.device):
-    from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-    return BasicvsrppMosaicRestorer(
-        checkpoint_path=str(RESTORATION_MODEL_PTH),
-        device=device, max_clip_size=10, use_tensorrt=False, fp16=True,
-    )
-
-
-def _decode_frames(device: torch.device, n: int = NUM_CLIP_FRAMES) -> list[torch.Tensor]:
-    from jasna.media.video_decoder import VideoReader
-    meta = get_video_meta_data(str(TEST_CLIP))
-    frames: list[torch.Tensor] = []
-    with VideoReader(str(TEST_CLIP), batch_size=n, device=device, metadata=meta) as reader:
-        for batch, pts_list in reader.frames():
-            for i in range(len(pts_list)):
-                frames.append(batch[i])
-            break
-    return frames[:n]
-
-
-def _make_synthetic_clip(n: int, h: int, w: int, device: torch.device):
-    from jasna.tracking.clip_tracker import TrackedClip
-    cx, cy, half = w // 2, h // 2, 80
-    bbox = np.array([cx - half, cy - half, cx + half, cy + half], dtype=np.float32)
-    mask = torch.zeros(h // 4, w // 4, dtype=torch.bool, device=device)
-    mask[cy // 4 - half // 4 : cy // 4 + half // 4, cx // 4 - half // 4 : cx // 4 + half // 4] = True
-    return TrackedClip(
-        track_id=0, start_frame=0,
-        mask_resolution=(h // 4, w // 4),
-        bboxes=[bbox] * n,
-        masks=[mask] * n,
-    )
-
-
-# ---------------------------------------------------------------------------
-# RestorationPipeline E2E with RTX Super Res secondary
-# ---------------------------------------------------------------------------
-
-@REQUIRES_TEST_CLIP
-@REQUIRES_CUDA
-@REQUIRES_RESTORER
-@REQUIRES_NVVFX
-class TestRestorationPipelineRtxE2E:
-    def test_restore_clip(self):
-        from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
-        from jasna.restorer.restoration_pipeline import RestorationPipeline
-
-        device = torch.device("cuda:0")
-        frames = _decode_frames(device)
-        n = len(frames)
-        h, w = frames[0].shape[1], frames[0].shape[2]
-        clip = _make_synthetic_clip(n, h, w, device)
-
-        restorer = _make_restorer(device)
-        rtx = RtxSuperresSecondaryRestorer(
-            device=device, scale=4, quality="high", denoise="medium",
-        )
-        try:
-            pipeline = RestorationPipeline(restorer=restorer, secondary_restorer=rtx)
-            from jasna.crop_buffer import extract_crop
-            raw_crops = [extract_crop(f, clip.bboxes[i], h, w) for i, f in enumerate(frames)]
-            pr = pipeline.prepare_and_run_primary(clip, raw_crops, (h, w), keep_start=0, keep_end=n, crossfade_weights=None)
-            restored_frames = pipeline._run_secondary(pr.primary_raw, pr.keep_start, pr.keep_end)
-            sr = pipeline.build_secondary_result(pr, restored_frames)
-
-            assert sr.keep_end == n
-            for f in sr.restored_frames:
-                assert f.dtype == torch.uint8
-                assert f.dim() == 3
-            assert sr.frame_shape == (h, w)
-        finally:
-            rtx.close()
+        self._assert_restored_video(output)

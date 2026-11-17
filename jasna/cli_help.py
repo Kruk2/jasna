@@ -1,4 +1,4 @@
-"""CLI argument help strings for jasna.main.build_parser, keyed by argparse dest."""
+"""CLI argument help strings for jasna.cli_parser.build_parser, keyed by argparse dest."""
 
 from jasna.session_config import DEFAULT_CODEC
 
@@ -128,5 +128,74 @@ CLI_HELP: dict[str, str] = {
     "post_export_video_command": (
         "Shell command to run after each successful video export. Supports "
         "{input}, {output}, {output_dir}, {output_stem}, and {output_suffix}."
+    ),
+    "benchmark": 'Run benchmarks instead of processing video',
+    "input": 'Path to input video, image, or folder',
+    "output": 'Path to output file, or output folder when --input is a folder',
+    "output_pattern": (
+        'Filename template for folder input, matching the GUI pattern behavior. Use {original} for the input '
+        'stem. Default: {original}_out with each input extension. Images keep their source extension; videos '
+        'use the template extension when provided.'
+    ),
+    "working_directory": (
+        "Directory for temporary files created while assembling segment output (default: the output video's "
+        'directory)'
+    ),
+    "log_level": 'Logging level (default: %(default)s)',
+    "no_progress": 'Disable the progress bar.',
+    "image_restoration_model_name": (
+        'Restoration model for still-image input (image-only). Images auto-route here; no need to set '
+        '--restoration-model-name.'
+    ),
+    "sd15_steps": 'More steps = more detail, but slower (default: %(default)s)',
+    "sd15_strength": 'How much of the image is redrawn, up to 0.7. Higher = bigger changes (default: %(default)s)',
+    "sd15_freeu": 'Small extra detail boost; turn off if results look over-sharpened (default: %(default)s)',
+    "sd15_seed": 'Starting number for the random result. Same seed = same result (default: %(default)s)',
+    "sd15_variants": (
+        'Save N versions (name_v1 … name_vN), each with the next seed, so you can pick the best (default: '
+        '%(default)s)'
+    ),
+    "rtx_scale": 'RTX Super Res upscale factor for BasicVSR++; LTX always upscales 2x (default: %(default)s)',
+    "rtx_quality": 'RTX Super Res upscale quality (default: %(default)s)',
+    "rtx_denoise": 'RTX Super Res denoise level, none to disable (default: %(default)s)',
+    "rtx_deblur": 'RTX Super Res deblur level, none to disable (default: %(default)s)',
+    "tvai_args": 'Extra options for the Topaz model, for advanced users (default: %(default)s)',
+    "detection_model": (
+        'Detection model name. Installed models are discovered from model_weights/; rfdetr-v6 (fast), '
+        'rfdetr-vr-v1 (VR180) and lada-yolo-v4 are bundled with Jasna, rfdetr-v6-large (higher quality) and '
+        'zelefans-vr-yolo-v2 are optional downloads (default: %(default)s)'
+    ),
+    "detection_model_path": (
+        'Optional path to detection weights. If not set, uses "model_weights/<detection-model>": .onnx for '
+        'RF-DETR on NVIDIA, .pt for RF-DETR on AMD and for YOLO.'
+    ),
+    "stream": (
+        'Enable HLS streaming mode (no file output). Serves processed video via HTTP for playback in '
+        'VLC/browser.'
+    ),
+    "stream_port": 'HTTP port for HLS streaming server (default: %(default)s)',
+    "stream_segment_duration": 'HLS segment duration in seconds (default: %(default)s)',
+    "no_browser": 'Do not open a browser window when starting streaming mode.',
+    "lut": 'Path to a .cube color LUT (1D or 3D) applied on GPU before encoding.',
+    "sharpen": (
+        'Sharpen the picture on GPU before encoding, from 0 (off) to 1 (strongest). Matches the ffmpeg cas '
+        'filter.'
+    ),
+    "retarget_high_fps": (
+        'For offline exports, map 60 fps to 30 fps and 59.94 fps to 29.97 fps by processing every second '
+        'frame. Other source rates are unchanged.'
+    ),
+    "fmp4": (
+        'Write .mp4/.mov output as fragmented MP4, so the file can be played while processing runs and stays '
+        'playable after an interruption. Not available with --stream or --segments.'
+    ),
+    "segments": (
+        'Restore only selected ranges and smart-render the rest, for example 10-25,01:10-01:30. Output codec '
+        'must match the H.264, HEVC, or AV1 input.'
+    ),
+    "post_export_command": 'Shell command to run when --post-export-action=command.',
+    "benchmark_filter": "Only run benchmarks whose name contains this string (e.g. 'basicvsrpp')",
+    "benchmark_video": (
+        'Video path for benchmark (can be repeated). Default: test_clip1_1080p.mp4, test_clip1_2160p.mp4'
     ),
 }

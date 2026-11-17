@@ -72,12 +72,12 @@ def get_onnx_tensorrt_engine_path(
     return onnx_path.with_suffix(suffix)
 
 
-def get_yolo_tensorrt_engine_path(model_path: str | Path, *, fp16: bool) -> Path:
+def get_yolo_tensorrt_engine_path(model_path: str | Path, *, batch_size: int, fp16: bool) -> Path:
     model_path = Path(model_path)
     if model_path.suffix.lower() != ".pt":
         raise ValueError(f"Expected a .pt YOLO checkpoint, got: {model_path}")
     onnx_path = model_path.with_suffix(".onnx")
-    return get_onnx_tensorrt_engine_path(onnx_path, batch_size=None, fp16=bool(fp16))
+    return get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=bool(fp16))
 
 
 UNET4X_ONNX_PATH = model_weights_dir() / "unet-4x.onnx"

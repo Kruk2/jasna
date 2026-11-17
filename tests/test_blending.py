@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock
-
 import cv2
 import numpy as np
 import pytest
@@ -7,43 +5,25 @@ import torch
 import torch.nn.functional as F
 
 from jasna.tracking.blending import (
-    _box_blur,
+    _conv_box_blur,
+    _prefix_box_blur,
     create_bbox_blend_mask,
     create_blend_mask,
     dilate_ellipse,
 )
 
 
-@pytest.mark.parametrize("kernel_size", [5, 61, 121])
-def test_box_blur_matches_dense_reference(kernel_size: int) -> None:
+@pytest.mark.parametrize("box_blur", [_conv_box_blur, _prefix_box_blur], ids=["convolution", "prefix-sum"])
+@pytest.mark.parametrize(("kh", "kw"), [(5, 5), (61, 61), (121, 121), (5, 9), (61, 31)])
+def test_box_blur_matches_dense_reference(box_blur, kh: int, kw: int) -> None:
     torch.manual_seed(0)
     x = torch.rand((128, 96))
 
-    pad = kernel_size // 2
-    kernel = torch.ones((1, 1, kernel_size, kernel_size)) / (kernel_size ** 2)
-    x4d = F.pad(x.unsqueeze(0).unsqueeze(0), (pad, pad, pad, pad), mode="reflect")
-    dense = F.conv2d(x4d, kernel).squeeze(0).squeeze(0)
+    kernel = torch.ones((1, 1, kh, kw)) / (kh * kw)
+    x4d = F.pad(x[None, None], (kw // 2, kw // 2, kh // 2, kh // 2), mode="reflect")
+    dense = F.conv2d(x4d, kernel)[0, 0]
 
-    assert torch.allclose(_box_blur(x, kernel_size, kernel_size), dense, atol=1e-4)
-
-
-def test_box_blur_uses_convolution_only_for_nvidia(monkeypatch) -> None:
-    import jasna.tracking.blending as module
-
-    x = torch.ones((8, 8))
-    conv = MagicMock(return_value=x)
-    prefix = MagicMock(return_value=x)
-    monkeypatch.setattr(module, "_conv_box_blur", conv)
-    monkeypatch.setattr(module, "_prefix_box_blur", prefix)
-    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: True)
-
-    assert module._box_blur(x, 3, 3) is x
-    conv.assert_called_once_with(x, 3, 3)
-    prefix.assert_not_called()
-
-    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: False)
-    assert module._box_blur(x, 5, 5) is x
-    prefix.assert_called_once_with(x, 5, 5)
+    assert torch.allclose(box_blur(x, kh, kw), dense, atol=1e-4)
 
 
 def test_create_blend_mask_all_ones_stays_ones() -> None:
@@ -77,23 +57,16 @@ def test_create_blend_mask_dilation_covers_past_mask_edge() -> None:
     assert float(out[75, 100]) > 0.5
 
 
-@pytest.mark.parametrize("frame_height", [720, 1080, 2160])
-def test_create_blend_mask_scales_with_resolution(frame_height: int) -> None:
-    crop_mask = torch.ones((200, 200), dtype=torch.bool)
-    out = create_blend_mask(crop_mask, frame_height=frame_height, scale_y=1.0, scale_x=1.0)
-    assert out.shape == (200, 200)
+def test_create_blend_mask_reaches_farther_past_the_mask_on_a_taller_frame() -> None:
+    crop_mask = torch.zeros((400, 400), dtype=torch.bool)
+    crop_mask[180:220, 180:220] = True
 
+    weight_40px_outside = {
+        height: float(create_blend_mask(crop_mask, frame_height=height, scale_y=1.0, scale_x=1.0)[200, 140])
+        for height in (720, 2160)
+    }
 
-@pytest.mark.parametrize("kh,kw", [(5, 9), (61, 31)])
-def test_box_blur_anisotropic_matches_dense(kh: int, kw: int) -> None:
-    torch.manual_seed(0)
-    x = torch.rand((128, 96))
-
-    kernel = torch.ones((1, 1, kh, kw)) / (kh * kw)
-    x4d = F.pad(x[None, None], (kw // 2, kw // 2, kh // 2, kh // 2), mode="reflect")
-    dense = F.conv2d(x4d, kernel)[0, 0]
-
-    assert torch.allclose(_box_blur(x, kh, kw), dense, atol=1e-4)
+    assert weight_40px_outside[2160] > weight_40px_outside[720]
 
 
 def _reference_fullres_blend_mask(

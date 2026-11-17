@@ -346,29 +346,6 @@ def test_cli_continues_on_amd_with_the_amf_runtime(capsys):
     assert "AMF" not in capsys.readouterr().out
 
 
-def test_frame_generation_reaches_the_pipeline_with_retargeting(tmp_path):
-    with patch("jasna.accelerator.supports_frame_generation", return_value=True):
-        config = run_cli(
-            cli_args(tmp_path, "--frame-generation", "2x", "--retarget-high-fps")
-        ).call_args.kwargs["config"]
-
-    assert (config.frame_generation, config.retarget_high_fps) == ("2x", True)
-
-
-def test_upscale_options_reach_the_pipeline(tmp_path):
-    config = run_cli(
-        cli_args(
-            tmp_path, "--upscale", "rtx-super-res", "--upscale-height", "1440", "--upscale-strength", "0.5",
-            "--upscale-rtx-quality", "ultra", "--upscale-rtx-denoise", "low", "--upscale-rtx-deblur", "medium",
-        )
-    ).call_args.kwargs["config"]
-
-    assert (
-        config.upscale_model, config.upscale_height, config.upscale_strength,
-        config.upscale_rtx_quality, config.upscale_rtx_denoise, config.upscale_rtx_deblur,
-    ) == ("rtx-super-res", 1440, 0.5, "ultra", "low", "medium")
-
-
 def test_frame_generation_on_an_older_gpu_is_a_usage_error(tmp_path, capsys):
     with (
         patch("jasna.accelerator.supports_frame_generation", return_value=False),

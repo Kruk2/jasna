@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import threading
-from unittest.mock import patch, MagicMock
+from types import SimpleNamespace
 
 import pytest
 import torch
 
 from jasna.blend_buffer import BlendBuffer
-from jasna.crop_buffer import CropBuffer, RawCrop, prepare_crops_for_restoration
+from jasna.crop_buffer import CropBuffer, RawCrop
 from jasna.pipeline_items import SecondaryRestoreResult
-from jasna.vram_offloader import VramOffloader, VramStats
+from jasna.vram_offloader import STALL_WARN_SECONDS, VRAM_SAFETYNET, VramOffloader, VramStats, plan_offload, stall_warning_due
 
 
 def _make_sr(
@@ -78,287 +78,91 @@ class TestVramStats:
         assert "offloads: 3" in summary
 
 
-class TestVramOffloaderOffload:
-    def test_offloads_restored_frames_when_over_threshold(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
-        sr = _make_sr(track_id=1, start_frame=0, frame_count=3)
-        bb.add_result(sr)
-        bb.register_frame(0, {1})
-        bb.register_frame(1, {1})
-        bb.register_frame(2, {1})
-
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=bb,
-            crop_buffers={},
-            vram_limit=0.001,
-            safetynet=0,
-        )
-        offloader._offload_device_type = "cpu"
-
-        freed = offloader._offload(1)
-        assert freed > 0
-        assert sr.restored_frames[0].device.type == "cpu"
-
-    def test_no_offload_when_all_already_offloaded(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
-        sr = _make_sr(track_id=1, start_frame=0, frame_count=2, device="cpu")
-        bb.add_result(sr)
-        bb.register_frame(0, {1})
-
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=bb,
-            crop_buffers={},
-            vram_limit=0.001,
-            safetynet=0,
-        )
-        # device_type stays "cuda" (default) so CPU tensors are not considered on-device
-        freed = offloader._offload(1)
-        assert freed == 0
-
-    def test_offload_priority_highest_start_frame_first(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
-        sr_early = _make_sr(track_id=1, start_frame=0, frame_count=2)
-        sr_late = _make_sr(track_id=2, start_frame=100, frame_count=2)
-        bb.register_frame(0, {1})
-        bb.register_frame(1, {1})
-        bb.register_frame(100, {2})
-        bb.register_frame(101, {2})
-        bb.add_result(sr_early)
-        bb.add_result(sr_late)
-
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=bb,
-            crop_buffers={},
-            vram_limit=0.001,
-            safetynet=0,
-        )
-        offloader._offload_device_type = "cpu"
-
-        single_frame_bytes = sr_late.restored_frames[0].nelement() * sr_late.restored_frames[0].element_size()
-        offloader._offload(single_frame_bytes)
-
-        # late clip (start_frame=100) offloaded first — verify via offload_count logic
-        # Since bytes_to_free = single_frame_bytes, only the first frame of sr_late gets hit
-        # then early clip starts. The key assertion: offload happened at all
-        assert offloader.stats.total_offloaded_bytes == 0  # stats not updated in _offload directly
-
-    def test_offloads_crop_buffers_after_blend_buffer(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
-
-        crop_buf = CropBuffer(track_id=1, start_frame=0)
-        crop = torch.randint(0, 255, (3, 40, 40), dtype=torch.uint8)
-        crop_buf.add(RawCrop(crop=crop, enlarged_bbox=(0, 0, 40, 40), crop_shape=(40, 40)))
-
-        crop_buffers = {1: crop_buf}
-
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=bb,
-            crop_buffers=crop_buffers,
-            vram_limit=0.001,
-            safetynet=0,
-        )
-
-        freed = offloader._offload(1)
-        assert freed == 0
-
-    def test_offloads_masks_too(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
-        sr = _make_sr(track_id=1, start_frame=0, frame_count=1)
-        sr.restored_frames = [torch.full((3, 256, 256), 200, dtype=torch.uint8)]
-        bb.register_frame(0, {1})
-        bb.add_result(sr)
-
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=bb,
-            crop_buffers={},
-            vram_limit=0.001,
-            safetynet=0,
-        )
-        offloader._offload_device_type = "cpu"
-
-        big_target = 999_999_999
-        offloader._offload(big_target)
-        assert sr.masks[0].device.type == "cpu"
+def _crop_buffer(track_id: int, frames: int) -> CropBuffer:
+    buffer = CropBuffer(track_id=track_id, start_frame=0)
+    for _ in range(frames):
+        buffer.add(RawCrop(crop=torch.zeros((3, 40, 40), dtype=torch.uint8), enlarged_bbox=(0, 0, 40, 40), crop_shape=(40, 40)))
+    return buffer
 
 
-class TestVramOffloaderThreshold:
-    def test_explicit_vram_limit(self):
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=BlendBuffer(device=torch.device("cpu")),
-            crop_buffers={},
-            vram_limit=2.0,
-            safetynet=750_000_000,
-        )
-        assert offloader._threshold == int(2.0 * 1024 * 1024 * 1024) - 750_000_000
-
-    def test_safetynet_zero(self):
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=BlendBuffer(device=torch.device("cpu")),
-            crop_buffers={},
-            vram_limit=1.0,
-            safetynet=0,
-        )
-        assert offloader._threshold == 1 * 1024 * 1024 * 1024
+def _frame_bytes(result: SecondaryRestoreResult) -> int:
+    return result.restored_frames[0].nelement() * result.restored_frames[0].element_size()
 
 
-class TestVramOffloaderLifecycle:
-    def test_start_stop(self):
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=BlendBuffer(device=torch.device("cpu")),
-            crop_buffers={},
-            vram_limit=0.001,
-            safetynet=0,
-        )
-        offloader.start()
-        assert offloader._thread.is_alive()
-        offloader.stop()
-        assert not offloader._thread.is_alive()
+class TestOffloadPlan:
+    def test_the_latest_clip_goes_first_with_its_masks(self):
+        early = _make_sr(track_id=1, start_frame=0, frame_count=2)
+        late = _make_sr(track_id=2, start_frame=100, frame_count=2)
 
-    @patch("jasna.vram_offloader.torch.cuda.mem_get_info", return_value=(0, 2_000_000))
-    @patch("jasna.vram_offloader.torch.cuda.empty_cache")
-    def test_run_loop_triggers_offload_and_empty_cache(self, mock_empty_cache, mock_mem_info):
-        bb = BlendBuffer(device=torch.device("cpu"))
-        sr = _make_sr(track_id=1, start_frame=0, frame_count=1)
-        bb.register_frame(0, {1})
-        bb.add_result(sr)
+        steps = plan_offload([early, late], [], 2 * _frame_bytes(late) + 1, "cpu")
 
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=bb,
-            crop_buffers={},
-            vram_limit=0.001,
-            safetynet=0,
-        )
-        offloader._offload_device_type = "cpu"
+        assert [step.tensor for step in steps] == [*late.restored_frames, *late.masks, early.restored_frames[0]]
+
+    def test_it_stops_once_enough_is_planned(self):
+        late = _make_sr(track_id=2, start_frame=100, frame_count=3)
+
+        steps = plan_offload([late], [], _frame_bytes(late), "cpu")
+
+        assert [step.tensor for step in steps] == [late.restored_frames[0]]
+
+    def test_crops_come_after_restored_clips_largest_buffer_first(self):
+        result = _make_sr(track_id=1, start_frame=0, frame_count=1)
+        small, large = _crop_buffer(1, 1), _crop_buffer(2, 2)
+
+        steps = plan_offload([result], [small, large], 10**12, "cpu")
+
+        assert [step.tensor for step in steps] == [
+            *result.restored_frames, *result.masks, *(raw.crop for raw in large.crops), small.crops[0].crop,
+        ]
+        assert sum(step.nbytes for step in steps) == sum(step.tensor.nelement() for step in steps)
+
+    def test_tensors_already_off_the_device_are_left_alone(self):
+        assert plan_offload([_make_sr(track_id=1, start_frame=0, frame_count=2)], [_crop_buffer(1, 1)], 1, "cuda") == []
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+    def test_planned_steps_move_the_tensors_to_the_cpu(self):
+        result = _make_sr(track_id=1, start_frame=0, frame_count=1, device="cuda")
+        crops = _crop_buffer(1, 1)
+        crops.crops[0].crop = crops.crops[0].crop.cuda()
+
+        for step in plan_offload([result], [crops], 10**12, "cuda"):
+            step.move()
+
+        assert {result.restored_frames[0].device.type, result.masks[0].device.type, crops.crops[0].crop.device.type} == {"cpu"}
+
+
+class TestVramOffloaderLoop:
+    def test_running_over_the_threshold_offloads_and_empties_the_cache(self, monkeypatch):
+        monkeypatch.setattr(torch.cuda, "get_device_properties", lambda _device: SimpleNamespace(total_memory=VRAM_SAFETYNET + 1000))
+        monkeypatch.setattr(torch.cuda, "mem_get_info", lambda _device: (0, VRAM_SAFETYNET + 2000))
         emptied = threading.Event()
-        mock_empty_cache.side_effect = emptied.set
+        monkeypatch.setattr(torch.cuda, "empty_cache", emptied.set)
+        blend_buffer = BlendBuffer(vr_projector=None)
+        blend_buffer.register_frame(0, {1})
+        blend_buffer.add_result(_make_sr(track_id=1, start_frame=0, frame_count=1))
+
+        offloader = VramOffloader(device=torch.device("cpu"), blend_buffer=blend_buffer, crop_buffers={})
         offloader.start()
         assert emptied.wait(timeout=30)
         offloader.stop()
 
-        assert offloader.stats.sample_count > 0
         assert offloader.stats.offload_count >= 1
-        mock_empty_cache.assert_called()
+        assert offloader.stats.total_offloaded_bytes > 0
 
 
-class TestEncodeStallDetection:
-    @pytest.fixture(autouse=True)
-    def _gpu_memory_queries(self, monkeypatch):
-        monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (0, 0))
-        monkeypatch.setattr(torch.cuda, "memory_allocated", lambda device: 0)
-        monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device: 0)
+@pytest.mark.parametrize(
+    ("since_encode", "since_warning", "warn", "keeps_warning_time"),
+    [
+        (STALL_WARN_SECONDS - 1, 1000.0, False, False),
+        (STALL_WARN_SECONDS + 1, 1000.0, True, False),
+        (STALL_WARN_SECONDS + 1, STALL_WARN_SECONDS - 1, False, True),
+        (STALL_WARN_SECONDS + 1, STALL_WARN_SECONDS, True, False),
+    ],
+    ids=["encoding", "stalled", "warned-recently", "warned-a-while-ago"],
+)
+def test_an_encode_stall_warns_once_per_interval(since_encode, since_warning, warn, keeps_warning_time):
+    now = 5000.0
+    last_warning = now - since_warning
+    expected_warning_time = last_warning if keeps_warning_time else (now if warn else 0.0)
 
-    def test_no_warning_without_heartbeat(self):
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=BlendBuffer(device=torch.device("cpu")),
-            crop_buffers={},
-            vram_limit=0.001,
-            safetynet=0,
-        )
-        offloader._check_encode_stall()
-        assert offloader._last_stall_warn_time == 0.0
-
-    def test_no_warning_when_recent(self):
-        import time
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=BlendBuffer(device=torch.device("cpu")),
-            crop_buffers={},
-            vram_limit=0.001,
-            safetynet=0,
-        )
-        hb = [time.monotonic()]
-        offloader.set_encode_heartbeat(hb)
-        offloader._check_encode_stall()
-        assert offloader._last_stall_warn_time == 0.0
-
-    def test_warns_when_stale(self):
-        import time
-        from jasna.vram_offloader import STALL_WARN_SECONDS
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=BlendBuffer(device=torch.device("cpu")),
-            crop_buffers={},
-            vram_limit=0.001,
-            safetynet=0,
-        )
-        hb = [time.monotonic() - STALL_WARN_SECONDS - 1.0]
-        offloader.set_encode_heartbeat(hb)
-        offloader._check_encode_stall()
-        assert offloader._last_stall_warn_time > 0.0
-
-    def test_does_not_rewarn_within_interval(self):
-        import time
-        from jasna.vram_offloader import STALL_WARN_SECONDS
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=BlendBuffer(device=torch.device("cpu")),
-            crop_buffers={},
-            vram_limit=0.001,
-            safetynet=0,
-        )
-        hb = [time.monotonic() - STALL_WARN_SECONDS - 1.0]
-        offloader.set_encode_heartbeat(hb)
-        offloader._check_encode_stall()
-        first_warn = offloader._last_stall_warn_time
-        assert first_warn > 0.0
-        offloader._check_encode_stall()
-        assert offloader._last_stall_warn_time == first_warn
-
-    def test_resets_after_fresh_heartbeat(self):
-        import time
-        from jasna.vram_offloader import STALL_WARN_SECONDS
-        offloader = VramOffloader(
-            device=torch.device("cpu"),
-            blend_buffer=BlendBuffer(device=torch.device("cpu")),
-            crop_buffers={},
-            vram_limit=0.001,
-            safetynet=0,
-        )
-        hb = [time.monotonic() - STALL_WARN_SECONDS - 1.0]
-        offloader.set_encode_heartbeat(hb)
-        offloader._check_encode_stall()
-        assert offloader._last_stall_warn_time > 0.0
-        hb[0] = time.monotonic()
-        offloader._check_encode_stall()
-        assert offloader._last_stall_warn_time == 0.0
-
-
-class TestPrepareCropsJitGuard:
-    def test_cpu_crops_stay_on_cpu_device(self):
-        crop = torch.randint(0, 255, (3, 40, 40), dtype=torch.uint8)
-        raw = RawCrop(crop=crop, enlarged_bbox=(0, 0, 40, 40), crop_shape=(40, 40))
-        result, _, _ = prepare_crops_for_restoration([raw], device=torch.device("cpu"), dtype=torch.float32)
-        assert len(result) == 1
-        assert result[0].device.type == "cpu"
-
-
-class TestBlendBufferOffloadableResults:
-    def test_returns_snapshot_of_results(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
-        sr1 = _make_sr(track_id=1, start_frame=0, frame_count=2)
-        sr2 = _make_sr(track_id=2, start_frame=10, frame_count=2)
-        bb.register_frame(0, {1})
-        bb.register_frame(1, {1})
-        bb.register_frame(10, {2})
-        bb.register_frame(11, {2})
-        bb.add_result(sr1)
-        bb.add_result(sr2)
-
-        results = bb.offloadable_results()
-        assert len(results) == 2
-        track_ids = {r.track_id for r in results}
-        assert track_ids == {1, 2}
-
-    def test_empty_when_no_results(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
-        assert bb.offloadable_results() == []
+    assert stall_warning_due(now, now - since_encode, last_warning) == (warn, expected_warning_time)

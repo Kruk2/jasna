@@ -8,12 +8,10 @@ import torch
 
 from jasna.media.probe import get_video_meta_data
 from jasna.pipeline_threads import run_restoration_pass
-from jasna.streaming import HlsStreamingServer
+from jasna.streaming import MAX_SEGMENTS_AHEAD, HlsStreamingServer
 from jasna.streaming_encoder import StreamingEncoder, StreamingEncodeError
 
 log = logging.getLogger(__name__)
-
-_MAX_SEGMENTS_AHEAD = 3
 
 
 class _StreamingFrameWriter:
@@ -43,13 +41,12 @@ class _StreamingFrameWriter:
 
         current_seg = self._start_segment + frames_written // self._frames_per_seg
         self._hls_server.update_production(current_seg)
-        self._hls_server.wait_for_demand(current_seg, _MAX_SEGMENTS_AHEAD, stop_event)
+        self._hls_server.wait_for_demand(current_seg, MAX_SEGMENTS_AHEAD, stop_event)
 
 
 def run_streaming(pipeline, hls_server: HlsStreamingServer) -> None:
     metadata = get_video_meta_data(str(pipeline.input_video))
-    pipeline.validate_metadata(metadata)
-    pipeline.configure_vr(metadata)
+    pipeline.prepare(metadata)
     hls_server.load_video(metadata)
 
     streaming_encoder = StreamingEncoder(
@@ -58,9 +55,9 @@ def run_streaming(pipeline, hls_server: HlsStreamingServer) -> None:
         metadata=metadata,
         source_video=str(pipeline.input_video),
         device=pipeline.device,
-        lut_path=pipeline.lut_path,
+        lut_path=pipeline.config.lut_path,
     )
-    if pipeline.sharpen_strength > 0:
+    if pipeline.config.sharpen_strength > 0:
         log.warning("[stream] sharpening is not used while streaming")
     try:
         _streaming_loop(

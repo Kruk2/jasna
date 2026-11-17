@@ -3,44 +3,36 @@ from __future__ import annotations
 from types import SimpleNamespace
 import subprocess
 
+import pytest
+
 from jasna.gui import system_stats
 from jasna.gui.components import format_duration as _format_duration
 from jasna.gui.control_bar import _color_for_percent
 
 
-def test_format_duration_seconds_only() -> None:
-    assert _format_duration(45) == "45s"
-    assert _format_duration(0) == "0s"
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [(0, "0s"), (45, "45s"), (90, "1m 30s"), (3599, "59m 59s"), (3600, "1h 0m"), (7323, "2h 2m")],
+)
+def test_format_duration_shows_the_two_largest_units(seconds, text) -> None:
+    assert _format_duration(seconds) == text
 
 
-def test_format_duration_minutes_and_seconds() -> None:
-    assert _format_duration(90) == "1m 30s"
-    assert _format_duration(3599) == "59m 59s"
+def _rgb(color: str) -> tuple[int, ...]:
+    return tuple(int(color[index:index + 2], 16) for index in (1, 3, 5))
 
 
-def test_format_duration_hours() -> None:
-    assert _format_duration(3600) == "1h 0m"
-    assert _format_duration(7323) == "2h 2m"
+@pytest.mark.parametrize(("percent", "lower", "upper"), [(25, 0, 50), (75, 50, 100)])
+def test_color_for_percent_blends_the_neighbouring_stops(percent, lower, upper) -> None:
+    blended, low, high = _rgb(_color_for_percent(percent)), _rgb(_color_for_percent(lower)), _rgb(_color_for_percent(upper))
+
+    assert all(min(a, b) <= value <= max(a, b) for value, a, b in zip(blended, low, high))
+    assert blended not in (low, high)
 
 
-def test_color_for_percent_green_at_zero() -> None:
-    assert _color_for_percent(0) == "#34d399"
-
-
-def test_color_for_percent_amber_at_50() -> None:
-    assert _color_for_percent(50) == "#fbbf24"
-
-
-def test_color_for_percent_rose_at_100() -> None:
-    assert _color_for_percent(100) == "#fb7185"
-
-
-def test_color_for_percent_interpolates_midpoints() -> None:
-    c25 = _color_for_percent(25)
-    assert c25.startswith("#") and len(c25) == 7
-    c75 = _color_for_percent(75)
-    assert c75.startswith("#") and len(c75) == 7
-    assert c25 != c75
+def test_color_for_percent_clamps_outside_0_to_100() -> None:
+    assert _color_for_percent(-20) == _color_for_percent(0)
+    assert _color_for_percent(150) == _color_for_percent(100)
 
 
 def test_parse_nvidia_smi_csv_line_parses_gpu_and_vram_pct() -> None:

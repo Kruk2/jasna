@@ -8,7 +8,6 @@ import torch
 
 from jasna.image_restore import (
     clamp_strength,
-    group_boxes_by_iou,
     mask_overlay_rgb_chw,
     prepare_image_restore,
     render_prepared_image,
@@ -66,19 +65,6 @@ class TestClampStrength:
     def test_rejects_non_positive(self):
         with pytest.raises(ValueError):
             clamp_strength(0.0)
-
-
-class TestGroupBoxesByIou:
-    def test_overlapping_grouped(self):
-        boxes = np.array([[0, 0, 10, 10], [1, 1, 11, 11], [100, 100, 110, 110]], dtype=np.float32)
-        groups = group_boxes_by_iou(boxes, 0.3)
-        sizes = sorted(len(g) for g in groups)
-        assert sizes == [1, 2]
-
-    def test_disjoint_not_grouped(self):
-        boxes = np.array([[0, 0, 10, 10], [50, 50, 60, 60]], dtype=np.float32)
-        groups = group_boxes_by_iou(boxes, 0.3)
-        assert len(groups) == 2
 
 
 class TestRestoreImage:

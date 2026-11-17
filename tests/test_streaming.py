@@ -38,8 +38,8 @@ def _finalize_segments(segments_dir: Path, *numbers: int) -> None:
     staged.replace(segments_dir / "_hls_internal.m3u8")
 
 
-def _server(tmp_path=None, segment_duration: float = 4.0, **kwargs) -> HlsStreamingServer:
-    server = HlsStreamingServer(segment_duration=segment_duration, port=0, **kwargs)
+def _server(tmp_path=None, segment_duration: float = 4.0) -> HlsStreamingServer:
+    server = HlsStreamingServer(segment_duration=segment_duration, port=0)
     server.segments_dir = tmp_path
     return server
 
@@ -116,6 +116,21 @@ def test_loading_and_unloading_a_video():
 
     server.stop()
     assert not segments_dir.exists()
+
+
+def test_segments_that_cannot_be_removed_on_stop_are_logged(tmp_path, caplog):
+    segments_dir = tmp_path / "hls"
+    segments_dir.mkdir()
+    _finalize_segments(segments_dir, 0)
+    server = _server(segments_dir)
+    segments_dir.chmod(0o500)
+    try:
+        server.stop()
+    finally:
+        segments_dir.chmod(0o700)
+
+    assert (segments_dir / "seg_00000.ts").exists()
+    assert "seg_00000.ts" in caplog.text
 
 
 def test_playlist_being_replaced_reads_as_not_ready(tmp_path, monkeypatch):
@@ -323,7 +338,7 @@ def test_late_request_does_not_restart_segments_not_yet_written(tmp_path):
 
 @pytest.mark.parametrize(("written", "player_at", "kept"), [(15, 12, range(6, 15)), (5, 3, range(5))])
 def test_old_segments_are_evicted_behind_the_player(tmp_path, written, player_at, kept):
-    server = _server(tmp_path, max_segments_ahead=3)
+    server = _server(tmp_path)
     for index in range(written):
         (tmp_path / f"seg_{index:05d}.ts").write_bytes(b"data")
 
@@ -579,7 +594,7 @@ def test_restart_waits_for_writer_before_closing_pipe(monkeypatch, tmp_path):
         encoder.stop()
 
     assert uncaught == []
-    assert not encoder.failed
+    encoder.raise_if_failed()
     new.stdin.write.assert_called_once()
 
 
@@ -615,7 +630,8 @@ def test_a_dead_ffmpeg_pipe_fails_the_writes_instead_of_blocking(monkeypatch, tm
         encoder.stop()
 
     assert [str(error) for error in raised] == ["Streaming writer failed"]
-    assert encoder.failed
+    with pytest.raises(StreamingEncodeError):
+        encoder.raise_if_failed()
     assert uncaught == []
 
 
@@ -629,11 +645,10 @@ def test_restart_clears_a_writer_failure(tmp_path):
 
         process.stdin.write.side_effect = None
         encoder.flush_and_restart(start_number=1)
-        assert not encoder.failed
         encoder.write_frame(torch.zeros(3, 4, 4, dtype=torch.uint8), pts=0)
         encoder.stop()
 
-    assert not encoder.failed
+    encoder.raise_if_failed()
 
 
 def test_reencoded_surround_audio_plays_from_any_segment(tmp_path):
@@ -698,7 +713,7 @@ def serve():
             server.load_video(metadata)
         server.start()
         started.append(server)
-        return server, server._httpd.server_address[1]
+        return server, server.port
 
     yield start
     for server in started:

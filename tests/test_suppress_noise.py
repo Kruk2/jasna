@@ -40,68 +40,44 @@ def test_only_unsupported_hipblas_fallback_warning_is_muted(monkeypatch, message
     assert len(caught) == (0 if muted else 1)
 
 
-def test_deserialized_symbol_warning_is_filtered() -> None:
+@pytest.mark.parametrize(
+    ("logger_name", "level", "suppressed", "kept"),
+    [
+        (
+            "torch._export.serde.serialize", logging.WARNING,
+            ("Symbol %s did not appear in the graph that was deserialized", ("u0",)),
+            ("a real warning", ()),
+        ),
+        (
+            "torch_tensorrt._utils", logging.ERROR,
+            ("CUDA 13 is not currently supported for TRT-LLM plugins. Please install pytorch with CUDA 12.x support", ()),
+            ("a genuine conversion failure", ()),
+        ),
+        (
+            "torch.utils.flop_counter", logging.WARNING,
+            ("triton not found; flop counting will not work for triton kernels", ()),
+            ("some other flop message", ()),
+        ),
+        (
+            "torch._inductor.select_algorithm", logging.ERROR,
+            (
+                "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+                ("No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376",),
+            ),
+            ("Runtime error during autotuning: \n%s. \nIgnoring this choice.", ("illegal memory access",)),
+        ),
+    ],
+    ids=["deserialized-symbol", "trt-llm-plugins", "flop-counter-triton", "autotune-shared-memory"],
+)
+def test_known_noise_is_filtered_and_other_records_pass(logger_name, level, suppressed, kept) -> None:
     install()
-    logger = logging.getLogger("torch._export.serde.serialize")
+    logger = logging.getLogger(logger_name)
 
-    suppressed = logger.makeRecord(
-        logger.name,
-        logging.WARNING,
-        "f",
-        1,
-        "Symbol %s did not appear in the graph that was deserialized",
-        ("u0",),
-        None,
-    )
-    kept = logger.makeRecord(
-        logger.name, logging.WARNING, "f", 1, "a real warning", (), None
-    )
+    def record(message, args):
+        return logger.makeRecord(logger.name, level, "f", 1, message, args, None)
 
-    assert not logger.filter(suppressed)
-    assert logger.filter(kept)
-
-
-def test_torch_tensorrt_cuda_plugin_error_is_filtered() -> None:
-    install()
-    logger = logging.getLogger("torch_tensorrt._utils")
-
-    suppressed = logger.makeRecord(
-        logger.name,
-        logging.ERROR,
-        "f",
-        1,
-        "CUDA 13 is not currently supported for TRT-LLM plugins. "
-        "Please install pytorch with CUDA 12.x support",
-        (),
-        None,
-    )
-    kept = logger.makeRecord(
-        logger.name, logging.ERROR, "f", 1, "a genuine conversion failure", (), None
-    )
-
-    assert not logger.filter(suppressed)
-    assert logger.filter(kept)
-
-
-def test_flop_counter_triton_warning_is_filtered() -> None:
-    install()
-    logger = logging.getLogger("torch.utils.flop_counter")
-
-    suppressed = logger.makeRecord(
-        logger.name,
-        logging.WARNING,
-        "f",
-        1,
-        "triton not found; flop counting will not work for triton kernels",
-        (),
-        None,
-    )
-    kept = logger.makeRecord(
-        logger.name, logging.WARNING, "f", 1, "some other flop message", (), None
-    )
-
-    assert not logger.filter(suppressed)
-    assert logger.filter(kept)
+    assert not logger.filter(record(*suppressed))
+    assert logger.filter(record(*kept))
 
 
 def test_tensorrt_plugin_experimental_warning_is_muted(monkeypatch) -> None:
@@ -200,27 +176,6 @@ def test_real_tensorrt_plugin_logger_is_filtered_lazily(proxy_before_plugin) -> 
         [sys.executable, "-c", script], cwd=Path(__file__).parents[1], capture_output=True, text=True, check=True
     )
     assert "NOISY_PROXY_ATTRIBUTE" not in result.stdout
-
-
-def test_autotune_choice_that_exceeds_shared_memory_is_filtered() -> None:
-    install()
-    logger = logging.getLogger("torch._inductor.select_algorithm")
-
-    suppressed = logger.makeRecord(
-        logger.name,
-        logging.ERROR,
-        "f",
-        1,
-        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
-        ("No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376",),
-        None,
-    )
-    kept = logger.makeRecord(
-        logger.name, logging.ERROR, "f", 1, "Runtime error during autotuning: \n%s. \nIgnoring this choice.", ("illegal memory access",), None
-    )
-
-    assert not logger.filter(suppressed)
-    assert logger.filter(kept)
 
 
 def test_tensorrt_proxy_misses_attributes_without_printing() -> None:

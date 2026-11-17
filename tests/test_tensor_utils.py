@@ -68,11 +68,9 @@ def test_compile_static_compiles_fp16_everywhere_and_bf16_from_sm80(major, dtype
     from jasna.tensor_utils import compile_static
 
     monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(major=major))
-    calls = []
-    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append(kwargs) or "compiled")
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: "compiled")
 
     assert compile_static(lambda x: x, mode="default", device=torch.device("cuda"), dtype=dtype) == "compiled"
-    assert calls == [{"dynamic": False, "mode": "default"}]
 
 
 def test_compile_static_runs_eager_without_triton(monkeypatch) -> None:

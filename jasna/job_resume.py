@@ -113,7 +113,7 @@ def job_inputs(config: SessionConfig, source: Path, output: Path, metadata, spli
     the saved auto split, track plans and latents depend on, so a change to the rest
     (codec, quality, LUT, sharpening, BasicVSR++ settings) keeps them."""
     from jasna.ltx.model_files import bundle_paths
-    from jasna.ltx.plan import track_max_gap
+    from jasna.ltx.tracks import track_max_gap
 
     stat = source.stat()
     settings = asdict(config)

@@ -283,17 +283,6 @@ def ipc_collect(device: torch.device | str) -> None:
         module.ipc_collect()
 
 
-def reset_peak_memory_stats(device: torch.device | str) -> None:
-    module = device_module(torch.device(device))
-    if hasattr(module, "reset_peak_memory_stats"):
-        module.reset_peak_memory_stats(torch.device(device))
-
-
-def mem_get_info(device: torch.device | str) -> tuple[int, int]:
-    module = device_module(torch.device(device))
-    return module.mem_get_info(torch.device(device))
-
-
 class _NvmlMemory(ctypes.Structure):
     _fields_ = [("total", ctypes.c_ulonglong), ("free", ctypes.c_ulonglong), ("used", ctypes.c_ulonglong)]
 

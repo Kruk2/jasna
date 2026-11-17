@@ -1,14 +1,15 @@
 import os
+import pickle
+from contextlib import contextmanager
 from dataclasses import replace
 from fractions import Fraction
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 import torch
 
-from factories import session_config
+from factories import session_config, video_metadata
 from jasna import job_resume
 from jasna.job_resume import ResumeJob, ResumeMismatchError, changed_inputs, fingerprints, job_inputs
 from jasna.media.splice import KeyframeIndex, build_splice_plan
@@ -16,8 +17,11 @@ from jasna.os_utils import atomic_write
 from jasna.session_factory import find_resume_output
 from jasna.ltx.camera import CropFrame
 from jasna.ltx.model_files import bundle_names
-from jasna.ltx.plan import MAX_GAP, TrackPlan, Window, plans_from_arrays, plans_to_arrays
-from jasna.ltx.restore import LatentStore
+from jasna.ltx.plan import TrackPlan
+from jasna.ltx.resume_files import plans_from_arrays, plans_to_arrays
+from jasna.ltx.tracks import MAX_GAP
+from jasna.ltx.windows import Window
+from jasna.ltx.resume_files import LatentStore
 from jasna.segments import SegmentRange, SegmentRestoration
 
 
@@ -35,8 +39,7 @@ def job(tmp_path):
     )
     for name in bundle_names(config.ltx_model, fast=config.ltx_fast):
         (models / name).write_bytes(b"weights")
-    metadata = SimpleNamespace(num_frames=120, time_base=Fraction(1, 30), duration=4.0, codec_name="hevc")
-    return config, source, output, metadata
+    return config, source, output, video_metadata(fps=30, num_frames=120, video_width=1920, video_height=1080)
 
 
 def _plan(segments):
@@ -80,15 +83,20 @@ def test_atomic_write_does_not_publish_interrupted_file(tmp_path):
     assert target.read_text() == "old"
 
 
+class _NotAWeight:
+    pass
+
+
 def test_latents_ignore_part_files_and_load_only_weights(tmp_path):
     store = LatentStore(tmp_path, "reference")
     (tmp_path / "000003.reference.pt.part").write_bytes(b"unfinished")
     assert not store.has(3)
     store.put(3, torch.tensor([1.0, 2.0]))
-    with patch("torch.load", wraps=torch.load) as load:
-        assert torch.equal(store.get(3), torch.tensor([1.0, 2.0], dtype=torch.bfloat16))
-    assert load.call_args.kwargs["weights_only"] is True
+    assert torch.equal(store.get(3), torch.tensor([1.0, 2.0], dtype=torch.bfloat16))
     assert store.has(3)
+    torch.save({"latent": _NotAWeight()}, tmp_path / "000003.reference.pt")
+    with pytest.raises(pickle.UnpicklingError):
+        store.get(3)
 
 
 def job_fingerprints(config, source, output, metadata, splice_plan):
@@ -217,7 +225,7 @@ def test_fingerprint_detects_changes(job, monkeypatch, change):
     elif change == "output":
         output = output.with_suffix(".mkv")
     else:
-        metadata = SimpleNamespace(num_frames=120, time_base=Fraction(1, 24), duration=5.0)
+        metadata = video_metadata(fps=24, num_frames=120, video_width=1920, video_height=1080)
     assert job_fingerprints(config, source, output, metadata, _plan(ranges)) != original
 
 
@@ -335,12 +343,6 @@ def test_resume_lookup_handles_brackets_and_only_follows_actual_auto_rename_name
         assert find_resume_output(config, source, output, ()) == saved
 
 
-def _video_metadata(metadata):
-    metadata.video_width, metadata.video_height = 1920, 1080
-    metadata.sample_aspect_ratio = Fraction(1, 1)
-    return metadata
-
-
 def _splice_patches(metadata):
     return (
         patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
@@ -353,7 +355,6 @@ def test_find_auto_split_checkpoint_with_effective_codec_and_ranges(job):
     from jasna.session_factory import segment_job_config
 
     config, source, output, metadata = job
-    metadata = _video_metadata(metadata)
     config = replace(config, ltx_auto_split_percent=12.0, codec="av1", vr_mode="off")
     segments = (SegmentRange(1, 2, SegmentRestoration("ltx", 0)),)
     ResumeJob(config, source, output, metadata, None).save_split(segments)
@@ -383,7 +384,6 @@ def test_auto_split_that_could_not_split_finds_its_whole_video_checkpoint(job):
 
     config, source, output, metadata = job
     config = replace(config, ltx_auto_split_percent=12.0, vr_mode="off")
-    metadata = _video_metadata(metadata)
     ResumeJob(config, source, output, metadata, None).prepare()
     with (
         patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
@@ -415,25 +415,29 @@ def test_cli_asks_before_replacing_progress(job, answer):
         assert prompt.called is (answer is not None)
 
 
-@pytest.mark.parametrize("render_started", [False, True])
-def test_auto_split_reuses_saved_detection_and_rejects_changed_settings(job, render_started):
-    from jasna.media.splice import KeyframeIndex
+@contextmanager
+def _auto_split_video():
+    """A 6 s video whose second sampled mosaic is big enough for LTX; yields its metadata and the mosaic scan."""
     from jasna.mosaic_scan import MosaicSamples
-    from jasna.session_factory import ltx_auto_split
 
-    config, source, output, metadata = job
-    config = replace(config, ltx_auto_split_percent=12.0, vr_mode="off")
-    metadata.duration = 6.0
-    metadata.num_frames = 180
-    metadata.video_width, metadata.video_height = 1920, 1080
-    metadata.sample_aspect_ratio = Fraction(1, 1)
+    metadata = video_metadata(fps=30, num_frames=180, video_width=1920, video_height=1080)
     samples = MosaicSamples(times=(1.0, 3.0), scores=(0.9, 0.9), sizes=(0.05, 0.3), stride=1.0)
     with (
         patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
         patch("jasna.media.splice.validate_smart_render"),
-        patch("jasna.media.splice.probe_keyframes", return_value=KeyframeIndex((0, 60, 120), Fraction(1,30), 0, 180)),
+        patch("jasna.media.splice.probe_keyframes", return_value=KeyframeIndex((0, 60, 120), Fraction(1, 30), 0, 180)),
         patch("jasna.mosaic_scan.scan_mosaic_sizes", return_value=samples) as scan,
     ):
+        yield metadata, scan
+
+
+@pytest.mark.parametrize("render_started", [False, True])
+def test_auto_split_reuses_saved_detection_and_rejects_changed_settings(job, render_started):
+    from jasna.session_factory import ltx_auto_split
+
+    config, source, output, _metadata = job
+    config = replace(config, ltx_auto_split_percent=12.0, vr_mode="off")
+    with _auto_split_video() as (metadata, scan):
         first = ltx_auto_split(config, MagicMock(), source, output, progress_callback=None)
         second = ltx_auto_split(config, MagicMock(), source, output, progress_callback=None)
         assert first == second
@@ -452,24 +456,12 @@ def test_auto_split_reuses_saved_detection_and_rejects_changed_settings(job, ren
 
 
 def test_auto_split_scans_past_a_checkpoint_without_saved_work(job):
-    from jasna.media.splice import KeyframeIndex
-    from jasna.mosaic_scan import MosaicSamples
     from jasna.session_factory import ltx_auto_split
 
-    config, source, output, metadata = job
+    config, source, output, _metadata = job
     config = replace(config, ltx_auto_split_percent=12.0, vr_mode="off")
-    metadata.duration = 6.0
-    metadata.num_frames = 180
-    metadata.video_width, metadata.video_height = 1920, 1080
-    metadata.sample_aspect_ratio = Fraction(1, 1)
-    ResumeJob(replace(config, ltx_seed=42), source, output, metadata, None).prepare()
-    samples = MosaicSamples(times=(1.0, 3.0), scores=(0.9, 0.9), sizes=(0.05, 0.3), stride=1.0)
-    with (
-        patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
-        patch("jasna.media.splice.validate_smart_render"),
-        patch("jasna.media.splice.probe_keyframes", return_value=KeyframeIndex((0, 60, 120), Fraction(1,30), 0, 180)),
-        patch("jasna.mosaic_scan.scan_mosaic_sizes", return_value=samples) as scan,
-    ):
+    with _auto_split_video() as (metadata, scan):
+        ResumeJob(replace(config, ltx_seed=42), source, output, metadata, None).prepare()
         assert ltx_auto_split(config, MagicMock(), source, output, progress_callback=None) is not None
     scan.assert_called_once()
 

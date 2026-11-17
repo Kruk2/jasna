@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from queue import Queue
 
 import torch
@@ -18,12 +17,6 @@ from jasna.vr180 import StereoLayout
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class BatchProcessResult:
-    next_frame_idx: int
-    clips_emitted: int
-
-
 def _process_ended_clips(
     *,
     ended_clips: list[EndedClip],
@@ -34,7 +27,7 @@ def _process_ended_clips(
     crop_buffers: dict[int, CropBuffer],
     clip_queue: Queue[ClipRestoreItem | object],
     frame_shape: tuple[int, int],
-    min_detection_duration: int = 0,
+    min_detection_duration: int,
 ) -> None:
     bf = min(int(blend_frames), int(discard_margin)) if discard_margin > 0 else 0
     if bf > 0 and discard_margin > 0:
@@ -130,26 +123,21 @@ def process_frame_batch(
     clip_queue: Queue[ClipRestoreItem | object],
     metadata_queue: Queue[FrameMeta | object],
     discard_margin: int,
-    blend_frames: int = 0,
-    stereo: StereoLayout | None = None,
-    min_detection_duration: int = 0,
-    scene_detector: SceneCutDetector | None = None,
-    vr_projector=None,
-) -> BatchProcessResult:
-    effective_bs = len(pts_list)
-    if effective_bs == 0:
-        return BatchProcessResult(next_frame_idx=int(start_frame_idx), clips_emitted=0)
+    blend_frames: int,
+    stereo: StereoLayout | None,
+    min_detection_duration: int,
+    scene_detector: SceneCutDetector | None,
+    vr_projector,
+) -> int:
+    """Track one non-empty batch (``frames`` matching ``pts_list``); returns the next frame index."""
+    scene_cuts = scene_detector.find_cuts(frames) if scene_detector is not None else frozenset()
+    detections: Detections = detections_fn(frames, target_hw=target_hw)
+    _, frame_h, frame_w = frames[0].shape
 
-    frames_eff = frames[:effective_bs]
-    scene_cuts = scene_detector.find_cuts(frames_eff) if scene_detector is not None else frozenset()
-    detections: Detections = detections_fn(frames_eff, target_hw=target_hw)
-    _, frame_h, frame_w = frames_eff[0].shape
-
-    clips_emitted = 0
-    for i in range(effective_bs):
+    for i in range(len(pts_list)):
         current_frame_idx = int(start_frame_idx) + i
         pts = int(pts_list[i])
-        frame = frames_eff[i]
+        frame = frames[i]
 
         valid_boxes = detections.boxes_xyxy[i]
         valid_masks = detections.masks[i]
@@ -184,8 +172,6 @@ def process_frame_batch(
                 )
                 crop_buffers[tid].add(raw_crop)
 
-        clips_emitted += len(ended_clips)
-
         _process_ended_clips(
             ended_clips=ended_clips,
             discard_margin=int(discard_margin),
@@ -198,10 +184,7 @@ def process_frame_batch(
             min_detection_duration=int(min_detection_duration),
         )
 
-    return BatchProcessResult(
-        next_frame_idx=int(start_frame_idx) + effective_bs,
-        clips_emitted=clips_emitted,
-    )
+    return int(start_frame_idx) + len(pts_list)
 
 
 def _extract_region_crop(
@@ -226,8 +209,8 @@ def finalize_processing(
     clip_queue: Queue[ClipRestoreItem | object],
     frame_shape: tuple[int, int],
     discard_margin: int,
-    blend_frames: int = 0,
-    min_detection_duration: int = 0,
+    blend_frames: int,
+    min_detection_duration: int,
 ) -> None:
     ended_clips = tracker.flush()
     _process_ended_clips(

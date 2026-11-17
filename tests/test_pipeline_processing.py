@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 import torch
 
-import jasna.crop_buffer as crop_buffer
+from factories import restore_synchronously
 from jasna.vr180 import StereoLayout
 from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer, prepare_crops_for_restoration
 from jasna.frame_queue import FrameQueue
 from jasna.mosaic.detections import Detections
-from jasna.pipeline_items import ClipRestoreItem, FrameMeta, SecondaryRestoreResult, _SENTINEL
+from jasna.pipeline_items import ClipRestoreItem, FrameMeta, SecondaryRestoreResult, SENTINEL
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
 from jasna.restorer.restoration_pipeline import RestorationPipeline
 from jasna.tracking.clip_tracker import ClipTracker
@@ -76,31 +76,23 @@ def _restore_with(restorer):
     pipeline = RestorationPipeline(restorer=restorer)
 
     def process(ci: ClipRestoreItem, blend_buffer: BlendBuffer) -> None:
-        pr = pipeline.prepare_and_run_primary(ci.clip, ci.raw_crops, ci.frame_shape, ci.keep_start, ci.keep_end, ci.crossfade_weights)
-        restored = pipeline._run_secondary(pr.primary_raw, pr.keep_start, pr.keep_end)
-        blend_buffer.add_result(pipeline.build_secondary_result(pr, restored))
+        blend_buffer.add_result(restore_synchronously(
+            pipeline, ci.clip, ci.raw_crops, ci.frame_shape, ci.keep_start, ci.keep_end, ci.crossfade_weights
+        ))
 
     return process
 
 
-def _ones_blend_mask(mask_lr, bbox_xyxy, frame_shape) -> torch.Tensor:
-    x1, y1, x2, y2 = bbox_xyxy
-    return torch.ones((y2 - y1, x2 - x1), dtype=torch.float32)
-
-
 @pytest.fixture
-def exact_crops(monkeypatch):
+def exact_blend_buffer(exact_crops, whole_box_blend_mask):
     """Crop exactly the detected box and blend all of it, so restored pixels are predictable."""
-    monkeypatch.setattr(crop_buffer, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(crop_buffer, "MIN_BORDER", 0)
-    monkeypatch.setattr(crop_buffer, "MAX_EXPANSION_FACTOR", 0.0)
-    return BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_ones_blend_mask)
+    return BlendBuffer(vr_projector=None)
 
 
 def _drain_queue(clip_queue: FrameQueue, blend_buffer: BlendBuffer, process_fn) -> None:
-    while not clip_queue.empty():
+    while clip_queue.qsize():
         item = clip_queue.get(timeout=0)
-        if item is _SENTINEL:
+        if item is SENTINEL:
             break
         process_fn(item, blend_buffer)
 
@@ -112,7 +104,7 @@ def _make_empty_det_batch(*, batch_size: int) -> Detections:
     )
 
 
-def _make_single_det_batch(*, effective_bs: int, batch_size: int, box=(2.0, 2.0, 6.0, 6.0)) -> Detections:
+def _make_single_det_batch(*, batch_size: int, box=(2.0, 2.0, 6.0, 6.0)) -> Detections:
     boxes_xyxy = []
     masks = []
     for _ in range(batch_size):
@@ -124,7 +116,7 @@ def _make_single_det_batch(*, effective_bs: int, batch_size: int, box=(2.0, 2.0,
 
 
 def _one_box_per_frame(frames: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-    return _make_single_det_batch(effective_bs=len(frames), batch_size=len(frames))
+    return _make_single_det_batch(batch_size=len(frames))
 
 
 def _run_batches(
@@ -142,7 +134,7 @@ def _run_batches(
     ``(frame_idx, blended, pts)`` for every frame in output order."""
     batch_size = max(len(pts_list) for pts_list in pts_lists)
     tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
-    blend_buffer = blend_buffer or BlendBuffer(device=torch.device("cpu"))
+    blend_buffer = blend_buffer or BlendBuffer(vr_projector=None)
     crop_buffers: dict[int, CropBuffer] = {}
     clip_queue = FrameQueue(max_frames=9999)
     metadata_queue: Queue[FrameMeta | object] = Queue()
@@ -150,25 +142,25 @@ def _run_batches(
     frame_idx = 0
 
     for pts_list in pts_lists:
-        res = process_frame_batch(
+        frame_idx = process_frame_batch(
             frames=frames[:len(pts_list)], pts_list=list(pts_list), start_frame_idx=frame_idx,
             target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
             clip_queue=clip_queue, metadata_queue=metadata_queue,
             discard_margin=discard_margin, blend_frames=blend_frames,
+            stereo=None, min_detection_duration=0, scene_detector=None, vr_projector=None,
         )
         _drain_queue(clip_queue, blend_buffer, process_fn)
-        frame_idx = res.next_frame_idx
 
     finalize_processing(
         tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
         clip_queue=clip_queue, frame_shape=(8, 8),
-        discard_margin=discard_margin, blend_frames=blend_frames,
+        discard_margin=discard_margin, blend_frames=blend_frames, min_detection_duration=0,
     )
     _drain_queue(clip_queue, blend_buffer, process_fn)
 
     ready = []
-    while not metadata_queue.empty() and (meta := metadata_queue.get()) is not _SENTINEL:
+    while not metadata_queue.empty() and (meta := metadata_queue.get()) is not SENTINEL:
         ready.append((meta.frame_idx, blend_buffer.blend_frame(meta.frame_idx, frames[0].clone()), meta.pts))
     return ready
 
@@ -221,13 +213,13 @@ def _full_mask_box(frames: torch.Tensor, *, target_hw: tuple[int, int]) -> Detec
     ids=["overlapping-crossfade", "valid-crossfade", "exact-boundary", "long-split-chain", "clamped-blend"],
 )
 def test_restored_mosaic_survives_clip_splits_and_crossfades(
-    exact_crops, max_clip_size, temporal_overlap, blend_frames, num_frames, original_value, restored, exact
+    exact_blend_buffer, max_clip_size, temporal_overlap, blend_frames, num_frames, original_value, restored, exact
 ) -> None:
     out = _run_batches(
         pts_lists=[[pts] for pts in range(num_frames)],
         max_clip_size=max_clip_size, discard_margin=temporal_overlap, blend_frames=blend_frames,
         process_fn=_restore_with(_ConstantRestorer(restored)), detections_fn=_full_mask_box,
-        blend_buffer=exact_crops, original_value=original_value,
+        blend_buffer=exact_blend_buffer, original_value=original_value,
     )
 
     assert [idx for idx, _, _ in out] == list(range(num_frames))
@@ -246,26 +238,35 @@ def test_merged_crossfade_weights_sum_to_one_across_clip_boundaries() -> None:
     )
 
     assert len(captured) >= 3
-    for a, b in zip(captured, captured[1:]):
-        if a.crossfade_weights is None or b.crossfade_weights is None:
-            continue
-        for local_b, w_b in b.crossfade_weights.items():
-            w_a = a.crossfade_weights.get(b.clip.start_frame + local_b - a.clip.start_frame)
-            if w_a is not None:
-                assert w_a + w_b == pytest.approx(1.0)
+    sums = [
+        w_a + w_b
+        for a, b in zip(captured, captured[1:])
+        if a.crossfade_weights is not None and b.crossfade_weights is not None
+        for local_b, w_b in b.crossfade_weights.items()
+        if (w_a := a.crossfade_weights.get(b.clip.start_frame + local_b - a.clip.start_frame)) is not None
+    ]
+    assert sums and sums == pytest.approx([1.0] * len(sums))
 
 
-def test_crossfade_weights_applied_in_blending(exact_crops) -> None:
-    def run(blend_frames: int) -> list[torch.Tensor]:
-        blend_buffer = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_ones_blend_mask)
-        out = _run_batches(
-            pts_lists=[[pts] for pts in range(15)], max_clip_size=10, discard_margin=2, blend_frames=blend_frames,
-            process_fn=_restore_with(_ConstantRestorer(0.3, 0.7)), detections_fn=_full_mask_box,
-            blend_buffer=blend_buffer, original_value=200,
-        )
-        return [blended[:, 2:6, 2:6] for _, blended, _ in out]
+@pytest.mark.parametrize(
+    ("blend_frames", "mosaic_values"),
+    [
+        (0, [76] * 8 + [178] * 7),
+        # Weights 0.75/0.25 then 0.25/0.75 of the parent (0.3 -> 76) and child (0.7 -> 178) clip.
+        (1, [76] * 7 + [102, 152] + [178] * 6),
+    ],
+    ids=["hard-cut", "crossfade"],
+)
+def test_crossfade_weights_mix_the_split_clips_in_blending(exact_blend_buffer, blend_frames, mosaic_values) -> None:
+    out = _run_batches(
+        pts_lists=[[pts] for pts in range(15)], max_clip_size=10, discard_margin=2, blend_frames=blend_frames,
+        process_fn=_restore_with(_ConstantRestorer(0.3, 0.7)), detections_fn=_full_mask_box,
+        blend_buffer=exact_blend_buffer, original_value=200,
+    )
 
-    assert any(not torch.equal(faded, cut) for faded, cut in zip(run(1), run(0)))
+    regions = [blended[:, 2:6, 2:6] for _, blended, _ in out]
+    assert all(region.unique().numel() == 1 for region in regions)
+    assert [int(region[0, 0, 0]) for region in regions] == mosaic_values
 
 
 def test_crossfade_with_split_assigns_parent_weights() -> None:
@@ -280,56 +281,6 @@ def test_crossfade_with_split_assigns_parent_weights() -> None:
     weights = [parent[k] for k in sorted(parent)]
     assert weights == sorted(weights, reverse=True) and len(set(weights)) == len(weights)
     assert captured[1].crossfade_weights is not None, "continuation clip should have child crossfade weights"
-
-
-def test_process_frame_batch_empty_pts_list_returns_immediately() -> None:
-    metadata_queue: Queue[FrameMeta | object] = Queue()
-
-    res = process_frame_batch(
-        frames=torch.zeros((1, 3, 8, 8), dtype=torch.uint8), pts_list=[], start_frame_idx=5,
-        target_hw=(8, 8),
-        detections_fn=lambda *a, **kw: _make_empty_det_batch(batch_size=1),
-        tracker=ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.0),
-        blend_buffer=BlendBuffer(device=torch.device("cpu")), crop_buffers={},
-        clip_queue=FrameQueue(max_frames=9999), metadata_queue=metadata_queue,
-        discard_margin=0, blend_frames=0,
-    )
-    assert (res.next_frame_idx, res.clips_emitted) == (5, 0)
-    assert metadata_queue.empty()
-
-
-def test_process_frame_batch_forwards_partial_batch_without_padding() -> None:
-    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.0)
-    blend_buffer = BlendBuffer(device=torch.device("cpu"))
-    crop_buffers: dict[int, CropBuffer] = {}
-    clip_queue = FrameQueue(max_frames=9999)
-    metadata_queue: Queue[FrameMeta | object] = Queue()
-    frames = torch.zeros((4, 3, 8, 8), dtype=torch.uint8)
-    seen_shapes: list[tuple[int, ...]] = []
-
-    def detections_fn(
-        input_frames: torch.Tensor,
-        *,
-        target_hw: tuple[int, int],
-    ) -> Detections:
-        seen_shapes.append(tuple(input_frames.shape))
-        return _make_empty_det_batch(batch_size=input_frames.shape[0])
-
-    process_frame_batch(
-        frames=frames,
-        pts_list=[0, 1],
-        start_frame_idx=0,
-        target_hw=(8, 8),
-        detections_fn=detections_fn,
-        tracker=tracker,
-        blend_buffer=blend_buffer,
-        crop_buffers=crop_buffers,
-        clip_queue=clip_queue,
-        metadata_queue=metadata_queue,
-        discard_margin=0,
-    )
-
-    assert seen_shapes == [(2, 3, 8, 8)]
 
 
 def test_clip_split_child_crop_count_matches_frame_count() -> None:
@@ -371,7 +322,7 @@ def _run_scripted(
         iou_threshold=0.0,
         max_detection_gap=max_detection_gap,
     )
-    blend_buffer = BlendBuffer(device=torch.device("cpu"))
+    blend_buffer = BlendBuffer(vr_projector=None)
     crop_buffers: dict[int, CropBuffer] = {}
     clip_queue = FrameQueue(max_frames=9999)
     metadata_queue: Queue[FrameMeta | object] = Queue()
@@ -385,16 +336,15 @@ def _run_scripted(
 
     frame_idx = 0
     for pts in range(len(script)):
-        res = process_frame_batch(
+        frame_idx = process_frame_batch(
             frames=frames, pts_list=[pts], start_frame_idx=frame_idx,
             target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
             clip_queue=clip_queue, metadata_queue=metadata_queue,
-            discard_margin=temporal_overlap, blend_frames=0,
-            min_detection_duration=min_detection_duration,
+            discard_margin=temporal_overlap, blend_frames=0, stereo=None,
+            min_detection_duration=min_detection_duration, scene_detector=None, vr_projector=None,
         )
         _drain_queue(clip_queue, blend_buffer, collect)
-        frame_idx = res.next_frame_idx
 
     finalize_processing(
         tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
@@ -459,24 +409,25 @@ class _StubSceneDetector:
 
 def test_scene_cut_flushes_tracker_and_splits_clip() -> None:
     tracker = ClipTracker(max_clip_size=60, temporal_overlap=0, iou_threshold=0.0)
-    blend_buffer = BlendBuffer(device=torch.device("cpu"))
+    blend_buffer = BlendBuffer(vr_projector=None)
     crop_buffers: dict[int, CropBuffer] = {}
     clip_queue = FrameQueue(max_frames=9999)
     metadata_queue: Queue[FrameMeta | object] = Queue()
     frames = torch.zeros((8, 3, 8, 8), dtype=torch.uint8)
 
     def detections_fn(frames_eff, target_hw):
-        return _make_single_det_batch(effective_bs=len(frames_eff), batch_size=len(frames_eff))
+        return _make_single_det_batch(batch_size=len(frames_eff))
 
-    res = process_frame_batch(
+    process_frame_batch(
         frames=frames, pts_list=list(range(8)), start_frame_idx=0,
         target_hw=(8, 8), detections_fn=detections_fn,
         tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
         clip_queue=clip_queue, metadata_queue=metadata_queue,
-        discard_margin=0, scene_detector=_StubSceneDetector({4}),
+        discard_margin=0, blend_frames=0, stereo=None, min_detection_duration=0,
+        scene_detector=_StubSceneDetector({4}), vr_projector=None,
     )
 
-    assert res.clips_emitted == 1
+    assert clip_queue.qsize() == 1
     first = clip_queue.get(timeout=0)
     assert first.clip.start_frame == 0
     assert first.clip.frame_count == 4
@@ -484,7 +435,7 @@ def test_scene_cut_flushes_tracker_and_splits_clip() -> None:
 
     finalize_processing(
         tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
-        clip_queue=clip_queue, frame_shape=(8, 8), discard_margin=0,
+        clip_queue=clip_queue, frame_shape=(8, 8), discard_margin=0, blend_frames=0, min_detection_duration=0,
     )
     second = clip_queue.get(timeout=0)
     assert second.clip.start_frame == 4
@@ -497,7 +448,7 @@ def test_scene_cut_ends_coasting_track_and_trims_synthetic_tail() -> None:
     tracker = ClipTracker(
         max_clip_size=60, temporal_overlap=0, iou_threshold=0.0, max_detection_gap=5,
     )
-    blend_buffer = BlendBuffer(device=torch.device("cpu"))
+    blend_buffer = BlendBuffer(vr_projector=None)
     crop_buffers: dict[int, CropBuffer] = {}
     clip_queue = FrameQueue(max_frames=9999)
     metadata_queue: Queue[FrameMeta | object] = Queue()
@@ -505,21 +456,22 @@ def test_scene_cut_ends_coasting_track_and_trims_synthetic_tail() -> None:
     detected = [True, True, True, False, False, False, False, False]
 
     def detections_fn(frames_eff, target_hw):
-        dets = _make_single_det_batch(effective_bs=len(frames_eff), batch_size=len(frames_eff))
+        dets = _make_single_det_batch(batch_size=len(frames_eff))
         empty = _make_empty_det_batch(batch_size=1)
         boxes = [b if detected[i] else empty.boxes_xyxy[0] for i, b in enumerate(dets.boxes_xyxy)]
         masks = [m if detected[i] else empty.masks[0] for i, m in enumerate(dets.masks)]
         return Detections(boxes_xyxy=boxes, masks=masks)
 
-    res = process_frame_batch(
+    process_frame_batch(
         frames=frames, pts_list=list(range(8)), start_frame_idx=0,
         target_hw=(8, 8), detections_fn=detections_fn,
         tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
         clip_queue=clip_queue, metadata_queue=metadata_queue,
-        discard_margin=0, scene_detector=_StubSceneDetector({5}),
+        discard_margin=0, blend_frames=0, stereo=None, min_detection_duration=0,
+        scene_detector=_StubSceneDetector({5}), vr_projector=None,
     )
 
-    assert res.clips_emitted == 1
+    assert clip_queue.qsize() == 1
     ended = clip_queue.get(timeout=0)
     assert ended.clip.frame_count == 3
     assert len(ended.raw_crops) == 3
@@ -527,7 +479,7 @@ def test_scene_cut_ends_coasting_track_and_trims_synthetic_tail() -> None:
 
 
 @pytest.mark.parametrize("layout", ["sbs", "tb"])
-def test_vr_gnomonic_crop_and_blend_stays_within_one_eye(layout) -> None:
+def test_vr_gnomonic_crop_and_blend_stays_within_one_eye(layout, whole_box_blend_mask) -> None:
     from jasna.vr_projection import GnomonicProjector
 
     eye_w, eye_h = 512, 64
@@ -544,16 +496,8 @@ def test_vr_gnomonic_crop_and_blend_stays_within_one_eye(layout) -> None:
         masks = [torch.ones((1, height, frame_w), dtype=torch.bool) for _ in range(b)]
         return Detections(boxes_xyxy=boxes, masks=masks)
 
-    def _ones_blend_mask(mask_lr, bbox_xyxy, frame_shape):
-        x1, y1, x2, y2 = bbox_xyxy
-        return torch.ones((y2 - y1, x2 - x1), dtype=torch.float32)
-
     tracker = ClipTracker(max_clip_size=8, temporal_overlap=0, iou_threshold=0.0)
-    blend_buffer = BlendBuffer(
-        device=torch.device("cpu"),
-        blend_mask_fn=_ones_blend_mask,
-        vr_projector=projector,
-    )
+    blend_buffer = BlendBuffer(vr_projector=projector)
     crop_buffers: dict[int, CropBuffer] = {}
     clip_queue = FrameQueue(max_frames=9999)
     metadata_queue: Queue[FrameMeta | object] = Queue()
@@ -562,11 +506,13 @@ def test_vr_gnomonic_crop_and_blend_stays_within_one_eye(layout) -> None:
         frames=frame, pts_list=[0], start_frame_idx=0, target_hw=(height, frame_w),
         detections_fn=_detections_fn, tracker=tracker, blend_buffer=blend_buffer,
         crop_buffers=crop_buffers, clip_queue=clip_queue, metadata_queue=metadata_queue,
-        discard_margin=0, blend_frames=0, stereo=stereo, vr_projector=projector,
+        discard_margin=0, blend_frames=0, stereo=stereo, min_detection_duration=0, scene_detector=None,
+        vr_projector=projector,
     )
     finalize_processing(
         tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
-        clip_queue=clip_queue, frame_shape=(height, frame_w), discard_margin=0,
+        clip_queue=clip_queue, frame_shape=(height, frame_w), discard_margin=0, blend_frames=0,
+        min_detection_duration=0,
     )
     _drain_queue(clip_queue, blend_buffer, _restore_to_200)
 

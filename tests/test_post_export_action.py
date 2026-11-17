@@ -1,5 +1,5 @@
 import subprocess
-import shlex
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -16,6 +16,8 @@ from jasna.post_export_action import (
     uses_log_placeholder,
     validate_post_export_action,
 )
+
+posix_paths = pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell quoting of POSIX paths")
 
 
 def test_validate_post_export_command_requires_command() -> None:
@@ -81,35 +83,31 @@ def test_run_post_export_safely_reports_spawn_error(monkeypatch) -> None:
     assert errors == ["Post-export action failed: cannot spawn"]
 
 
-def test_expand_post_export_video_command_quotes_paths(monkeypatch, tmp_path: Path) -> None:
+@posix_paths
+def test_expand_post_export_video_command_quotes_paths(monkeypatch) -> None:
     monkeypatch.setattr("jasna.post_export_action.sys.platform", "linux")
-    input_path = tmp_path / "source file.mp4"
-    output_path = tmp_path / "output file.mp4"
 
     expanded = expand_post_export_video_command(
         "tool {input} {output} {output_dir}/{output_stem}_remuxed{output_suffix}",
-        input_path,
-        output_path,
+        Path("/videos/source file.mp4"),
+        Path("/videos/out/output file.mp4"),
     )
 
-    assert expanded == (
-        f"tool {shlex.quote(str(input_path))} {shlex.quote(str(output_path))} "
-        f"{shlex.quote(str(tmp_path))}/{shlex.quote('output file')}_remuxed.mp4"
-    )
+    assert expanded == "tool '/videos/source file.mp4' '/videos/out/output file.mp4' /videos/out/'output file'_remuxed.mp4"
 
 
-def test_expand_post_export_video_command_quotes_log_path(monkeypatch, tmp_path: Path) -> None:
+@posix_paths
+def test_expand_post_export_video_command_quotes_log_path(monkeypatch) -> None:
     monkeypatch.setattr("jasna.post_export_action.sys.platform", "linux")
-    log_path = tmp_path / "output file.log"
 
     expanded = expand_post_export_video_command(
         "cp {log} /logs/",
-        tmp_path / "in.mp4",
-        tmp_path / "output file.mp4",
-        log_path=log_path,
+        Path("/videos/in.mp4"),
+        Path("/videos/output file.mp4"),
+        log_path=Path("/videos/output file.log"),
     )
 
-    assert expanded == f"cp {shlex.quote(str(log_path))} /logs/"
+    assert expanded == "cp '/videos/output file.log' /logs/"
 
 
 def test_expansion_without_a_log_file_leaves_log_as_typed(monkeypatch, tmp_path: Path) -> None:
@@ -128,19 +126,13 @@ def test_uses_log_placeholder(command: str, uses_log: bool) -> None:
     assert uses_log_placeholder(command) is uses_log
 
 
-def test_expansion_does_not_reprocess_placeholders_inside_paths(
-    monkeypatch, tmp_path: Path
-) -> None:
+@posix_paths
+def test_expansion_does_not_reprocess_placeholders_inside_paths(monkeypatch) -> None:
     monkeypatch.setattr("jasna.post_export_action.sys.platform", "linux")
-    input_path = tmp_path / "{output_dir}.mp4"
 
-    expanded = expand_post_export_video_command(
-        "tool {input}",
-        input_path,
-        tmp_path / "out.mp4",
-    )
+    expanded = expand_post_export_video_command("tool {input}", Path("/videos/{output_dir}.mp4"), Path("/videos/out.mp4"))
 
-    assert expanded == f"tool {shlex.quote(str(input_path))}"
+    assert expanded == "tool '/videos/{output_dir}.mp4'"
 
 
 def test_expand_post_export_video_command_quotes_windows_values(
@@ -179,34 +171,19 @@ def test_windows_quoting_keeps_trailing_backslash_inside_quotes(monkeypatch) -> 
     assert _quote_shell_value("C:\\") == '"C:\\\\"'
 
 
-def test_run_post_export_video_command_waits_for_success(
-    monkeypatch, tmp_path: Path, linux_bundled_library_path
+@posix_paths
+def test_run_post_export_video_command_runs_the_expanded_command_without_bundled_libraries(
+    monkeypatch, linux_bundled_library_path
 ) -> None:
     process = MagicMock(pid=123)
     process.wait.return_value = 0
     popen = MagicMock(return_value=process)
     monkeypatch.setattr("jasna.post_export_action.subprocess.Popen", popen)
-    monkeypatch.setattr("jasna.post_export_action.subprocess_no_window_kwargs", lambda: {})
-    input_path = tmp_path / "in.mp4"
-    output_path = tmp_path / "out.mp4"
 
-    run_post_export_video_command(
-        "tool {output}",
-        input_path,
-        output_path,
-        lambda: False,
-    )
+    run_post_export_video_command("tool {output}", Path("/videos/in.mp4"), Path("/videos/out file.mp4"), lambda: False)
 
-    environment = popen.call_args.kwargs["env"]
-    assert environment["LD_LIBRARY_PATH"] == linux_bundled_library_path
-    popen.assert_called_once_with(
-        f"tool {shlex.quote(str(output_path))}",
-        shell=True,
-        cwd=tmp_path,
-        env=environment,
-        start_new_session=True,
-    )
-    process.wait.assert_called_once_with(timeout=0.1)
+    assert popen.call_args.args[0] == "tool '/videos/out file.mp4'"
+    assert popen.call_args.kwargs["env"]["LD_LIBRARY_PATH"] == linux_bundled_library_path
 
 
 def test_run_post_export_video_command_reports_nonzero_exit(monkeypatch, tmp_path: Path) -> None:

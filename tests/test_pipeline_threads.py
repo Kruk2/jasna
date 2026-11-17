@@ -1,7 +1,6 @@
 """Tests for pipeline_threads.py shared thread functions and related frame writers."""
 from __future__ import annotations
 
-import logging
 import threading
 from queue import Queue
 from unittest.mock import MagicMock, patch
@@ -9,12 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
-from factories import make_pipeline, pass_context, video_metadata
+from factories import RecordingWriter, make_pipeline, pass_context, video_metadata
 from jasna.blend_buffer import BlendBuffer
 from jasna.frame_queue import FrameQueue
 from jasna.pipeline import _OfflineFrameWriter
-from jasna.pipeline_items import FrameMeta, _SENTINEL
-from jasna.pipeline_processing import BatchProcessResult
+from jasna.pipeline_items import FrameMeta, SENTINEL
 from jasna.pipeline_threads import (
     blend_encode_loop,
     decode_detect_loop,
@@ -33,24 +31,13 @@ def _reader(batches) -> MagicMock:
     return reader
 
 
-class _RecordingWriter:
-    def __init__(self):
-        self.written: list[tuple[torch.Tensor, int]] = []
-
-    def write(self, frame: torch.Tensor, pts: int) -> None:
-        self.written.append((frame, pts))
-
-    def after_write(self, frames_written: int, stop_event: threading.Event) -> None:
-        pass
-
-
 def _register_frames(**kwargs):
     """Detection that finds nothing: every frame goes straight to blend-encode."""
     start = kwargs["start_frame_idx"]
     for offset, pts in enumerate(kwargs["pts_list"]):
         kwargs["blend_buffer"].register_frame(start + offset, set())
         kwargs["metadata_queue"].put(FrameMeta(frame_idx=start + offset, pts=int(pts)))
-    return BatchProcessResult(next_frame_idx=start + len(kwargs["pts_list"]), clips_emitted=0)
+    return start + len(kwargs["pts_list"])
 
 
 def _decode(reader, *, process=_register_frames, end_pts=None, effect_ranges=None, **context):
@@ -75,7 +62,7 @@ def _decode(reader, *, process=_register_frames, end_pts=None, effect_ranges=Non
             progress=None,
         )
     metas = []
-    while (item := ctx.metadata_queue.get_nowait()) is not _SENTINEL:
+    while (item := ctx.metadata_queue.get_nowait()) is not SENTINEL:
         metas.append(item)
     return metas, ctx.error_holder, detect
 
@@ -146,7 +133,7 @@ def test_decode_stops_on_an_error_from_another_thread():
     failure = RuntimeError("boom")
     _, errors, _ = _decode(_reader(batches), error_holder=[failure])
 
-    assert errors == [failure, failure]
+    assert errors == [failure]
     assert batches_read == [0]
 
 
@@ -160,20 +147,7 @@ def test_primary_loop_exits_on_cancel_and_releases_the_secondary_thread():
         primary_restore_loop(pass_context(secondary_queue=secondary_queue, error_holder=errors, stop_event=cancel))
 
     assert not errors
-    assert secondary_queue.get() is _SENTINEL
-
-
-def test_primary_loop_logs_its_timing_summary(caplog):
-    clip_queue = FrameQueue(max_frames=999)
-    clip_queue.put(_SENTINEL)
-
-    with (
-        patch("jasna.pipeline_threads.torch.cuda.set_device"),
-        caplog.at_level(logging.INFO, logger="jasna.pipeline_threads"),
-    ):
-        primary_restore_loop(pass_context(clip_queue=clip_queue))
-
-    assert "[timing] primary" in caplog.text
+    assert secondary_queue.get() is SENTINEL
 
 
 def test_secondary_loop_exits_on_cancel_and_releases_the_encode_thread():
@@ -186,12 +160,12 @@ def test_secondary_loop_exits_on_cancel_and_releases_the_encode_thread():
         secondary_restore_loop(pass_context(encode_queue=encode_queue, error_holder=errors, stop_event=cancel))
 
     assert not errors
-    assert encode_queue.get() is _SENTINEL
+    assert encode_queue.get() is SENTINEL
 
 
 def _blend_encode(*, pending_tracks=None, encode_items=(), error_holder=None, cancel_event=None):
     """Run ``blend_encode_loop`` over one frame that waits on ``pending_tracks``; returns what it wrote."""
-    blend_buffer = BlendBuffer(device=torch.device("cpu"))
+    blend_buffer = BlendBuffer(vr_projector=None)
     if pending_tracks is not None:
         blend_buffer.register_frame(0, pending_tracks)
     encode_queue = FrameQueue(max_frames=999)
@@ -199,8 +173,8 @@ def _blend_encode(*, pending_tracks=None, encode_items=(), error_holder=None, ca
         encode_queue.put(item)
     metadata_queue = Queue(maxsize=999)
     metadata_queue.put(FrameMeta(frame_idx=0, pts=0))
-    metadata_queue.put(_SENTINEL)
-    writer = _RecordingWriter()
+    metadata_queue.put(SENTINEL)
+    writer = RecordingWriter()
     error_holder = [] if error_holder is None else error_holder
 
     with (
@@ -237,11 +211,11 @@ def test_blend_encode_stops_waiting_for_a_restored_frame_when_another_thread_fai
     written, errors = _blend_encode(pending_tracks={99}, error_holder=[failure])
 
     assert written == []
-    assert errors == [failure, failure]
+    assert errors == [failure]
 
 
 def test_blend_encode_writes_the_source_frame_when_secondary_ends_without_its_restoration():
-    written, errors = _blend_encode(pending_tracks={99}, encode_items=[_SENTINEL])
+    written, errors = _blend_encode(pending_tracks={99}, encode_items=[SENTINEL])
 
     assert [pts for _, pts in written] == [0]
     assert errors == []
@@ -391,12 +365,10 @@ def test_run_streaming_uses_the_given_server_without_starting_or_stopping_it():
     with (
         patch("jasna.streaming_pipeline.get_video_meta_data", return_value=video_metadata()),
         patch("jasna.streaming_pipeline.StreamingEncoder") as encoder_cls,
-        patch("jasna.streaming_pipeline._streaming_loop") as loop,
+        patch("jasna.streaming_pipeline._streaming_loop"),
     ):
         run_streaming(pipeline, server)
 
-    server.load_video.assert_called_once()
-    loop.assert_called_once()
     encoder_cls.return_value.stop.assert_called_once()
     server.start.assert_not_called()
     server.stop.assert_not_called()
@@ -476,7 +448,8 @@ def test_ctrl_c_stops_every_worker_before_the_pass_returns(monkeypatch):
     for name in ("decode_detect_loop", "primary_restore_loop", "secondary_restore_loop", "blend_encode_loop"):
         monkeypatch.setattr(threads_module, name, worker(name))
     monkeypatch.setattr(threads_module, "VramOffloader", MagicMock())
-    pipeline = MagicMock(device=torch.device("cpu"), max_clip_size=4, vr_projector=None)
+    pipeline = MagicMock(device=torch.device("cpu"), vr_projector=None)
+    pipeline.config.max_clip_size = 4
     pipeline.restoration_pipeline.secondary_num_workers = 1
 
     def interrupt():

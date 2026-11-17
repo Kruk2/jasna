@@ -1,5 +1,7 @@
 import os
+import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -72,7 +74,7 @@ def test_windows_jasna_cli_no_args_prints_help_and_exits_0(monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", [r"C:\Program Files\Jasna\jasna-cli.exe"])
 
     _clear_entry_modules()
-    with patch("jasna.main.build_parser") as build_parser, pytest.raises(SystemExit) as exit_info:
+    with patch("jasna.cli_parser.build_parser") as build_parser, pytest.raises(SystemExit) as exit_info:
         import jasna.__main__  # noqa: F401
 
     assert exit_info.value.code == 0
@@ -97,11 +99,28 @@ def test_child_processes_exit_without_dispatch(monkeypatch, child) -> None:
     assert not gui.called and not cli.called
 
 
-def test_startup_configures_windows_dll_search_paths(monkeypatch) -> None:
-    monkeypatch.setattr(sys, "argv", ["jasna"])
-    with patch("jasna.packaging.windows_dll_paths.configure_windows_dll_search_paths") as configure:
-        _run_entry()
-    configure.assert_called_once()
+_RECORD_TORCH_AT_DLL_SETUP = """
+import runpy, sys
+import jasna.packaging.windows_dll_paths as dll_paths
+torch_loaded = []
+dll_paths.configure_windows_dll_search_paths = lambda: torch_loaded.append("torch" in sys.modules)
+sys.argv = ["jasna", "--version"]
+try:
+    runpy.run_module("jasna", run_name="__main__")
+except SystemExit:
+    pass
+print(torch_loaded)
+"""
+
+
+def test_startup_configures_dll_search_paths_once_before_torch_loads() -> None:
+    environment = {name: value for name, value in os.environ.items() if name != "JASNA_MAIN_PID"}
+    result = subprocess.run(
+        [sys.executable, "-c", _RECORD_TORCH_AT_DLL_SETUP], cwd=Path(__file__).resolve().parents[1],
+        env=environment, capture_output=True, text=True, check=True, timeout=120,
+    )
+
+    assert result.stdout.splitlines()[-1] == "[False]"
 
 
 def test_ltx_worker_dispatch_precedes_parent_pid_and_gui(monkeypatch) -> None:

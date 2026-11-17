@@ -5,11 +5,20 @@ from pathlib import Path
 
 import pytest
 
-import jasna.engine_paths as engine_paths
 from jasna.engine_paths import model_weights_dir
 from jasna.mosaic import detection_registry
 
 pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
+
+@pytest.fixture
+def frozen_executable(monkeypatch, tmp_path: Path) -> Path:
+    """A frozen build whose executable is in ``tmp_path``."""
+    executable = tmp_path / "jasna-cli.exe"
+    executable.touch()
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(executable))
+    return executable
 
 
 def test_model_weights_dir_in_dev_is_cwd_relative(monkeypatch) -> None:
@@ -17,35 +26,20 @@ def test_model_weights_dir_in_dev_is_cwd_relative(monkeypatch) -> None:
     assert model_weights_dir() == Path("model_weights")
 
 
-def test_model_weights_dir_when_frozen_is_next_to_executable(monkeypatch, tmp_path: Path) -> None:
-    fake_exe = tmp_path / "jasna-cli.exe"
-    fake_exe.touch()
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(fake_exe))
-
+def test_model_weights_dir_when_frozen_is_next_to_executable(frozen_executable, tmp_path: Path) -> None:
     assert model_weights_dir() == tmp_path / "model_weights"
 
 
-def test_detection_model_weights_path_uses_helper(monkeypatch, tmp_path: Path) -> None:
-    fake_exe = tmp_path / "jasna-cli.exe"
-    fake_exe.touch()
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(fake_exe))
-
+def test_detection_model_weights_path_uses_helper(frozen_executable, tmp_path: Path) -> None:
     p = detection_registry.detection_model_weights_path("rfdetr-v5")
     assert p == tmp_path / "model_weights" / "rfdetr-v5.onnx"
 
 
-def test_discover_available_detection_models_uses_helper(monkeypatch, tmp_path: Path) -> None:
+def test_discover_available_detection_models_uses_helper(frozen_executable, tmp_path: Path) -> None:
     weights_dir = tmp_path / "model_weights"
     weights_dir.mkdir()
     (weights_dir / "rfdetr-v5.onnx").touch()
     (weights_dir / "lada_mosaic_detection_model_v4_fast.pt").touch()
-
-    fake_exe = tmp_path / "jasna-cli.exe"
-    fake_exe.touch()
-    monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(fake_exe))
 
     names = detection_registry.discover_available_detection_models()
     assert "rfdetr-v5" in names

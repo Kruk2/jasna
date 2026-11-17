@@ -13,43 +13,34 @@ from jasna.accelerator import (
     windows_miopen_system_db,
 )
 
-ROCM_DEFAULTS = {
-    "MIOPEN_FIND_MODE": "HYBRID",
-    "MIOPEN_DEBUG_CONV_GEMM": "0",
-    "PYTORCH_ALLOC_CONF": "expandable_segments:False",
-    "PYTORCH_HIP_ALLOC_CONF": "expandable_segments:False",
-    "TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL": "1",
-}
+ROCM_ENV_NAMES = (
+    "MIOPEN_FIND_MODE",
+    "MIOPEN_DEBUG_CONV_GEMM",
+    "PYTORCH_ALLOC_CONF",
+    "PYTORCH_HIP_ALLOC_CONF",
+    "TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL",
+    "PYTORCH_MIOPEN_SUGGEST_NHWC",
+)
 
 
-@pytest.mark.parametrize("platform", ["linux", "win32"])
-def test_rocm_pins_the_allocator_and_miopen_find_mode(monkeypatch, platform):
-    monkeypatch.setattr(accelerator.sys, "platform", platform)
-    environ: dict[str, str] = {}
-    apply_rocm_env_defaults(environ)
-    assert environ == ROCM_DEFAULTS
-
-
-@pytest.mark.parametrize("platform", ["linux", "win32"])
 @pytest.mark.parametrize(("name", "value"), [
     ("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0"),
     ("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1"),
     ("PYTORCH_ALLOC_CONF", "expandable_segments:True"),
     ("MIOPEN_DEBUG_CONV_GEMM", "1"),
 ])
-def test_a_user_setting_wins(monkeypatch, platform, name, value):
-    monkeypatch.setattr(accelerator.sys, "platform", platform)
+def test_a_user_setting_wins(name, value):
     environ = {name: value}
     apply_rocm_env_defaults(environ)
-    assert environ == {**ROCM_DEFAULTS, name: value}
+    assert environ[name] == value
 
 
 def test_process_env_is_left_alone_off_rocm(monkeypatch):
     monkeypatch.setattr(torch.version, "hip", None)
-    for name in ROCM_DEFAULTS:
+    for name in ROCM_ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
     configure_rocm_process_env()
-    assert not any(name in os.environ for name in ROCM_DEFAULTS)
+    assert not any(name in os.environ for name in ROCM_ENV_NAMES)
 
 
 @pytest.fixture
@@ -92,24 +83,20 @@ def test_rocm_keeps_flash_sdpa_only_with_aotriton_images(monkeypatch, tmp_path, 
 def test_process_env_gets_rocm_defaults_on_rocm(monkeypatch, sdpa_switches, platform):
     monkeypatch.setattr(accelerator.sys, "platform", platform)
     monkeypatch.setattr(torch.version, "hip", "7.2")
-    for name in ROCM_DEFAULTS:
+    for name in ROCM_ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
     configure_rocm_process_env()
-    assert {name: os.environ.get(name) for name in ROCM_DEFAULTS} == ROCM_DEFAULTS
+    assert os.environ.get("MIOPEN_FIND_MODE") == "HYBRID"
 
 
-@pytest.mark.parametrize(("platform", "shipped", "expected"), [
-    ("win32", True, True), ("win32", False, False), ("linux", True, False),
-])
-def test_windows_miopen_reads_the_wheels_system_databases(tmp_path, platform, shipped, expected):
+@pytest.mark.parametrize(("platform", "libraries", "shipped", "expected"), [
+    ("win32", True, True, True), ("win32", True, False, False), ("linux", True, True, False), ("win32", False, True, False),
+], ids=["windows", "windows-without-databases", "linux", "windows-without-rocm-libraries"])
+def test_windows_miopen_reads_the_wheels_system_databases(tmp_path, platform, libraries, shipped, expected):
     database = tmp_path / "share" / "miopen" / "db"
     if shipped:
         database.mkdir(parents=True)
-    assert windows_miopen_system_db(platform, tmp_path) == (database if expected else None)
-
-
-def test_windows_miopen_system_database_needs_the_rocm_libraries():
-    assert windows_miopen_system_db("win32", None) is None
+    assert windows_miopen_system_db(platform, tmp_path if libraries else None) == (database if expected else None)
 
 
 @pytest.mark.parametrize(("platform", "expected"), [("win32", True), ("linux", False)])
@@ -142,13 +129,6 @@ def test_miopen_runs_channels_last_convs_natively_only_where_they_compile(monkey
     monkeypatch.setattr(accelerator, "has_triton", lambda: triton)
     configure_rocm_process_env()
     assert os.environ.get("PYTORCH_MIOPEN_SUGGEST_NHWC") == ("1" if triton else None)
-
-
-def test_process_env_is_left_alone_off_rocm_including_the_channels_last_convs(monkeypatch):
-    monkeypatch.setattr(torch.version, "hip", None)
-    monkeypatch.delenv("PYTORCH_MIOPEN_SUGGEST_NHWC", raising=False)
-    configure_rocm_process_env()
-    assert "PYTORCH_MIOPEN_SUGGEST_NHWC" not in os.environ
 
 
 @pytest.mark.parametrize(

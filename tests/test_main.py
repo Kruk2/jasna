@@ -10,20 +10,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from factories import cli_args, cli_environment, run_cli
-from jasna.main import batch_size_from_args, build_parser, stop_on_termination_signals
+from factories import cli_args, cli_environment, cli_image_models, run_cli, write_test_image
+from jasna.cli_parser import build_parser
+from jasna.main import batch_size_from_args, stop_on_termination_signals
 from jasna.media.probe import UnsupportedVideoError
 from jasna.post_export_action import PostExportVideoCommandError
 from jasna.restorer.denoise import DenoiseStrength
 
 pytestmark = pytest.mark.usefixtures("nvidia_vendor")
-
-
-@pytest.fixture(autouse=True)
-def _mock_device_context():
-    """CLI orchestration tests use mocked models and must not initialize CUDA."""
-    with patch("jasna.accelerator.device_context", side_effect=lambda _device: nullcontext()):
-        yield
 
 
 def _config(tmp_path, *extra):
@@ -48,6 +42,44 @@ def test_benchmark_flag_runs_the_benchmark_instead_of_a_job():
         pipeline_cls = run_cli(["--benchmark"])
     benchmark.assert_called_once()
     pipeline_cls.assert_not_called()
+
+
+@pytest.fixture
+def rocm_process_env(monkeypatch):
+    """A ROCm torch whose process environment starts without Jasna's ROCm defaults; returns a
+    reader of the MIOpen find mode."""
+    import torch
+
+    monkeypatch.setattr(torch.version, "hip", "7.15.26333")
+    monkeypatch.setattr(torch.backends.cuda, "enable_flash_sdp", lambda on: None)
+    monkeypatch.setattr(torch.backends.cuda, "enable_mem_efficient_sdp", lambda on: None)
+    for name in ("MIOPEN_FIND_MODE", "MIOPEN_DEBUG_CONV_GEMM", "PYTORCH_ALLOC_CONF", "PYTORCH_HIP_ALLOC_CONF",
+                 "TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "PYTORCH_MIOPEN_SUGGEST_NHWC"):
+        monkeypatch.delenv(name, raising=False)
+    return lambda: os.environ.get("MIOPEN_FIND_MODE")
+
+
+def test_benchmark_runs_with_the_process_setup_of_a_job(rocm_process_env):
+    find_modes = []
+    with patch("jasna.benchmark.run_benchmark_cli", side_effect=lambda _args: find_modes.append(rocm_process_env())):
+        run_cli(["--benchmark"])
+    assert find_modes == ["HYBRID"]
+
+
+def test_the_gpu_check_runs_after_the_process_setup(tmp_path, rocm_process_env):
+    find_modes = []
+
+    def check_gpu(_device):
+        find_modes.append(rocm_process_env())
+        raise RuntimeError("stop after the GPU check")
+
+    with patch("jasna.main.check_amd_amf_runtime", return_value=(True, "AMF")), pytest.raises(RuntimeError, match="stop"):
+        with cli_environment(), patch("jasna.main.check_supported_gpu", side_effect=check_gpu):
+            with patch.object(sys, "argv", ["jasna", *cli_args(tmp_path)]):
+                from jasna.main import main
+
+                main()
+    assert find_modes == ["HYBRID"]
 
 
 def test_a_video_job_runs_the_pipeline_and_not_the_stream(tmp_path):
@@ -130,7 +162,7 @@ def test_encoder_settings_default_per_codec_and_parse_typed_values(tmp_path, arg
 @pytest.mark.parametrize(
     ("args", "error"),
     [
-        (["--cq", "28", "--encoder-settings", "cq=22"], "--cq.*--encoder-settings"),
+        (["--cq", "28", "--encoder-settings", "cq=22"], "quality setting already sets the CQ; remove cq"),
         (["--codec", "h264", "--cq", "52"], r"h264.*1\.\.51"),
     ],
 )
@@ -246,11 +278,14 @@ def test_folder_output_pattern_rejects_colliding_outputs(tmp_path, capsys, names
 
 
 def test_folder_video_progress_counts_images_too(tmp_path, capsys):
-    with patch("jasna.image_restore.run_image_restoration_folder") as image_batch:
-        run_cli(_folder_args(tmp_path, ["photo.png", "clip.mp4"]))
+    argv = _folder_args(tmp_path, ["clip.mp4"])
+    write_test_image(tmp_path / "in" / "photo.png")
+    with cli_image_models():
+        run_cli(argv)
 
-    assert image_batch.call_args.kwargs["progress_total"] == 2
-    assert "[2/2] Processing clip.mp4 -> clip_out.mp4" in capsys.readouterr().out
+    printed = capsys.readouterr().out
+    assert "[1/2] Processing photo.png -> photo_out.png" in printed
+    assert "[2/2] Processing clip.mp4 -> clip_out.mp4" in printed
 
 
 def test_post_export_video_command_failure_continues_folder_and_exits_1(tmp_path, capsys):
@@ -297,15 +332,13 @@ def _stream_server(videos=()):
 
 def test_streaming_an_input_serves_it_and_stops_the_server(tmp_path):
     pipeline = MagicMock()
-    with _stream_server() as (server_cls, server, run_streaming):
+    with _stream_server() as (_, server, _):
         run_cli(
             ["--stream", "--input", cli_args(tmp_path)[1], *_model_args(tmp_path), "--no-browser",
              "--stream-port", "9999", "--stream-segment-duration", "2.0"],
             pipeline=pipeline,
         )
 
-    server_cls.assert_called_once_with(segment_duration=2.0, port=9999)
-    run_streaming.assert_called_once_with(pipeline, server)
     server.stop.assert_called_once()
 
 

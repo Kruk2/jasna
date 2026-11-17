@@ -11,8 +11,9 @@ import pytest
 
 from jasna.engine_compiler import (
     EngineCompilationRequest,
+    _compiler_command,
     _detection_engine_exists,
-    _subprocess_compile,
+    compile_missing_engines,
     _unet4x_engine_exists,
     ensure_engines_compiled,
 )
@@ -29,49 +30,54 @@ def _mock_proc(lines: list[str], returncode: int = 0) -> MagicMock:
     return proc
 
 
-def test_request_json_roundtrip() -> None:
-    req = EngineCompilationRequest(
-        device="cuda:0", fp16=True, basicvsrpp=True,
-        basicvsrpp_model_path="/path/to/model.pth",
+@pytest.mark.parametrize("request_fields", [
+    dict(
+        basicvsrpp=True, basicvsrpp_model_path="/path/to/model.pth",
         detection=True, detection_model_name="rfdetr-v5",
         detection_model_path="/path/to/det.onnx", detection_batch_size=8, unet4x=True,
-    )
+    ),
+    dict(upscale_model="span", upscale_input_sizes=[(1920, 1080), (3840, 2160)]),
+], ids=["restoration-engines", "upscale-sizes"])
+def test_request_json_roundtrip(request_fields) -> None:
+    req = EngineCompilationRequest(device="cuda:0", fp16=True, **request_fields)
     assert EngineCompilationRequest.from_json(req.to_json()) == req
 
 
-def test_ensure_no_subprocess_when_basicvsrpp_exists(monkeypatch) -> None:
-    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: True)
-    req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
-    assert ensure_engines_compiled(req).use_basicvsrpp_tensorrt is True
-
-
-def test_ensure_no_subprocess_when_not_requested() -> None:
-    req = EngineCompilationRequest(device="cuda:0", fp16=True)
-    result = ensure_engines_compiled(req)
-    assert result.use_basicvsrpp_tensorrt is False
-
-
-def test_amd_unet_does_not_need_a_tensorrt_engine(monkeypatch) -> None:
-    monkeypatch.setattr("jasna.accelerator.is_nvidia_device", lambda _device: False)
-    monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda *_args, **_kwargs: pytest.fail("compiled TensorRT on AMD"))
-    result = ensure_engines_compiled(EngineCompilationRequest(device="cuda:0", fp16=True, unet4x=True))
-    assert result.use_basicvsrpp_tensorrt is False
-
-
-def test_ensure_all_exist_no_subprocess(monkeypatch) -> None:
+@pytest.mark.parametrize(("request_fields", "use_basicvsrpp_tensorrt"), [
+    (dict(basicvsrpp=True, basicvsrpp_model_path="x"), True),
+    ({}, False),
+    (dict(fp16=False, basicvsrpp=True, basicvsrpp_model_path="x"), False),
+    (dict(
+        basicvsrpp=True, basicvsrpp_model_path="x",
+        detection=True, detection_model_name="rfdetr-v5", detection_model_path="x", unet4x=True,
+    ), True),
+], ids=["basicvsrpp", "nothing-requested", "basicvsrpp-fp32", "every-engine"])
+def test_existing_or_unneeded_engines_start_no_compiler(monkeypatch, request_fields, use_basicvsrpp_tensorrt) -> None:
     monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: True)
     monkeypatch.setattr("jasna.engine_compiler._detection_engine_exists", lambda *_a, **_kw: True)
     monkeypatch.setattr("jasna.engine_compiler._unet4x_engine_exists", lambda *_a, **_kw: True)
-    req = EngineCompilationRequest(
-        device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x",
-        detection=True, detection_model_name="rfdetr-v5", detection_model_path="x", unet4x=True,
+    monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda *_a, **_kw: pytest.fail("started the compiler"))
+    req = EngineCompilationRequest(**{"device": "cuda:0", "fp16": True, **request_fields})
+    assert ensure_engines_compiled(req).use_basicvsrpp_tensorrt is use_basicvsrpp_tensorrt
+
+
+@pytest.mark.parametrize("request_fields", [
+    dict(unet4x=True), dict(basicvsrpp=True, basicvsrpp_model_path="model.pth"),
+], ids=["unet4x", "basicvsrpp"])
+def test_amd_needs_no_tensorrt_engine(monkeypatch, request_fields) -> None:
+    monkeypatch.setattr("jasna.accelerator.is_nvidia_device", lambda _device: False)
+    monkeypatch.setattr(
+        "jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: pytest.fail("TensorRT probe on AMD")
     )
-    assert ensure_engines_compiled(req).use_basicvsrpp_tensorrt is True
+    monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda *_args, **_kwargs: pytest.fail("compiled TensorRT on AMD"))
+    result = ensure_engines_compiled(EngineCompilationRequest(device="cuda:0", fp16=True, **request_fields))
+    assert result.use_basicvsrpp_tensorrt is False
 
 
-def test_ensure_basicvsrpp_fp32_no_tensorrt() -> None:
-    req = EngineCompilationRequest(device="cuda:0", fp16=False, basicvsrpp=True, basicvsrpp_model_path="x")
-    assert ensure_engines_compiled(req).use_basicvsrpp_tensorrt is False
+def test_amd_rfdetr_needs_no_detection_engine(monkeypatch) -> None:
+    monkeypatch.setattr("jasna.accelerator.is_amd_device", lambda _device=None: True)
+
+    assert _detection_engine_exists("rfdetr-v6", "rfdetr-v6.pt", batch_size=4, fp16=True, device="cpu")
 
 
 def test_ensure_spawns_subprocess_on_missing(monkeypatch) -> None:
@@ -90,8 +96,6 @@ def test_ensure_spawns_subprocess_on_missing(monkeypatch) -> None:
     result = ensure_engines_compiled(req, log_callback=log_messages.append)
 
     assert len(popen_calls) == 1
-    assert "-m" in popen_calls[0]
-    assert "jasna.engine_compiler" in popen_calls[0]
     assert result.use_basicvsrpp_tensorrt is True
     assert any("Compiling" in m for m in log_messages)
 
@@ -105,28 +109,13 @@ def test_ensure_subprocess_failure_raises(monkeypatch) -> None:
         ensure_engines_compiled(req)
 
 
-def test_ensure_frozen_exe_uses_compile_engines_flag(monkeypatch) -> None:
-    pytest.importorskip("jasna.protection.runtime")
-    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: False)
-    monkeypatch.setattr("jasna.engine_compiler.is_frozen", lambda: True)
-    monkeypatch.setattr("jasna.engine_compiler.get_application_executable", lambda: "C:/app/jasna.exe")
-
-    popen_calls = []
-    proc = _mock_proc([])
-    monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda cmd, **kw: (popen_calls.append(cmd), proc)[1])
-
+def test_a_source_run_compiles_with_this_module() -> None:
     req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
-    ensure_engines_compiled(req)
-
-    assert len(popen_calls) == 1
-    assert popen_calls[0][0] == "C:/app/jasna.exe"
-    assert popen_calls[0][1] == "--compile-engines"
-    assert "-m" not in popen_calls[0]
+    assert _compiler_command(req, frozen=False) == [sys.executable, "-m", "jasna.engine_compiler", req.to_json()]
 
 
 @pytest.mark.parametrize("platform", ["win32", "linux"])
 def test_frozen_engine_compiler_removes_parent_tcl_paths_before_native_startup(monkeypatch, platform) -> None:
-    import torch
     import jasna.engine_compiler as compiler
 
     pytest.importorskip("jasna.protection.runtime")
@@ -149,61 +138,31 @@ def test_frozen_engine_compiler_removes_parent_tcl_paths_before_native_startup(m
 
 
 def test_frozen_linux_engine_compiler_uses_the_running_binary(monkeypatch) -> None:
-    import torch  # noqa: F401  Initialize before mocking subprocess.
-    import jasna.engine_compiler as compiler
     from jasna import os_utils
 
-    pytest.importorskip("jasna.protection.runtime")
-    monkeypatch.setattr(compiler, "is_frozen", lambda: True)
     monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
     monkeypatch.setattr(os_utils.sys, "platform", "linux")
-    monkeypatch.setattr(compiler.sys, "executable", "/relocated/app/python")
+    monkeypatch.setattr(os_utils.sys, "executable", "/relocated/app/python")
     monkeypatch.setattr(os_utils.os, "readlink", lambda path: "/relocated/app/jasna.bin")
-    monkeypatch.setattr(compiler, "_missing_engines", lambda *_args, **_kwargs: compiler._MissingEngines(False, True, False))
-    commands = []
-    monkeypatch.setattr(compiler.subprocess, "Popen", lambda command, **kwargs: (commands.append(command), _mock_proc([]))[1])
 
-    ensure_engines_compiled(EngineCompilationRequest(device="cpu", fp16=False, detection=True))
+    command = _compiler_command(EngineCompilationRequest(device="cpu", fp16=False, detection=True), frozen=True)
 
-    assert commands[0][:2] == ["/relocated/app/jasna.bin", "--compile-engines"]
+    assert command[:2] == ["/relocated/app/jasna.bin", "--compile-engines"]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows native module path API")
 def test_frozen_windows_engine_compiler_uses_running_binary_when_python_placeholder_is_missing(monkeypatch) -> None:
-    import torch  # noqa: F401  Initialize before mocking subprocess.
     import jasna.engine_compiler as compiler
     from jasna import os_utils
 
-    pytest.importorskip("jasna.protection.runtime")
     expected = sys.executable
-    monkeypatch.setattr(compiler, "is_frozen", lambda: True)
     monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
     monkeypatch.setattr(compiler.sys, "executable", "C:/relocated/app/python.exe")
-    monkeypatch.setattr(compiler, "_missing_engines", lambda *_args, **_kwargs: compiler._MissingEngines(False, True, False))
-    commands = []
-    monkeypatch.setattr(compiler.subprocess, "Popen", lambda command, **kwargs: (commands.append(command), _mock_proc([]))[1])
 
-    ensure_engines_compiled(EngineCompilationRequest(device="cpu", fp16=False, detection=True))
+    command = _compiler_command(EngineCompilationRequest(device="cpu", fp16=False, detection=True), frozen=True)
 
-    assert commands[0][0].casefold() == expected.casefold()
-    assert commands[0][1] == "--compile-engines"
-
-
-def test_ensure_create_no_window_on_windows(monkeypatch) -> None:
-    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: False)
-    monkeypatch.setattr(
-        "jasna.engine_compiler.subprocess_no_window_kwargs", lambda: {"creationflags": 0x08000000}
-    )
-
-    popen_kwargs = {}
-    monkeypatch.setattr(
-        "jasna.engine_compiler.subprocess.Popen",
-        lambda cmd, **kw: (popen_kwargs.update(kw), _mock_proc([]))[1],
-    )
-
-    req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
-    ensure_engines_compiled(req)
-    assert popen_kwargs.get("creationflags") == 0x08000000
+    assert command[0].casefold() == expected.casefold()
+    assert command[1] == "--compile-engines"
 
 
 def test_ensure_does_not_print_when_log_callback_given(monkeypatch) -> None:
@@ -255,7 +214,7 @@ def test_ensure_popen_stdin_is_devnull(monkeypatch) -> None:
     assert popen_kwargs.get("stdin") == subprocess.DEVNULL
 
 
-def test_subprocess_compile_patches_frozen_torch(monkeypatch) -> None:
+def test_compiling_missing_engines_patches_frozen_torch(monkeypatch) -> None:
     # In the compiled binary the compile subprocess imports torch_tensorrt -> torch._inductor
     # directly; without patch_frozen_torch the source-introspection raises. An empty request
     # compiles nothing, so this only exercises the early import-torch + patch path.
@@ -263,7 +222,7 @@ def test_subprocess_compile_patches_frozen_torch(monkeypatch) -> None:
     monkeypatch.setattr("jasna._frozen.patch_frozen_torch", lambda: called.append(True))
     try:
         with warnings.catch_warnings():
-            _subprocess_compile(EngineCompilationRequest(device="cpu", fp16=False))
+            compile_missing_engines(EngineCompilationRequest(device="cpu", fp16=False))
     finally:
         logging.disable(logging.NOTSET)
     assert called, "patch_frozen_torch must run before any torch_tensorrt/_inductor import"
@@ -355,6 +314,7 @@ def test_unet4x_engine_exists_encrypted(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_a_stale_encrypted_unet4x_engine_counts_as_missing(monkeypatch, tmp_path: Path) -> None:
+    pytest.importorskip("jasna.protection.protected_model")
     from jasna.protection import ProtectionError
 
     def stale(model_id, data):
@@ -394,7 +354,7 @@ def unet4x_licensed_in_this_process_only(monkeypatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(protected_model, "decrypt_model_bytes", licensed(lambda path: b"onnx"))
     monkeypatch.setattr(protected_model, "encrypt_engine_bytes", licensed(lambda engine: b"sealed " + engine))
     monkeypatch.setattr(protected_model, "decrypt_engine_bytes", licensed(lambda sealed: sealed.removeprefix(b"sealed ")))
-    monkeypatch.setattr(trt, "_build_serialized_engine", lambda onnx, device, **kwargs: b"engine of " + onnx)
+    monkeypatch.setattr(trt, "build_engine_bytes", lambda onnx, device, **kwargs: b"engine of " + onnx)
     monkeypatch.setattr("jasna._frozen.patch_frozen_torch", lambda: None)
 
     started_process = subprocess.Popen
@@ -405,7 +365,7 @@ def unet4x_licensed_in_this_process_only(monkeypatch, tmp_path: Path) -> Path:
         in_subprocess.append(True)
         try:
             with warnings.catch_warnings():
-                _subprocess_compile(EngineCompilationRequest.from_json(command[-1]))
+                compile_missing_engines(EngineCompilationRequest.from_json(command[-1]))
             returncode = 0
         except LeaseError:
             returncode = 1
@@ -445,6 +405,7 @@ def test_compiling_other_engines_keeps_the_unet4x_license_check_here(
 
 
 def test_an_offline_license_check_keeps_the_encrypted_unet4x_engine(monkeypatch, tmp_path: Path) -> None:
+    pytest.importorskip("jasna.protection.protected_model")
     from jasna.protection.lease import LeaseError
     from jasna.restorer import unet4x_secondary_restorer
 

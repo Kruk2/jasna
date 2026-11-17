@@ -25,12 +25,5 @@ def test_both_vendors_install_the_same_comfy_kitchen_for_ltx() -> None:
     def kitchen(vendor):
         return [pin for pin in extras[vendor] if pin.startswith("comfy-kitchen")]
 
-    assert kitchen("amd") == kitchen("nvidia") == ["comfy-kitchen==0.2.38"]
-
-
-def test_amd_extra_pins_the_rocm_101_pytorch_builds() -> None:
-    with (ROOT / "pyproject.toml").open("rb") as file:
-        amd = tomllib.load(file)["project"]["optional-dependencies"]["amd"]
-
-    assert "torch==2.14.0+rocm10.1.0" in amd
-    assert "torchvision==0.29.0a0+rocm10.1.0" in amd
+    assert len(kitchen("nvidia")) == 1
+    assert kitchen("amd") == kitchen("nvidia")

@@ -109,7 +109,7 @@ def benchmark_basicvsrpp_restoration(
 
         durations: list[float] = []
         video = [
-            torch.randint(0, 256, (SIZE, SIZE, 3), dtype=torch.uint8, device=device)
+            torch.randint(0, 256, (3, SIZE, SIZE), dtype=torch.uint8, device=device)
             for _ in range(CLIP_LENGTH)
         ]
         with torch.inference_mode():

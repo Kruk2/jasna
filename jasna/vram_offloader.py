@@ -5,15 +5,18 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Callable
+from dataclasses import dataclass
+from functools import partial
 
 import torch
 
 from jasna.blend_buffer import BlendBuffer
-from jasna.crop_buffer import CropBuffer
+from jasna.crop_buffer import CropBuffer, RawCrop
+from jasna.pipeline_items import SecondaryRestoreResult
 
 _log = logging.getLogger(__name__)
 
-VRAM_LIMIT: float | None = None
 VRAM_SAFETYNET: int = 750 * 1024 * 1024
 
 _POLL_INTERVAL = 0.1
@@ -58,25 +61,80 @@ class VramStats:
         )
 
 
+@dataclass(frozen=True)
+class OffloadStep:
+    """One tensor on the GPU to move to the CPU; ``move`` replaces it where it is kept."""
+
+    tensor: torch.Tensor
+    nbytes: int
+    move: Callable[[], None]
+
+
+def _move_item_to_cpu(items: list[torch.Tensor], index: int) -> None:
+    items[index] = items[index].cpu()
+
+
+def _move_crop_to_cpu(raw_crop: RawCrop) -> None:
+    raw_crop.crop = raw_crop.crop.cpu()
+
+
+def plan_offload(
+    results: list[SecondaryRestoreResult], crop_buffers: list[CropBuffer], bytes_to_free: int, device_type: str
+) -> list[OffloadStep]:
+    """What to move off ``device_type`` to free ``bytes_to_free``: restored frames of the latest
+    clips first (each clip's masks go along with its frames), then the crops of the largest
+    crop buffers."""
+    steps: list[OffloadStep] = []
+    planned = 0
+
+    def add(tensor: torch.Tensor, move: Callable[[], None]) -> None:
+        nonlocal planned
+        nbytes = tensor.nelement() * tensor.element_size()
+        steps.append(OffloadStep(tensor, nbytes, move))
+        planned += nbytes
+
+    for result in sorted(results, key=lambda result: result.start_frame, reverse=True):
+        for index, frame in enumerate(result.restored_frames):
+            if frame.device.type == device_type:
+                add(frame, partial(_move_item_to_cpu, result.restored_frames, index))
+                if planned >= bytes_to_free:
+                    return steps
+        for index, mask in enumerate(result.masks):
+            if mask.device.type == device_type:
+                add(mask, partial(_move_item_to_cpu, result.masks, index))
+
+    for crop_buffer in sorted(crop_buffers, key=lambda crop_buffer: crop_buffer.frame_count, reverse=True):
+        for raw_crop in crop_buffer.crops:
+            if raw_crop.crop.device.type == device_type:
+                add(raw_crop.crop, partial(_move_crop_to_cpu, raw_crop))
+                if planned >= bytes_to_free:
+                    return steps
+    return steps
+
+
+def stall_warning_due(now: float, last_encode: float, last_warning: float) -> tuple[bool, float]:
+    """Whether to warn about an encode stall now, and the last warning time to keep: once per
+    ``STALL_WARN_SECONDS`` while no frame was encoded for that long."""
+    if now - last_encode <= STALL_WARN_SECONDS:
+        return False, 0.0
+    if now - last_warning >= STALL_WARN_SECONDS:
+        return True, now
+    return False, last_warning
+
+
 class VramOffloader:
     def __init__(
         self,
         device: torch.device,
         blend_buffer: BlendBuffer,
         crop_buffers: dict[int, CropBuffer],
-        vram_limit: float | None = VRAM_LIMIT,
-        safetynet: int = VRAM_SAFETYNET,
     ) -> None:
         self._device = device
         self._blend_buffer = blend_buffer
         self._crop_buffers = crop_buffers
 
-        if vram_limit is not None:
-            gpu_total = int(vram_limit * 1024 * 1024 * 1024)
-        else:
-            gpu_total = torch.cuda.get_device_properties(device).total_memory
-        self._threshold = max(0, gpu_total - safetynet)
-        self._offload_device_type = "cuda"
+        gpu_total = torch.cuda.get_device_properties(device).total_memory
+        self._threshold = max(0, gpu_total - VRAM_SAFETYNET)
 
         self.stats = VramStats()
         self._stop = threading.Event()
@@ -91,7 +149,7 @@ class VramOffloader:
             "VramOffloader: threshold=%d MiB (total=%d MiB, safetynet=%d MiB)",
             self._threshold // _MIB,
             gpu_total // _MIB,
-            safetynet // _MIB,
+            VRAM_SAFETYNET // _MIB,
         )
 
     def set_encode_heartbeat(self, shared_time: list[float]) -> None:
@@ -146,24 +204,18 @@ class VramOffloader:
         if hb is None or self._stall_check_paused:
             return
         now = time.monotonic()
-        elapsed = now - hb[0]
-        if elapsed > STALL_WARN_SECONDS:
-            if now - self._last_stall_warn_time >= STALL_WARN_SECONDS:
-                _log.warning(
-                    "[vram-offloader] encode stall detected: no frame encoded for %.0fs",
-                    elapsed,
-                )
-                self._dump_stall_diagnostics(elapsed)
-                self._last_stall_warn_time = now
-        else:
-            self._last_stall_warn_time = 0.0
+        warn, self._last_stall_warn_time = stall_warning_due(now, hb[0], self._last_stall_warn_time)
+        if warn:
+            elapsed = now - hb[0]
+            _log.warning("[vram-offloader] encode stall detected: no frame encoded for %.0fs", elapsed)
+            self._dump_stall_diagnostics(elapsed)
 
     def _dump_stall_diagnostics(self, elapsed: float) -> None:
         lines: list[str] = [f"=== ENCODE STALL DIAGNOSTICS (stalled {elapsed:.0f}s) ==="]
 
         if self._pipeline_queues:
             for name, q in self._pipeline_queues.items():
-                lines.append(f"  {name}: items={q.qsize()} frames={q.current_frames} max_frames={q._max_frames}")
+                lines.append(f"  {name}: items={q.qsize()} frames={q.current_frames} max_frames={q.max_frames}")
         if self._metadata_queue is not None:
             lines.append(
                 f"  metadata_queue: items~={self._metadata_queue.qsize()} maxsize={self._metadata_queue.maxsize}"
@@ -193,35 +245,12 @@ class VramOffloader:
         _log.warning("\n".join(lines))
 
     def _offload(self, bytes_to_free: int) -> int:
-        freed = 0
-
-        results = self._blend_buffer.offloadable_results()
-        results.sort(key=lambda sr: sr.start_frame, reverse=True)
-
-        for sr in results:
-            for i, frame in enumerate(sr.restored_frames):
-                if frame.device.type == self._offload_device_type:
-                    nbytes = frame.nelement() * frame.element_size()
-                    sr.restored_frames[i] = frame.cpu()
-                    freed += nbytes
-                    if freed >= bytes_to_free:
-                        return freed
-            for i, mask in enumerate(sr.masks):
-                if mask.device.type == self._offload_device_type:
-                    nbytes = mask.nelement() * mask.element_size()
-                    sr.masks[i] = mask.cpu()
-                    freed += nbytes
-
-        buffers = list(self._crop_buffers.values())
-        buffers.sort(key=lambda cb: cb.frame_count, reverse=True)
-
-        for cb in buffers:
-            for rc in cb.crops:
-                if rc.crop.device.type == self._offload_device_type:
-                    nbytes = rc.crop.nelement() * rc.crop.element_size()
-                    rc.crop = rc.crop.cpu()
-                    freed += nbytes
-                    if freed >= bytes_to_free:
-                        return freed
-
-        return freed
+        steps = plan_offload(
+            self._blend_buffer.offloadable_results(),
+            list(self._crop_buffers.values()),
+            bytes_to_free,
+            self._device.type,
+        )
+        for step in steps:
+            step.move()
+        return sum(step.nbytes for step in steps)

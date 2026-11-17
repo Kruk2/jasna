@@ -74,12 +74,14 @@ def test_split_due_to_max_clip_size_starts_new_track_next_frame() -> None:
         assert ended == []
 
     bboxes, masks = _det()
-    ended, _ = tracker.update(2, bboxes, masks)
+    ended, active = tracker.update(2, bboxes, masks)
     assert len(ended) == 1
     assert ended[0].split_due_to_max_size is True
     assert ended[0].clip.track_id == 0
     assert ended[0].clip.frame_count == 3
     assert ended[0].clip.end_frame == 2
+    # The split frame stays pending on its track so it is still blended.
+    assert active == {0}
 
     bboxes, masks = _det()
     ended, active = tracker.update(3, bboxes, masks)
@@ -259,29 +261,12 @@ def test_two_mosaics_blend_and_detector_outputs_two_overlapping_boxes_continues_
         (5, 6),
         (5, 3),  # 2*overlap >= max_clip_size
         (1, 1),
+        (5, -1),
     ],
 )
 def test_invalid_temporal_overlap_raises(max_clip_size: int, temporal_overlap: int) -> None:
     with pytest.raises(ValueError):
         ClipTracker(max_clip_size=max_clip_size, temporal_overlap=temporal_overlap)
-
-
-def test_split_with_zero_overlap_keeps_track_id_in_active_for_split_frame() -> None:
-    tracker = ClipTracker(max_clip_size=3, temporal_overlap=0, iou_threshold=0.0)
-
-    for frame_idx in range(2):
-        bboxes, masks = _det()
-        ended, active = tracker.update(frame_idx, bboxes, masks)
-        assert ended == []
-
-    # Frame 2 is the split frame: clip reaches max_clip_size=3
-    bboxes, masks = _det()
-    ended, active = tracker.update(2, bboxes, masks)
-    assert len(ended) == 1
-    assert ended[0].split_due_to_max_size is True
-    # The split frame's track_id must still be in active_track_ids so
-    # frame_buffer.add_frame records it as pending for blending.
-    assert 0 in active
 
 
 def test_tracked_clip_frame_indices() -> None:
@@ -301,6 +286,16 @@ def test_compute_iou_matrix_empty_boxes() -> None:
     assert compute_iou_matrix(boxes, empty).shape == (1, 0)
 
 
+@pytest.mark.parametrize(("inclusive", "expected"), [(True, [[0, 2, 3], [1]]), (False, [[0, 2], [1], [3]])])
+def test_iou_groups_chain_overlaps_in_index_order(inclusive, expected) -> None:
+    from jasna.tracking.clip_tracker import iou_groups
+
+    boxes = np.array(
+        [[0, 0, 10, 10], [100, 100, 110, 110], [1, 1, 11, 11], [0, 0, 10, 20]], dtype=np.float32
+    )
+    assert iou_groups(boxes, 0.5, inclusive=inclusive) == expected
+
+
 def test_merge_overlapping_boxes_empty() -> None:
     from jasna.tracking.clip_tracker import merge_overlapping_boxes
     empty_boxes = np.zeros((0, 4), dtype=np.float32)
@@ -308,12 +303,6 @@ def test_merge_overlapping_boxes_empty() -> None:
     out_b, out_m = merge_overlapping_boxes(empty_boxes, empty_masks, iou_threshold=0.5)
     assert out_b.shape == (0, 4)
     assert out_m.shape == (0, 4, 4)
-
-
-# negative overlap raises
-def test_negative_temporal_overlap_raises() -> None:
-    with pytest.raises(ValueError):
-        ClipTracker(max_clip_size=5, temporal_overlap=-1)
 
 
 def test_negative_max_detection_gap_raises() -> None:

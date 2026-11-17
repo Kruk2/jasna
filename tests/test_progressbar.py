@@ -1,5 +1,4 @@
-import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,12 +18,6 @@ def test_format_duration(seconds, text):
 
 
 class TestProgressbarLifecycle:
-    def test_init_sets_timer(self):
-        pb = Progressbar(total_frames=100, video_fps=30, disable=True)
-        assert pb.duration_start is None
-        pb.init()
-        assert pb.duration_start is not None
-
     def test_update_increments_frames(self):
         pb = Progressbar(total_frames=100, video_fps=30, disable=True)
         pb.init()
@@ -32,11 +25,6 @@ class TestProgressbarLifecycle:
         assert pb.frames_processed == 5
         pb.update(3)
         assert pb.frames_processed == 8
-
-    def test_update_auto_inits(self):
-        pb = Progressbar(total_frames=100, video_fps=30, disable=True)
-        pb.update(1)
-        assert pb.duration_start is not None
 
     def test_close_adjusts_total_on_mismatch(self):
         pb = Progressbar(total_frames=100, video_fps=30, disable=True)
@@ -67,19 +55,28 @@ class TestProgressbarLifecycle:
         assert last_call[0][4] == 10
         assert last_call[0][5] is None
 
-    def test_buffer_respects_max_len(self):
-        pb = Progressbar(total_frames=200, video_fps=1, disable=True)
-        pb.init()
-        for _ in range(200):
-            pb.update(1)
-        assert len(pb.frame_processing_durations_buffer) <= pb.frame_processing_durations_buffer_max_len
+    @pytest.mark.parametrize("total_frames", [0, 1])
+    def test_a_job_of_at_most_one_frame_reports_its_progress(self, total_frames):
+        calls = []
+        pb = Progressbar(total_frames=total_frames, video_fps=30, disable=True, callback=lambda *args: calls.append(args))
+        pb.update(1)
+        assert calls[-1][3] == 1
 
-    def test_speed_display_after_enough_data(self):
-        pb = Progressbar(total_frames=100, video_fps=1, disable=True)
-        pb.init()
-        for _ in range(5):
+    def test_speed_and_time_left_show_once_two_seconds_of_frames_are_timed(self, monkeypatch):
+        from jasna import progressbar
+
+        clock = iter(range(100))
+        monkeypatch.setattr(progressbar.time, "time", lambda: next(clock) / 2)
+        pb = Progressbar(total_frames=100, video_fps=1)
+
+        pb.update(1)
+        pb.update(1)
+        assert pb.tqdm.desc == " | Remaining: ? | Speed: ?"
+        for _ in range(3):
             pb.update(1)
-        assert "Speed:" in pb.tqdm.desc or "?" in pb.tqdm.desc
+
+        assert pb.tqdm.desc == " | Remaining: 0:48 (96f) | Speed: 2.0fps"
+        pb.close()
 
 
 class TestJobProgress:

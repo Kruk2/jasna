@@ -14,11 +14,11 @@ if _HAS_TENSORRT and find_spec("tensorrt_libs") is not None:
     import tensorrt_libs
 
 collect_ignore = [] if _HAS_TENSORRT else [
-    "test_basicvsrpp_sub_engines.py",
     "test_rtx_superres_restorer.py",
-    "test_torch_tensorrt_export.py",
     "test_trt_utils.py",
 ]
+if find_spec("triton") is None:
+    collect_ignore.append("test_na_triton.py")
 
 
 def pytest_configure(config):
@@ -162,13 +162,13 @@ def make_jasna_app(monkeypatch, tmp_path, user_config_dir):
     import threading
     from tkinter import TclError
 
-    from jasna import engine_paths, os_utils, update_check
+    from jasna import engine_paths, os_utils, system_requirements, update_check
     from jasna.accelerator import AcceleratorVendor
     from jasna.gui import app as app_module
 
     monkeypatch.setattr(app_module, "_warm_up_cuda", lambda: (AcceleratorVendor.NVIDIA, True, True))
     monkeypatch.setattr(update_check, "fetch_latest_release", lambda: None)
-    monkeypatch.setattr(os_utils, "install_on_hard_disk", lambda: False)
+    monkeypatch.setattr(system_requirements, "install_on_hard_disk", lambda: False)
     monkeypatch.setattr(os_utils, "windows_module_loaded", lambda _name: False)
     monkeypatch.setattr(engine_paths, "default_restoration_model_path", lambda name: tmp_path / "models" / name)
     apps = []
@@ -291,6 +291,17 @@ def nvidia_vendor(monkeypatch):
 
 
 @pytest.fixture
+def cuda_capability(monkeypatch, nvidia_vendor):
+    """Report an NVIDIA GPU of the given compute capability, e.g. ``use((12, 0))``."""
+    import torch
+
+    def use(capability: tuple[int, int]) -> None:
+        monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: capability)
+
+    return use
+
+
+@pytest.fixture
 def linux_bundled_library_path(monkeypatch) -> str:
     """Linux, with a bundled package's library folder put ahead of the user's own
     ``LD_LIBRARY_PATH``; returns the user's own value."""
@@ -305,7 +316,36 @@ def linux_bundled_library_path(monkeypatch) -> str:
 @pytest.fixture
 def no_gpu_cleanup(monkeypatch):
     """Skip the per-job torch cleanup: it initializes CUDA, which can outlast thread joins in a busy run."""
-    monkeypatch.setattr("jasna.gui.processor._cleanup_torch", lambda torch_mod: None)
+    monkeypatch.setattr("jasna.gui.processor.release_session_memory", lambda device: None)
+
+
+@pytest.fixture
+def fake_job_pipelines(monkeypatch, tmp_path, no_gpu_cleanup):
+    """Run the real GUI ``Processor`` without models, in ``tmp_path`` (which holds the default
+    detection weights). Video jobs run a ``factories.FakeJobPipeline``; set ``restore`` on the
+    returned ``FakeJobPipelines`` to act inside each run. Image jobs write the input image back."""
+    from unittest.mock import MagicMock
+
+    import torch
+
+    from factories import FakeJobPipelines
+    from jasna.mosaic.detection_registry import DEFAULT_DETECTION_MODEL_NAME, detection_model_weights_path
+    from jasna.session_factory import ImageSession
+
+    monkeypatch.chdir(tmp_path)
+    weights = detection_model_weights_path(DEFAULT_DETECTION_MODEL_NAME)
+    weights.parent.mkdir(parents=True, exist_ok=True)
+    weights.touch()
+    pipelines = FakeJobPipelines()
+    monkeypatch.setattr("jasna.gui.processor.build_job_pipeline", pipelines.build)
+    monkeypatch.setattr("jasna.gui.processor.build_video_session", lambda *_a, **_k: MagicMock(device=torch.device("cpu")))
+    monkeypatch.setattr("jasna.engine_compiler.ensure_engines_compiled", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "jasna.gui.processor.build_image_session",
+        lambda *_a, **_k: ImageSession(MagicMock(), MagicMock(), torch.device("cpu"), fp16=False),
+    )
+    monkeypatch.setattr("jasna.image_restore.restore_image", lambda image, *_a, num_variants, **_k: [image] * num_variants)
+    return pipelines
 
 
 @pytest.fixture
@@ -338,3 +378,32 @@ def sparse_ltx_downloads(monkeypatch):
 
     zeros = hashlib.sha256(bytes(1 << 20)).hexdigest()
     monkeypatch.setattr(model_files, "LTX_DOWNLOAD_HEADS", dict.fromkeys(model_files.LTX_DOWNLOAD_HEADS, zeros))
+
+
+@pytest.fixture
+def whole_box_blend_mask(monkeypatch):
+    """Blend all of every restored box, without the feathered edge, so blended pixels are predictable."""
+    import torch
+
+    def whole_box(mask_lr, bbox_xyxy, frame_shape):
+        x1, y1, x2, y2 = bbox_xyxy
+        return torch.ones((y2 - y1, x2 - x1), dtype=torch.float32)
+
+    monkeypatch.setattr("jasna.blend_buffer.create_bbox_blend_mask", whole_box)
+
+
+@pytest.fixture
+def exact_crops(monkeypatch):
+    """Crop exactly the detected box, without the border restoration normally adds around it."""
+    from jasna import crop_buffer
+
+    monkeypatch.setattr(crop_buffer, "BORDER_RATIO", 0.0)
+    monkeypatch.setattr(crop_buffer, "MIN_BORDER", 0)
+    monkeypatch.setattr(crop_buffer, "MAX_EXPANSION_FACTOR", 0.0)
+
+
+@pytest.fixture
+def cpu_gpu_memory(monkeypatch):
+    """A pipeline on the CPU, which has no GPU memory for the job to sample."""
+    monkeypatch.setattr("jasna.pipeline.device_used_bytes", lambda _device: 0)
+    monkeypatch.setattr("jasna.pipeline.device_free_bytes", lambda _device: 0)

@@ -44,7 +44,7 @@ Dlss5PresetName = Literal["default", "j", "k", "l", "m"]
 Dlss5StyleName = Literal["default", "natural", "cinematic"]
 UPSCALE_HEIGHTS = (1080, 1440, 2160)
 
-# Option defaults shared by the CLI (``jasna.main.build_parser``) and the GUI (``AppSettings``).
+# Option defaults shared by the CLI (``jasna.cli_parser.build_parser``) and the GUI (``AppSettings``).
 DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
 DEFAULT_MAX_CLIP_SIZE = 90
 DEFAULT_TEMPORAL_OVERLAP = 8

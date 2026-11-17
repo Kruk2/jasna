@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import torch
 
 if TYPE_CHECKING:
-    from jasna.ltx.restore import FrameWriter
+    from jasna.ltx.spans import FrameWriter
 
 
 class FrameGenerationWriter:
@@ -57,11 +57,12 @@ class RtxFrameGeneration:
     frames. Its automatic shot-change detection stays on, so a hard cut is not blended across."""
 
     def __init__(self, device: torch.device, width: int, height: int) -> None:
-        import jasna.restorer.rtx_superres_secondary_restorer  # noqa: F401  pins pip TensorRT before nvvfx loads
-        from nvvfx import VideoFrameGeneration
+        from jasna.upscale.nvvfx_effects import import_nvvfx
 
         self._device = device
-        self._effect = VideoFrameGeneration(device=device.index or 0, automatic_shot_change_detection_enabled=True)
+        self._effect = import_nvvfx().VideoFrameGeneration(
+            device=device.index or 0, automatic_shot_change_detection_enabled=True
+        )
         self._effect.input_width = width
         self._effect.input_height = height
         try:
@@ -75,17 +76,14 @@ class RtxFrameGeneration:
             ) from exc
 
     def __call__(self, previous: torch.Tensor, current: torch.Tensor) -> torch.Tensor:
-        stream = torch.cuda.current_stream(self._device)
+        from jasna.upscale.nvvfx_effects import on_default_stream
+
         inputs = [frame.float().div_(255.0).contiguous() for frame in (previous, current)]
-        # nvvfx effects fail on any stream but the default one they load with (see ltx/super_res.py).
-        default = torch.cuda.default_stream(self._device)
-        default.wait_stream(stream)
-        with torch.cuda.stream(default):
+        with on_default_stream(self._device):
             image = torch.from_dlpack(self._effect.run_at_timestep(*inputs, 0.5).image)
             # The effect reuses one output buffer, so this copy must be made before the next run.
             generated = image.clamp(0.0, 1.0).mul_(255.0).round_().to(torch.uint8)
-        stream.wait_stream(default)
-        generated.record_stream(stream)
+        generated.record_stream(torch.cuda.current_stream(self._device))
         return generated
 
     def close(self) -> None:

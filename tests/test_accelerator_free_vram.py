@@ -11,10 +11,9 @@ from jasna import accelerator
 GIB = 1 << 30
 
 
+@pytest.mark.usefixtures("nvidia_vendor")
 def test_windows_caps_the_process_view_with_the_device_wide_free_vram(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(torch.version, "hip", None)
-    monkeypatch.setattr(torch.version, "cuda", "13.0")
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (30 * GIB, 32 * GIB))
     monkeypatch.setattr(accelerator, "_nvml_free_bytes", lambda device: 12 * GIB)
     assert accelerator.device_free_bytes(torch.device("cuda:0")) == 12 * GIB
@@ -61,11 +60,10 @@ def test_nvml_total_disagrees_with_cuda(nvml_total, cuda_total, disagrees):
     assert accelerator._nvml_total_disagrees_with_cuda(nvml_total, cuda_total) is disagrees
 
 
+@pytest.mark.usefixtures("nvidia_vendor")
 def test_windows_soc_gpu_caps_the_process_view_at_the_host_available_ram(monkeypatch):
     # Same measured GB10 row through device_free_bytes.
     monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(torch.version, "hip", None)
-    monkeypatch.setattr(torch.version, "cuda", "13.0")
     props = SimpleNamespace(uuid="abc", total_memory=93_066_629_120)
     monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: props)
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (92_648_583_168, 93_066_629_120))
@@ -137,10 +135,9 @@ def test_resident_blocks_probe_only_what_all_resident_needs(free, resident):
     assert limits == [4 * GIB + sampler.ACTIVATION_RESERVE_BYTES + 2 * GIB]
 
 
+@pytest.mark.usefixtures("nvidia_vendor")
 def test_used_vram_is_what_the_whole_gpu_does_not_have_free(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(torch.version, "hip", None)
-    monkeypatch.setattr(torch.version, "cuda", "13.0")
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (30 * GIB, 32 * GIB))
     monkeypatch.setattr(accelerator, "_nvml_free_bytes", lambda device: 12 * GIB)
     assert accelerator.device_used_bytes(torch.device("cuda:0")) == 20 * GIB

@@ -21,40 +21,16 @@ def test_compute_overlap_and_tail_indices_matches_expected_example() -> None:
 
 
 @pytest.mark.parametrize(
-    ("frame_count", "is_continuation", "split_due_to_max_size", "discard_margin", "expected"),
-    [
-        (10, False, False, 0, (0, 10)),
-        (10, True, False, 0, (0, 10)),
-        (10, False, True, 0, (0, 10)),
-        (10, True, True, 0, (0, 10)),
-        (10, False, False, 2, (0, 10)),
-        (10, True, False, 2, (2, 10)),
-        (10, False, True, 2, (0, 8)),
-        (10, True, True, 2, (2, 8)),
-    ],
-)
-def test_compute_keep_range(
-    frame_count: int,
-    is_continuation: bool,
-    split_due_to_max_size: bool,
-    discard_margin: int,
-    expected: tuple[int, int],
-) -> None:
-    assert (
-        compute_keep_range(
-            frame_count=frame_count,
-            is_continuation=is_continuation,
-            split_due_to_max_size=split_due_to_max_size,
-            discard_margin=discard_margin,
-        )
-        == expected
-    )
-
-
-@pytest.mark.parametrize(
     ("frame_count", "is_continuation", "split_due_to_max_size", "discard_margin", "blend_frames", "expected"),
     [
-        # blend_frames=0 behaves like no crossfade
+        (10, False, False, 0, 0, (0, 10)),
+        (10, True, False, 0, 0, (0, 10)),
+        (10, False, True, 0, 0, (0, 10)),
+        (10, True, True, 0, 0, (0, 10)),
+        (10, False, False, 2, 0, (0, 10)),
+        (10, True, False, 2, 0, (2, 10)),
+        (10, False, True, 2, 0, (0, 8)),
+        (10, True, True, 2, 0, (2, 8)),
         (180, True, True, 15, 0, (15, 165)),
         # blend_frames extends keep range on both sides
         (180, False, True, 15, 5, (0, 170)),
@@ -62,11 +38,11 @@ def test_compute_keep_range(
         (180, True, True, 15, 5, (10, 170)),
         # blend_frames clamped to discard_margin
         (10, True, True, 2, 5, (0, 10)),
-        # blend_frames=0 with discard_margin=0 is no-op
+        # blend_frames with discard_margin=0 is no-op
         (10, True, True, 0, 5, (0, 10)),
     ],
 )
-def test_compute_keep_range_with_blend_frames(
+def test_compute_keep_range(
     frame_count: int,
     is_continuation: bool,
     split_due_to_max_size: bool,

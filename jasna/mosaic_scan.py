@@ -31,6 +31,19 @@ def scan_sample_stride(fps: float, *, seconds: float = 1.0) -> int:
     return max(1, round(float(fps) * float(seconds)))
 
 
+def scan_batch(detector, batch, batch_size: int):
+    """``(scores, masks)`` of ``detector.scan_scores_masks`` for a decoded ``batch``, padded with
+    its last frame to the detector's ``batch_size``."""
+    from jasna.tensor_utils import pad_batch_with_last
+
+    return detector.scan_scores_masks(pad_batch_with_last(batch, batch_size=batch_size), mask_hw=SCAN_MASK_HW)
+
+
+def sample_seconds(pts: int, start_pts: int, time_base: float) -> float:
+    """The video time of a decoded frame's ``pts``."""
+    return max(0.0, (pts - start_pts) * time_base)
+
+
 def segments_from_scores(
     times: tuple[float, ...] | list[float],
     scores: tuple[float, ...] | list[float],
@@ -190,10 +203,8 @@ def scan_mosaic_sizes(
     with reader, tqdm(total=total, desc="Mosaic scan", unit="sample", disable=disable_progress) as bar:
         for batch, pts_list in reader.frames():
             count = len(pts_list)
-            if batch.shape[0] < batch_size:
-                batch = torch.cat((batch, batch[-1:].expand(batch_size - batch.shape[0], -1, -1, -1)))
-            batch_scores, batch_masks = detector.scan_scores_masks(batch, mask_hw=SCAN_MASK_HW)
-            times.extend(max(0.0, (pts - reader.start_pts) * time_base) for pts in pts_list)
+            batch_scores, batch_masks = scan_batch(detector, batch, batch_size)
+            times.extend(sample_seconds(pts, reader.start_pts, time_base) for pts in pts_list)
             scores.extend(batch_scores[:count].tolist())
             sizes.extend(
                 mosaic_sizes(

@@ -9,6 +9,12 @@ import torch
 
 _TARGET_WIDTH = 192
 _LUMA_WEIGHTS = (0.299, 0.587, 0.114)
+_ADAPTIVE_RATIO = 3.0
+_MIN_CONTENT = 15.0
+_WINDOW_SIZE = 5
+_MIN_SCENE_LEN = 2
+_REPEAT_RATIO = 0.1
+_MIN_REPEAT_SCORE = 0.5
 
 
 class SceneCutDetector:
@@ -16,48 +22,33 @@ class SceneCutDetector:
 
     Frames are stride-subsampled to ~192px wide on their own device and each
     consecutive pair is scored by mean absolute luma difference. A cut fires
-    when the score spikes above ``adaptive_ratio`` times the median of the
+    when the score spikes above ``_ADAPTIVE_RATIO`` times the median of the
     recent scores (PySceneDetect AdaptiveDetector style; the median stays
     robust against spikes from earlier cuts, while sustained fast motion
     raises it and suppresses false positives). No cut can fire until the
-    score window is full, so the first ``window_size`` frames of a stream
+    score window is full, so the first ``_WINDOW_SIZE`` frames of a stream
     are never split — tracks barely exist there anyway.
 
     Repeated frames (a 30 fps video doubled to 60, 3:2 pulldown) score about
     zero right after each real change and would drag the median to zero, so
     ordinary motion between two real frames would fire as a cut. A pair that
-    follows a real change (a non-repeat scoring at least ``min_repeat_score``)
-    and scores under ``repeat_ratio`` times that change (or
-    ``min_repeat_score``) is a repeat: it never fires and stays out of the
+    follows a real change (a non-repeat scoring at least ``_MIN_REPEAT_SCORE``)
+    and scores under ``_REPEAT_RATIO`` times that change (or
+    ``_MIN_REPEAT_SCORE``) is a repeat: it never fires and stays out of the
     window. Everything else is scored as before, so still shots, slow motion
     and flashes keep their old behavior.
     """
 
-    def __init__(
-        self,
-        *,
-        adaptive_ratio: float = 3.0,
-        min_content: float = 15.0,
-        window_size: int = 5,
-        min_scene_len: int = 2,
-        repeat_ratio: float = 0.1,
-        min_repeat_score: float = 0.5,
-    ) -> None:
-        self.adaptive_ratio = float(adaptive_ratio)
-        self.min_content = float(min_content)
-        self.window_size = int(window_size)
-        self.min_scene_len = int(min_scene_len)
-        self.repeat_ratio = float(repeat_ratio)
-        self.min_repeat_score = float(min_repeat_score)
+    def __init__(self) -> None:
         self._prev_small: torch.Tensor | None = None
-        self._recent_scores: deque[float] = deque(maxlen=self.window_size)
-        self._frames_since_cut = self.min_scene_len
+        self._recent_scores: deque[float] = deque(maxlen=_WINDOW_SIZE)
+        self._frames_since_cut = _MIN_SCENE_LEN
         self._last_change: float | None = None
 
     def reset(self) -> None:
         self._prev_small = None
         self._recent_scores.clear()
-        self._frames_since_cut = self.min_scene_len
+        self._frames_since_cut = _MIN_SCENE_LEN
         self._last_change = None
 
     def find_cuts(self, frames_uint8_bchw: torch.Tensor) -> set[int]:
@@ -99,21 +90,21 @@ class SceneCutDetector:
             else:
                 self._frames_since_cut += 1
             self._recent_scores.append(score)
-            self._last_change = score if score >= self.min_repeat_score else None
+            self._last_change = score if score >= _MIN_REPEAT_SCORE else None
         return cuts
 
     def _is_repeat(self, score: float) -> bool:
         if self._last_change is None:
             return False
-        return score < max(self.min_repeat_score, self.repeat_ratio * self._last_change)
+        return score < max(_MIN_REPEAT_SCORE, _REPEAT_RATIO * self._last_change)
 
     def _is_cut(self, score: float) -> bool:
-        if self._frames_since_cut < self.min_scene_len:
+        if self._frames_since_cut < _MIN_SCENE_LEN:
             return False
-        if len(self._recent_scores) < self.window_size:
+        if len(self._recent_scores) < _WINDOW_SIZE:
             return False
         baseline = median(self._recent_scores)
-        return score > max(self.min_content, self.adaptive_ratio * max(baseline, 1.0))
+        return score > max(_MIN_CONTENT, _ADAPTIVE_RATIO * max(baseline, 1.0))
 
     @staticmethod
     def _subsample(frames_uint8_bchw: torch.Tensor) -> torch.Tensor:

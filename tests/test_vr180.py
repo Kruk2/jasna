@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import torch
 
+from factories import video_metadata
 from jasna.media.probe import VideoMetadata
 from jasna.mosaic.detections import Detections
 from jasna.vr180 import (
@@ -20,32 +21,9 @@ from jasna.vr180 import (
 )
 
 
-def _metadata(
-    *,
-    width: int = 3840,
-    height: int = 1920,
-    sample_aspect_ratio: Fraction = Fraction(1, 1),
-    stereo_layout: str = "",
-    spherical_projection: str = "",
-) -> VideoMetadata:
-    return VideoMetadata(
-        video_file="movie.mp4",
-        video_height=height,
-        video_width=width,
-        video_fps=30.0,
-        average_fps=30.0,
-        video_fps_exact=Fraction(30, 1),
-        codec_name="hevc",
-        duration=1.0,
-        time_base=Fraction(1, 30),
-        start_pts=0,
-        color_range=None,
-        color_space=None,
-        num_frames=30,
-        is_10bit=True,
-        sample_aspect_ratio=sample_aspect_ratio,
-        stereo_layout=stereo_layout,
-        spherical_projection=spherical_projection,
+def _metadata(*, width: int = 3840, height: int = 1920, **overrides) -> VideoMetadata:
+    return video_metadata(
+        fps=30, num_frames=30, video_file="movie.mp4", video_width=width, video_height=height, is_10bit=True, **overrides
     )
 
 
@@ -205,8 +183,8 @@ def test_resolve_projection_rejects_unknown_override() -> None:
         resolve_projection(Path("movie.mp4"), requested="cylindrical")
 
 
-def test_resolve_projection_strips_release_site_tag() -> None:
-    assert resolve_projection(Path("[sample]VRPRD00004-A.mp4")) == "gnomonic"
+def test_resolve_projection_strips_a_bracketed_name_prefix() -> None:
+    assert resolve_projection(Path("[tag]VRPRD00004-A.mp4")) == "gnomonic"
 
 
 class _FakeDetector:

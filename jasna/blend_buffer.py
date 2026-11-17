@@ -3,7 +3,6 @@ from __future__ import annotations
 import itertools
 import logging
 import threading
-from collections.abc import Callable
 
 import torch
 import torch.nn.functional as F
@@ -16,16 +15,7 @@ _log = logging.getLogger(__name__)
 
 
 class BlendBuffer:
-    def __init__(
-        self,
-        device: torch.device,
-        blend_mask_fn: Callable[
-            [torch.Tensor, tuple[int, int, int, int], tuple[int, int]], torch.Tensor
-        ] = create_bbox_blend_mask,
-        vr_projector=None,
-    ):
-        self.device = device
-        self.blend_mask_fn = blend_mask_fn
+    def __init__(self, vr_projector) -> None:
         self.vr_projector = vr_projector
         self._lock = threading.Lock()
         self.pending_map: dict[int, set[int]] = {}
@@ -175,7 +165,7 @@ class BlendBuffer:
             )
             resized_back = original[:, y1:y2, x1:x2].float() + source_delta
 
-        blend_mask = self.blend_mask_fn(mask_lr, (x1, y1, x2, y2), sr.frame_shape)
+        blend_mask = create_bbox_blend_mask(mask_lr, (x1, y1, x2, y2), sr.frame_shape)
 
         if cw < 1.0:
             blend_mask = blend_mask * cw

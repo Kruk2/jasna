@@ -70,16 +70,14 @@ def tuned_entries(architecture: str, suffix: str, tuned_dir: Path, borrowed: Map
     return entries
 
 
-def install(system_db: Path, tuned_dir: Path = TUNED_DIR,
-            compute_units: Mapping[str, Sequence[int]] = COMPUTE_UNITS,
-            borrowed: Mapping[str, Sequence[str]] = BORROWED_TUNING) -> list[Path]:
+def install(system_db: Path) -> list[Path]:
     """Merge the tuned entries (``tuned_entries``) into ``system_db`` for every known GPU of each architecture
     that has any; returns the files written."""
     system_db.mkdir(parents=True, exist_ok=True)
     written = []
-    for architecture, units in compute_units.items():
+    for architecture, units in COMPUTE_UNITS.items():
         for suffix in DATABASE_SUFFIXES:
-            entries = tuned_entries(architecture, suffix, tuned_dir, borrowed)
+            entries = tuned_entries(architecture, suffix, TUNED_DIR, BORROWED_TUNING)
             if not entries:
                 continue
             for count in units:

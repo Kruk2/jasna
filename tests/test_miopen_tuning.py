@@ -1,4 +1,23 @@
+import pytest
+
+from jasna import miopen_tuning
 from jasna.miopen_tuning import database_names, install, merged, read_entries, tuned_entries
+
+
+@pytest.fixture
+def known_gpus(monkeypatch, tmp_path):
+    """Tuning files in ``tmp_path / "tuned"`` for the given GPUs (architecture -> compute unit counts);
+    returns that folder."""
+    tuned = tmp_path / "tuned"
+    tuned.mkdir()
+
+    def use(compute_units, borrowed=None):
+        monkeypatch.setattr(miopen_tuning, "TUNED_DIR", tuned)
+        monkeypatch.setattr(miopen_tuning, "COMPUTE_UNITS", compute_units)
+        monkeypatch.setattr(miopen_tuning, "BORROWED_TUNING", borrowed or {})
+        return tuned
+
+    return use
 
 
 def test_database_names_cover_both_miopen_namings():
@@ -19,15 +38,14 @@ def test_merged_is_idempotent():
     assert merged(once, {"a": "tuned"}) == once
 
 
-def test_install_writes_every_known_gpu_of_a_tuned_architecture(tmp_path):
-    tuned, system = tmp_path / "tuned", tmp_path / "share" / "miopen" / "db"
-    tuned.mkdir()
+def test_install_writes_every_known_gpu_of_a_tuned_architecture(tmp_path, known_gpus):
+    tuned, system = known_gpus({"gfx1201": (64, 56), "gfx1100": (96,)}), tmp_path / "share" / "miopen" / "db"
     (tuned / "gfx1201.HIP.fdb.txt").write_text("conv-a=Solver:1.0\n")
     (tuned / "gfx1201.db.txt").write_text("conv-a=Solver:params\n")
     system.mkdir(parents=True)
     (system / "gfx120140.HIP.fdb.txt").write_text("conv-amd=Other:2.0\n")
 
-    written = install(system, tuned, {"gfx1201": (64, 56), "gfx1100": (96,)})
+    written = install(system)
 
     assert sorted(path.name for path in written) == [
         "gfx120138.HIP.fdb.txt", "gfx120138.db.txt", "gfx120140.HIP.fdb.txt", "gfx120140.db.txt",
@@ -48,21 +66,19 @@ def test_tuned_entries_prefer_the_architectures_own_then_the_nearest_borrowed(tm
     }
 
 
-def test_install_gives_an_untuned_architecture_the_tuning_it_borrows(tmp_path):
-    tuned = tmp_path / "tuned"
-    tuned.mkdir()
+def test_install_gives_an_untuned_architecture_the_tuning_it_borrows(tmp_path, known_gpus):
+    tuned = known_gpus({"gfx1102": (32,), "gfx1150": (16,)}, {"gfx1102": ("gfx1101",)})
     (tuned / "gfx1101.HIP.fdb.txt").write_text("conv-a=Solver:1.0\n")
     system = tmp_path / "db"
-    install(system, tuned, {"gfx1102": (32,), "gfx1150": (16,)}, {"gfx1102": ("gfx1101",)})
+    install(system)
     assert (system / "gfx110220.HIP.fdb.txt").read_text() == "conv-a=Solver:1.0\n"
     assert (system / "gfx1102_32.HIP.fdb.txt").read_text() == "conv-a=Solver:1.0\n"
     assert not list(system.glob("gfx1150*"))
 
 
-def test_install_creates_a_missing_database_folder(tmp_path):
-    tuned = tmp_path / "tuned"
-    tuned.mkdir()
+def test_install_creates_a_missing_database_folder(tmp_path, known_gpus):
+    tuned = known_gpus({"gfx1201": (64,)})
     (tuned / "gfx1201.HIP.fdb.txt").write_text("conv-a=Solver:1.0\n")
     system = tmp_path / "db"
-    install(system, tuned, {"gfx1201": (64,)})
+    install(system)
     assert (system / "gfx120140.HIP.fdb.txt").read_text() == "conv-a=Solver:1.0\n"

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
 from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
@@ -24,10 +25,11 @@ from jasna.frame_queue import FrameQueue
 from jasna.media.probe import VideoMetadata
 from jasna.pipeline import Pipeline
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
-from jasna.pipeline_items import PrimaryRestoreResult
+from jasna.pipeline_items import PrimaryRestoreResult, SecondaryRestoreResult
 from jasna.pipeline_threads import PassContext
 from jasna.os_utils import resolve_executable
 from jasna.session_config import SessionConfig
+from jasna.session_factory import RestorationSession
 
 
 class TemporalUpscaler(torch.nn.Module):
@@ -102,6 +104,24 @@ def session_config(**overrides) -> SessionConfig:
     return SessionConfig(**base)
 
 
+GUI_WEIGHTS_DIR = Path("model_weights")
+
+
+def gui_session_config(settings) -> SessionConfig:
+    """The session config the GUI builds from ``settings``, with every model under ``GUI_WEIGHTS_DIR``
+    and the detector's weights at ``GUI_WEIGHTS_DIR / "<name>.onnx"``."""
+    from jasna.gui.video_session import video_session_config
+
+    with (
+        patch("jasna.engine_paths.model_weights_dir", return_value=GUI_WEIGHTS_DIR),
+        patch(
+            "jasna.mosaic.detection_registry.require_detection_model_weights",
+            side_effect=lambda name: GUI_WEIGHTS_DIR / f"{name}.onnx",
+        ),
+    ):
+        return video_session_config(settings, codec="hevc", encoder_settings={})
+
+
 def video_metadata(*, fps: int = 24, num_frames: int = 2, **overrides) -> VideoMetadata:
     """Probe result of an 8x8 8-bit BT.709 video of ``num_frames`` frames at ``fps``."""
     values = dict(
@@ -135,7 +155,7 @@ def pass_context(**overrides) -> PassContext:
         metadata=video_metadata(),
         seek_ts=None,
         frame_stride=1,
-        blend_buffer=BlendBuffer(device=torch.device("cpu")),
+        blend_buffer=BlendBuffer(vr_projector=None),
         crop_buffers={},
         clip_queue=FrameQueue(max_frames=9999),
         secondary_queue=FrameQueue(max_frames=9999),
@@ -179,6 +199,18 @@ def primary_result(
         pad_offsets=[(126, 126)] * frames,
         resize_shapes=[(4, 4)] * frames,
     )
+
+
+def restore_synchronously(
+    restoration_pipeline, clip, raw_crops, frame_shape, keep_start: int, keep_end: int, crossfade_weights=None
+) -> SecondaryRestoreResult:
+    """One clip through primary and secondary restoration on the calling thread, as the
+    primary and secondary worker threads of a pass run it."""
+    primary = restoration_pipeline.prepare_and_run_primary(
+        clip, raw_crops, frame_shape, keep_start, keep_end, crossfade_weights
+    )
+    restored = restoration_pipeline.run_secondary(primary.primary_raw, primary.keep_start, primary.keep_end)
+    return restoration_pipeline.build_secondary_result(primary, restored)
 
 
 def cli_args(tmp_path: Path, *extra: str, missing: tuple[str, ...] = ()) -> list[str]:
@@ -228,20 +260,100 @@ def run_cli(argv: list[str], *, pipeline=None) -> MagicMock:
     return pipeline_cls
 
 
+@contextmanager
+def cli_image_models():
+    """The CLI's still-image models without weights: the restorer hands each image back unchanged."""
+    from jasna.session_factory import ImageSession
+
+    session = ImageSession(MagicMock(), MagicMock(), torch.device("cpu"), fp16=False)
+    with (
+        patch("jasna.restorer.sd15_download.ensure_sd15_bundle"),
+        patch("jasna.session_factory.build_image_session", return_value=session),
+        patch("jasna.image_restore.restore_image", lambda image, *_a, num_variants, **_k: [image] * num_variants),
+    ):
+        yield
+
+
+def write_test_image(path: Path) -> Path:
+    import numpy as np
+
+    from jasna.media.image_io import write_image_rgb_chw
+
+    write_image_rgb_chw(path, np.zeros((3, 8, 8), dtype=np.uint8))
+    return path
+
+
 def no_resume_conflict(directory: Path):
     raise AssertionError(f"unexpected saved-progress conflict: {directory}")
 
 
-def fake_session(
-    *, device: torch.device, restoration_pipeline, detection_model=None, ltx_files=None
-) -> SimpleNamespace:
-    detection_model = MagicMock() if detection_model is None else detection_model
-    return SimpleNamespace(
-        device=device,
-        restoration_pipeline=restoration_pipeline,
-        ltx_files=ltx_files,
-        detection_model_for=lambda config: detection_model,
-    )
+class CallsAtOnce:
+    """Stands in for ``gui.queues.MainThreadCalls``: runs each posted callback right away."""
+
+    def post(self, callback) -> None:
+        callback()
+
+
+class FakeJobPipeline:
+    """A job's pipeline for GUI processor tests: ``run()`` calls its builder's ``restore(pipeline)``
+    and, like the real pipeline, counts as completed unless it was cancelled."""
+
+    def __init__(self, builder: "FakeJobPipelines", input_path: Path, output_path: Path):
+        self.input_path, self.output_path = input_path, output_path
+        self.cancel_requested = self.completed = False
+        self._builder = builder
+
+    def cancel(self) -> None:
+        self.cancel_requested = True
+
+    def run(self) -> None:
+        self._builder.restore(self)
+        self.completed = not self.cancel_requested
+
+
+class FakeJobPipelines:
+    """Stands in for ``session_factory.build_job_pipeline``; a test sets ``restore`` to act inside each run."""
+
+    def __init__(self):
+        self.restore = lambda pipeline: None
+        self.built: list[FakeJobPipeline] = []
+
+    def build(self, _config, _session, input_path, output_path, _segment_job, *, progress_callback) -> FakeJobPipeline:
+        self.built.append(FakeJobPipeline(self, input_path, output_path))
+        return self.built[-1]
+
+
+@dataclass
+class FixedDetectorSession(RestorationSession):
+    """A restoration session whose detector is given instead of built from the config."""
+
+    detector: object = None
+
+    def detection_model_for(self, config: SessionConfig):
+        return self.detector
+
+
+class RecordingWriter:
+    """A frame writer that keeps every ``(frame, pts)`` it is given; ``close`` raises when ``fail_on_close``."""
+
+    def __init__(self, *, fail_on_close: bool = False):
+        self.written: list[tuple[torch.Tensor, int]] = []
+        self.finished = self.closed = False
+        self._fail_on_close = fail_on_close
+
+    def write(self, frame: torch.Tensor, pts: int) -> None:
+        self.written.append((frame, pts))
+
+    def after_write(self, frames_written: int, stop_event: threading.Event) -> None:
+        pass
+
+    def finish(self) -> None:
+        self.finished = True
+
+    def close(self) -> None:
+        self.closed = True
+        if self._fail_on_close:
+            raise RuntimeError("encoder failed")
 
 
 def make_pipeline(
@@ -265,11 +377,12 @@ def make_pipeline(
         )
     return Pipeline(
         config=session_config(**config_overrides),
-        session=fake_session(
+        session=FixedDetectorSession(
             device=device,
             restoration_pipeline=restoration_pipeline,
-            detection_model=detection_model,
+            log_callback=None,
             ltx_files=ltx_files,
+            detector=MagicMock() if detection_model is None else detection_model,
         ),
         input_video=input_video,
         output_video=output_video,
@@ -624,6 +737,34 @@ class ReadObserver:
             yield group
 
 
+class TensorDictReader:
+    """A model-file reader over in-memory tensors, stored in the dict's order."""
+
+    def __init__(self, tensors: dict[str, torch.Tensor]):
+        self._tensors = tensors
+
+    def tensor_specs(self):
+        return {name: (tensor.dtype, tuple(tensor.shape)) for name, tensor in self._tensors.items()}
+
+    def offset_keys(self):
+        return list(self._tensors)
+
+    def read_tensors_into(self, group_names, groups) -> None:
+        for names, destinations in zip(group_names, groups, strict=True):
+            assert tuple(destinations) == tuple(names)
+            for name, destination in destinations.items():
+                destination.copy_(self._tensors[name])
+
+
+def block_store(blocks: list[dict[str, torch.Tensor]], device: torch.device, *, resident: int):
+    """A ``BlockStore`` holding ``blocks`` (per block ``{name: tensor}``), read like a model file."""
+    from jasna.ltx.blocks import BlockStore
+
+    tensors = {f"blocks.{index}.{name}": tensor for index, block in enumerate(blocks) for name, tensor in block.items()}
+    names = [{name: f"blocks.{index}.{name}" for name in block} for index, block in enumerate(blocks)]
+    return BlockStore.from_reader(TensorDictReader(tensors), names, device, resident=resident)
+
+
 def shown_pixel(canvas, x: int, y: int) -> tuple[int, ...]:
     """RGB at ``x``, ``y`` of the one image a canvas shows, in that image's own pixels."""
     (item,) = canvas.find_all()
@@ -650,6 +791,95 @@ class FakeFrameGeneration:
 
     def close(self):
         self.closed = True
+
+
+class NullProgressBar:
+    """Stands in for a stage bar of the LTX ``Progress``: counts the frames or steps done, times nothing."""
+
+    def __init__(self, total: int = 0):
+        self.total, self.n = total, 0
+
+    def update(self, n):
+        self.n += n
+
+    def reuse(self, done, frames, windows):
+        self.n += done
+
+    def window(self, canvas):
+        return nullcontext()
+
+    def waiting(self):
+        return nullcontext()
+
+    def windows_done(self, canvas, count):
+        pass
+
+    def track(self, canvas, steps):
+        return self.update
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def track_plan(windows, *, window_hop: int = 3):
+    """An LTX ``TrackPlan`` of track 0 from frame 0 to the end of its last window, with no
+    polygons and the track owning every frame."""
+    from jasna.ltx.plan import TrackPlan
+
+    windows = tuple(windows)
+    frames = max(window.stop for window in windows)
+    return TrackPlan(0, 0, ((),) * frames, (1.0,) * frames, windows, window_hop)
+
+
+def ltx_block_weights(dim: int, heads: int, generator: torch.Generator, linear_weights=None) -> dict[str, torch.Tensor]:
+    """Random weights of one LTX transformer block. ``linear_weights(name, out_features, in_features)``
+    gives each linear's weight tensors (bf16 ``.weight`` when omitted)."""
+
+    def rand(*shape: int) -> torch.Tensor:
+        return (torch.randn(*shape, generator=generator) * 0.05).to(torch.bfloat16)
+
+    def bf16_linear(name: str, out_features: int, in_features: int) -> dict[str, torch.Tensor]:
+        return {f"{name}.weight": rand(out_features, in_features)}
+
+    linear_weights = linear_weights or bf16_linear
+    weights = {}
+    for attn in ("attn1", "attn2"):
+        for proj in ("to_q", "to_k", "to_v", "to_out.0"):
+            weights |= linear_weights(f"{attn}.{proj}", dim, dim)
+            weights[f"{attn}.{proj}.bias"] = rand(dim)
+        weights |= linear_weights(f"{attn}.to_gate_logits", heads, dim)
+        weights[f"{attn}.to_gate_logits.bias"] = rand(heads)
+        weights[f"{attn}.q_norm.weight"] = rand(dim) + 1
+        weights[f"{attn}.k_norm.weight"] = rand(dim) + 1
+    weights |= linear_weights("ff.net.0.proj", 4 * dim, dim)
+    weights |= linear_weights("ff.net.2", dim, 4 * dim)
+    weights["scale_shift_table"] = rand(9, dim)
+    weights["prompt_scale_shift_table"] = rand(2, dim)
+    return weights
+
+
+def ltx_block_inputs(dim: int, heads: int, generator: torch.Generator, *, rows: int = 24, context_rows: int = 5,
+                     latent_shape: tuple[int, int, int] = (3, 2, 2), device="cpu"):
+    """``(x, cond, context, rope)`` of one LTX transformer block on ``device``: ``rows`` tokens, one
+    step's conditioning, ``context_rows`` prompt tokens and the rope of a ``latent_shape`` latent.
+    Values are drawn on ``generator``'s device in that order."""
+    from jasna.ltx import transformer as T
+
+    def randn(*shape: int, scale: float = 1.0) -> torch.Tensor:
+        return (torch.randn(*shape, generator=generator, device=generator.device) * scale).to(device, torch.bfloat16)
+
+    cond = T.StepConditioning(
+        block_rows=randn(1, 2, 9, dim, scale=0.1),
+        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16, device=device),
+        prompt_rows=randn(1, 1, 2, dim, scale=0.1),
+    )
+    x = randn(1, rows, dim)
+    context = randn(1, context_rows, dim)
+    rope = T.build_rope(*latent_shape, dim=dim, heads=heads, device=torch.device(device))
+    return x, cond, context, rope
 
 
 def write_sparse_file(path: Path, size: int) -> None:

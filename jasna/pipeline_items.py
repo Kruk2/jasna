@@ -8,7 +8,7 @@ from jasna.crop_buffer import RawCrop
 from jasna.tracking.clip_tracker import TrackedClip
 
 
-_SENTINEL = object()
+SENTINEL = object()
 
 
 @dataclass(frozen=True)

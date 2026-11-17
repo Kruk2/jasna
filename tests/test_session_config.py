@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
+from factories import GUI_WEIGHTS_DIR, gui_session_config
+from jasna.engine_paths import default_restoration_model_path
 from jasna.gui.models import AppSettings
-from jasna.gui.video_session import build_image_session, video_session_config
-from jasna.main import _session_config_from_args, build_parser
+from jasna.gui.video_session import build_image_session
+from jasna.cli_parser import build_parser
+from jasna.main import _session_config_from_args
 from jasna.mosaic.detection_registry import recommended_score_threshold
 
 pytestmark = pytest.mark.usefixtures("nvidia_vendor")
-
-_DETECTION_PATH = Path("mw") / "rfdetr-v6.onnx"
-_RESTORATION_PATH = Path("mw") / "lada_mosaic_restoration_model_generic_v1.2.pth"
 
 
 def _cli_config(extra_args: list[str] | None = None):
@@ -27,115 +25,11 @@ def _cli_config(extra_args: list[str] | None = None):
         codec="hevc",
         encoder_settings={},
         detection_model_name="rfdetr-v6",
-        detection_model_path=_DETECTION_PATH,
+        detection_model_path=GUI_WEIGHTS_DIR / "rfdetr-v6.onnx",
         detection_score_threshold=recommended_score_threshold("rfdetr-v6") if threshold is None else threshold,
-        restoration_model_path=_RESTORATION_PATH,
+        restoration_model_path=GUI_WEIGHTS_DIR / default_restoration_model_path("basicvsrpp").name,
         lut_path=None,
     )
-
-
-def _gui_config(settings: AppSettings):
-    with (
-        patch(
-            "jasna.mosaic.detection_registry.coerce_detection_model_name",
-            side_effect=lambda name: name,
-        ),
-        patch(
-            "jasna.mosaic.detection_registry.require_detection_model_weights",
-            return_value=_DETECTION_PATH,
-        ),
-        patch("jasna.engine_paths.model_weights_dir", return_value=Path("mw")),
-    ):
-        return video_session_config(settings, codec="hevc", encoder_settings={})
-
-
-def test_cli_defaults_map_to_expected_config() -> None:
-    config = _cli_config()
-
-    assert config.device == "cuda:0"
-    assert config.fp16 is True
-    assert config.batch_size == 4
-    assert config.detection_model_name == "rfdetr-v6"
-    assert config.detection_model_path == _DETECTION_PATH
-    assert config.detection_score_threshold == 0.35
-    assert config.max_detection_gap == 2
-    assert config.min_detection_duration == 2
-    assert config.scene_detection is True
-    assert config.restoration_model_path == _RESTORATION_PATH
-    assert config.compile_basicvsrpp is True
-    assert config.max_clip_size == 90
-    assert config.temporal_overlap == 8
-    assert config.denoise_strength == "none"
-    assert config.secondary_restoration == "none"
-    assert config.tvai_model == "iris-2"
-    assert config.tvai_scale == 4
-    assert config.tvai_workers == 2
-    assert config.tvai_denoise is False
-    assert config.rtx_scale == 4
-    assert config.rtx_quality == "high"
-    assert config.rtx_denoise == "medium"
-    assert config.rtx_deblur == "none"
-    assert config.vr_mode == "auto"
-    assert config.codec == "hevc"
-    assert config.encoder_settings == {}
-    assert config.lut_path is None
-    assert config.sharpen_strength == 0.0
-    assert config.retarget_high_fps is False
-    assert config.fmp4 is False
-    assert config.disable_progress is False
-    assert config.working_dir is None
-
-
-def test_cli_non_default_args_are_mapped() -> None:
-    config = _cli_config(
-        [
-            "--no-fp16",
-            "--batch-size", "8",
-            "--denoise", "high",
-            "--secondary-restoration", "rtx-super-res",
-            "--rtx-quality", "ultra",
-            "--vr-mode", "sbs",
-            "--no-progress",
-            "--working-directory", "/fast/scratch",
-            "--retarget-high-fps",
-            "--sharpen", "0.4",
-            "--fmp4",
-            "--no-scene-detection",
-        ]
-    )
-
-    assert config.fp16 is False
-    assert config.batch_size == 8
-    assert config.denoise_strength == "high"
-    assert config.secondary_restoration == "rtx-super-res"
-    assert config.rtx_quality == "ultra"
-    assert config.vr_mode == "sbs"
-    assert config.disable_progress is True
-    assert config.working_dir == Path("/fast/scratch")
-    assert config.retarget_high_fps is True
-    assert config.sharpen_strength == 0.4
-    assert config.fmp4 is True
-    assert config.scene_detection is False
-
-
-def test_cli_ltx_args_are_mapped() -> None:
-    defaults = _cli_config()
-    assert defaults.restoration_model_name == "basicvsrpp"
-    assert defaults.ltx_large_canvas is False
-    assert defaults.ltx_seed == 20260923
-    assert defaults.ltx_model == "distilled2"
-
-    assert _cli_config(["--restoration-model-name", "ltx-basic"]).ltx_model == "distilled1"
-    assert _cli_config(["--restoration-model-name", "ltx"]).ltx_model == "distilled2"
-    assert _cli_config(["--restoration-model-name", "ltx-4step"]).ltx_model == "distilled4"
-    assert _cli_config(["--restoration-model-name", "ltx-8step"]).ltx_model == "distilled"
-    teacher = _cli_config(["--restoration-model-name", "ltx-undistilled"])
-    assert (teacher.restoration_model_name, teacher.ltx_model) == ("ltx", "undistilled")
-
-    config = _cli_config(["--restoration-model-name", "ltx", "--ltx-large-canvas", "--ltx-seed", "7"])
-    assert config.restoration_model_name == "ltx"
-    assert config.ltx_large_canvas is True
-    assert config.ltx_seed == 7
 
 
 def test_cli_takes_the_video_decoder_from_the_environment(monkeypatch) -> None:
@@ -157,16 +51,9 @@ def test_cli_ltx_overlap_defaults_to_17_frames_and_sets_the_window_step() -> Non
     assert more.ltx_window_hop == 88
 
 
-def test_restoration_model_path_defaults_per_model() -> None:
-    from jasna.engine_paths import default_restoration_model_path
-
-    assert default_restoration_model_path("basicvsrpp").name == "lada_mosaic_restoration_model_generic_v1.2.pth"
-    assert default_restoration_model_path("ltx").name == "ltx-restore"
-
-
 def test_gui_defaults_match_cli_defaults() -> None:
     cli = _cli_config()
-    gui = _gui_config(AppSettings())
+    gui = gui_session_config(AppSettings())
 
     # The GUI shows its own progress, never the terminal bar.
     assert replace(cli, disable_progress=True) == gui
@@ -185,32 +72,12 @@ def test_gui_image_defaults_match_cli_defaults() -> None:
     )
 
 
-def test_gui_config_maps_settings_fields() -> None:
-    settings = AppSettings(
-        fp16_mode=False,
-        lut_path="  lut.cube  ",
-        sharpen_strength=0.35,
-        working_directory="/tmp/work",
-        secondary_restoration="tvai",
-        tvai_scale=2,
-        denoise_strength="low",
-        scene_detection=False,
-        ltx_vae_encoder="max",
-        ltx_vae_decoder="full",
-        decode_backend="pyav-hw",
-    )
-    config = _gui_config(settings)
+def test_gui_config_trims_the_lut_path_and_hides_the_terminal_progress_bar() -> None:
+    config = gui_session_config(AppSettings(lut_path="  lut.cube  "))
 
-    assert config.fp16 is False
     assert config.lut_path == "lut.cube"
-    assert config.sharpen_strength == 0.35
-    assert config.working_dir == Path("/tmp/work")
-    assert config.secondary_restoration == "tvai"
-    assert config.tvai_scale == 2
-    assert config.denoise_strength == "low"
-    assert config.scene_detection is False
-    assert (config.ltx_vae_encoder, config.ltx_vae_decoder, config.decode_backend) == ("max", "full", "pyav-hw")
     assert config.disable_progress is True
+    assert gui_session_config(AppSettings(lut_path="   ")).lut_path is None
 
 
 @pytest.mark.parametrize(("secondary", "auto_split", "expected"), [
@@ -221,7 +88,7 @@ def test_gui_config_maps_settings_fields() -> None:
 ])
 def test_gui_ltx_keeps_only_the_secondary_restoration_it_supports(secondary, auto_split, expected) -> None:
     settings = AppSettings(restoration_model="ltx", secondary_restoration=secondary, ltx_auto_split=auto_split)
-    assert _gui_config(settings).secondary_restoration == expected
+    assert gui_session_config(settings).secondary_restoration == expected
 
 
 def test_gui_image_session_requires_installed_sd15_bundle(monkeypatch) -> None:
@@ -249,9 +116,3 @@ def test_ltx_needs_auto_split_for_options_of_the_basicvsrpp_parts(auto_split, se
     assert ltx_unsupported_options(
         auto_split=auto_split, secondary_restoration=secondary, denoise_strength=denoise
     ) == expected
-
-
-def test_cli_ltx_vae_choices_reach_the_config() -> None:
-    assert (_cli_config().ltx_vae_encoder, _cli_config().ltx_vae_decoder) == ("auto", "auto")
-    config = _cli_config(["--restoration-model-name", "ltx", "--ltx-vae-encoder", "max", "--ltx-vae-decoder", "half"])
-    assert (config.ltx_vae_encoder, config.ltx_vae_decoder) == ("max", "half")

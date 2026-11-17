@@ -63,34 +63,13 @@ def _detection_engine_exists(
     import torch
 
     from jasna.accelerator import is_amd_device
-    from jasna.mosaic.detection_registry import (
-        is_rfdetr_model,
-        is_yolo_model,
-        rfdetr_model_config,
-    )
+    from jasna.mosaic.detection_registry import detection_engine_path
 
-    resolved_device = torch.device(device)
-    if is_amd_device(resolved_device):
+    if is_amd_device(torch.device(device)):
         # AMD runs both RF-DETR (rfdetr torch model) and YOLO through PyTorch;
         # there is no compiled engine artifact to check for.
         return True
-
-    from jasna.engine_paths import (
-        get_onnx_tensorrt_engine_path,
-        get_yolo_tensorrt_engine_path,
-    )
-
-    if is_rfdetr_model(detection_model_name):
-        config = rfdetr_model_config(detection_model_name)
-        return get_onnx_tensorrt_engine_path(
-            detection_model_path,
-            batch_size=config.engine_batch_size(batch_size),
-            fp16=fp16,
-            dynamic_batch=config.dynamic_batch,
-        ).exists()
-    if is_yolo_model(detection_model_name):
-        return get_yolo_tensorrt_engine_path(detection_model_path, fp16=fp16).exists()
-    return True
+    return detection_engine_path(detection_model_name, Path(detection_model_path), batch_size, fp16=fp16).exists()
 
 
 def _unet4x_engine_exists(fp16: bool) -> bool:
@@ -201,16 +180,20 @@ def _show(message: str, log_callback: typing.Callable[[str], None] | None) -> No
         print(message)
 
 
+def _compiler_command(req: EngineCompilationRequest, frozen: bool) -> list[str]:
+    """A frozen build runs its own binary, a source run this module."""
+    if frozen:
+        return [get_application_executable(), "--compile-engines", req.to_json()]
+    return [sys.executable, "-m", "jasna.engine_compiler", req.to_json()]
+
+
 def _run_compiler_subprocess(
     req: EngineCompilationRequest,
     log_callback: typing.Callable[[str], None] | None,
 ) -> None:
     logger.info("Spawning GPU model compilation subprocess...")
     frozen = is_frozen()
-    if frozen:
-        cmd = [get_application_executable(), "--compile-engines", req.to_json()]
-    else:
-        cmd = [sys.executable, "-m", "jasna.engine_compiler", req.to_json()]
+    cmd = _compiler_command(req, frozen)
 
     kwargs: dict = {
         "stdin": subprocess.DEVNULL,  # don't inherit the GUI's detached (invalid) stdin
@@ -235,24 +218,18 @@ def _run_compiler_subprocess(
         raise RuntimeError(f"Engine compilation subprocess failed (exit code {returncode})")
 
 
-def _subprocess_compile(req: EngineCompilationRequest) -> None:
+def compile_missing_engines(req: EngineCompilationRequest) -> None:
     import logging as _logging
     import warnings
     warnings.filterwarnings("ignore")
     _logging.disable(_logging.WARNING)
 
-    from jasna._suppress_noise import install as _install_noise_filters
-    _install_noise_filters()
+    # Before torch_tensorrt (-> torch._inductor) imports: the frozen binary's source-introspection
+    # shims must be in place.
+    from jasna.bootstrap import configure_process
+    configure_process()
     import torch
     from jasna.accelerator import is_nvidia_device
-
-    # The compile subprocess imports torch_tensorrt (-> torch._inductor) directly, without
-    # going through jasna.pipeline, so the source-introspection shims aren't installed yet.
-    # In the compiled (Nuitka) binary that introspection raises; patch before any such import.
-    from jasna._frozen import patch_frozen_torch
-    patch_frozen_torch()
-    from jasna.accelerator import configure_rocm_process_env
-    configure_rocm_process_env()
 
     device = torch.device(req.device)
     missing = _missing_engines(req, nvidia=is_nvidia_device(device))
@@ -287,4 +264,4 @@ if __name__ == "__main__":
         print("Usage: python -m jasna.engine_compiler <json_request>", file=sys.stderr)
         sys.exit(1)
     req = EngineCompilationRequest.from_json(sys.argv[1])
-    _subprocess_compile(req)
+    compile_missing_engines(req)

@@ -9,11 +9,10 @@ from __future__ import annotations
 import threading
 
 import numpy as np
+import pytest
 import torch
 
 from jasna.crop_buffer import extract_crop, prepare_crops_for_restoration
-from jasna.tracking.clip_tracker import TrackedClip
-import jasna.crop_buffer as cb
 
 
 class _CpuSliceTracer:
@@ -46,31 +45,10 @@ class _CpuSliceTracer:
         self._originals.clear()
 
 
-def _no_expansion(monkeypatch):
-    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(cb, "MIN_BORDER", 0)
-    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
-
-
-class _ConstantRestorer:
-    dtype = torch.float32
-    device = torch.device("cpu")
-
-    def __init__(self, value: float) -> None:
-        self._value = value
-
-    def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
-        stacked = []
-        for f in crops:
-            stacked.append(torch.full(f.shape, self._value, dtype=torch.float32))
-        return torch.stack(stacked, dim=0)
-
-
-def test_extract_crop_and_prepare_uses_no_cpu_dispatch(monkeypatch) -> None:
+@pytest.mark.usefixtures("exact_crops")
+def test_extract_crop_and_prepare_uses_no_cpu_dispatch() -> None:
     """extract_crop + prepare_crops_for_restoration must not trigger torch CPU
     __getitem__/contiguous on CPU tensors."""
-    _no_expansion(monkeypatch)
-
     frame = torch.randint(0, 255, (3, 64, 64), dtype=torch.uint8)
     bbox = np.array([10.0, 10.0, 50.0, 50.0], dtype=np.float32)
 
@@ -85,5 +63,3 @@ def test_extract_crop_and_prepare_uses_no_cpu_dispatch(monkeypatch) -> None:
     assert tracer.calls == [], (
         f"CPU tensor __getitem__/contiguous detected in extract_crop/prepare: {tracer.calls}"
     )
-
-

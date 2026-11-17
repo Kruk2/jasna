@@ -63,6 +63,29 @@ def compute_iou_matrix(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
     return inter_area / np.maximum(union_area, 1e-6)
 
 
+def iou_groups(boxes: np.ndarray, threshold: float, *, inclusive: bool) -> list[list[int]]:
+    """Indices of ``boxes`` (xyxy) joined by chains of overlap: IoU >= ``threshold`` when
+    ``inclusive``, else IoU > ``threshold``. Groups and their members are in index order."""
+    iou = compute_iou_matrix(boxes, boxes)
+    overlapping = iou >= threshold if inclusive else iou > threshold
+    parent = list(range(len(boxes)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    for i, j in zip(*np.nonzero(np.triu(overlapping, 1))):
+        root_i, root_j = find(int(i)), find(int(j))
+        if root_i != root_j:
+            parent[root_i] = root_j
+    groups: dict[int, list[int]] = {}
+    for index in range(len(boxes)):
+        groups.setdefault(find(index), []).append(index)
+    return list(groups.values())
+
+
 def merge_overlapping_boxes(
     bboxes: np.ndarray, masks: torch.Tensor, iou_threshold: float
 ) -> tuple[np.ndarray, torch.Tensor]:
@@ -71,37 +94,19 @@ def merge_overlapping_boxes(
     masks: (K, Hm, Wm) bool, GPU
     Returns: merged (N, 4) bboxes (CPU) and (N, Hm, Wm) masks (GPU) where N <= K
     """
-    n = bboxes.shape[0]
-    if n == 0:
-        return bboxes, masks
-    if n == 1:
+    if bboxes.shape[0] <= 1:
         return bboxes, masks
 
-    iou_matrix = compute_iou_matrix(bboxes, bboxes)
-    adjacency = iou_matrix > iou_threshold
-
-    labels = np.arange(n)
-    for _ in range(n):
-        for i in range(n):
-            neighbors = np.where(adjacency[i])[0]
-            if len(neighbors) > 0:
-                min_label = labels[neighbors].min()
-                if min_label < labels[i]:
-                    labels[i] = min_label
-
-    unique_labels = np.unique(labels)
     merged_bboxes = []
     merged_masks = []
-
-    for label in unique_labels:
-        group_indices = np.where(labels == label)[0]
-        group_boxes = bboxes[group_indices]
+    for group in iou_groups(bboxes, iou_threshold, inclusive=False):
+        group_boxes = bboxes[group]
         x1 = group_boxes[:, 0].min()
         y1 = group_boxes[:, 1].min()
         x2 = group_boxes[:, 2].max()
         y2 = group_boxes[:, 3].max()
         merged_bboxes.append(np.array([x1, y1, x2, y2]))
-        merged_masks.append(masks[group_indices].any(dim=0))
+        merged_masks.append(masks[group].any(dim=0))
 
     return np.stack(merged_bboxes), torch.stack(merged_masks)
 

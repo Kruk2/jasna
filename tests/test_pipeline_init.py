@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from factories import make_pipeline, video_metadata
-from jasna.ltx.restore import LtxSegment
+from jasna.ltx.spans import LtxSegment
 from jasna.media.splice import KeyframeIndex, SpliceSpan
 from jasna.progressbar import StageProgress
 from jasna.segments import SegmentRange, SegmentRestoration

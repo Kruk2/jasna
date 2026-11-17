@@ -1,4 +1,4 @@
-import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import torch
@@ -49,6 +49,5 @@ def test_gpu_libraries_load_ahead_only_on_a_gpu(monkeypatch):
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 def test_gpu_libraries_load_ahead_on_another_thread(dtype):
-    worker = threading.Thread(target=load_gpu_libraries_ahead, args=(torch.device("cuda"), dtype))
-    worker.start()
-    worker.join()
+    with ThreadPoolExecutor(1) as worker:
+        assert worker.submit(load_gpu_libraries_ahead, torch.device("cuda"), dtype).result() is None

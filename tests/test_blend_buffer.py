@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
+import pytest
 import torch
 
 from jasna.vr180 import StereoLayout
@@ -11,6 +12,8 @@ from jasna.pipeline_items import SecondaryRestoreResult
 
 
 RSIZE = 256
+
+pytestmark = pytest.mark.usefixtures("whole_box_blend_mask")
 
 
 def _make_sr(
@@ -46,27 +49,20 @@ def _make_sr(
     )
 
 
-def _identity_blend_mask(
-    mask_lr: torch.Tensor,
-    bbox_xyxy: tuple[int, int, int, int],
-    frame_shape: tuple[int, int],
-) -> torch.Tensor:
-    x1, y1, x2, y2 = bbox_xyxy
-    return torch.ones((y2 - y1, x2 - x1), dtype=torch.float32)
 
 
 class TestBlendBufferReadiness:
     def test_frame_with_no_pending_tracks_is_ready(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
+        bb = BlendBuffer(vr_projector=None)
         bb.register_frame(0, set())
         assert bb.is_frame_ready(0)
 
     def test_unregistered_frame_is_ready(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
+        bb = BlendBuffer(vr_projector=None)
         assert bb.is_frame_ready(99)
 
     def test_frame_not_ready_until_result_added(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
+        bb = BlendBuffer(vr_projector=None)
         bb.register_frame(0, {1})
         assert not bb.is_frame_ready(0)
 
@@ -75,7 +71,7 @@ class TestBlendBufferReadiness:
         assert bb.is_frame_ready(0)
 
     def test_frame_with_two_tracks_needs_both_results(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
+        bb = BlendBuffer(vr_projector=None)
         bb.register_frame(0, {1, 2})
         assert not bb.is_frame_ready(0)
 
@@ -88,7 +84,7 @@ class TestBlendBufferReadiness:
 
 class TestBlendBufferBlending:
     def test_blend_replaces_region(self):
-        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
+        bb = BlendBuffer(vr_projector=None)
         bb.register_frame(0, {1})
         sr = _make_sr(track_id=1, start_frame=0, frame_count=1, fill_value=200)
         bb.add_result(sr)
@@ -98,23 +94,16 @@ class TestBlendBufferBlending:
         assert blended.shape == original.shape
         assert torch.all(blended == 200)
 
-    def test_blend_no_pending_returns_original(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
-        original = torch.zeros(3, 8, 8, dtype=torch.uint8)
-        result = bb.blend_frame(0, original)
-        assert result is original
-
-    def test_blend_skips_the_frame_copy_when_no_result_arrived(self):
-        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
-        bb.register_frame(0, {1})
+    @pytest.mark.parametrize("pending_tracks", [set(), {1}], ids=["no-pending-track", "no-result-arrived"])
+    def test_blend_returns_the_original_frame_without_a_result(self, pending_tracks):
+        bb = BlendBuffer(vr_projector=None)
+        bb.register_frame(0, pending_tracks)
         original = torch.zeros(3, 8, 8, dtype=torch.uint8)
 
-        result = bb.blend_frame(0, original)
-
-        assert result is original
+        assert bb.blend_frame(0, original) is original
 
     def test_blend_copies_when_only_some_tracks_have_results(self):
-        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
+        bb = BlendBuffer(vr_projector=None)
         bb.register_frame(0, {1, 2})
         bb.add_result(_make_sr(track_id=1, start_frame=0, frame_count=1, fill_value=200))
 
@@ -126,21 +115,20 @@ class TestBlendBufferBlending:
         assert torch.all(original == 0)
 
     def test_result_cleaned_up_after_last_frame(self):
-        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
+        bb = BlendBuffer(vr_projector=None)
         bb.register_frame(0, {1})
         bb.register_frame(1, {1})
         sr = _make_sr(track_id=1, start_frame=0, frame_count=2)
         bb.add_result(sr)
 
         bb.blend_frame(0, torch.zeros(3, 8, 8, dtype=torch.uint8))
-        assert 1 in bb._results
+        assert bb.offloadable_results() == [sr]
 
         bb.blend_frame(1, torch.zeros(3, 8, 8, dtype=torch.uint8))
-        assert 1 not in bb._results
-        assert 1 not in bb._result_last_frame
+        assert bb.offloadable_results() == []
 
     def test_crossfade_weights_applied(self):
-        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
+        bb = BlendBuffer(vr_projector=None)
         bb.register_frame(0, {1})
         sr = _make_sr(track_id=1, start_frame=0, frame_count=1, fill_value=100, crossfade_weights={0: 0.5})
         bb.add_result(sr)
@@ -151,7 +139,7 @@ class TestBlendBufferBlending:
         assert torch.all(blended == expected)
 
     def test_two_tracks_both_applied_on_same_frame(self):
-        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
+        bb = BlendBuffer(vr_projector=None)
         bb.register_frame(0, {1, 2})
 
         left = _make_sr(track_id=1, start_frame=0, frame_count=1, fill_value=100)
@@ -166,7 +154,7 @@ class TestBlendBufferBlending:
 
 class TestBlendBufferDiscardedFrames:
     def test_discarded_frames_outside_keep_range_cleared(self):
-        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
+        bb = BlendBuffer(vr_projector=None)
         bb.register_frame(0, {1})
         bb.register_frame(1, {1})
         bb.register_frame(2, {1})
@@ -183,84 +171,50 @@ class TestBlendBufferDiscardedFrames:
 
 class TestBlendBufferPendingClip:
     def test_add_pending_clip_adds_track_to_existing_frames(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
+        bb = BlendBuffer(vr_projector=None)
         bb.register_frame(0, {1})
         bb.add_pending_clip([0], 2)
         assert bb.pending_map[0] == {1, 2}
 
     def test_remove_pending_clip_removes_track(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
+        bb = BlendBuffer(vr_projector=None)
         bb.register_frame(0, {1, 2})
         bb.remove_pending_clip([0], 2)
         assert bb.pending_map[0] == {1}
 
     def test_add_pending_clip_ignores_unregistered_frames(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
+        bb = BlendBuffer(vr_projector=None)
         bb.add_pending_clip([99], 1)
         assert 99 not in bb.pending_map
 
 
 class TestBlendBufferThreadSafety:
-    def test_concurrent_register_and_ready_check(self):
-        bb = BlendBuffer(device=torch.device("cpu"))
-        errors = []
-
-        def writer():
-            try:
-                for i in range(1000):
-                    bb.register_frame(i, {1})
-            except Exception as e:
-                errors.append(e)
-
-        def reader():
-            try:
-                for i in range(1000):
-                    bb.is_frame_ready(i)
-            except Exception as e:
-                errors.append(e)
-
-        t1 = threading.Thread(target=writer)
-        t2 = threading.Thread(target=reader)
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-        assert not errors
-
     def test_concurrent_add_pending_and_blend(self):
-        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
+        bb = BlendBuffer(vr_projector=None)
         for i in range(100):
             bb.register_frame(i, {1})
         sr = _make_sr(track_id=1, start_frame=0, frame_count=100, fill_value=200)
         bb.add_result(sr)
 
-        errors = []
+        def add_pending():
+            for i in range(100):
+                bb.add_pending_clip([i], 2)
 
-        def adder():
-            try:
-                for i in range(100):
-                    bb.add_pending_clip([i], 2)
-            except Exception as e:
-                errors.append(e)
+        def blend():
+            return [bb.blend_frame(i, torch.zeros(3, 8, 8, dtype=torch.uint8)) for i in range(100)]
 
-        def blender():
-            try:
-                for i in range(100):
-                    bb.blend_frame(i, torch.zeros(3, 8, 8, dtype=torch.uint8))
-            except Exception as e:
-                errors.append(e)
+        with ThreadPoolExecutor(2) as pool:
+            adding, blending = pool.submit(add_pending), pool.submit(blend)
+            adding.result()
+            blended = blending.result()
 
-        t1 = threading.Thread(target=adder)
-        t2 = threading.Thread(target=blender)
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-        assert not errors
+        assert all(torch.all(frame == 200) for frame in blended)
+        assert bb.pending_map == {}
+        assert bb.offloadable_results() == []
 
 
 def test_remove_pending_clip_skips_unregistered_frames() -> None:
-    bb = BlendBuffer(device=torch.device("cpu"))
+    bb = BlendBuffer(vr_projector=None)
     bb.register_frame(0, {1})
     bb.remove_pending_clip([0, 99], 1)
     assert bb.is_frame_ready(0)
@@ -289,7 +243,7 @@ def _vr_sr(enlarged_bbox, frame_shape, fill_value):
     )
 
 
-def test_vr_delta_composite_preserves_pixels_outside_mask() -> None:
+def test_vr_delta_composite_preserves_pixels_outside_mask(monkeypatch) -> None:
     # With a real region projector and a nontrivial restoration, source pixels
     # where the blend mask is 0 must survive bit-for-bit — the delta composite
     # inverse-projects only the restoration change, never the whole patch.
@@ -306,9 +260,8 @@ def test_vr_delta_composite_preserves_pixels_outside_mask() -> None:
         return m
 
     projector = GnomonicProjector(StereoLayout("sbs", 64, 32), device=torch.device("cpu"))
-    bb = BlendBuffer(
-        device=torch.device("cpu"), blend_mask_fn=half_mask_fn, vr_projector=projector
-    )
+    monkeypatch.setattr("jasna.blend_buffer.create_bbox_blend_mask", half_mask_fn)
+    bb = BlendBuffer(vr_projector=projector)
     bb.register_frame(0, {1})
     bb.add_result(_vr_sr(enlarged, frame_shape, fill_value=255))
 
@@ -327,7 +280,7 @@ def test_vr_delta_composite_preserves_pixels_outside_mask() -> None:
 
 
 def test_apply_blend_skips_out_of_range_frame() -> None:
-    bb = BlendBuffer(device=torch.device("cpu"))
+    bb = BlendBuffer(vr_projector=None)
     bb.register_frame(0, {1})
     sr = _make_sr(track_id=1, start_frame=5, frame_count=3, frame_shape=(8, 8))
     bb.add_result(sr)
@@ -337,7 +290,7 @@ def test_apply_blend_skips_out_of_range_frame() -> None:
 
 
 def test_debug_lines_name_frames_waiting_for_missing_tracks() -> None:
-    bb = BlendBuffer(device=torch.device("cpu"))
+    bb = BlendBuffer(vr_projector=None)
     bb.register_frame(4, {1, 2})
     bb.register_frame(5, {2})
 

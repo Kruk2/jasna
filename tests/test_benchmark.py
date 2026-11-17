@@ -1,8 +1,8 @@
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
 
 
 def test_benchmark_rfdetr_detection_speed_file_not_found() -> None:
@@ -21,47 +21,25 @@ def test_benchmark_rfdetr_detection_speed_file_not_found() -> None:
         )
 
 
-def test_benchmark_cli_preserves_auto_threshold_for_each_benchmark() -> None:
-    from jasna.benchmark import run_benchmark_cli
-
-    args = SimpleNamespace(
-        device="cuda:0",
-        benchmark_video=[],
-        batch_size=4,
-        fp16=True,
-        detection_score_threshold=None,
-        restoration_model_path="model.pth",
-        compile_basicvsrpp=True,
-        benchmark_filter=None,
-    )
-    with (
-        patch("jasna.benchmark.check_required_executables"),
-        patch(
-            "jasna.benchmark.check_supported_gpu",
-            return_value=(True, "gpu"),
-        ),
-        patch("jasna.benchmark.run_benchmarks") as run_benchmarks,
-    ):
-        run_benchmark_cli(args)
-
-    assert run_benchmarks.call_args.kwargs["detection_score_threshold"] is None
-
-
-def test_benchmark_cli_without_batch_size_uses_the_vendor_default(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("argv", "environment", "option", "value"),
+    [
+        ([], {}, "detection_score_threshold", None),
+        ([], {}, "batch_size", 4),
+        (["--batch-size", "4"], {"JASNA_DECODE_BACKEND": "pyav-sw"}, "decode_backend", "pyav-sw"),
+    ],
+    ids=["model-threshold", "vendor-batch-size", "decode-backend-from-environment"],
+)
+def test_benchmark_options_follow_the_cli(monkeypatch, argv, environment, option, value) -> None:
     import jasna.mosaic.detection_registry as registry
-    from jasna.benchmark import run_benchmark_cli
-    from jasna.main import build_parser
+    from jasna.benchmark import benchmark_options
+    from jasna.cli_parser import build_parser
 
     monkeypatch.setattr(registry, "is_amd_device", lambda _device: False)
-    args = build_parser().parse_args(["--benchmark"])
-    with (
-        patch("jasna.benchmark.check_required_executables"),
-        patch("jasna.benchmark.check_supported_gpu", return_value=(True, "gpu")),
-        patch("jasna.benchmark.run_benchmarks") as run_benchmarks,
-    ):
-        run_benchmark_cli(args)
+    for name, setting in environment.items():
+        monkeypatch.setenv(name, setting)
 
-    assert run_benchmarks.call_args.kwargs["batch_size"] == 4
+    assert benchmark_options(build_parser().parse_args(["--benchmark", *argv]))[option] == value
 
 
 def test_rfdetr_benchmark_uses_its_model_recommended_threshold(
@@ -145,17 +123,21 @@ def test_detection_benchmark_compiles_missing_engine_before_loading(tmp_path) ->
     assert request.detection_model_path == str(weights)
 
 
-def test_benchmark_cli_passes_the_decode_backend_from_the_environment(monkeypatch) -> None:
-    from jasna.benchmark import run_benchmark_cli
-    from jasna.main import build_parser
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="the benchmark synchronizes CUDA")
+def test_basicvsrpp_benchmark_times_the_restorer_without_engines(monkeypatch, tmp_path, capsys) -> None:
+    import jasna.benchmark.basicvsrpp_restoration as bench
+    import jasna.restorer.basicvsrpp_mosaic_restorer as restorer_module
+    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
 
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", "pyav-sw")
-    args = build_parser().parse_args(["--benchmark", "--batch-size", "4"])
-    with (
-        patch("jasna.benchmark.check_required_executables"),
-        patch("jasna.benchmark.check_supported_gpu", return_value=(True, "gpu")),
-        patch("jasna.benchmark.run_benchmarks") as run_benchmarks,
-    ):
-        run_benchmark_cli(args)
+    generator = BasicVSRPlusPlusNet(mid_channels=8, num_blocks=1, spynet_pretrained=None).eval()
+    monkeypatch.setattr(restorer_module, "load_model", lambda *_args: generator)
+    monkeypatch.setattr(bench, "CLIP_LENGTH", 3)
+    monkeypatch.setattr(bench, "RUNS", 1)
+    weights = tmp_path / "model.pth"
+    weights.write_bytes(b"")
 
-    assert run_benchmarks.call_args.kwargs["decode_backend"] == "pyav-sw"
+    bench.benchmark_basicvsrpp_restoration(
+        device=torch.device("cpu"), fp16=False, restoration_model_path=weights, compile_basicvsrpp=False,
+    )
+
+    assert "raw_process median" in capsys.readouterr().out

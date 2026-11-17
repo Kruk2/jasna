@@ -51,8 +51,8 @@ if sys.argv[1:2] == ["--tpm-activate"]:
     raise SystemExit(elevated_main(sys.argv[2:]))
 
 if len(sys.argv) >= 3 and sys.argv[1] == "--compile-engines":
-    from jasna.engine_compiler import EngineCompilationRequest, _subprocess_compile
-    _subprocess_compile(EngineCompilationRequest.from_json(sys.argv[2]))
+    from jasna.engine_compiler import EngineCompilationRequest, compile_missing_engines
+    compile_missing_engines(EngineCompilationRequest.from_json(sys.argv[2]))
     sys.exit(0)
 
 _JASNA_MAIN_PID = os.environ.get("JASNA_MAIN_PID")
@@ -100,7 +100,7 @@ if __name__ == "__main__":
 if multiprocessing.parent_process() is None:
     if _wants_cli(sys.argv):
         if len(sys.argv) == 1:
-            from jasna.main import build_parser
+            from jasna.cli_parser import build_parser
 
             build_parser().print_help()
             raise SystemExit(0)

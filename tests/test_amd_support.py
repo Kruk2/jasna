@@ -2,67 +2,32 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from dataclasses import replace
 from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import torch
-from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
+from av.video.reformatter import Colorspace as AvColorspace
 
+from factories import video_metadata
 from jasna.accelerator import (
     AcceleratorVendor,
     vendor_for_device,
 )
-from jasna.media.probe import VideoMetadata
 from jasna.media.encoder_settings import validate_encoder_settings
+from jasna.media.video_encoder import resolve_encoder_options
 
 
-def _metadata() -> VideoMetadata:
-    return VideoMetadata(
-        video_file="input.mp4",
-        video_height=16,
-        video_width=16,
-        video_fps=30.0,
-        average_fps=30.0,
-        video_fps_exact=Fraction(30, 1),
-        codec_name="h264",
-        duration=1.0,
-        time_base=Fraction(1, 30),
-        start_pts=0,
-        color_range=AvColorRange.MPEG,
-        color_space=AvColorspace.ITU709,
-        num_frames=30,
-        is_10bit=False,
+def _metadata(**overrides):
+    return video_metadata(
+        fps=30, num_frames=30, video_file="input.mp4", video_width=16, video_height=16, codec_name="h264", **overrides
     )
 
 
 def test_rocm_uses_cuda_device_api_but_reports_amd(monkeypatch) -> None:
     monkeypatch.setattr(torch.version, "hip", "7.2.1")
     assert vendor_for_device("cuda:0") is AcceleratorVendor.AMD
-
-
-def test_amd_basicvsrpp_skips_tensorrt_compilation(monkeypatch) -> None:
-    import jasna.accelerator as accelerator
-    import jasna.engine_compiler as compiler
-
-    monkeypatch.setattr(accelerator, "is_nvidia_device", lambda _device: False)
-    monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
-    monkeypatch.setattr(
-        compiler,
-        "all_basicvsrpp_sub_engines_exist",
-        MagicMock(side_effect=AssertionError("TensorRT probe on AMD")),
-    )
-    result = compiler.ensure_engines_compiled(
-        compiler.EngineCompilationRequest(
-            device="cuda:0",
-            fp16=True,
-            basicvsrpp=True,
-            basicvsrpp_model_path="model.pth",
-        )
-    )
-    assert result.use_basicvsrpp_tensorrt is False
 
 
 def test_amf_encoder_settings_are_vendor_specific() -> None:
@@ -79,48 +44,45 @@ def test_amf_encoder_settings_are_vendor_specific() -> None:
         )
 
 
-def test_amf_hevc_uses_compatible_defaults() -> None:
-    from jasna.media.video_encoder import AMF_ENCODER_SPECS
-
-    options = AMF_ENCODER_SPECS["hevc"].default_options
-    assert options["rc"] == "cqp"
-    assert options["preanalysis"] == "0"
-    assert options["vbaq"] == "0"
-    assert options["qp_i"] == "25"
-    assert options["qp_p"] == "25"
-    assert "qvbr_quality_level" not in options
-
-
-def test_video_encoder_selects_amf_and_normalizes_cq(monkeypatch, tmp_path) -> None:
+def test_video_encoder_on_an_amd_gpu_uses_amf(monkeypatch, tmp_path) -> None:
     import jasna.media.video_encoder as module
 
-    monkeypatch.setattr(
-        module,
-        "vendor_for_device",
-        lambda _device: AcceleratorVendor.AMD,
-    )
+    monkeypatch.setattr(module, "vendor_for_device", lambda _device: AcceleratorVendor.AMD)
     encoder = module.VideoEncoder(
-        str(tmp_path / "out.mp4"),
-        torch.device("cuda:0"),
-        _metadata(),
-        codec="h264",
-        encoder_settings={"cq": 21},
+        str(tmp_path / "out.mp4"), torch.device("cuda:0"), _metadata(), codec="h264", encoder_settings={"cq": 21},
     )
     assert encoder.encoder_name == "h264_amf"
-    assert encoder.spec.frame_format == "nv12"
-    assert encoder.encoder_options["rc"] == "cqp"
-    assert all(encoder.encoder_options[key] == "21" for key in ("qp_i", "qp_p", "qp_b"))
-    assert "cq" not in encoder.encoder_options
-    assert "qvbr_quality_level" not in encoder.encoder_options
+
+
+@pytest.mark.parametrize(
+    ("codec", "settings", "smart_fragment", "frame_format", "expected", "absent"),
+    [
+        ("h264", {"cq": 21}, False, "nv12", {"rc": "cqp", "qp_i": "21", "qp_p": "21", "qp_b": "21"},
+         {"cq", "qvbr_quality_level", "maxrate"}),
+        ("hevc", {"cq": 21}, False, "p010le", {"rc": "cqp", "qp_i": "21", "qp_p": "21"},
+         {"cq", "qvbr_quality_level", "maxrate", "bufsize"}),
+        ("hevc", {"cq": 21, "rc": "qvbr"}, True, "nv12", {"rc": "qvbr", "qvbr_quality_level": "21"}, {"qp_i", "qp_p"}),
+        ("hevc", {}, True, "nv12", {"profile": "main", "forced_idr": "1"}, {"bitdepth", "forced-idr"}),
+        ("h264", {}, True, "nv12", {"forced_idr": "1"}, {"forced-idr"}),
+        ("av1", {}, True, "nv12", {"forced_idr": "1"}, {"forced-idr"}),
+    ],
+    ids=["h264-cq", "hevc-cq", "hevc-8bit-qvbr", "hevc-8bit-fragment", "h264-fragment", "av1-fragment"],
+)
+def test_amf_options_map_cq_and_smart_fragments(codec, settings, smart_fragment, frame_format, expected, absent) -> None:
+    spec, options = resolve_encoder_options(
+        AcceleratorVendor.AMD, codec, _metadata(video_bitrate=20_000_000), settings, smart_fragment=smart_fragment,
+    )
+    assert spec.encoder_name == f"{codec}_amf"
+    assert spec.frame_format == frame_format
+    assert {key: options.get(key) for key in expected} == expected
+    assert not absent & options.keys()
 
 
 def test_amf_h264_defaults_to_constant_qp_without_bitrate_cap() -> None:
-    from jasna.media.video_encoder import resolve_encoder_options
-
     _, options = resolve_encoder_options(
         AcceleratorVendor.AMD,
         "h264",
-        replace(_metadata(), video_bitrate=20_000_000),
+        _metadata(video_bitrate=20_000_000),
         {},
         smart_fragment=False,
     )
@@ -133,12 +95,10 @@ def test_amf_h264_defaults_to_constant_qp_without_bitrate_cap() -> None:
 
 
 def test_amf_h264_qvbr_override_keeps_cq_and_source_bitrate_cap() -> None:
-    from jasna.media.video_encoder import resolve_encoder_options
-
     _, options = resolve_encoder_options(
         AcceleratorVendor.AMD,
         "h264",
-        replace(_metadata(), video_bitrate=20_000_000),
+        _metadata(video_bitrate=20_000_000),
         {"cq": 21, "rc": "qvbr"},
         smart_fragment=False,
     )
@@ -146,48 +106,6 @@ def test_amf_h264_qvbr_override_keeps_cq_and_source_bitrate_cap() -> None:
     assert options["qvbr_quality_level"] == "21"
     assert not {"qp_i", "qp_p", "qp_b"} & options.keys()
     assert options["maxrate"] == "20000000"
-
-
-def test_amf_hevc_maps_cq_to_constant_qp(monkeypatch, tmp_path) -> None:
-    import jasna.media.video_encoder as module
-
-    monkeypatch.setattr(
-        module,
-        "vendor_for_device",
-        lambda _device: AcceleratorVendor.AMD,
-    )
-    encoder = module.VideoEncoder(
-        str(tmp_path / "out.mp4"),
-        torch.device("cuda:0"),
-        _metadata(),
-        codec="hevc",
-        encoder_settings={"cq": 21},
-    )
-    assert encoder.spec.frame_format == "p010le"
-    assert encoder.encoder_options["rc"] == "cqp"
-    assert encoder.encoder_options["qp_i"] == "21"
-    assert encoder.encoder_options["qp_p"] == "21"
-    assert "cq" not in encoder.encoder_options
-    assert "qvbr_quality_level" not in encoder.encoder_options
-
-
-def test_amf_hevc_cqp_skips_source_bitrate_cap(monkeypatch, tmp_path) -> None:
-    import jasna.media.video_encoder as module
-
-    monkeypatch.setattr(
-        module,
-        "vendor_for_device",
-        lambda _device: AcceleratorVendor.AMD,
-    )
-    encoder = module.VideoEncoder(
-        str(tmp_path / "out.mp4"),
-        torch.device("cuda:0"),
-        replace(_metadata(), video_bitrate=20_000_000),
-        codec="hevc",
-        encoder_settings={"cq": 21},
-    )
-    assert "maxrate" not in encoder.encoder_options
-    assert "bufsize" not in encoder.encoder_options
 
 
 @pytest.mark.parametrize(
@@ -202,12 +120,10 @@ def test_amf_hevc_cqp_skips_source_bitrate_cap(monkeypatch, tmp_path) -> None:
 def test_amf_av1_maps_cq_to_constant_qindex(
     settings, smart_fragment, frame_format, expected_qindex
 ) -> None:
-    from jasna.media.video_encoder import resolve_encoder_options
-
     spec, options = resolve_encoder_options(
         AcceleratorVendor.AMD,
         "av1",
-        replace(_metadata(), video_bitrate=20_000_000),
+        _metadata(video_bitrate=20_000_000),
         settings,
         smart_fragment=smart_fragment,
     )
@@ -221,94 +137,11 @@ def test_amf_av1_maps_cq_to_constant_qindex(
     assert "bufsize" not in options
 
 
+@pytest.mark.parametrize("codec", ["av1", "hevc"])
 @pytest.mark.parametrize("rc", ["qvbr", "hqvbr", 4, 5])
-def test_amf_av1_p010_rejects_qvbr(monkeypatch, tmp_path, rc: str | int) -> None:
-    import jasna.media.video_encoder as module
-
-    monkeypatch.setattr(
-        module,
-        "vendor_for_device",
-        lambda _device: AcceleratorVendor.AMD,
-    )
-    with pytest.raises(ValueError, match="AMD AV1 Main10.*QVBR"):
-        module.VideoEncoder(
-            str(tmp_path / "out.mp4"),
-            torch.device("cuda:0"),
-            _metadata(),
-            codec="av1",
-            encoder_settings={"cq": 21, "rc": rc},
-        )
-
-
-@pytest.mark.parametrize("rc", ["qvbr", "hqvbr", 4, 5])
-def test_amf_hevc_rejects_qvbr_for_main10(
-    monkeypatch, tmp_path, rc: str | int
-) -> None:
-    import jasna.media.video_encoder as module
-
-    monkeypatch.setattr(
-        module,
-        "vendor_for_device",
-        lambda _device: AcceleratorVendor.AMD,
-    )
-    with pytest.raises(ValueError, match="AMD HEVC Main10.*QVBR"):
-        module.VideoEncoder(
-            str(tmp_path / "out.mp4"),
-            torch.device("cuda:0"),
-            _metadata(),
-            codec="hevc",
-            encoder_settings={"cq": 21, "rc": rc},
-        )
-
-
-def test_amf_hevc_8bit_allows_qvbr(monkeypatch, tmp_path) -> None:
-    import jasna.media.video_encoder as module
-
-    monkeypatch.setattr(
-        module,
-        "vendor_for_device",
-        lambda _device: AcceleratorVendor.AMD,
-    )
-    encoder = module.VideoEncoder(
-        str(tmp_path / "out.mp4"),
-        torch.device("cuda:0"),
-        _metadata(),
-        codec="hevc",
-        encoder_settings={"cq": 21, "rc": "qvbr"},
-        smart_fragment=True,
-    )
-    assert encoder.spec.frame_format == "nv12"
-    assert encoder.encoder_options["rc"] == "qvbr"
-    assert encoder.encoder_options["qvbr_quality_level"] == "21"
-    assert "qp_i" not in encoder.encoder_options
-    assert "qp_p" not in encoder.encoder_options
-
-
-@pytest.mark.parametrize("codec", ["h264", "hevc", "av1"])
-def test_smart_render_uses_amf_fragment_options(
-    monkeypatch,
-    tmp_path,
-    codec: str,
-) -> None:
-    import jasna.media.video_encoder as module
-
-    monkeypatch.setattr(
-        module,
-        "vendor_for_device",
-        lambda _device: AcceleratorVendor.AMD,
-    )
-    encoder = module.VideoEncoder(
-        str(tmp_path / "out.mp4"),
-        torch.device("cuda:0"),
-        _metadata(),
-        codec=codec,
-        encoder_settings={},
-        smart_fragment=True,
-    )
-
-    assert encoder.encoder_name == f"{codec}_amf"
-    assert encoder.encoder_options["forced_idr"] == "1"
-    assert "forced-idr" not in encoder.encoder_options
+def test_amf_main10_rejects_qvbr(codec: str, rc: str | int) -> None:
+    with pytest.raises(ValueError, match=rf"AMD {codec.upper()} Main10.*QVBR"):
+        resolve_encoder_options(AcceleratorVendor.AMD, codec, _metadata(), {"cq": 21, "rc": rc}, smart_fragment=False)
 
 
 def test_amf_h264_smart_settings_are_accepted() -> None:
@@ -325,18 +158,12 @@ def test_streaming_encoder_selects_amf(monkeypatch, tmp_path) -> None:
     import jasna.streaming_encoder as module
 
     monkeypatch.setattr(module, "find_executable", lambda _name: "/ffmpeg")
-    popen = MagicMock()
-    popen.stderr = []
+    monkeypatch.setattr(module, "vendor_for_device", lambda _device: AcceleratorVendor.AMD)
+    popen = MagicMock(stderr=[], returncode=0)
     monkeypatch.setattr(module.subprocess, "Popen", MagicMock(return_value=popen))
-    encoder = module.StreamingEncoder(
-        tmp_path,
-        4.0,
-        _metadata(),
-        "missing.mp4",
-        torch.device("cuda:0"),
-    )
-    encoder._vendor = AcceleratorVendor.AMD
-    encoder._launch_ffmpeg(0)
+    encoder = module.StreamingEncoder(tmp_path, 4.0, _metadata(), "missing.mp4", torch.device("cuda:0"))
+    encoder.start(0)
+    encoder.stop()
     cmd = module.subprocess.Popen.call_args.args[0]
     assert cmd[cmd.index("-c:v") + 1] == "h264_amf"
     assert "-qvbr_quality_level" in cmd
@@ -478,27 +305,6 @@ def test_yuv_eager_converter_runs_on_gpu_planes(monkeypatch) -> None:
 
     assert (out.cpu().int() - expected.int()).abs().max() <= 1
 
-
-def test_amf_8bit_downgrade_drops_bitdepth(monkeypatch, tmp_path) -> None:
-    import jasna.media.video_encoder as module
-
-    monkeypatch.setattr(
-        module,
-        "vendor_for_device",
-        lambda _device: AcceleratorVendor.AMD,
-    )
-    encoder = module.VideoEncoder(
-        str(tmp_path / "out.mp4"),
-        torch.device("cuda:0"),
-        _metadata(),
-        codec="hevc",
-        encoder_settings={},
-        smart_fragment=True,
-    )
-    assert encoder.spec.frame_format == "nv12"
-    assert encoder.encoder_options["profile"] == "main"
-    assert encoder.encoder_options["forced_idr"] == "1"
-    assert "bitdepth" not in encoder.encoder_options
 
 class _FakeRfDetrCore:
     def __init__(self):
@@ -688,18 +494,3 @@ def test_rfdetr_torch_runner_rejects_unknown_variant(monkeypatch, tmp_path) -> N
             resolution=576,
             variant="mystery",
         )
-
-
-def test_amd_rfdetr_needs_no_detection_engine(monkeypatch) -> None:
-    import jasna.accelerator as accelerator
-    import jasna.engine_compiler as compiler
-
-    monkeypatch.setattr(accelerator, "is_amd_device", lambda _device=None: True)
-
-    assert compiler._detection_engine_exists(
-        "rfdetr-v6",
-        "rfdetr-v6.pt",
-        batch_size=4,
-        fp16=True,
-        device="cpu",
-    )

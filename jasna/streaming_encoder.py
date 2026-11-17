@@ -10,11 +10,11 @@ from pathlib import Path
 import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
-from jasna.media.lut import GpuLutApplier, parse_cube_file
+from jasna.media.lut import lut_applier
 from jasna.media.audio_utils import aac_reencode_args, needs_audio_reencode, source_audio_codec
 from jasna.media.probe import VideoMetadata
 from jasna.os_utils import find_executable, subprocess_no_window_kwargs
-from jasna.streaming import SegmentTimeline
+from jasna.streaming import SegmentTimeline, clear_segments
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class StreamingEncoder:
         self.metadata = metadata
         self.source_video = source_video
         self._vendor = vendor_for_device(device)
-        self._lut_applier = GpuLutApplier(parse_cube_file(lut_path), device) if lut_path else None
+        self._lut_applier = lut_applier(lut_path, device)
 
         self._width = metadata.video_width
         self._height = metadata.video_height
@@ -72,7 +72,6 @@ class StreamingEncoder:
         self._writer_thread: threading.Thread | None = None
         self._stop_sentinel = object()
         self._started = False
-        self.failed = False
         self._writer_error: BaseException | None = None
 
     def start(self, start_number: int = 0) -> None:
@@ -83,7 +82,6 @@ class StreamingEncoder:
         self._write_queue = queue.Queue(maxsize=_WRITE_QUEUE_SIZE)
         self._stop_sentinel = object()
         self._writer_error = None
-        self.failed = False
         self._launch_ffmpeg(start_number)
         process = self._process
         if process is None or process.stdin is None:
@@ -127,14 +125,8 @@ class StreamingEncoder:
         self._started = False
         self._stop_writer(discard_pending=True)
         self._kill_ffmpeg()
-        self._cleanup_segments()
+        clear_segments(self.segments_dir)
         self.start(start_number=start_number)
-
-    def _cleanup_segments(self) -> None:
-        for f in self.segments_dir.glob('*.ts'):
-            f.unlink(missing_ok=True)
-        for f in self.segments_dir.glob('*.m3u8'):
-            f.unlink(missing_ok=True)
 
     def stop(self) -> None:
         self._started = False
@@ -259,7 +251,6 @@ class StreamingEncoder:
                 if self._write_queue is write_queue:
                     self._writer_error = exc
                     self._started = False
-                    self.failed = True
                 return
 
     def _stop_writer(self, discard_pending: bool) -> None:

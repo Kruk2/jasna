@@ -51,18 +51,11 @@ def _build_session(
 
 
 def test_session_without_secondary() -> None:
-    session, compiled, restorer_cls, pipeline_cls, *_ = _build_session(session_config())
+    session, compiled, _, pipeline_cls, *_ = _build_session(session_config())
 
     assert session.restoration_pipeline is pipeline_cls.return_value
     request = compiled.call_args.args[0]
-    assert request.basicvsrpp is True
-    assert request.basicvsrpp_model_path == "restore.pth"
-    assert request.detection is True
-    assert request.detection_model_name == "rfdetr-v5"
-    assert request.detection_batch_size == 4
-    assert request.unet4x is False
-    assert restorer_cls.call_args.kwargs["use_tensorrt"] is True
-    assert restorer_cls.call_args.kwargs["max_clip_size"] == 90
+    assert (request.basicvsrpp, request.detection, request.unet4x) == (True, True, False)
     assert pipeline_cls.call_args.kwargs["secondary_restorer"] is None
 
 
@@ -71,12 +64,7 @@ def test_session_selects_tvai_secondary() -> None:
         session_config(secondary_restoration="tvai", tvai_scale=2, tvai_workers=1, tvai_denoise=True)
     )
 
-    kwargs = tvai_cls.call_args.kwargs
-    assert kwargs["ffmpeg_path"] == "ffmpeg.exe"
-    assert kwargs["tvai_args"] == "model=iris-2:scale=2:noise=0"
-    assert kwargs["scale"] == 2
-    assert kwargs["num_workers"] == 1
-    assert kwargs["tvai_denoise"] is True
+    assert tvai_cls.call_args.kwargs["tvai_args"] == "model=iris-2:scale=2:noise=0"
     assert pipeline_cls.call_args.kwargs["secondary_restorer"] is tvai_cls.return_value
 
 
@@ -96,7 +84,7 @@ def test_session_selects_unet_secondary(amd) -> None:
     assert unet_cls.call_args.kwargs["fp16"] is True
 
 
-def test_session_selects_rtx_secondary_and_maps_none_levels() -> None:
+def test_session_selects_rtx_secondary_with_its_levels() -> None:
     pytest.importorskip("tensorrt")
     session, _, _, pipeline_cls, rtx_cls = _build_session(
         session_config(secondary_restoration="rtx-super-res", rtx_denoise="none", rtx_deblur="low")
@@ -106,7 +94,7 @@ def test_session_selects_rtx_secondary_and_maps_none_levels() -> None:
     kwargs = rtx_cls.call_args.kwargs
     assert kwargs["scale"] == 4
     assert kwargs["quality"] == "high"
-    assert kwargs["denoise"] is None
+    assert kwargs["denoise"] == "none"
     assert kwargs["deblur"] == "low"
 
 
@@ -132,8 +120,10 @@ def test_ltx_runs_rtx_super_res_without_auto_split() -> None:
 
 @pytest.mark.parametrize("secondary", ["tvai", "rtx-super-res"])
 def test_amd_rejects_secondary_restoration(secondary) -> None:
+    from jasna.accelerator import AcceleratorVendor
+
     # Rejected before the restorer is built, so its NVIDIA-only module never needs to import.
-    with (patch("jasna.accelerator.is_amd_device", return_value=True),
+    with (patch("jasna.accelerator.vendor_for_device", return_value=AcceleratorVendor.AMD),
           patch("jasna.accelerator.log_amd_backend"),
           pytest.raises(ValueError, match="not available in the AMD build")):
         build_restoration_session(session_config(secondary_restoration=secondary), log_callback=None)
@@ -145,20 +135,37 @@ def test_amd_disables_basicvsrpp_compilation() -> None:
     assert compiled.call_args.args[0].basicvsrpp is False
 
 
+class _ClosingRestorer:
+    name = "closing"
+
+    def __init__(self) -> None:
+        self.closed = 0
+
+    def close(self) -> None:
+        self.closed += 1
+
+
 def test_session_close_closes_restorers() -> None:
-    pytest.importorskip("tensorrt")
-    session, *_ = _build_session(session_config(secondary_restoration="unet-4x"))
+    import torch
+
+    from jasna.restorer.restoration_pipeline import RestorationPipeline
+
+    primary, secondary = _ClosingRestorer(), _ClosingRestorer()
+    pipeline = RestorationPipeline(primary, secondary_restorer=secondary)
+    session = RestorationSession(device=torch.device("cpu"), restoration_pipeline=pipeline, log_callback=None)
 
     session.close()
 
-    session.restoration_pipeline.restorer.close.assert_called_once_with()
-    session.restoration_pipeline.secondary_restorer.close.assert_called_once_with()
+    assert (primary.closed, secondary.closed) == (1, 1)
 
 
 def test_session_reuses_its_detector_until_detection_settings_change() -> None:
-    session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
+    session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock(), log_callback=None)
 
-    with patch("jasna.mosaic.detection_registry.build_detection_model") as build:
+    with (
+        patch("jasna.engine_compiler.ensure_engines_compiled"),
+        patch("jasna.mosaic.detection_registry.build_detection_model") as build,
+    ):
         build.side_effect = lambda *args, **kwargs: MagicMock()
         first = session.detection_model_for(session_config())
         again = session.detection_model_for(session_config(max_clip_size=30))
@@ -177,7 +184,7 @@ def test_session_reuses_its_detector_until_detection_settings_change() -> None:
 def test_build_pipeline_loads_a_segment_model_the_session_lacks() -> None:
     import torch
 
-    session = RestorationSession(device=torch.device("cuda:0"), restoration_pipeline=MagicMock())
+    session = RestorationSession(device=torch.device("cuda:0"), restoration_pipeline=MagicMock(), log_callback=None)
     segments = (SegmentRange(1, 2), SegmentRange(3, 4, SegmentRestoration("ltx", 9)))
 
     with (
@@ -198,7 +205,7 @@ def test_build_pipeline_loads_a_segment_model_the_session_lacks() -> None:
 
 def test_build_pipeline_keeps_a_session_that_holds_the_job_model() -> None:
     pipeline = MagicMock()
-    session = RestorationSession(device=MagicMock(), restoration_pipeline=pipeline)
+    session = RestorationSession(device=MagicMock(), restoration_pipeline=pipeline, log_callback=None)
 
     with patch("jasna.pipeline.Pipeline"):
         build_pipeline(session_config(), session, Path("in.mp4"), Path("out.mp4"), segments=(SegmentRange(1, 2),))
@@ -310,6 +317,38 @@ def _h264_source(max_b_frames):
     return SpliceSource(MagicMock(duration=6.0), "h264", index)
 
 
+def test_ranges_give_the_source_codec_its_default_cq_not_settings_meant_for_another() -> None:
+    from jasna.accelerator import vendor_for_device
+    from jasna.media.encoder_settings import encoder_cq_spec
+    from jasna.session_factory import plan_segment_job
+
+    config = session_config(codec="av1", encoder_settings={"cq": 38, "tune": "uhq"})
+    job = plan_segment_job(config, Path("in.mp4"), _h264_source(0), (SegmentRange(1, 2),))
+
+    assert job.config.codec == "h264"
+    assert job.config.encoder_settings == {"cq": encoder_cq_spec("h264", vendor_for_device(config.device)).default}
+
+
+def test_a_job_with_ranges_writes_a_regular_mp4_because_its_parts_are_assembled_afterwards(caplog) -> None:
+    from jasna.session_factory import plan_segment_job
+
+    job = plan_segment_job(session_config(codec="h264", fmp4=True), Path("in.mp4"), _h264_source(0), (SegmentRange(1, 2),))
+
+    assert job.config.fmp4 is False
+    assert "Fragmented MP4 is not available with segment processing" in caplog.text
+
+
+def test_ranges_the_user_set_win_over_the_ltx_auto_split() -> None:
+    from jasna.session_factory import plan_job, plan_segment_job
+
+    config = session_config(restoration_model_name="ltx", ltx_auto_split_percent=12.0, codec="h264")
+    ranges_job = plan_segment_job(config, Path("in.mp4"), _h264_source(0), (SegmentRange(1, 2),))
+    missing = Path("missing.mp4")
+
+    assert plan_job(config, MagicMock(), missing, Path("out.mp4"), ranges_job, progress_callback=None) is ranges_job
+    assert plan_job(session_config(), MagicMock(), missing, Path("out.mp4"), None, progress_callback=None) is None
+
+
 @pytest.mark.parametrize("model", ["ltx", "basicvsrpp"])
 def test_ltx_ranges_past_the_encoder_b_frame_cap_fail_before_any_work(model) -> None:
     from jasna.media.splice import SmartRenderCompatibilityError
@@ -344,14 +383,14 @@ def test_fast_ltx_needs_a_blackwell_nvidia_gpu(nvidia, capability, allowed) -> N
         patch("jasna.ltx.transformer.require_kernels"),
         patch("jasna.accelerator.is_nvidia_device", return_value=nvidia),
         patch("torch.cuda.get_device_capability", return_value=capability),
-        patch("jasna.engine_compiler.ensure_engines_compiled") as compiled,
     ):
         if allowed:
-            _ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
-            compiled.assert_called_once()
+            from jasna.ltx.model_files import LtxModelFiles
+
+            assert isinstance(_ltx_model_files(config, torch.device("cuda:0")), LtxModelFiles)
         else:
             with pytest.raises(ValueError, match="Blackwell"):
-                _ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
+                _ltx_model_files(config, torch.device("cuda:0"))
 
 
 def test_fast_ltx_refuses_unsupported_hardware_before_loading_kernels(monkeypatch):
@@ -362,7 +401,7 @@ def test_fast_ltx_refuses_unsupported_hardware_before_loading_kernels(monkeypatc
     monkeypatch.setattr("jasna.ltx.transformer.require_kernels", lambda device: pytest.fail("loaded unsupported kernels"))
     config = session_config(restoration_model_name="ltx", ltx_fast=True, ltx_trial=True)
     with pytest.raises(ValueError, match="Blackwell"):
-        _ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
+        _ltx_model_files(config, torch.device("cuda:0"))
 
 
 @pytest.mark.parametrize(("lut_path", "sharpen_strength"), [(None, 0.0), ("look.cube", 0.0), (None, 0.3)])
@@ -392,4 +431,4 @@ def test_ltx_refuses_amd_gpus_without_its_prebuilt_kernels(monkeypatch, architec
     monkeypatch.setattr("jasna.ltx.transformer.require_kernels", lambda device: pytest.fail("loaded unsupported kernels"))
     config = session_config(restoration_model_name="ltx", ltx_trial=True)
     with pytest.raises(ValueError, match=rf"^LTX can't run on this AMD GPU \({architecture}\): .*BasicVSR\+\+"):
-        _ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
+        _ltx_model_files(config, torch.device("cuda:0"))

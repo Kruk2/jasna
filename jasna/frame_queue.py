@@ -6,19 +6,24 @@ from queue import Empty
 from typing import Any
 
 
+def must_wait(current_frames: int, frame_count: int, max_frames: int) -> bool:
+    """Whether a put of ``frame_count`` frames waits: past ``max_frames``, unless the queue holds no
+    frames (an oversized item still goes into an empty queue) or the item has none (sentinels)."""
+    return frame_count > 0 and current_frames > 0 and current_frames + frame_count > max_frames
+
+
 class FrameQueue:
     def __init__(self, max_frames: int):
         self._deque: deque[tuple[Any, int]] = deque()
         self._cond = threading.Condition()
-        self._max_frames = max_frames
+        self.max_frames = max_frames
         self._current_frames = 0
         self._unfinished_tasks = 0
 
     def put(self, item: Any, frame_count: int = 0) -> None:
         with self._cond:
-            if frame_count > 0:
-                while self._current_frames > 0 and self._current_frames + frame_count > self._max_frames:
-                    self._cond.wait()
+            while must_wait(self._current_frames, frame_count, self.max_frames):
+                self._cond.wait()
             self._deque.append((item, frame_count))
             self._current_frames += frame_count
             self._unfinished_tasks += 1
@@ -58,10 +63,6 @@ class FrameQueue:
     def qsize(self) -> int:
         with self._cond:
             return len(self._deque)
-
-    def empty(self) -> bool:
-        with self._cond:
-            return len(self._deque) == 0
 
     @property
     def current_frames(self) -> int:

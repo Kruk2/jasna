@@ -5,6 +5,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,7 @@ from jasna.media.encoder_settings import require_encodable_size
 from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
 from jasna.media.video_encoder import VideoEncoder, nvenc_vram_beside_ltx, resolve_encoder_options
 from jasna.media.frame_rate import resolve_frame_rate_retarget
+from jasna.media.lut import CubeLut, parse_cube_file
 from jasna.media.splice import (
     H264_SMART_MAX_B_FRAMES,
     KeyframeIndex,
@@ -37,7 +39,7 @@ from jasna.peak_sampler import PeakSampler
 from jasna.pipeline_threads import run_restoration_pass
 from jasna.progressbar import JobProgress, ProgressCallback, Progressbar
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
-from jasna.segments import SegmentRange, job_models, job_restoration, resolve_restorations
+from jasna.segments import SegmentRange, SegmentRestoration, job_models, job_restoration, resolve_restorations
 from jasna.session_config import RestorationModelName, SessionConfig
 from jasna.session_factory import build_frame_upscaler, ensure_frame_upscale_engines, frame_upscale_size
 from jasna.settings_tag import job_settings, settings_comment
@@ -47,7 +49,8 @@ from jasna.vr_projection import build_vr_projector
 
 if TYPE_CHECKING:
     from jasna.ltx.inference import ModelRuntime
-    from jasna.ltx.restore import FrameWriter, LtxRender, LtxSpan
+    from jasna.ltx.restore import LtxRender
+    from jasna.ltx.spans import FrameWriter, LtxSpan
     from jasna.session_factory import RestorationSession
 
 log = logging.getLogger(__name__)
@@ -61,6 +64,59 @@ def _span_seconds(span: SpliceSpan, index: KeyframeIndex) -> float:
 
 def _span_frames(span: SpliceSpan, index: KeyframeIndex, metadata) -> int:
     return round((span.end_pts - span.start_pts) * index.time_base * metadata.mean_fps)
+
+
+@dataclass(frozen=True)
+class SmartRenderSteps:
+    """What a segment job renders: each render span's resolved ranges, which spans LTX and which
+    the standard pass restores (re-encoded spans count as standard), and their frame counts.
+    ``full_reencode_ranges`` is set when the H.264 source uses more B-frames than the encoder
+    can match: then the whole video is encoded again, restoring only those effect ranges."""
+
+    segments_of: dict[SpliceSpan, tuple[SegmentRange, ...]]
+    ltx_spans: frozenset[SpliceSpan]
+    standard_spans: frozenset[SpliceSpan]
+    standard_frames: int
+    ltx_frames: int
+    full_reencode_ranges: tuple[tuple[int, int], ...] | None
+
+
+def smart_render_steps(
+    plan: SplicePlan, metadata, default: SegmentRestoration, codec: str, vendor: AcceleratorVendor
+) -> SmartRenderSteps:
+    segments_of = {
+        span: resolve_restorations(segments, default)
+        for span, segments in zip(plan.render_spans, plan.render_span_segments())
+    }
+    for segments in segments_of.values():
+        require_one_model(segments)
+    ltx_spans = frozenset(span for span, segments in segments_of.items() if segments[0].restoration.model == "ltx")
+    standard_spans = frozenset(span for span in plan.spans if span.kind != "copy" and span not in ltx_spans)
+    # Re-rendered segments must match the source's B-frames to stitch
+    # against the stream-copied ones; past the encoder's cap, re-encode all.
+    full_reencode_ranges = (
+        tuple(effect_range for span in plan.render_spans for effect_range in span.effect_ranges)
+        if h264_b_frames_over_cap(codec, plan.index, vendor)
+        else None
+    )
+    return SmartRenderSteps(
+        segments_of=segments_of,
+        ltx_spans=ltx_spans,
+        standard_spans=standard_spans,
+        standard_frames=sum(_span_frames(span, plan.index, metadata) for span in standard_spans),
+        ltx_frames=sum(_span_frames(span, plan.index, metadata) for span in ltx_spans),
+        full_reencode_ranges=full_reencode_ranges,
+    )
+
+
+def _log_peak_gpu_memory(sampler: PeakSampler) -> None:
+    """Diagnostics only: a failed reading is logged and never decides the job's outcome."""
+    try:
+        peak = sampler.stop()
+    except Exception:
+        log.warning("Could not read the GPU memory in use", exc_info=True)
+        return
+    log.info("Peak GPU memory (whole card, incl. other apps) — %.1f MiB", peak / (1024 ** 2))
 
 
 class _OfflineFrameWriter:
@@ -146,33 +202,12 @@ class Pipeline:
         self.resume: ResumeJob | None = None
         self.input_video = input_video
         self.output_video = output_video
-        self.working_dir = config.working_dir
-        self.codec = config.codec
-        self.encoder_settings = dict(config.encoder_settings)
-        self.batch_size = config.batch_size
         self.device = session.device
-        self.max_clip_size = config.max_clip_size
-        self.temporal_overlap = config.temporal_overlap
-        self.max_detection_gap = config.max_detection_gap
-        self.min_detection_duration = config.min_detection_duration
-        self.scene_detection = config.scene_detection
-        self.decode_backend = config.decode_backend
-        self.vr_mode = config.vr_mode
-        self.vr_projection = config.vr_projection
         self.detection_model = session.detection_model_for(config)
         self.restoration_pipeline = session.restoration_pipeline
         self.ltx_files = session.ltx_files
         self.ltx_super_res = session.ltx_super_res if config.secondary_restoration == "rtx-super-res" else None
-        self.restoration_model_name = config.restoration_model_name
-        self.ltx_large_canvas = config.ltx_large_canvas
-        self.ltx_window_hop = config.ltx_window_hop
-        self.ltx_seed = config.ltx_seed
-        self.disable_progress = config.disable_progress
         self.progress_callback = progress_callback
-        self.lut_path = config.lut_path
-        self.sharpen_strength = config.sharpen_strength
-        self.retarget_high_fps = config.retarget_high_fps
-        self.fmp4 = config.fmp4
         self.segments = tuple(segments) if segments else None
         self.splice_plan = splice_plan
         self.vr_resolution = None
@@ -192,12 +227,17 @@ class Pipeline:
         """Ask the running pipeline to stop as soon as the worker threads notice."""
         self._cancel_event.set()
 
+    def prepare(self, metadata) -> None:
+        """Check the video and set up its VR layout; every pass over it needs both."""
+        self.validate_metadata(metadata)
+        self.configure_vr(metadata)
+
     def configure_vr(self, metadata) -> None:
         self.vr_resolution = resolve_vr_mode(
-            self.vr_mode,
+            self.config.vr_mode,
             metadata,
             self.input_video,
-            projection=self.vr_projection,
+            projection=self.config.vr_projection,
         )
         self.stereo = self.vr_resolution.layout(metadata)
         self.job_detection_model = stereo_detector(self.detection_model, self.stereo)
@@ -220,7 +260,7 @@ class Pipeline:
     ) -> None:
         frame_rate = resolve_frame_rate_retarget(
             metadata.video_fps_exact,
-            enabled=self.retarget_high_fps,
+            enabled=self.config.retarget_high_fps,
             measured_fps=metadata.average_fps,
         )
         if output_frame_count is None:
@@ -307,7 +347,7 @@ class Pipeline:
     def _resolve_frame_rate(self, metadata):
         frame_rate = resolve_frame_rate_retarget(
             metadata.video_fps_exact,
-            enabled=self.retarget_high_fps,
+            enabled=self.config.retarget_high_fps,
             measured_fps=metadata.average_fps,
         )
         if frame_rate.active:
@@ -324,7 +364,7 @@ class Pipeline:
                 frame_rate.source_fps,
                 metadata.average_fps,
             )
-        elif self.retarget_high_fps:
+        elif self.config.retarget_high_fps:
             log.info(
                 "Frame-rate retargeting requested, but %s fps is not a supported source rate; keeping source rate",
                 frame_rate.source_fps,
@@ -334,7 +374,7 @@ class Pipeline:
     def _job_settings(
         self, models: frozenset[RestorationModelName], *, ltx_large_canvas: bool | None
     ) -> dict[str, object]:
-        default = job_restoration(self.restoration_model_name, self.ltx_seed)
+        default = job_restoration(self.config.restoration_model_name, self.config.ltx_seed)
         return job_settings(
             self.config,
             models=models,
@@ -345,7 +385,7 @@ class Pipeline:
         )
 
     def _video_encoder(self, metadata, frame_rate, settings: dict[str, object]) -> VideoEncoder:
-        if self.fmp4 and self.output_video.suffix.lower() not in MOV_SUFFIXES:
+        if self.config.fmp4 and self.output_video.suffix.lower() not in MOV_SUFFIXES:
             log.info(
                 "Fragmented MP4 has no effect on %s output; it is already playable while it grows",
                 self.output_video.suffix,
@@ -354,15 +394,18 @@ class Pipeline:
             str(self.output_video),
             device=self.device,
             metadata=self._encoder_metadata(metadata),
-            codec=self.codec,
-            encoder_settings=self.encoder_settings,
-            lut_path=self.lut_path,
-            sharpen_strength=self.sharpen_strength,
+            codec=self.config.codec,
+            encoder_settings=self.config.encoder_settings,
+            lut=self._lut(),
+            sharpen_strength=self.config.sharpen_strength,
             output_fps=frame_rate.output_fps,
-            fmp4=self.fmp4,
+            fmp4=self.config.fmp4,
             settings=settings,
             frame_generation=self.config.frame_generation != "none",
         )
+
+    def _lut(self) -> CubeLut | None:
+        return parse_cube_file(self.config.lut_path) if self.config.lut_path else None
 
     def _encoder_metadata(self, metadata):
         upscale_size = frame_upscale_size(self.config, int(metadata.video_width), int(metadata.video_height))
@@ -375,7 +418,7 @@ class Pipeline:
             return 0
         encoder_metadata = self._encoder_metadata(metadata)
         spec, options = resolve_encoder_options(
-            vendor, self.codec, encoder_metadata, self.encoder_settings, smart_fragment=False,
+            vendor, self.config.codec, encoder_metadata, self.config.encoder_settings, smart_fragment=False,
             frame_generation=self.config.frame_generation != "none",
         )
         return nvenc_vram_beside_ltx(
@@ -390,13 +433,13 @@ class Pipeline:
         progress = Progressbar(
             total_frames=output_frame_count,
             video_fps=float(frame_rate.output_fps),
-            disable=self.disable_progress,
+            disable=self.config.disable_progress,
             callback=self.progress_callback,
         )
         encoder_ctx = self._video_encoder(
             metadata,
             frame_rate,
-            self._job_settings(job_models(self.restoration_model_name, self.segments), ltx_large_canvas=None),
+            self._job_settings(job_models(self.config.restoration_model_name, self.segments), ltx_large_canvas=None),
         )
         try:
             self._run_pass(
@@ -410,13 +453,13 @@ class Pipeline:
             progress.close(ensure_completed_bar=True)
 
     def _ltx_progress(self, frames: int, callback: ProgressCallback | None, *, writer_adds_frame_work: bool):
-        from jasna.ltx.restore import Progress
+        from jasna.ltx.progress import Progress
 
         report = None
         if callback is not None:
             report = lambda fraction, eta, stage: callback(fraction * 100.0, 0.0, eta, 0, 0, stage)
         return Progress(
-            frames, disable=self.disable_progress, writer_adds_frame_work=writer_adds_frame_work, report=report
+            frames, disable=self.config.disable_progress, writer_adds_frame_work=writer_adds_frame_work, report=report
         )
 
     def _frame_writer_adds_work(self, metadata) -> bool:
@@ -427,30 +470,24 @@ class Pipeline:
         )
 
     def _run_ltx(self, metadata) -> None:
-        from jasna.ltx.plan import track_max_gap
-        from jasna.ltx.restore import Cancelled, FrameNumbers, restore_video, video_frames, whole_video_large_canvas
+        from jasna.ltx.tracks import track_max_gap
+        from jasna.ltx.inference import Cancelled
+        from jasna.ltx.restore import restore_video
+        from jasna.ltx.spans import FrameNumbers
+        from jasna.ltx.vram_budget import whole_video_large_canvas
         from jasna.ltx.speed import profile_path
 
         frame_rate = self._resolve_frame_rate(metadata)
         resume_dir = self.resume.directory / "ltx"
         large_canvas = whole_video_large_canvas(
-            self.ltx_large_canvas, self._free_bytes_before_ltx, resume_dir,
+            self.config.ltx_large_canvas, self._free_bytes_before_ltx, resume_dir,
             encoder_bytes=self._encoder_vram_bytes(metadata),
         )
         settings = self._job_settings(frozenset({"ltx"}), ltx_large_canvas=large_canvas)
         encoder = self._video_encoder(metadata, frame_rate, settings)
         try:
             restore_video(
-                video_frames(
-                    self.input_video,
-                    metadata,
-                    batch_size=self.batch_size,
-                    device=self.device,
-                    frame_stride=frame_rate.frame_stride,
-                    decode_backend=self.decode_backend,
-                    seek_ts=None,
-                    end_pts=None,
-                ),
+                self._decoded_frames(metadata, frame_stride=frame_rate.frame_stride, seek_ts=None, end_pts=None),
                 # Opened when compose starts, so frame generation loads after the denoiser is
                 # gone and before the free VRAM sets the first decode's budget.
                 lambda: self._frame_writer(_OfflineFrameWriter(encoder, [time.monotonic()]), metadata),
@@ -459,12 +496,12 @@ class Pipeline:
                 frame_h=int(metadata.video_height),
                 frame_w=int(metadata.video_width),
                 stereo=self.stereo,
-                batch_size=self.batch_size,
+                batch_size=self.config.batch_size,
                 large_canvas=large_canvas,
-                window_hop=self.ltx_window_hop,
-                seed=self.ltx_seed,
+                window_hop=self.config.ltx_window_hop,
+                seed=self.config.ltx_seed,
                 device=self.device,
-                work_dir=self.working_dir or self.output_video.parent,
+                work_dir=self.config.working_dir or self.output_video.parent,
                 speed_profile=profile_path(),
                 resume_dir=resume_dir,
                 progress=self._ltx_progress(
@@ -473,8 +510,8 @@ class Pipeline:
                     writer_adds_frame_work=self._frame_writer_adds_work(metadata),
                 ),
                 cancel=self._cancel_event,
-                max_gap=track_max_gap(self.max_detection_gap),
-                min_duration=self.min_detection_duration,
+                max_gap=track_max_gap(self.config.max_detection_gap),
+                min_duration=self.config.min_detection_duration,
                 super_res=self.ltx_super_res,
                 vr_projector=self.vr_projector,
                 frame_numbers=FrameNumbers.of_video(metadata),
@@ -488,8 +525,10 @@ class Pipeline:
         """How LTX restores segments: the 768 px decision and the decode tiles follow the
         GPU's size, never the VRAM free at that moment, so a segment renders the same in a
         job and in a seed preview."""
-        from jasna.ltx.plan import track_max_gap
-        from jasna.ltx.restore import FrameNumbers, LtxRender, segment_decode_budget, segment_large_canvas
+        from jasna.ltx.tracks import track_max_gap
+        from jasna.ltx.restore import LtxRender
+        from jasna.ltx.spans import FrameNumbers
+        from jasna.ltx.vram_budget import segment_decode_budget, segment_large_canvas
         from jasna.ltx.speed import profile_path
 
         total_bytes = torch.cuda.get_device_properties(self.device).total_memory
@@ -499,15 +538,15 @@ class Pipeline:
             frame_h=int(metadata.video_height),
             frame_w=int(metadata.video_width),
             stereo=self.stereo,
-            batch_size=self.batch_size,
-            large_canvas=segment_large_canvas(self.ltx_large_canvas, total_bytes),
-            window_hop=self.ltx_window_hop,
+            batch_size=self.config.batch_size,
+            large_canvas=segment_large_canvas(self.config.ltx_large_canvas, total_bytes),
+            window_hop=self.config.ltx_window_hop,
             budget=segment_decode_budget(total_bytes),
             budget_name="segment",
             device=self.device,
             speed_profile=profile_path(),
-            max_gap=track_max_gap(self.max_detection_gap),
-            min_duration=self.min_detection_duration,
+            max_gap=track_max_gap(self.config.max_detection_gap),
+            min_duration=self.config.min_detection_duration,
             super_res=self.ltx_super_res,
             vr_projector=self.vr_projector,
             frame_numbers=FrameNumbers.of_video(metadata),
@@ -523,24 +562,31 @@ class Pipeline:
     ) -> "LtxSpan":
         """The LTX work of one render span: decoded from its keyframe, one LTX segment per
         effect range with that range's seed."""
-        from jasna.ltx.restore import LtxSegment, LtxSpan, video_frames
+        from jasna.ltx.spans import LtxSegment, LtxSpan
 
         return LtxSpan(
-            video_frames(
-                self.input_video,
-                metadata,
-                batch_size=self.batch_size,
-                device=self.device,
-                frame_stride=1,
-                decode_backend=self.decode_backend,
-                seek_ts=index.seconds_for_pts(span.start_pts),
-                end_pts=span.end_pts,
+            self._decoded_frames(
+                metadata, frame_stride=1, seek_ts=index.seconds_for_pts(span.start_pts), end_pts=span.end_pts
             ),
             tuple(
                 LtxSegment(start, end, segment.restoration.ltx_seed)
                 for (start, end), segment in zip(span.effect_ranges, segments)
             ),
             open_writer,
+        )
+
+    def _decoded_frames(self, metadata, *, frame_stride: int, seek_ts: float | None, end_pts: int | None):
+        from jasna.ltx.spans import video_frames
+
+        return video_frames(
+            self.input_video,
+            metadata,
+            batch_size=self.config.batch_size,
+            device=self.device,
+            frame_stride=frame_stride,
+            decode_backend=self.config.decode_backend,
+            seek_ts=seek_ts,
+            end_pts=end_pts,
         )
 
     def _ltx_estimate_seconds(self, metadata, frames: int) -> float:
@@ -554,7 +600,7 @@ class Pipeline:
             frames=frames,
             fps=metadata.mean_fps,
             megapixels=metadata.video_height * metadata.video_width / 1e6,
-            window_hop=self.ltx_window_hop,
+            window_hop=self.config.ltx_window_hop,
         )
 
     def _run_ltx_spans(
@@ -567,7 +613,8 @@ class Pipeline:
         progress_callback: ProgressCallback | None,
     ) -> None:
         """Restore the LTX render spans in one batched run, so every model loads once."""
-        from jasna.ltx.restore import Cancelled, restore_spans
+        from jasna.ltx.inference import Cancelled
+        from jasna.ltx.restore import restore_spans
 
         frames = sum(_span_frames(span, index, metadata) for span, _, _ in spans)
         try:
@@ -588,17 +635,8 @@ class Pipeline:
         self, metadata, index: KeyframeIndex, span: SpliceSpan, writer: _OfflineFrameWriter, progress: Progressbar
     ) -> None:
         """A span with nothing to restore, encoded again so the LUT and sharpening cover it as well."""
-        from jasna.ltx.restore import video_frames
-
-        frames = video_frames(
-            self.input_video,
-            metadata,
-            batch_size=self.batch_size,
-            device=self.device,
-            frame_stride=1,
-            decode_backend=self.decode_backend,
-            seek_ts=index.seconds_for_pts(span.start_pts),
-            end_pts=span.end_pts,
+        frames = self._decoded_frames(
+            metadata, frame_stride=1, seek_ts=index.seconds_for_pts(span.start_pts), end_pts=span.end_pts
         )
         try:
             for batch, pts in frames():
@@ -614,18 +652,12 @@ class Pipeline:
     def _run_smart(self, metadata) -> None:
         plan = self.splice_plan
         index = plan.index
-        default = job_restoration(self.restoration_model_name, self.ltx_seed)
-        segments_of = {
-            span: resolve_restorations(segments, default)
-            for span, segments in zip(plan.render_spans, plan.render_span_segments())
-        }
-        for segments in segments_of.values():
-            require_one_model(segments)
-        ltx_spans = {span for span, segments in segments_of.items() if segments[0].restoration.model == "ltx"}
-        # Re-rendered segments must match the source's B-frames to stitch
-        # against the stream-copied ones; past the encoder's cap, re-encode all.
         vendor = vendor_for_device(self.device)
-        if h264_b_frames_over_cap(self.codec, index, vendor):
+        steps = smart_render_steps(
+            plan, metadata, job_restoration(self.config.restoration_model_name, self.config.ltx_seed),
+            self.config.codec, vendor,
+        )
+        if steps.full_reencode_ranges is not None:
             log.warning(
                 "%s uses %d consecutive B-frames; %s H.264 smart rendering supports "
                 "at most %d, falling back to a full re-encode",
@@ -634,24 +666,18 @@ class Pipeline:
                 vendor.value,
                 H264_SMART_MAX_B_FRAMES[vendor],
             )
-            self._run_full(
-                metadata,
-                effect_ranges=tuple(
-                    effect_range
-                    for span in plan.render_spans
-                    for effect_range in span.effect_ranges
-                ),
-            )
+            self._run_full(metadata, effect_ranges=steps.full_reencode_ranges)
             return
+        segments_of, ltx_spans, standard_spans = steps.segments_of, steps.ltx_spans, steps.standard_spans
         smart_encoder_settings = resolve_smart_encoder_settings(
-            self.codec,
+            self.config.codec,
             metadata,
             index,
-            self.encoder_settings,
+            self.config.encoder_settings,
             vendor=vendor,
         )
         smart_spec, smart_encoder_options = resolve_encoder_options(
-            vendor, self.codec, metadata, smart_encoder_settings, smart_fragment=True
+            vendor, self.config.codec, metadata, smart_encoder_settings, smart_fragment=True
         )
         ltx_render = self.ltx_segment_render(metadata) if ltx_spans else None
         comment = settings_comment(
@@ -662,35 +688,33 @@ class Pipeline:
             encoder=smart_spec.encoder_name,
             options=smart_encoder_options,
         )
-        standard_spans = {span for span in plan.spans if span.kind != "copy" and span not in ltx_spans}
-        standard_frames = sum(_span_frames(span, index, metadata) for span in standard_spans)
         ltx_callback = standard_callback = self.progress_callback
-        if self.progress_callback is not None and ltx_spans and standard_frames:
-            ltx_frames = sum(_span_frames(span, index, metadata) for span in ltx_spans)
+        if self.progress_callback is not None and ltx_spans and steps.standard_frames:
             job_progress = JobProgress(
                 self.progress_callback,
-                {"standard": 0.0, "ltx": self._ltx_estimate_seconds(metadata, ltx_frames)},
+                {"standard": 0.0, "ltx": self._ltx_estimate_seconds(metadata, steps.ltx_frames)},
             )
             standard_callback, ltx_callback = job_progress.part("standard"), job_progress.part("ltx")
         progress = Progressbar(
-            total_frames=max(1, standard_frames),
+            total_frames=max(1, steps.standard_frames),
             video_fps=metadata.mean_fps,
-            disable=self.disable_progress,
+            disable=self.config.disable_progress,
             callback=standard_callback,
         )
         self.output_video.parent.mkdir(parents=True, exist_ok=True)
-        work_root = self.working_dir or self.output_video.parent
+        work_root = self.config.working_dir or self.output_video.parent
         work_root.mkdir(parents=True, exist_ok=True)
+        lut = self._lut()
 
         def fragment_encoder(fragments: _FragmentDir, span_index: int, span: SpliceSpan) -> VideoEncoder:
             return VideoEncoder(
                 str(fragments.partial(span_index)),
                 device=self.device,
                 metadata=metadata,
-                codec=self.codec,
+                codec=self.config.codec,
                 encoder_settings=smart_encoder_settings,
-                lut_path=self.lut_path,
-                sharpen_strength=self.sharpen_strength,
+                lut=lut,
+                sharpen_strength=self.config.sharpen_strength,
                 output_fps=metadata.video_fps_exact,
                 pts_origin=span.start_pts,
                 smart_fragment=True,
@@ -712,7 +736,7 @@ class Pipeline:
                         progress.update(_span_frames(span, index, metadata))
                 elif span.kind == "copy":
                     create_copy_fragment(
-                        self.input_video, span, index, fragments.partial(span_index), codec=self.codec
+                        self.input_video, span, index, fragments.partial(span_index), codec=self.config.codec
                     )
                     fragments.commit(span_index)
                 elif span.kind == "reencode":
@@ -745,17 +769,17 @@ class Pipeline:
             progress.close(ensure_completed_bar=True)
 
     def _assemble(self, fragments: _FragmentDir, plan: SplicePlan, comment: str) -> None:
-        suffix = ".ts" if self.codec in {"h264", "hevc"} else ".mkv"
+        suffix = ".ts" if self.config.codec in {"h264", "hevc"} else ".mkv"
         normalized = []
         for span_index, span in enumerate(plan.spans):
             path = fragments.directory / f"{span_index:04d}{suffix}"
-            normalize_fragment(fragments.final(span_index), path, codec=self.codec)
+            normalize_fragment(fragments.final(span_index), path, codec=self.config.codec)
             normalized.append((path, _span_seconds(span, plan.index)))
         assembled = fragments.directory / f"assembled{suffix}"
         concatenate_fragments(
-            normalized, manifest=fragments.directory / "fragments.ffconcat", destination=assembled, codec=self.codec
+            normalized, manifest=fragments.directory / "fragments.ffconcat", destination=assembled, codec=self.config.codec
         )
-        mux_final_output(assembled, self.input_video, self.output_video, codec=self.codec, comment=comment)
+        mux_final_output(assembled, self.input_video, self.output_video, codec=self.config.codec, comment=comment)
 
     def run(self) -> None:
         """Run the job and log the whole GPU's peak used memory while it ran: unlike the models'
@@ -767,7 +791,7 @@ class Pipeline:
         try:
             self._run_job()
         finally:
-            log.info("Peak GPU memory (whole card, incl. other apps) — %.1f MiB", gpu_memory.stop() / (1024 ** 2))
+            _log_peak_gpu_memory(gpu_memory)
 
     def _run_job(self) -> None:
         self._open_ltx_runtime()
@@ -784,7 +808,7 @@ class Pipeline:
         decides the 768 px canvas."""
         from jasna.ltx.inference import ModelRuntime, worker_starts_with_job
 
-        models = job_models(self.restoration_model_name, self.segments)
+        models = job_models(self.config.restoration_model_name, self.segments)
         if "ltx" not in models:
             return
         self._free_bytes_before_ltx = device_free_bytes(self.device)
@@ -796,25 +820,18 @@ class Pipeline:
 
     def _run_restorations(self) -> None:
         metadata = get_video_meta_data(str(self.input_video))
-        self.validate_metadata(metadata)
-        require_encodable_size(vendor_for_device(self.device), self.codec, metadata.video_width, metadata.video_height)
-        self.configure_vr(metadata)
+        self.prepare(metadata)
+        require_encodable_size(vendor_for_device(self.device), self.config.codec, metadata.video_width, metadata.video_height)
         self._prepare_upscale(metadata)
         if (
-            self.segments or self.restoration_model_name == "ltx"
+            self.segments or self.config.restoration_model_name == "ltx"
             or (resume_directory(self.config, self.output_video) / "render").exists()
         ):
             self.resume = ResumeJob(self.config, self.input_video, self.output_video, metadata, self.splice_plan)
             self.resume.prepare()
         if self.segments:
-            if self.fmp4:
-                log.warning(
-                    "Fragmented MP4 is not available with segment processing; "
-                    "the output is assembled after processing finishes"
-                )
-                self.fmp4 = False
             self._run_smart(metadata)
-        elif self.restoration_model_name == "ltx":
+        elif self.config.restoration_model_name == "ltx":
             self._run_ltx(metadata)
         else:
             self._run_full(metadata)

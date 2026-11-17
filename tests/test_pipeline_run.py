@@ -15,22 +15,18 @@ from jasna.crop_buffer import RawCrop
 from jasna.media.encoder_settings import AMF_MIN_SIZE
 from jasna.media.probe import UnsupportedVideoError
 from jasna.pipeline import Pipeline
-from jasna.pipeline_items import ClipRestoreItem, FrameMeta, _SENTINEL
-from jasna.pipeline_processing import BatchProcessResult
+from jasna.pipeline_items import ClipRestoreItem, FrameMeta, SENTINEL
 from jasna.pipeline_threads import earliest_blocking_seqs, run_async_secondary, starvation_action
-from jasna.restorer import RestorationPipeline
-from jasna.segments import SegmentRange
+from jasna.restorer.restoration_pipeline import RestorationPipeline
 from jasna.tracking.clip_tracker import TrackedClip
 
 
 @pytest.fixture(autouse=True)
-def _mock_gpu_monitoring():
+def _mock_gpu_monitoring(cpu_gpu_memory):
     """Exercise the real thread flow on CPU without GPU memory monitoring."""
     with (
         patch("jasna.pipeline_threads.VramOffloader", autospec=True),
         patch.object(Pipeline, "_log_memory_at_end"),
-        patch("jasna.pipeline.device_used_bytes", return_value=0),
-        patch("jasna.pipeline.device_free_bytes", return_value=0),
     ):
         yield
 
@@ -95,7 +91,7 @@ class _BufferingAsyncRestorer:
     def pop_completed(self):
         if self.pop_error and self.ready:
             raise self.pop_error
-        completed = [(seq, [np.full((256, 256, 3), 255, np.uint8)] * self.frames[seq]) for seq in self.ready]
+        completed = [(seq, torch.full((self.frames[seq], 3, 256, 256), 255, dtype=torch.uint8)) for seq in self.ready]
         self.returned += self.ready
         self.ready = []
         if completed:
@@ -118,10 +114,6 @@ class _BufferingAsyncRestorer:
 
     def close(self) -> None:
         pass
-
-    @staticmethod
-    def _to_tensors(frames_np):
-        return torch.from_numpy(np.stack(frames_np)).permute(0, 3, 1, 2) if frames_np else torch.empty(0)
 
 
 def _pipeline(*, primary=None, secondary=None, **overrides) -> Pipeline:
@@ -162,7 +154,7 @@ def _detect_one_clip(**kwargs):
     kwargs["clip_queue"].put(
         ClipRestoreItem(clip=clip, raw_crops=raw_crops, frame_shape=(8, 8), keep_start=0, keep_end=2, crossfade_weights=None)
     )
-    return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
+    return 2
 
 
 def _run(pipeline, *, metadata=None, frames=None, decode_error=None):
@@ -249,7 +241,7 @@ def test_run_fails_promptly_when_blend_encode_dies_while_secondary_is_blocked():
                 ClipRestoreItem(clip=clip, raw_crops=[], frame_shape=(8, 8), keep_start=0, keep_end=clip_frames, crossfade_weights=None),
                 frame_count=clip_frames,
             )
-        return BatchProcessResult(next_frame_idx=2, clips_emitted=2)
+        return 2
 
     def _primary_after_blend_failed(*args):
         assert blend_reader_failed.wait(timeout=5)
@@ -311,8 +303,8 @@ def test_ltx_loads_frame_generation_only_when_compose_opens_the_writer(tmp_path)
     pipeline.resume = MagicMock(directory=tmp_path)
     pipeline.configure_vr(_fake_metadata())
     with (
-        patch("jasna.ltx.restore.whole_video_large_canvas", return_value=False),
-        patch("jasna.ltx.restore.video_frames"),
+        patch("jasna.ltx.vram_budget.whole_video_large_canvas", return_value=False),
+        patch("jasna.ltx.spans.video_frames"),
         patch("jasna.ltx.restore.restore_video") as restore_video,
         patch("jasna.pipeline.VideoEncoder"),
         patch("jasna.frame_generation.RtxFrameGeneration") as generation_cls,
@@ -323,23 +315,6 @@ def test_ltx_loads_frame_generation_only_when_compose_opens_the_writer(tmp_path)
 
     assert isinstance(writer, FrameGenerationWriter)
     generation_cls.assert_called_once_with(torch.device("cpu"), 8, 8)
-
-
-def test_fmp4_is_dropped_for_segment_processing(tmp_path):
-    p = _pipeline(
-        fmp4=True, segments=(SegmentRange(0.0, 1.0),),
-        input_video=tmp_path / "in.mp4", output_video=tmp_path / "out.mp4",
-    )
-    p.input_video.touch()
-
-    with (
-        patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-        patch.object(Pipeline, "_run_smart") as run_smart,
-    ):
-        p.run()
-
-    run_smart.assert_called_once()
-    assert p.fmp4 is False
 
 
 @pytest.mark.parametrize(
@@ -373,18 +348,35 @@ def test_run_rejects_a_video_too_small_for_the_amd_encoder_before_processing():
         _pipeline().run()
 
 
+def test_a_failing_gpu_memory_reading_neither_fails_the_job_nor_hides_its_error(caplog):
+    meta = _fake_metadata()
+    meta.video_width, meta.video_height = AMF_MIN_SIZE["hevc"][0] - 2, 240
+
+    def unreadable(_device):
+        raise RuntimeError("NVML: Unknown Error")
+
+    with (
+        patch("jasna.pipeline.device_used_bytes", unreadable),
+        patch("jasna.pipeline.get_video_meta_data", return_value=meta),
+        patch("jasna.pipeline.vendor_for_device", return_value=AcceleratorVendor.AMD),
+        pytest.raises(UnsupportedVideoError, match="AMD video encoder"),
+    ):
+        _pipeline().run()
+    assert "NVML: Unknown Error" in caplog.text
+
+
 def _run_async_secondary(restorer, results, *, primary_idle: bool):
     ctx = pass_context(restoration_pipeline=RestorationPipeline(_WhitePrimary(), secondary_restorer=restorer))
     for result in results:
         ctx.secondary_queue.put(result)
     if not primary_idle:
-        ctx.secondary_queue.put(_SENTINEL)
+        ctx.secondary_queue.put(SENTINEL)
     if primary_idle:
         ctx.primary_idle_event.set()
-        restorer.on_pop = lambda r: ctx.secondary_queue.put(_SENTINEL) if len(r.returned) == len(results) else None
+        restorer.on_pop = lambda r: ctx.secondary_queue.put(SENTINEL) if len(r.returned) == len(results) else None
     stats = run_async_secondary(ctx)
     forwarded = []
-    while not ctx.encode_queue.empty():
+    while ctx.encode_queue.qsize():
         forwarded.append(ctx.encode_queue.get())
     return stats, forwarded
 
@@ -437,8 +429,8 @@ def test_async_secondary_stops_after_a_cancel_mid_pass_without_flushing(monkeypa
     assert list(restorer.frames) == [0]
     assert restorer.ready == [] and restorer.returned == []
     assert ctx.secondary_queue.qsize() == 1
-    assert ctx.encode_queue.get_nowait() is _SENTINEL
-    assert ctx.encode_queue.empty()
+    assert ctx.encode_queue.get_nowait() is SENTINEL
+    assert ctx.encode_queue.qsize() == 0
 
 
 @pytest.mark.parametrize(
