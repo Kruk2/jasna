@@ -266,13 +266,16 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
                 if not self._state.is_loaded:
                     self.send_error(404)
                     return
+                # Read before the readiness check: a pass lists its last segment before it finishes,
+                # so a pass that ends in between still gets its segment served.
+                may_wait = self._state.can_wait_for_segment(seg_num, generation, seeking)
                 if self._state.segment_is_ready(seg_path):
                     sz = seg_path.stat().st_size
                     log.debug("[stream-server] serving %s (%d bytes, waited %.1fs)",
                               seg_name, sz, SEGMENT_WAIT_SECONDS - (deadline - time.monotonic()))
                     self._serve_file(seg_path)
                     return
-                if not self._state.can_wait_for_segment(seg_num, generation, seeking):
+                if not may_wait:
                     self.send_error(404)
                     return
                 time.sleep(0.2)

@@ -871,6 +871,28 @@ def test_segment_is_served_once_the_playlist_lists_it(serve, monkeypatch, pass_f
     assert result[0][2]["content-length"] == "8"
 
 
+def test_a_segment_listed_just_as_the_pass_finishes_is_served(serve, monkeypatch):
+    server, port = serve(metadata=_metadata(duration=20.0))
+    server.reset_demand()
+    server.update_production(4)
+    (server.segments_dir / "seg_00004.ts").write_bytes(b"partial")
+    requested = _on_segment_request(monkeypatch, server, 4)
+    is_ready = server.segment_is_ready
+    pass_finished = []
+
+    def ready_then_the_pass_finishes(path):
+        ready = is_ready(path)
+        if requested.is_set() and not pass_finished:
+            pass_finished.append(True)
+            _finalize_segments(server.segments_dir, 4)
+            server.mark_finished()
+        return ready
+
+    monkeypatch.setattr(server, "segment_is_ready", ready_then_the_pass_finishes)
+
+    assert _http(port, "/seg_00004.ts?epoch=0")[0:2] == (200, "complete")
+
+
 def test_open_seek_to_a_nearby_segment_serves_it_from_the_new_pass(serve, monkeypatch, video_file):
     server, port = serve(segment_duration=2.0, video=video_file, metadata=_metadata(duration=200.0))
     server.reset_demand(20)
