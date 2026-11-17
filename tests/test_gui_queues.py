@@ -1,7 +1,20 @@
 import queue
 import threading
 
-from jasna.gui.queues import MainThreadCalls, replace_pending
+from jasna.gui.queues import MainThreadCalls, queued_now, replace_pending
+
+
+def test_queued_now_takes_what_is_queued_and_stops_without_waiting() -> None:
+    pending: queue.Queue = queue.Queue()
+    for event in ("loaded", "frame"):
+        pending.put(event)
+
+    taken = queued_now(pending)
+
+    assert next(taken) == "loaded"
+    pending.put("ended")
+    assert list(taken) == ["frame", "ended"]
+    assert pending.empty()
 
 
 def test_replace_pending_keeps_only_the_newest_command() -> None:

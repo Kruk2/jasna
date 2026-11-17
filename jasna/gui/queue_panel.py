@@ -306,9 +306,6 @@ class QueuePanel(ctk.CTkFrame):
         if job.has_conflict and job.status is JobStatus.PENDING:
             widget.set_conflict(True)
 
-    def add_job(self, path: Path):
-        self.add_jobs([JobItem(path=path)])
-
     def add_jobs(self, jobs: Iterable[JobItem]) -> None:
         """Append the jobs whose input is not queued yet, keeping their own options."""
         added = self._queue.add_unique(jobs)

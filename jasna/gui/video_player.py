@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import math
-import queue
 import time
 import tkinter as tk
 from dataclasses import replace
@@ -17,7 +16,7 @@ from jasna.gui.components import grab_modal
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
 from jasna.gui.player_settings_card import PlayerSettingsCard
-from jasna.gui.queues import MainThreadCalls
+from jasna.gui.queues import MainThreadCalls, queued_now
 from jasna.gui.raw_player import (
     PREROLL_SECONDS,
     PlaybackClock,
@@ -482,25 +481,21 @@ class VideoPlayerDialog(ctk.CTkToplevel):
     def _poll_worker_events(self) -> None:
         if self._worker is None:
             return
-        try:
-            while True:
-                event = self._worker.events.get_nowait()
-                if event.generation != self._generation:
-                    continue
-                if isinstance(event, PlayerStatus):
-                    if event.message == "loading_models":
-                        message = t("player_loading_models")
-                    else:
-                        message = t("player_restoring")
-                    self._set_status(message, Colors.STATUS_PENDING)
-                elif isinstance(event, PlayerEnded):
-                    self._eof = True
-                elif isinstance(event, PlayerFailed):
-                    self._failed_message = t("player_failed", message=event.message)
-                    self._set_status(self._failed_message, Colors.STATUS_ERROR)
-                    self._begin_stop()
-        except queue.Empty:
-            pass
+        for event in queued_now(self._worker.events):
+            if event.generation != self._generation:
+                continue
+            if isinstance(event, PlayerStatus):
+                if event.message == "loading_models":
+                    message = t("player_loading_models")
+                else:
+                    message = t("player_restoring")
+                self._set_status(message, Colors.STATUS_PENDING)
+            elif isinstance(event, PlayerEnded):
+                self._eof = True
+            elif isinstance(event, PlayerFailed):
+                self._failed_message = t("player_failed", message=event.message)
+                self._set_status(self._failed_message, Colors.STATUS_ERROR)
+                self._begin_stop()
 
     def _tick_playback(self) -> None:
         if (

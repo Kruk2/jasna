@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import queue
 import threading
 import time
 import tkinter as tk
@@ -24,6 +23,7 @@ from jasna.gui.mask_feedback import (
     MaskFeedbackWorker,
     MaskSuggestDialog,
 )
+from jasna.gui.queues import queued_now
 from jasna.gui.segment_editor_state import SegmentEditorState, smart_render_error_key
 from jasna.gui.segment_scan_panel import ScanPanel
 from jasna.gui.segment_seed_panel import SeedPanel
@@ -515,32 +515,28 @@ class SegmentEditor(ctk.CTkToplevel):
     def _poll_workers(self) -> None:
         if self._closed.is_set():
             return
-        try:
-            while True:
-                event = self._preview_worker.events.get_nowait()
-                if isinstance(event, PreviewLoaded):
-                    if self._state is None:
-                        self._vr_resolution = event.vr_resolution
-                        self._preview_stereo = event.vr_resolution.resolved
-                        self._build_editor(event.metadata)
-                elif isinstance(event, PreviewKeyframes):
-                    self._keyframe_index = event.index
-                    self._analysis_error = event.error
-                    self._refresh_workload()
-                    if self._scan_panel is not None:
-                        self._scan_panel.refresh_view()
-                        self._seeds.refresh_render_button()
-                elif isinstance(event, PreviewFrame):
-                    self._show_frame(event)
-                elif isinstance(event, PreviewFullFrame):
-                    self._open_mask_suggest(event.image)
-                elif isinstance(event, PreviewEnded):
-                    if event.generation == self._preview_generation:
-                        self._set_playing(False)
-                elif isinstance(event, PreviewFailed):
-                    self._show_preview_error(event.message)
-        except queue.Empty:
-            pass
+        for event in queued_now(self._preview_worker.events):
+            if isinstance(event, PreviewLoaded):
+                if self._state is None:
+                    self._vr_resolution = event.vr_resolution
+                    self._preview_stereo = event.vr_resolution.resolved
+                    self._build_editor(event.metadata)
+            elif isinstance(event, PreviewKeyframes):
+                self._keyframe_index = event.index
+                self._analysis_error = event.error
+                self._refresh_workload()
+                if self._scan_panel is not None:
+                    self._scan_panel.refresh_view()
+                    self._seeds.refresh_render_button()
+            elif isinstance(event, PreviewFrame):
+                self._show_frame(event)
+            elif isinstance(event, PreviewFullFrame):
+                self._open_mask_suggest(event.image)
+            elif isinstance(event, PreviewEnded):
+                if event.generation == self._preview_generation:
+                    self._set_playing(False)
+            elif isinstance(event, PreviewFailed):
+                self._show_preview_error(event.message)
 
         if self._restore is not None:
             self._restore.poll()
@@ -548,11 +544,8 @@ class SegmentEditor(ctk.CTkToplevel):
             self._seeds.poll()
         if self._scan_panel is not None:
             self._scan_panel.poll()
-        try:
-            while True:
-                self._handle_feedback_event(self._mask_feedback_worker.events.get_nowait())
-        except queue.Empty:
-            pass
+        for event in queued_now(self._mask_feedback_worker.events):
+            self._handle_feedback_event(event)
         if self._state is not None:
             self._restore.refresh_toggle()
         self._poll_after = self.after(25, self._poll_workers)

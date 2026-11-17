@@ -16,10 +16,9 @@ from jasna.gui.settings_sections.post_export import PostExportSection
 from jasna.gui.settings_sections.processing import ProcessingSection
 from jasna.gui.settings_sections.restoration_model import RestorationModelSection
 from jasna.gui.settings_sections.secondary import SecondarySection
-from jasna.gui.settings_sections.widgets import add_info_icon
+from jasna.gui.settings_sections.widgets import LEVELS, add_info_icon
 from jasna.gui.theme import Colors, Fonts, Sizing
 
-_VIEWS = ("simple", "advanced", "expert")
 _TABS = ("model", "detection", "upscale", "output", "images")
 
 
@@ -56,7 +55,7 @@ class SettingsPanel(ctk.CTkFrame):
         )
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_SMALL))
-        view_by_label = {t(f"view_{view}"): view for view in _VIEWS}
+        view_by_label = {t(f"view_{view}"): view for view in LEVELS}
         self._view_switch = ctk.CTkSegmentedButton(
             bar,
             values=list(view_by_label),

@@ -11,6 +11,7 @@ from PIL import Image
 
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
+from jasna.gui.queues import queued_now
 from jasna.gui.restoration_preview import (
     RestorationClip,
     RestorationFailed,
@@ -290,8 +291,8 @@ class RestorePreview:
 
     def poll(self) -> None:
         if self._worker is not None:
-            while not self._worker.events.empty():
-                self.handle_event(self._worker.events.get_nowait())
+            for event in queued_now(self._worker.events):
+                self.handle_event(event)
 
     def handle_event(self, event) -> None:
         if not self._active or event.generation != self._generation:

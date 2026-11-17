@@ -130,10 +130,44 @@ def build_editor(tk_root, monkeypatch):
             editor._finish_close()
 
 
+def _load_keyframes(editor: SegmentEditor, index: KeyframeIndex = KeyframeIndex((0,), Fraction(1, 1000), 0, 60_000)) -> None:
+    """Hand the editor the keyframe index its preview worker found."""
+    editor._preview_worker.events.put(segment_editor.PreviewKeyframes(index, None))
+    editor._poll_workers()
+
+
+def _scan_result(scores: tuple[float, ...], *, sizes: tuple[float, ...] | None = None, masks=None) -> MosaicScanResult:
+    """A scan sampled once a second from 0 s with ``scores``."""
+    count = len(scores)
+    return MosaicScanResult(
+        times=tuple(float(second) for second in range(count)),
+        scores=scores,
+        masks=torch.zeros((count, 90, 160), dtype=torch.uint8) if masks is None else masks,
+        sizes=sizes or (0.0,) * count,
+        stride=1.0,
+        completed_until=float(count - 1),
+    )
+
+
+@pytest.fixture
+def finish_scan(monkeypatch):
+    """Press the editor's scan button and let a fake scan worker finish with ``result``."""
+
+    def finish(editor: SegmentEditor, result: MosaicScanResult) -> MagicMock:
+        worker = MagicMock(events=queue.Queue())
+        monkeypatch.setattr(segment_scan_panel, "MosaicScanWorker", MagicMock(return_value=worker))
+        editor._scan_panel._scan_btn.invoke()
+        worker.events.put(ScanCompleted(result, stopped=False))
+        editor._poll_workers()
+        return worker
+
+    return finish
+
+
 @pytest.fixture
 def restoring_editor(build_editor, monkeypatch):
     """A loaded editor with restore preview on; its restoration worker is a mock numbering each request."""
-    worker = MagicMock()
+    worker = MagicMock(events=queue.Queue())
     worker.request.side_effect = lambda *_args, **_kwargs: worker.request.call_count
     monkeypatch.setattr(segment_restore_preview, "RestorationPreviewWorker", MagicMock(return_value=worker))
     editor = build_editor()
@@ -186,7 +220,7 @@ def test_a_closed_restoration_worker_leaves_the_gpu_claimed_by_a_seed_render(bui
     monkeypatch.setattr(
         segment_restore_preview,
         "RestorationPreviewWorker",
-        lambda path, metadata, *, on_stopped: stopped_callbacks.append(on_stopped) or MagicMock(),
+        lambda path, metadata, *, on_stopped: stopped_callbacks.append(on_stopped) or MagicMock(events=queue.Queue()),
     )
     editor = build_editor(set_preview_gpu_busy=set_preview_gpu_busy)
     editor._restore.toggle()
@@ -207,19 +241,17 @@ def test_app_preview_gpu_stays_busy_until_every_owner_gave_it_back(jasna_app) ->
     assert not jasna_app._preview_gpu_busy
 
 
-def test_preview_surface_selects_original_or_restored_from_toggle_state(build_editor) -> None:
-    editor = build_editor()
-    editor._scan_panel._overlay = False
-    editor._preview_source = Image.new("RGB", (160, 90), "red")
-    editor._restore._restored_source = Image.new("RGB", (160, 90), "blue")
-
-    editor._restore._active = False
-    editor._preview.redraw()
-    assert shown_pixel(editor._preview, 0, 0) == (255, 0, 0)
-
-    editor._restore._active = True
-    editor._preview.redraw()
+def test_preview_surface_selects_original_or_restored_from_toggle_state(restoring_editor) -> None:
+    editor, worker = restoring_editor
+    editor._preview_worker.events.put(
+        segment_editor.PreviewFrame(0.0, Image.new("RGB", (160, 90), "red"), editor._preview_generation)
+    )
+    editor._poll_workers()
+    editor._restore.handle_event(RestorationFrame(0.0, Image.new("RGB", (160, 90), "blue"), worker.request.call_count))
     assert shown_pixel(editor._preview, 0, 0) == (0, 0, 255)
+
+    editor._restore.toggle()
+    assert shown_pixel(editor._preview, 0, 0) == (255, 0, 0)
 
 
 def test_projection_selector_is_disabled_for_non_vr_video(build_editor) -> None:
@@ -425,26 +457,14 @@ def test_scan_lock_disables_everything_but_stop(build_editor) -> None:
     assert editor._timeline._enabled
 
 
-def test_scan_completed_populates_detections_and_add_button(build_editor) -> None:
+def test_scan_completed_populates_detections_and_add_button(build_editor, finish_scan) -> None:
     editor = build_editor()
-    result = MosaicScanResult(
-        times=(0.0, 1.0, 2.0, 3.0),
-        scores=(0.0, 0.8, 0.9, 0.0),
-        masks=[None] * 4,
-        sizes=(0.0,) * 4,
-        stride=1.0,
-        completed_until=3.0,
-    )
-    editor._scan_panel._threshold = 0.5
-    editor._scan_panel._worker = MagicMock()
-    editor._scan_panel._set_locked(True)
-    editor._scan_panel._handle_event(ScanCompleted(result, stopped=False))
+
+    finish_scan(editor, _scan_result((0.0, 0.8, 0.9, 0.0)))
     editor.update_idletasks()
 
     assert editor._scan_panel._worker is not None
-    assert editor._scan_panel._result is result
     assert editor._timeline._detections
-    assert editor._scan_panel._proposals
     assert editor._scan_panel._add_btn.cget("state") == "normal"
     assert editor._scan_panel._activity.winfo_ismapped()
     assert editor._scan_panel._add_btn.winfo_ismapped()
@@ -463,21 +483,11 @@ def test_scan_completed_populates_detections_and_add_button(build_editor) -> Non
     assert not editor._scan_panel._add_btn.winfo_ismapped()
 
 
-def test_scan_ltx_auto_split_adds_big_mosaics_as_ltx(build_editor) -> None:
+def test_scan_ltx_auto_split_adds_big_mosaics_as_ltx(build_editor, finish_scan) -> None:
     editor = build_editor(settings=AppSettings(ltx_seed=5))
-    editor._keyframe_index = KeyframeIndex((0, 45, 120, 180), Fraction(1, 30), 0, 1800)
-    result = MosaicScanResult(
-        times=(0.0, 1.0, 2.0, 3.0),
-        scores=(0.0, 0.8, 0.9, 0.0),
-        masks=torch.zeros((4, 90, 160), dtype=torch.uint8),
-        sizes=(0.0, 0.05, 0.3, 0.0),
-        stride=1.0,
-        completed_until=3.0,
-    )
+    _load_keyframes(editor, KeyframeIndex((0, 45, 120, 180), Fraction(1, 30), 0, 1800))
     panel = editor._scan_panel
-    panel._threshold = 0.5
-    panel._worker = MagicMock(events=queue.Queue())
-    panel._handle_event(ScanCompleted(result, stopped=False))
+    finish_scan(editor, _scan_result((0.0, 0.8, 0.9, 0.0), sizes=(0.0, 0.05, 0.3, 0.0)))
     editor.geometry("900x640")
     editor.update()
     assert panel._ltx_auto_row.winfo_ismapped()
@@ -492,53 +502,24 @@ def test_scan_ltx_auto_split_adds_big_mosaics_as_ltx(build_editor) -> None:
     )
 
 
-def test_scan_ltx_auto_split_is_hidden_when_ltx_cannot_run(build_editor) -> None:
+def test_scan_ltx_auto_split_is_hidden_when_ltx_cannot_run(build_editor, finish_scan) -> None:
     editor = build_editor(ltx_unavailable_reason="model_ltx_not_downloaded")
     panel = editor._scan_panel
-    panel._worker = MagicMock()
-    panel._handle_event(
-        ScanCompleted(
-            MosaicScanResult(
-                times=(0.0, 1.0),
-                scores=(0.9, 0.9),
-                masks=torch.zeros((2, 90, 160), dtype=torch.uint8),
-                sizes=(0.0,) * 2,
-                stride=1.0,
-                completed_until=1.0,
-            ),
-            stopped=False,
-        )
-    )
+    finish_scan(editor, _scan_result((0.9, 0.9)))
     editor.update_idletasks()
     assert panel._add_btn.winfo_ismapped()
     assert not panel._ltx_auto_row.winfo_ismapped()
 
 
-def test_scan_finishes_without_ltx_split_when_ltx_cannot_run(build_editor) -> None:
+def test_scan_finishes_without_ltx_split_when_ltx_cannot_run(build_editor, finish_scan) -> None:
     editor = build_editor(
         settings=AppSettings(ltx_auto_split=True),
         ltx_unavailable_reason="model_ltx_not_downloaded",
     )
-    editor._keyframe_index = KeyframeIndex((0, 45, 120, 180), Fraction(1, 30), 0, 1800)
+    _load_keyframes(editor, KeyframeIndex((0, 45, 120, 180), Fraction(1, 30), 0, 1800))
     panel = editor._scan_panel
-    panel._threshold = 0.5
-    panel._worker = MagicMock(events=queue.Queue())
-    panel._set_locked(True)
-    panel._worker.events.put(
-        ScanCompleted(
-            MosaicScanResult(
-                times=(0.0, 1.0, 2.0, 3.0),
-                scores=(0.0, 0.8, 0.9, 0.0),
-                masks=torch.zeros((4, 90, 160), dtype=torch.uint8),
-                sizes=(0.0, 0.05, 0.3, 0.0),
-                stride=1.0,
-                completed_until=3.0,
-            ),
-            stopped=False,
-        )
-    )
 
-    editor._poll_workers()
+    finish_scan(editor, _scan_result((0.0, 0.8, 0.9, 0.0), sizes=(0.0, 0.05, 0.3, 0.0)))
     editor.update_idletasks()
 
     assert not panel.active
@@ -547,19 +528,9 @@ def test_scan_finishes_without_ltx_split_when_ltx_cannot_run(build_editor) -> No
     assert editor._state.segments == (SegmentRange(0.5, 3.5, SegmentRestoration("basicvsrpp", None)),)
 
 
-def test_scan_threshold_updates_ranges_and_add_button(build_editor) -> None:
+def test_scan_threshold_updates_ranges_and_add_button(build_editor, finish_scan) -> None:
     editor = build_editor()
-    result = MosaicScanResult(
-        times=(0.0, 1.0, 2.0),
-        scores=(0.0, 0.8, 0.0),
-        masks=torch.zeros((3, 90, 160), dtype=torch.uint8),
-        sizes=(0.0,) * 3,
-        stride=1.0,
-        completed_until=2.0,
-    )
-    editor._scan_panel._threshold = 0.5
-    editor._scan_panel._worker = MagicMock()
-    editor._scan_panel._handle_event(ScanCompleted(result, stopped=False))
+    finish_scan(editor, _scan_result((0.0, 0.8, 0.0)))
     assert editor._timeline._detections
     assert editor._scan_panel._add_btn.cget("state") == "normal"
 
@@ -572,24 +543,17 @@ def test_scan_threshold_updates_ranges_and_add_button(build_editor) -> None:
     assert not editor._scan_panel._add_btn.winfo_ismapped()
 
 
-def test_scan_overlay_respects_dynamic_threshold(build_editor) -> None:
+def test_scan_overlay_respects_dynamic_threshold(build_editor, finish_scan) -> None:
     editor = build_editor()
     panel = editor._scan_panel
-    editor._current = 1.0
-    panel._threshold = 0.8
-    panel._result = MosaicScanResult(
-        times=(1.0,),
-        scores=(0.7,),
-        masks=torch.ones((1, 90, 160), dtype=torch.uint8),
-        sizes=(0.0,) * 1,
-        stride=1.0,
-        completed_until=1.0,
-    )
+    editor._seek(1.0)
+    panel._on_threshold(0.8)
+    finish_scan(editor, _scan_result((0.0, 0.7), masks=torch.ones((2, 90, 160), dtype=torch.uint8)))
     image = Image.new("RGB", (160, 90), "black")
 
     assert panel.apply_overlay(image) is image
 
-    panel._threshold = 0.6
+    panel._on_threshold(0.6)
     overlaid = panel.apply_overlay(image)
     assert overlaid.getpixel((80, 45))[0] > 0
 
@@ -597,15 +561,8 @@ def test_scan_overlay_respects_dynamic_threshold(build_editor) -> None:
 def test_smart_render_error_is_explained_once(build_editor) -> None:
     editor = build_editor()
     editor._state.add(0.0, 58.0)
-    editor._analysis_error = None
-    editor._keyframe_index = KeyframeIndex(
-        pts=(0,),
-        time_base=Fraction(1, 1),
-        start_pts=0,
-        end_pts=60,
-    )
 
-    editor._refresh_workload()
+    _load_keyframes(editor, KeyframeIndex(pts=(0,), time_base=Fraction(1, 1), start_pts=0, end_pts=60))
 
     assert editor._workload.cget("text") != editor._notice.cget("text")
     assert editor._notice.cget("text") == t("segments_smart_render_whole_video")
@@ -774,7 +731,7 @@ def test_restore_preview_renders_an_ltx_range_then_lets_the_user_compare_and_pic
     monkeypatch.setattr(segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: 60.0)
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
-    editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+    _load_keyframes(editor)
     editor._seek(1.5)
     editor._preview_source = Image.new("RGB", (160, 90), "red")
     tk_root.update()
@@ -831,7 +788,7 @@ def test_playback_over_a_rendered_ltx_range_shows_each_seed_frame(build_editor, 
     monkeypatch.setattr(segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: 60.0)
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
-    editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+    _load_keyframes(editor)
     editor._seek(1.0)
     editor._restore.toggle()
     frames = []
@@ -862,7 +819,7 @@ def test_restore_preview_asks_before_a_long_ltx_render(build_editor, monkeypatch
     monkeypatch.setattr(segment_editor.messagebox, "askyesno", lambda title, text, parent: asked.append(text) or answer)
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
-    editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+    _load_keyframes(editor)
     editor._seek(1.5)
 
     editor._restore.toggle()
@@ -908,7 +865,7 @@ def test_closing_the_app_closes_the_segment_editor_and_its_seed_frames(jasna_app
     metadata = _fake_metadata()
     preview.events.put(segment_editor.PreviewLoaded(metadata, resolve_vr_mode("auto", metadata, job.path)))
     editor._poll_workers()
-    editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+    _load_keyframes(editor)
     editor._seek(1.5)
     editor._restore.toggle()
     assert _BlockingSeedRenderer.started.wait(5)
@@ -937,7 +894,7 @@ def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(build_editor, tk
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     settings = replace(AppSettings(), ltx_model="undistilled")
     editor = build_editor(job=job, settings=settings)
-    editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+    _load_keyframes(editor)
     editor._ranges.select(0)
     editor._preview_source = Image.new("RGB", (160, 90), "red")
     tk_root.update()
@@ -967,6 +924,8 @@ def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(build_editor, tk
     assert chips and chips[0] in tips[t("tip_segments_seed_chip")]
     assert use and use[0] in tips[t("tip_segments_seed_use")]
     assert editor._inspector._ltx_radio_tooltip._text == t("tip_model_ltx_undistilled")
+
+
 def test_range_controls_fit_their_content_while_the_list_keeps_its_rows() -> None:
     assert segment_range_panel.range_controls_height(500, 200, 156) == 200
     assert segment_range_panel.range_controls_height(320, 200, 156) == 164
@@ -1059,7 +1018,7 @@ def test_footer_shows_the_ltx_share_only_when_a_range_uses_ltx(build_editor, tk_
 
 
 def test_restore_preview_uses_basicvsrpp_outside_an_ltx_range(build_editor, monkeypatch, tmp_path) -> None:
-    preview_worker = MagicMock()
+    preview_worker = MagicMock(events=queue.Queue())
     monkeypatch.setattr(segment_restore_preview, "RestorationPreviewWorker", MagicMock(return_value=preview_worker))
     monkeypatch.setattr(segment_seed_panel, "ltx_render_seconds", lambda settings, metadata, segment: 60.0)
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
@@ -1080,14 +1039,11 @@ def test_ltx_render_button_enables_once_the_keyframes_arrive(build_editor, monke
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
     editor._seek(1.5)
-    editor._restore._active = True
+    editor._restore.activate()
     editor._restore.request()
     assert editor._seeds._render_btn.cget("state") == "disabled"
 
-    editor._preview_worker.events.put(
-        segment_editor.PreviewKeyframes(KeyframeIndex((0,), Fraction(1, 1000), 0, 60_000), None)
-    )
-    editor._poll_workers()
+    _load_keyframes(editor)
 
     assert editor._seeds._render_btn.cget("state") == "normal"
 
@@ -1100,7 +1056,7 @@ def test_ltx_render_estimate_is_worked_out_once_per_range(build_editor, monkeypa
     job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
     editor = build_editor(job=job)
     editor._seek(1.5)
-    editor._restore._active = True
+    editor._restore.activate()
 
     for _ in range(3):
         editor._restore.request()
@@ -1122,27 +1078,23 @@ def test_scan_says_it_loads_the_detection_model(build_editor, monkeypatch) -> No
 
 
 @pytest.mark.parametrize(("auto", "percent", "color"), [(False, 12, "BG_PANEL"), (True, 12, "MODEL_LTX"), (True, 60, "PRIMARY")])
-def test_scan_overlay_tags_each_mosaic_with_its_size(build_editor, auto, percent, color) -> None:
+def test_scan_overlay_tags_each_mosaic_with_its_size(build_editor, finish_scan, auto, percent, color) -> None:
     editor = build_editor()
     panel = editor._scan_panel
-    editor._current = 1.0
-    panel._threshold = 0.5
-    panel._ltx_auto, panel._ltx_percent = auto, percent
-    mask = torch.zeros((1, 90, 160), dtype=torch.uint8)
-    mask[0, 45:90, 80:120] = 1
-    panel._result = MosaicScanResult(
-        times=(1.0,),
-        scores=(0.9,),
-        masks=mask,
-        sizes=(0.5,),
-        stride=1.0,
-        completed_until=1.0,
-    )
+    editor._seek(1.0)
+    masks = torch.zeros((2, 90, 160), dtype=torch.uint8)
+    masks[1, 45:90, 80:120] = 1
+    finish_scan(editor, _scan_result((0.0, 0.9), sizes=(0.0, 0.5), masks=masks))
+    if auto:
+        panel._ltx_auto_toggle.select()
+        panel._toggle_ltx_auto()
+    panel._on_ltx_percent(percent)
 
     overlaid = panel.apply_overlay(Image.new("RGB", (1600, 900), "black"))
 
     expected = Image.new("RGB", (1, 1), getattr(segment_editor.Colors, color)).getpixel((0, 0))
     assert overlaid.getpixel((802, 447)) == expected
+
 
 def test_closing_the_editor_cancels_its_pending_timers(restoring_editor, tk_root) -> None:
     editor, _worker = restoring_editor

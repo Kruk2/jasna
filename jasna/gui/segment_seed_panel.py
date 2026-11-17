@@ -3,7 +3,6 @@ seed, keeps the frames of every tried seed and lets the user compare and pick on
 
 from __future__ import annotations
 
-import queue
 from collections.abc import Callable
 from pathlib import Path
 from tkinter import messagebox
@@ -15,6 +14,7 @@ from jasna.gui.components import Tooltip, format_duration
 from jasna.gui.locales import t
 from jasna.gui.ltx_seed_preview import LtxSeedPreviewWorker, SeedFailed, SeedFrame, SeedProgress, SeedReady
 from jasna.gui.models import AppSettings
+from jasna.gui.queues import queued_now
 from jasna.gui.segment_editor_state import SegmentEditorState
 from jasna.gui.theme import Colors, Fonts
 from jasna.media.probe import VideoMetadata
@@ -353,11 +353,8 @@ class SeedPanel(ctk.CTkFrame):
     def poll(self) -> None:
         if self._worker is None:
             return
-        try:
-            while True:
-                self._handle_event(self._worker.events.get_nowait())
-        except queue.Empty:
-            pass
+        for event in queued_now(self._worker.events):
+            self._handle_event(event)
 
     def _handle_event(self, event) -> None:
         if event.generation != self._generation or self._running is None:

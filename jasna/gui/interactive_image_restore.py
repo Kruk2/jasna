@@ -315,11 +315,8 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
 
         if image is None:
             return
-        photo = _ctk_image_from_chw(image, self._preview_w, self._preview_h)
-        old_photo = self._photo
-        self._image_label.configure(text="", image=photo)
-        self._photo = photo
-        _ = old_photo
+        self._photo = _ctk_image_from_chw(image, self._preview_w, self._preview_h)
+        self._image_label.configure(text="", image=self._photo)
 
     def _save_current(self) -> None:
         if self._current_result is None:

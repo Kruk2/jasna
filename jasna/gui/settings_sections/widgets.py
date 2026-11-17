@@ -142,15 +142,6 @@ def parse_int(text: str, fallback: int) -> int:
         return fallback
 
 
-def pack_rows(rows: list[tuple[tk.Misc, dict]], hidden: tuple[tk.Misc, ...]) -> None:
-    """Pack ``rows`` (widget, pack options) in order, leaving out ``hidden``."""
-    for row, _options in rows:
-        row.pack_forget()
-    for row, options in rows:
-        if row not in hidden:
-            row.pack(**options)
-
-
 LEVELS = ("simple", "advanced", "expert")
 
 
@@ -172,5 +163,8 @@ def layout_rows(rows: list[Row], level: str, *, standard: bool, ltx: bool, hidde
         row for row in rows
         if LEVELS.index(row.level) <= LEVELS.index(level) and used[row.model] and row.widget not in hidden
     ]
-    pack_rows([(row.widget, row.pack) for row in rows], tuple(row.widget for row in rows if row not in shown))
+    for row in rows:
+        row.widget.pack_forget()
+    for row in shown:
+        row.widget.pack(**row.pack)
     return bool(shown)

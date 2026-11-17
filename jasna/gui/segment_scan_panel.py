@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import queue
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import replace
@@ -16,6 +15,7 @@ from jasna.gui.components import Tooltip
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
+from jasna.gui.queues import queued_now
 from jasna.gui.mosaic_scan import (
     SCAN_SCORE_FLOOR,
     MosaicScanResult,
@@ -372,14 +372,10 @@ class ScanPanel(ctk.CTkFrame):
             Tooltip(widget, t("segments_scan_ltx_auto_hint"))
 
     def poll(self) -> None:
-        worker = self._worker
-        if worker is None:
+        if self._worker is None:
             return
-        try:
-            while True:
-                self._handle_event(worker.events.get_nowait())
-        except queue.Empty:
-            pass
+        for event in queued_now(self._worker.events):
+            self._handle_event(event)
 
     def stop(self) -> None:
         if self._worker is None or not self._active:

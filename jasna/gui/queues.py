@@ -7,13 +7,19 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
 
-def drain(pending: queue.Queue) -> None:
-    """Discard everything currently queued."""
+def queued_now(pending: queue.Queue | queue.SimpleQueue) -> Iterator:
+    """Take each item queued so far, without waiting for more."""
     while True:
         try:
-            pending.get_nowait()
+            yield pending.get_nowait()
         except queue.Empty:
             return
+
+
+def drain(pending: queue.Queue) -> None:
+    """Discard everything currently queued."""
+    for _ in queued_now(pending):
+        pass
 
 
 def replace_pending(pending: queue.Queue, command: object) -> None:
@@ -117,11 +123,7 @@ class MainThreadCalls:
 
     def _run_pending(self) -> None:
         self._after_id = self._widget.after(self._interval_ms, self._run_pending)
-        while True:
-            try:
-                callback = self._pending.get_nowait()
-            except queue.Empty:
-                return
+        for callback in queued_now(self._pending):
             callback()
 
     def close(self) -> None:
