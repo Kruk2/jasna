@@ -10,8 +10,8 @@ from jasna.gui.download_worker import start_download
 from jasna.license_status import read_license_info
 from jasna.gui.locales import get_locale, t
 from jasna.gui.queues import MainThreadCalls
-from jasna.ltx import model_files
-from jasna.ltx.model_files import LTX_MODELS, DownloadableFile, download_size_text
+from jasna.ltx import downloads, model_files
+from jasna.ltx.model_files import LTX_MODELS, DownloadableFile
 from jasna.license_api import ltx_driver_mismatch, protection_available
 from jasna.session_config import LtxModelName, LtxVaeName
 
@@ -156,14 +156,14 @@ class LtxModels:
             else "ltx_download_confirm"
         )
         if not messagebox.askyesno(
-            t("ltx_download_title"), t(confirm_key, model=name, size=download_size_text(list(files)))
+            t("ltx_download_title"), t(confirm_key, model=name, size=downloads.download_size_text(list(files)))
         ):
             return False
         self.percent = 0
         self._on_change()
         mirror_first = get_locale().current_language == "zh"
         start_download(
-            lambda progress: model_files.download_files(self.directory, list(files), progress, mirror_first=mirror_first),
+            lambda progress: downloads.download_files(self.directory, list(files), progress, mirror_first=mirror_first),
             lambda percent: self._main_thread.post(lambda: self._set_percent(percent)),
             lambda error: self._main_thread.post(lambda: self._finish(error, on_ready)),
         )

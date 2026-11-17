@@ -40,11 +40,6 @@ def tile_config(
 
 
 _CONFIGS = {config: tile_config(*config) for config in na_geometry.CONFIGS}
-LARGE_WINDOW_CONFIG = _CONFIGS[na_geometry.LARGE_WINDOW]
-SMALL_WINDOW_CONFIG = _CONFIGS[na_geometry.SMALL_WINDOW]
-AMD_LARGE_WINDOW_CONFIG = _CONFIGS[na_geometry.AMD_LARGE_WINDOW]
-RDNA3_LARGE_WINDOW_CONFIG = _CONFIGS[na_geometry.RDNA3_LARGE_WINDOW]
-AMD_SMALL_WINDOW_CONFIG = _CONFIGS[na_geometry.AMD_SMALL_WINDOW]
 
 
 def config_for(kernel_size: tuple[int, int, int], amd_architecture: str | None) -> triton.Config:

@@ -15,7 +15,7 @@ from safetensors.torch import save_file
 
 from factories import session_config, write_sparse_file
 from jasna import cli_downloads
-from jasna.ltx import model_files
+from jasna.ltx import downloads, model_files
 from jasna.ltx.model_files import LtxModelFiles, bundle_names, open_tensors
 
 
@@ -91,8 +91,8 @@ def test_outdated_encrypted_model_is_missing_until_verified_download_replaces_it
     with pytest.raises(FileNotFoundError, match="missing or outdated"):
         LtxModelFiles.from_dir(tmp_path, "distilled2", fast=False)
     assert checked.call_count == 1
-    monkeypatch.setattr(model_files.urllib.request, "urlopen", lambda request, **k: _response(request, current))
-    model_files.download_files(tmp_path, needed, None, mirror_first=False)
+    monkeypatch.setattr(downloads.urllib.request, "urlopen", lambda request, **k: _response(request, current))
+    downloads.download_files(tmp_path, needed, None, mirror_first=False)
     assert transformer.read_bytes() == current
     assert model_files.model_installed(tmp_path, "distilled2", fast=False)
     assert model_files.missing_downloads(tmp_path, "distilled2", fast=False) == []
@@ -119,15 +119,15 @@ def test_download_verifies_and_replaces_atomically(tmp_path, monkeypatch):
     good, bad = b"model bytes", b"tampered"
     (source / "a.safetensors.enc").write_bytes(good)
     (source / "b.safetensors.enc").write_bytes(bad)
-    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", source.as_uri())
+    monkeypatch.setattr(downloads, "LTX_DOWNLOAD_URL", source.as_uri())
     target = tmp_path / "models"
     progress = []
     ok = model_files.DownloadableFile("a.safetensors.enc", len(good), hashlib.sha256(good).hexdigest())
-    model_files.download_files(target, [ok], lambda done, total: progress.append((done, total)), mirror_first=False)
+    downloads.download_files(target, [ok], lambda done, total: progress.append((done, total)), mirror_first=False)
     assert (target / "a.safetensors.enc").read_bytes() == good and progress[-1] == (len(good), len(good))
     wrong = model_files.DownloadableFile("b.safetensors.enc", len(bad), hashlib.sha256(good).hexdigest())
     with pytest.raises(RuntimeError, match="checksum") as failure:
-        model_files.download_files(target, [wrong], None, mirror_first=False)
+        downloads.download_files(target, [wrong], None, mirror_first=False)
     assert f"{source.as_uri()}/b.safetensors.enc" in str(failure.value)
     assert sorted(p.name for p in target.iterdir()) == ["a.safetensors.enc"]
 
@@ -148,9 +148,9 @@ def test_download_resumes_its_partial_file(tmp_path, monkeypatch, status, served
         ranges.append(request.get_header("Range"))
         return _response(request, served, status, 5 if status == 206 else None)
 
-    monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
+    monkeypatch.setattr(downloads.urllib.request, "urlopen", open_url)
     progress = []
-    model_files.download_files(tmp_path, [file], lambda done, total: progress.append(done), mirror_first=False)
+    downloads.download_files(tmp_path, [file], lambda done, total: progress.append(done), mirror_first=False)
     assert ranges == ["bytes=5-"]
     assert (tmp_path / "model.enc").read_bytes() == content and progress[-1] == len(content)
     assert not (tmp_path / "model.enc.part").exists()
@@ -169,8 +169,8 @@ def test_bad_resume_restarts_from_the_first_byte(tmp_path, monkeypatch, partial,
             return _response(request, content[range_start:], 206, range_start)
         return _response(request, content)
 
-    monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
-    model_files.download_files(tmp_path, [file], None, mirror_first=False)
+    monkeypatch.setattr(downloads.urllib.request, "urlopen", open_url)
+    downloads.download_files(tmp_path, [file], None, mirror_first=False)
     assert ranges == ["bytes=5-", None]
     assert (tmp_path / "model.enc").read_bytes() == content and not (tmp_path / "model.enc.part").exists()
 
@@ -183,10 +183,10 @@ def test_failed_download_keeps_its_partial_file_and_names_the_direct_link(tmp_pa
     def unreachable(request, **kwargs):
         raise urllib.error.URLError("offline")
 
-    monkeypatch.setattr(model_files.urllib.request, "urlopen", unreachable)
+    monkeypatch.setattr(downloads.urllib.request, "urlopen", unreachable)
     with pytest.raises(RuntimeError) as failure:
-        model_files.download_files(tmp_path, [file], None, mirror_first=False)
-    assert f"{model_files.LTX_DOWNLOAD_URL}/model.enc" in str(failure.value) and str(tmp_path) in str(failure.value)
+        downloads.download_files(tmp_path, [file], None, mirror_first=False)
+    assert f"{downloads.LTX_DOWNLOAD_URL}/model.enc" in str(failure.value) and str(tmp_path) in str(failure.value)
     assert (tmp_path / "model.enc.part").read_bytes() == b"model"
 
 
@@ -199,14 +199,14 @@ def _published(directory, content: bytes) -> str:
 def test_download_falls_back_to_the_other_source(tmp_path, monkeypatch):
     content = b"model bytes"
     file = model_files.DownloadableFile("model.enc", len(content), hashlib.sha256(content).hexdigest())
-    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", (tmp_path / "unreachable").as_uri())
-    monkeypatch.setattr(model_files, "LTX_MIRROR_URL", _published(tmp_path / "mirror", content))
-    model_files.download_files(tmp_path / "a", [file], None, mirror_first=False)
+    monkeypatch.setattr(downloads, "LTX_DOWNLOAD_URL", (tmp_path / "unreachable").as_uri())
+    monkeypatch.setattr(downloads, "LTX_MIRROR_URL", _published(tmp_path / "mirror", content))
+    downloads.download_files(tmp_path / "a", [file], None, mirror_first=False)
     assert (tmp_path / "a" / "model.enc").read_bytes() == content
 
-    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", _published(tmp_path / "main", content))
-    monkeypatch.setattr(model_files, "LTX_MIRROR_URL", (tmp_path / "unreachable").as_uri())
-    model_files.download_files(tmp_path / "b", [file], None, mirror_first=True)
+    monkeypatch.setattr(downloads, "LTX_DOWNLOAD_URL", _published(tmp_path / "main", content))
+    monkeypatch.setattr(downloads, "LTX_MIRROR_URL", (tmp_path / "unreachable").as_uri())
+    downloads.download_files(tmp_path / "b", [file], None, mirror_first=True)
     assert (tmp_path / "b" / "model.enc").read_bytes() == content
 
 
@@ -227,11 +227,11 @@ def test_download_uses_bundled_ca_for_primary_and_fallback_with_empty_system_tru
             raise urllib.error.URLError("primary unavailable")
         return _response(request, content)
 
-    monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
+    monkeypatch.setattr(downloads.urllib.request, "urlopen", open_url)
     target = tmp_path / "models"
-    model_files.download_files(target, files, None, mirror_first=mirror_first)
-    primary, fallback = ((model_files.LTX_MIRROR_URL, model_files.LTX_DOWNLOAD_URL) if mirror_first
-                         else (model_files.LTX_DOWNLOAD_URL, model_files.LTX_MIRROR_URL))
+    downloads.download_files(target, files, None, mirror_first=mirror_first)
+    primary, fallback = ((downloads.LTX_MIRROR_URL, downloads.LTX_DOWNLOAD_URL) if mirror_first
+                         else (downloads.LTX_DOWNLOAD_URL, downloads.LTX_MIRROR_URL))
     assert [url for url, _, _ in requests] == [f"{primary}/first.enc", f"{fallback}/first.enc", f"{primary}/second.enc"]
     for _, _, context in requests:
         assert context.verify_mode == ssl.CERT_REQUIRED
@@ -244,13 +244,13 @@ def test_download_uses_bundled_ca_for_primary_and_fallback_with_empty_system_tru
 
 def test_mirror_first_tries_the_mirror_before_the_main_source(tmp_path, monkeypatch):
     mirrored = b"mirror bytes"
-    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", _published(tmp_path / "main", b"main bytes"))
-    monkeypatch.setattr(model_files, "LTX_MIRROR_URL", _published(tmp_path / "mirror", mirrored))
+    monkeypatch.setattr(downloads, "LTX_DOWNLOAD_URL", _published(tmp_path / "main", b"main bytes"))
+    monkeypatch.setattr(downloads, "LTX_MIRROR_URL", _published(tmp_path / "mirror", mirrored))
     file = model_files.DownloadableFile("model.enc", len(mirrored), hashlib.sha256(mirrored).hexdigest())
-    model_files.download_files(tmp_path / "models", [file], None, mirror_first=True)
+    downloads.download_files(tmp_path / "models", [file], None, mirror_first=True)
     assert (tmp_path / "models" / "model.enc").read_bytes() == mirrored
     with pytest.raises(RuntimeError, match="checksum"):
-        model_files.download_files(tmp_path / "models", [file], None, mirror_first=False)
+        downloads.download_files(tmp_path / "models", [file], None, mirror_first=False)
 
 
 @pytest.fixture

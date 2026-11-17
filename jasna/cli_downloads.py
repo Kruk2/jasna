@@ -9,7 +9,8 @@ from jasna.session_config import SessionConfig
 def ensure_ltx_model(config: SessionConfig, segments) -> None:
     """Offer to download the selected LTX model when the job needs it and it is missing.
     Without a terminal to ask in, fail with what to download instead of waiting."""
-    from jasna.ltx.model_files import LTX_TRIAL_NOTICE, download_files, download_size_text, missing_downloads
+    from jasna.ltx.downloads import download_files, download_size_text
+    from jasna.ltx.model_files import LTX_TRIAL_NOTICE, missing_downloads
 
     from jasna.segments import job_models
 

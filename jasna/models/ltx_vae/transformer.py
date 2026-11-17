@@ -21,10 +21,9 @@ from jasna.models.ltx_vae.eager_na import na3d
 from jasna.tensor_utils import compile_static
 
 DIFFUSION_DIM = 256
-DIFFUSION_HIDDEN = 1024
 DIFFUSION_HEAD_DIM = 64
 DIFFUSION_ROPE_PAIRS = (8, 12, 12)
-"""The shipped decoder's diffusion blocks: width, MLP width, head dim, RoPE pairs per (T, H, W)."""
+"""The shipped decoder's diffusion blocks: width, head dim, RoPE pairs per (T, H, W)."""
 FUSED_QKV_DIMS = (DIFFUSION_DIM, 512)
 """Widths the fused Q/K/V kernel is built for: the diffusion blocks' and the 512-wide deterministic stages
 3-4 (the 1024/2048-wide stages 1-2 do not fit its one-tile projections). Only the diffusion blocks' kernel

@@ -20,7 +20,7 @@ from jasna.gui.ltx_models import (
 )
 from jasna.gui.models import AppSettings, JobItem, PresetManager
 from jasna.license_api import DriverLibraryMismatch
-from jasna.ltx import model_files
+from jasna.ltx import downloads, model_files
 from jasna.ltx.model_files import bundle_names
 from jasna.segments import SegmentRange, SegmentRestoration
 from jasna.session_config import LTX_DEFAULT_MODEL
@@ -289,7 +289,7 @@ def test_start_downloads_only_the_fast_model_then_starts(
             downloaded.append(file.name)
             write_sparse_file(directory / file.name, file.size_bytes)
 
-    monkeypatch.setattr(model_files, "download_files", download_files)
+    monkeypatch.setattr(downloads, "download_files", download_files)
     monkeypatch.setattr(ltx_models_module, "start_download", lambda download, _on_percent, on_done: (download(None), on_done(None)))
     _queue_job(jasna_app, replace(AppSettings(), restoration_model="ltx", ltx_fast=True))
 
