@@ -317,10 +317,14 @@ def atomic_write(path: Path, mode: str):
     """Write ``path`` through a temporary file renamed over it, so a reader or a crash never
     leaves a partial ``path``."""
     partial = path.with_name(f"{path.name}.{os.getpid()}.part")
-    with partial.open(mode) as stream:
-        yield stream
-        stream.flush()
-        os.fsync(stream.fileno())
+    try:
+        with partial.open(mode) as stream:
+            yield stream
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
     commit_file(partial, path)
 
 

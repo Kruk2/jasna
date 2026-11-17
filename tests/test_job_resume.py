@@ -81,6 +81,7 @@ def test_atomic_write_does_not_publish_interrupted_file(tmp_path):
             stream.write("new")
             raise RuntimeError("interrupted")
     assert target.read_text() == "old"
+    assert [path.name for path in tmp_path.iterdir()] == ["state.json"]
 
 
 class _NotAWeight:
