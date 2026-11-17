@@ -150,7 +150,7 @@ def _launch_cas(kernel: Kernel, src: torch.Tensor, dst: torch.Tensor, weight_sca
 
 
 class GpuCasSharpener:
-    """Sharpens the luma plane of a packed NV12/P010 frame in place."""
+    """Sharpens the luma plane of an NV12/P010 frame."""
 
     def __init__(self, strength: float, *, ten_bit: bool, device: torch.device):
         if not 0.0 < strength <= 1.0:
@@ -181,11 +181,8 @@ class GpuCasSharpener:
         luma.copy_(sharpened)
 
     def sharpen_into(self, source_luma: torch.Tensor, destination_luma: torch.Tensor) -> None:
-        """Sharpen one luma plane into another.
-
-        Saves the full-plane copy ``apply_luma_`` needs, because the caller can
-        hand over a scratch plane the conversion wrote and the real destination.
-        """
+        """Sharpen one luma plane into another: the caller hands over a scratch plane the
+        conversion wrote and the real destination, which saves a full-plane copy."""
         if self.ten_bit:
             source_luma = source_luma.view(torch.uint16)
             destination_luma = destination_luma.view(torch.uint16)
@@ -195,15 +192,3 @@ class GpuCasSharpener:
 
         destination_luma.copy_(source_luma)
         self._sharpen_torch_(destination_luma)
-
-    def apply_luma_(self, packed: torch.Tensor, height: int) -> None:
-        luma = packed[:height]
-        if self.ten_bit:
-            luma = luma.view(torch.uint16)
-        if self._kernel is not None:
-            sharpened = torch.empty_like(luma)
-            _launch_cas(self._kernel, luma, sharpened, self.weight_scale)
-            luma.copy_(sharpened)
-            return
-
-        self._sharpen_torch_(luma)

@@ -16,9 +16,10 @@ from jasna import startup_timing
 from jasna.accelerator import AcceleratorVendor, device_free_bytes, device_used_bytes, vendor_for_device
 from jasna.job_resume import ResumeJob, resume_directory, saved_ltx_work
 from jasna.media.container_utils import MOV_SUFFIXES
+from jasna.media.encoder_options import nvenc_vram_beside_ltx, resolve_encoder_options
 from jasna.media.encoder_settings import require_encodable_size
 from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
-from jasna.media.video_encoder import VideoEncoder, nvenc_vram_beside_ltx, resolve_encoder_options
+from jasna.media.video_encoder import VideoEncoder
 from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.media.lut import CubeLut, parse_cube_file
 from jasna.media.splice import (

@@ -171,11 +171,6 @@ class YuvToRgbConverter:
             t = bayer[y_mod8][:, x_mod8].unsqueeze(0)
             self._dither2 = torch.floor(t * 4.0).to(torch.int32)
 
-    def convert(self, y: torch.Tensor, uv: torch.Tensor) -> torch.Tensor:
-        out = torch.empty((3, self.height, self.width), device=y.device, dtype=torch.uint8)
-        self.convert_into(y, uv, out)
-        return out
-
     def convert_surface_into(
         self,
         y_ptr: int,

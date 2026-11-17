@@ -16,7 +16,7 @@ from jasna.accelerator import (
     vendor_for_device,
 )
 from jasna.media.encoder_settings import validate_encoder_settings
-from jasna.media.video_encoder import resolve_encoder_options
+from jasna.media.encoder_options import resolve_encoder_options
 
 
 def _metadata(**overrides):

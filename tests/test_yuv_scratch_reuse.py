@@ -13,6 +13,7 @@ from jasna.media import rgb_to_yuv as rgb_to_yuv_module
 from jasna.media import yuv_to_rgb as yuv_to_rgb_module
 from jasna.media.rgb_to_yuv import RgbToYuvConverter
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
+from factories import yuv_to_rgb
 
 CPU = torch.device("cpu")
 VARIANTS = ["nv12_bt709_limited", "nv12_bt601_full", "p010_bt709_limited", "p010_bt2020_full"]
@@ -54,8 +55,8 @@ def test_yuv_to_rgb_reuses_one_working_set():
     converter = YuvToRgbConverter(8, 12, AvColorspace.ITU709, False, False, CPU)
     planes = [_planes(8, 12, CPU, seed) for seed in range(3)]
 
-    first = [converter.convert(y, uv) for y, uv in planes]
-    second = [converter.convert(y, uv) for y, uv in planes]
+    first = [yuv_to_rgb(converter, y, uv) for y, uv in planes]
+    second = [yuv_to_rgb(converter, y, uv) for y, uv in planes]
 
     for one, two in zip(first, second):
         assert torch.equal(one, two)
@@ -75,7 +76,6 @@ def eager_on_cuda(monkeypatch):
 def test_rgb_to_yuv_allocates_nothing_per_frame(variant, eager_on_cuda):
     device = eager_on_cuda
     converter = RgbToYuvConverter(variant, device=device)
-    assert not converter.uses_kernel
     frame = _frame(64, 96, device, 0)
     luma = torch.empty((64, 96), dtype=converter.sample_dtype, device=device)
     chroma = torch.empty((32, 96), dtype=converter.sample_dtype, device=device)

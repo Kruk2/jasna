@@ -128,40 +128,31 @@ def test_sharpener_rejects_strengths_outside_the_open_unit_range(strength: float
         GpuCasSharpener(strength, ten_bit=False, device=torch.device("cpu"))
 
 
-def test_sharpener_leaves_nv12_chroma_untouched() -> None:
-    rng = np.random.default_rng(3)
-    packed = torch.from_numpy(
-        rng.integers(16, 236, size=(24, 16)).astype(np.uint8)
-    )
-    chroma_before = packed[16:].clone()
-
-    GpuCasSharpener(0.5, ten_bit=False, device=torch.device("cpu")).apply_luma_(packed, 16)
-
-    assert torch.equal(packed[16:], chroma_before)
+def _sharpened(sharpener: GpuCasSharpener, luma: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(luma)
+    sharpener.sharpen_into(luma, out)
+    return out
 
 
 def test_sharpener_round_trips_the_p010_sample_shift() -> None:
     # P010 keeps 10-bit codes shifted left by six; a flat plane must come back
     # bit-identical through the unpack/repack.
     codes = torch.full((6, 8), 640, dtype=torch.int32)
-    packed = (codes << 6).to(torch.int16)
-    packed = torch.cat([packed, torch.full((3, 8), 512 << 6, dtype=torch.int32).to(torch.int16)])
-    chroma_before = packed[6:].clone()
+    luma = (codes << 6).to(torch.int16)
 
-    GpuCasSharpener(0.5, ten_bit=True, device=torch.device("cpu")).apply_luma_(packed, 6)
+    out = _sharpened(GpuCasSharpener(0.5, ten_bit=True, device=torch.device("cpu")), luma)
 
-    assert torch.equal(packed[:6].view(torch.uint16).to(torch.int32) >> 6, codes)
-    assert torch.equal(packed[6:], chroma_before)
+    assert torch.equal(out.view(torch.uint16).to(torch.int32) >> 6, codes)
 
 
 def test_sharpener_sharpens_the_luma_plane() -> None:
-    packed = torch.full((12, 8), 100, dtype=torch.uint8)
-    packed[4, 4] = 200
+    luma = torch.full((8, 8), 100, dtype=torch.uint8)
+    luma[4, 4] = 200
 
-    GpuCasSharpener(1.0, ten_bit=False, device=torch.device("cpu")).apply_luma_(packed, 8)
+    out = _sharpened(GpuCasSharpener(1.0, ten_bit=False, device=torch.device("cpu")), luma)
 
-    assert packed[4, 4].item() > 200
-    assert packed[4, 3].item() < 100
+    assert out[4, 4].item() > 200
+    assert out[4, 3].item() < 100
 
 
 requires_cuda = pytest.mark.skipif(
@@ -173,34 +164,22 @@ requires_cuda = pytest.mark.skipif(
 @pytest.mark.parametrize("strength", [0.1, 0.5, 1.0])
 def test_cuda_kernel_matches_the_torch_implementation_for_nv12(strength: float) -> None:
     rng = np.random.default_rng(5)
-    luma = rng.integers(0, 256, size=(48, 64)).astype(np.uint8)
-    packed = torch.from_numpy(np.vstack([luma, np.zeros((24, 64), np.uint8)]))
+    luma = torch.from_numpy(rng.integers(0, 256, size=(48, 64)).astype(np.uint8))
 
-    on_gpu = packed.cuda()
-    GpuCasSharpener(strength, ten_bit=False, device=torch.device("cuda:0")).apply_luma_(
-        on_gpu, 48
-    )
-    GpuCasSharpener(strength, ten_bit=False, device=torch.device("cpu")).apply_luma_(
-        packed, 48
-    )
+    on_gpu = _sharpened(GpuCasSharpener(strength, ten_bit=False, device=torch.device("cuda:0")), luma.cuda())
+    on_cpu = _sharpened(GpuCasSharpener(strength, ten_bit=False, device=torch.device("cpu")), luma)
 
-    assert torch.equal(on_gpu.cpu(), packed)
+    assert torch.equal(on_gpu.cpu(), on_cpu)
 
 
 @requires_cuda
 @pytest.mark.parametrize("strength", [0.1, 0.5, 1.0])
 def test_cuda_kernel_matches_the_torch_implementation_for_p010(strength: float) -> None:
     rng = np.random.default_rng(6)
-    luma = (rng.integers(0, 1024, size=(48, 64)).astype(np.int32) << 6).astype(np.int32)
-    chroma = np.full((24, 64), 512 << 6, dtype=np.int32)
-    packed = torch.from_numpy(np.vstack([luma, chroma]).astype(np.uint16)).view(torch.int16)
+    codes = rng.integers(0, 1024, size=(48, 64)).astype(np.int32) << 6
+    luma = torch.from_numpy(codes.astype(np.uint16)).view(torch.int16)
 
-    on_gpu = packed.cuda()
-    GpuCasSharpener(strength, ten_bit=True, device=torch.device("cuda:0")).apply_luma_(
-        on_gpu, 48
-    )
-    GpuCasSharpener(strength, ten_bit=True, device=torch.device("cpu")).apply_luma_(
-        packed, 48
-    )
+    on_gpu = _sharpened(GpuCasSharpener(strength, ten_bit=True, device=torch.device("cuda:0")), luma.cuda())
+    on_cpu = _sharpened(GpuCasSharpener(strength, ten_bit=True, device=torch.device("cpu")), luma)
 
-    assert torch.equal(on_gpu.cpu(), packed)
+    assert torch.equal(on_gpu.cpu(), on_cpu)

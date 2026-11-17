@@ -10,7 +10,8 @@ import torch
 from factories import FakeFrameGeneration, RecordingWriter, session_config, video_metadata
 from jasna.frame_generation import FrameGenerationWriter
 from jasna.media.splice import SmartRenderCompatibilityError
-from jasna.media.video_encoder import resolve_encoder_options, AcceleratorVendor
+from jasna.accelerator import AcceleratorVendor
+from jasna.media.encoder_options import resolve_encoder_options
 from jasna.session_factory import FRAME_GENERATION_NEEDS_RTX_40, build_restoration_session, splice_source
 
 

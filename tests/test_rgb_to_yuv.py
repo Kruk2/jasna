@@ -5,6 +5,7 @@ from av.video.reformatter import Colorspace as AvColorspace
 
 from jasna.media.rgb_to_yuv import RgbToYuvConverter
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
+from factories import yuv_to_rgb
 
 NV12_VARIANTS = {
     (AvColorspace.ITU601, False): "nv12_bt601_limited",
@@ -89,8 +90,6 @@ def test_round_trip_against_yuv_to_rgb_converter(color_space, full_range):
     y = packed[:h]
     uv = packed[h:].reshape(h // 2, w // 2, 2)
 
-    back = YuvToRgbConverter(
-        h, w, color_space, full_range, False, torch.device("cpu")
-    ).convert(y, uv)
+    back = yuv_to_rgb(YuvToRgbConverter(h, w, color_space, full_range, False, torch.device("cpu")), y, uv)
 
     assert (back.float() - img.float()).abs().max().item() <= 3.0

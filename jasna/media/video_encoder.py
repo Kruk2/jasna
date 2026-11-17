@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import heapq
 import logging
-import math
 import queue
 import threading
 from collections import deque
-from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
-from types import MappingProxyType
 from typing import Mapping
 
 import av
@@ -28,191 +25,20 @@ from jasna.accelerator import (
     stream_context,
     vendor_for_device,
 )
-from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.cas import GpuCasSharpener
 from jasna.media.container_utils import (
-    CREATION_TIME,
     MOV_SUFFIXES,
-    is_mov_chapter_stream,
     output_creation_time,
-    subtitle_transcode_codec,
     with_output_creation_time,
 )
-from jasna.media.encoder_settings import cq_controls, encoder_cq_spec, validate_encoder_settings
+from jasna.media.encoder_options import resolve_encoder_options
 from jasna.media.lut import CubeLut, GpuLutApplier
 from jasna.media.probe import VideoMetadata
 from jasna.media.rgb_to_yuv import RgbToYuvConverter
-from jasna.settings_tag import settings_comment, with_source_comment
+from jasna.media.source_streams import SourceStreamCopier
+from jasna.settings_tag import settings_comment
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_ENCODER_OPTIONS: dict[str, str] = {
-    "preset": "p5",
-    "tune": "hq",
-    "profile": "main10",
-    "rc": "vbr",
-    "cq": str(encoder_cq_spec("hevc", AcceleratorVendor.NVIDIA).default),
-    "qmin": "17",
-    "qmax": "34",
-    "nonref_p": "1",
-    "g": "250",
-    "temporal-aq": "1",
-    "rc-lookahead": "32",
-    "lookahead_level": "1",
-    "spatial_aq": "1",
-    "aq-strength": "8",
-    "init_qpI": "17",
-    "init_qpP": "17",
-    "init_qpB": "17",
-    "bf": "4",
-    "b_ref_mode": "middle",
-}
-
-# lookahead_level breaks avcodec_open2 on h264_nvenc with this lookahead/AQ
-# combination (ENOSYS on RTX 5090), so H.264 deliberately omits it.
-DEFAULT_H264_ENCODER_OPTIONS: dict[str, str] = {
-    "preset": "p5",
-    "tune": "hq",
-    "profile": "high",
-    "rc": "vbr",
-    # CQ 25 kept representative capped and uncapped H.264 encodes above VMAF 95.
-    "cq": str(encoder_cq_spec("h264", AcceleratorVendor.NVIDIA).default),
-    "qmin": "17",
-    "qmax": "34",
-    "nonref_p": "1",
-    "g": "250",
-    "temporal-aq": "1",
-    "rc-lookahead": "32",
-    "spatial_aq": "1",
-    "aq-strength": "8",
-    "init_qpI": "17",
-    "init_qpP": "17",
-    "init_qpB": "17",
-    "bf": "4",
-    "b_ref_mode": "middle",
-}
-
-# AV1 target quality uses a 0..63 scale rather than H.264/HEVC's 0..51.
-# CQ 35 matches HEVC CQ 28 on the same seven-above-HEVC scale. AV1 QP limits use a separate
-# 0..255 scale, so the HEVC qmin/qmax/init_qp values must not be copied here.
-# No profile: P010 input makes av1_nvenc emit AV1 Main 10-bit on its own.
-# av1_nvenc only consumes the hyphenated spatial-aq spelling.
-DEFAULT_AV1_ENCODER_OPTIONS: dict[str, str] = {
-    "preset": "p5",
-    "tune": "hq",
-    "rc": "vbr",
-    "cq": str(encoder_cq_spec("av1", AcceleratorVendor.NVIDIA).default),
-    "nonref_p": "1",
-    "g": "250",
-    "temporal-aq": "1",
-    "rc-lookahead": "32",
-    "lookahead_level": "1",
-    "spatial-aq": "1",
-    "aq-strength": "8",
-    "bf": "4",
-    "b_ref_mode": "middle",
-}
-
-def _amf_av1_qindex(cq: int) -> int:
-    # AMF AV1 frame QPs are AV1 qindex 0..255; CQ uses the H.264/HEVC QP scale 0..51.
-    return cq * 255 // 51
-
-
-def _amf_constant_qp(codec: str, cq: int) -> dict[str, str]:
-    if codec == "av1":
-        qindex = str(_amf_av1_qindex(cq))
-        return {"qp_i": qindex, "qp_p": qindex, "qp_b": qindex}
-    if codec == "h264":
-        return {"qp_i": str(cq), "qp_p": str(cq), "qp_b": str(cq)}
-    return {"qp_i": str(cq), "qp_p": str(cq)}
-
-
-DEFAULT_AMF_H264_ENCODER_OPTIONS: dict[str, str] = {
-    "usage": "high_quality",
-    "quality": "quality",
-    "rc": "cqp",
-    **_amf_constant_qp("h264", encoder_cq_spec("h264", AcceleratorVendor.AMD).default),
-    "g": "250",
-    "preanalysis": "0",
-    "vbaq": "0",
-    "profile": "high",
-}
-
-DEFAULT_AMF_HEVC_ENCODER_OPTIONS: dict[str, str] = {
-    "usage": "high_quality",
-    "quality": "quality",
-    "rc": "cqp",
-    **_amf_constant_qp("hevc", encoder_cq_spec("hevc", AcceleratorVendor.AMD).default),
-    "g": "250",
-    "preanalysis": "0",
-    "vbaq": "0",
-    "profile": "main10",
-    "bitdepth": "10",
-}
-
-
-DEFAULT_AMF_AV1_ENCODER_OPTIONS: dict[str, str] = {
-    "usage": "high_quality",
-    "quality": "quality",
-    "rc": "cqp",
-    **_amf_constant_qp("av1", encoder_cq_spec("av1", AcceleratorVendor.AMD).default),
-    "g": "250",
-    "preanalysis": "0",
-    "aq_mode": "none",
-    "profile": "main",
-    "bitdepth": "10",
-}
-
-NVENC_SMART_FRAGMENT_OPTIONS = MappingProxyType({"forced-idr": "1"})
-AMF_SMART_FRAGMENT_OPTIONS = MappingProxyType({"forced_idr": "1"})
-
-
-@dataclass(frozen=True)
-class EncoderSpec:
-    encoder_name: str
-    frame_format: str  # PyAV hardware-frame software format: "nv12" or "p010le"
-    default_options: Mapping[str, str]
-
-    @property
-    def ten_bit(self) -> bool:
-        return self.frame_format == "p010le"
-
-
-ENCODER_SPECS: dict[str, EncoderSpec] = {
-    "hevc": EncoderSpec(
-        encoder_name="hevc_nvenc",
-        frame_format="p010le",
-        default_options=MappingProxyType(DEFAULT_ENCODER_OPTIONS),
-    ),
-    "h264": EncoderSpec(
-        encoder_name="h264_nvenc",
-        frame_format="nv12",
-        default_options=MappingProxyType(DEFAULT_H264_ENCODER_OPTIONS),
-    ),
-    "av1": EncoderSpec(
-        encoder_name="av1_nvenc",
-        frame_format="p010le",
-        default_options=MappingProxyType(DEFAULT_AV1_ENCODER_OPTIONS),
-    ),
-}
-
-AMF_ENCODER_SPECS: dict[str, EncoderSpec] = {
-    "hevc": EncoderSpec(
-        encoder_name="hevc_amf",
-        frame_format="p010le",
-        default_options=MappingProxyType(DEFAULT_AMF_HEVC_ENCODER_OPTIONS),
-    ),
-    "h264": EncoderSpec(
-        encoder_name="h264_amf",
-        frame_format="nv12",
-        default_options=MappingProxyType(DEFAULT_AMF_H264_ENCODER_OPTIONS),
-    ),
-    "av1": EncoderSpec(
-        encoder_name="av1_amf",
-        frame_format="p010le",
-        default_options=MappingProxyType(DEFAULT_AMF_AV1_ENCODER_OPTIONS),
-    ),
-}
 
 # ITU-T H.273 matrix, primaries, and transfer-characteristic code points.
 _COLOR_TAGS = {
@@ -245,148 +71,6 @@ _COLOR_VARIANTS = {
 _NVENC_PITCH_ALIGNMENT = 16
 ENCODE_BUFFER_SIZE = 8
 
-NVENC_MAX_SURFACES = 64
-LARGE_FRAME_PIXELS = 4096 * 2160
-"""Frames above DCI 4K get a shorter default NVENC lookahead: at 8K, rc-lookahead 32 holds 22
-more 96 MiB frames than the B-frames need, which left LTX too little VRAM on 16 GB cards (#790)."""
-NVENC_WORK_FRAMES = 20
-"""NVENC's own buffers (references, lookahead analysis) in output frames: 16-22 measured at 4K
-and 8K, HEVC and AV1, on an RTX 5090 (2026-11-16)."""
-
-
-def nvenc_held_frames(rc_lookahead: int, b_frames: int) -> int:
-    """Input frames NVENC keeps referenced: FFmpeg's ``nvenc_recalc_surfaces`` with the default
-    ``surfaces`` and ``delay``, whose output starts only once all but one surface are queued."""
-    frame_interval_p = b_frames + 1
-    surfaces = max(4, frame_interval_p * 4)
-    if rc_lookahead > 0:
-        surfaces = max(surfaces, rc_lookahead + frame_interval_p + 5)
-    return min(surfaces, NVENC_MAX_SURFACES)
-
-
-def lookahead_within_b_frame_surfaces(b_frames: int) -> int:
-    """The longest lookahead NVENC runs on the surfaces its B-frames already hold."""
-    return max(0, nvenc_held_frames(0, b_frames) - (b_frames + 1) - 5)
-
-
-def nvenc_vram_bytes(spec: EncoderSpec, options: Mapping[str, str], *, width: int, height: int) -> int:
-    """VRAM an NVENC encode holds: its queued input frames plus its own buffers."""
-    frame_bytes = width * height * 3 // 2 * (2 if spec.ten_bit else 1)
-    held = nvenc_held_frames(int(options.get("rc-lookahead", 0)), int(options.get("bf", 0)))
-    return (held + NVENC_WORK_FRAMES) * frame_bytes
-
-
-def nvenc_vram_beside_ltx(spec: EncoderSpec, options: Mapping[str, str], *, width: int, height: int) -> int:
-    """VRAM the 768 px decision keeps free for NVENC: only frames above DCI 4K, since its
-    threshold was measured with a smaller encode already on the card."""
-    if width * height <= LARGE_FRAME_PIXELS:
-        return 0
-    return nvenc_vram_bytes(spec, options, width=width, height=height)
-
-
-# `cq` alone targets a fixed quality and ignores how the source was stored, so a
-# cheaply encoded source is re-encoded far above its own quality point and grows
-# several times over (issues #235, #243). A ceiling tied to the source bitrate
-# bounds that without measurably costing quality: across 27 clips (1080p to 8K,
-# VR and flat) capped encodes landed on the uncapped quality-vs-bitrate curve to
-# within 0.07 VMAF, and the ceiling stays inert on sources that were already
-# generously encoded. HEVC sources get restoration headroom; NVIDIA H.264 output
-# gets a larger ceiling because the old 1x limit flattened CQ values (issue #282).
-SOURCE_BITRATE_CAP_FACTORS: dict[str, float] = {"hevc": 1.25}
-DEFAULT_SOURCE_BITRATE_CAP_FACTOR = 1.0
-NVENC_H264_SOURCE_BITRATE_CAP_FACTOR = 2.0
-# Any VBV buffer of roughly a second or more never becomes the binding
-# constraint; only sub-second buffers throttle, which is the #243 unit trap.
-SOURCE_BITRATE_CAP_BUFFER_RATIO = 2
-
-
-def source_bitrate_cap_options(
-    metadata: VideoMetadata,
-    *,
-    output_codec: str,
-    vendor: AcceleratorVendor,
-    frame_generation: bool,
-) -> dict[str, str]:
-    """With ``frame_generation`` the output has twice the frames, so the ceiling doubles to
-    keep each frame's share of it."""
-    if metadata.video_bitrate <= 0:
-        logger.warning(
-            "No source bitrate for %s; encoding without a source-tied bitrate ceiling",
-            metadata.video_file,
-        )
-        return {}
-    if vendor is AcceleratorVendor.NVIDIA and output_codec == "h264":
-        factor = NVENC_H264_SOURCE_BITRATE_CAP_FACTOR
-    else:
-        factor = SOURCE_BITRATE_CAP_FACTORS.get(
-            metadata.codec_name.lower(), DEFAULT_SOURCE_BITRATE_CAP_FACTOR
-        )
-    maxrate = int(metadata.video_bitrate * factor * (2 if frame_generation else 1))
-    return {
-        "maxrate": str(maxrate),
-        "bufsize": str(maxrate * SOURCE_BITRATE_CAP_BUFFER_RATIO),
-    }
-
-
-def _option_value(value: object) -> str:
-    if isinstance(value, bool):
-        return "1" if value else "0"
-    return str(value)
-
-
-def _drop_unsupported_nvenc_overrides(
-    codec: str, overrides: dict[str, str], defaults: Mapping[str, str]
-) -> None:
-    # NVENC rejects these combinations at avcodec_open2, so dropping them with
-    # a warning beats failing the whole job.
-    if codec == "h264" and "lookahead_level" in overrides:
-        overrides.pop("lookahead_level")
-        logger.warning("dropping lookahead_level: h264_nvenc fails to open with it")
-    if overrides.get("weighted_pred", "0") != "0":
-        if codec == "av1":
-            overrides.pop("weighted_pred")
-            logger.warning("dropping weighted_pred: av1_nvenc does not support it")
-        elif overrides.get("bf", defaults.get("bf", "0")) != "0":
-            overrides.pop("weighted_pred")
-            logger.warning("dropping weighted_pred: NVENC supports it only with bf=0")
-
-
-def _normalize_amf_cq(
-    codec: str,
-    overrides: dict[str, str],
-    defaults: dict[str, str],
-    *,
-    ten_bit: bool,
-) -> None:
-    rc = overrides.get("rc", defaults["rc"])
-    cqp_modes = {"cqp", "0"}
-    qvbr_modes = {"qvbr", "hqvbr", "4", "5"}
-    if rc not in cqp_modes:
-        defaults.pop("qp_i", None)
-        defaults.pop("qp_p", None)
-        defaults.pop("qp_b", None)
-    if codec in {"hevc", "av1"} and ten_bit and rc in qvbr_modes:
-        raise ValueError(
-            f"AMD {codec.upper()} Main10 does not support QVBR or HQVBR; use the default CQP mode"
-        )
-
-    aliases = cq_controls(overrides, AcceleratorVendor.AMD)
-    if len(aliases) > 1:
-        raise ValueError(
-            "Conflicting encoder settings: cq and qvbr_quality_level are aliases "
-            "on AMD; use only one"
-        )
-    if not aliases:
-        return
-
-    value = overrides.pop(aliases[0])
-    if rc in cqp_modes:
-        overrides.update(_amf_constant_qp(codec, int(value)))
-    elif codec == "h264" or (not ten_bit and rc in qvbr_modes):
-        overrides["qvbr_quality_level"] = value
-    else:
-        raise ValueError(f"AMD {codec.upper()} CQ requires rc=cqp")
-
 
 def nvenc_yuv_frame(height: int, width: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
     """A packed NV12/P010 frame whose rows start on the pitch NVENC accepts."""
@@ -406,87 +90,6 @@ def _mov_container_options(suffix: str, *, fmp4: bool) -> dict[str, str]:
     # header fields parsed from the first audio packet.
     flags = "+frag_keyframe+empty_moov+delay_moov" if fmp4 else "+faststart"
     return {"movflags": flags}
-
-
-def _normalized_audio_layout(layout: av.AudioLayout) -> av.AudioLayout:
-    channels = layout.nb_channels
-    if layout.name == f"{channels} channels" and channels <= 8:
-        return av.AudioLayout(f"{channels}c")
-    return layout
-
-
-def _requests_eight_bit_output(codec: str, overrides: Mapping[str, str]) -> bool:
-    # NVENC and AMF take their output depth from the input frames, so an 8-bit
-    # profile or bit depth only works when the frames are 8-bit too.
-    return (codec == "hevc" and overrides.get("profile") == "main") or overrides.get("bitdepth") == "8"
-
-
-def _eight_bit_spec(spec: EncoderSpec, codec: str) -> EncoderSpec:
-    options = dict(spec.default_options)
-    if codec == "hevc":
-        options["profile"] = "main"
-    # AMF pins output depth via "bitdepth"; dropping it lets FFmpeg
-    # derive 8-bit from the nv12 input instead of conflicting with it.
-    options.pop("bitdepth", None)
-    return replace(spec, frame_format="nv12", default_options=MappingProxyType(options))
-
-
-def resolve_encoder_options(
-    vendor: AcceleratorVendor,
-    codec: str,
-    metadata: VideoMetadata,
-    encoder_settings: dict[str, object],
-    *,
-    smart_fragment: bool,
-    frame_generation: bool = False,
-) -> tuple[EncoderSpec, dict[str, str]]:
-    """Pick the encoder spec and the final FFmpeg options for one output."""
-    specs = AMF_ENCODER_SPECS if vendor is AcceleratorVendor.AMD else ENCODER_SPECS
-    if codec not in specs:
-        raise ValueError(f"Unsupported codec: {codec}")
-    spec = specs[codec]
-    if encoder_settings:
-        validate_encoder_settings(encoder_settings, codec=codec, vendor=vendor)
-    overrides = {k: _option_value(v) for k, v in encoder_settings.items()}
-    # Smart-render fragments are spliced between copied source spans, so they
-    # keep the source bit depth instead of the codec's 10-bit default.
-    matches_eight_bit_source = smart_fragment and not metadata.is_10bit
-    if codec in {"hevc", "av1"} and (
-        matches_eight_bit_source or _requests_eight_bit_output(codec, overrides)
-    ):
-        spec = _eight_bit_spec(spec, codec)
-
-    encoder_options = dict(spec.default_options)
-    if overrides:
-        # FFmpeg accepts both spellings for HEVC/H.264, but their defaults
-        # use the underscore key. Normalize the alias so a user override
-        # replaces that default instead of passing two conflicting options.
-        if "spatial-aq" in overrides and "spatial_aq" in encoder_options:
-            overrides["spatial_aq"] = overrides.pop("spatial-aq")
-        if vendor is AcceleratorVendor.AMD:
-            _normalize_amf_cq(codec, overrides, encoder_options, ten_bit=spec.ten_bit)
-        else:
-            _drop_unsupported_nvenc_overrides(codec, overrides, encoder_options)
-    uses_amf_cqp = (
-        vendor is AcceleratorVendor.AMD
-        and overrides.get("rc", encoder_options["rc"]) in {"cqp", "0"}
-    )
-    if "maxrate" not in overrides and not uses_amf_cqp:
-        encoder_options.update(
-            source_bitrate_cap_options(metadata, output_codec=codec, vendor=vendor, frame_generation=frame_generation)
-        )
-    encoder_options.update(overrides)
-    if (
-        vendor is AcceleratorVendor.NVIDIA
-        and metadata.video_width * metadata.video_height > LARGE_FRAME_PIXELS
-        and not {"rc-lookahead", "lookahead_level"} & overrides.keys()
-    ):
-        encoder_options["rc-lookahead"] = str(lookahead_within_b_frame_surfaces(int(encoder_options["bf"])))
-    if smart_fragment:
-        encoder_options.update(
-            AMF_SMART_FRAGMENT_OPTIONS if vendor is AcceleratorVendor.AMD else NVENC_SMART_FRAGMENT_OPTIONS
-        )
-    return spec, encoder_options
 
 
 class VideoEncoder:
@@ -552,7 +155,6 @@ class VideoEncoder:
         # its input frame after encode() returns, so NVIDIA allocates per frame.
         self._packed: torch.Tensor | None = None
         self._cas_luma: torch.Tensor | None = None
-        self._source_chapters = ()
 
     def __enter__(self):
         try:
@@ -607,11 +209,25 @@ class VideoEncoder:
         ctx.colorspace = matrix
         ctx.color_primaries = primaries
         ctx.color_trc = transfer
+        creation_time = output_creation_time(datetime.now(timezone.utc))
+        out_v.metadata.update(with_output_creation_time(in_v.metadata, creation_time))
+        out_v.disposition = in_v.disposition
         self.out_stream = out_v
 
-        creation_time = output_creation_time(datetime.now(timezone.utc))
-        self._copy_source_metadata(in_v, out_v, creation_time)
-        self._setup_source_streams(in_v, creation_time)
+        comment = (
+            None
+            if self.settings is None
+            else settings_comment(self.settings, encoder=self.encoder_name, options=self.encoder_options)
+        )
+        self._source_streams = SourceStreamCopier(
+            self._src,
+            self.dst,
+            self.output_path,
+            video_index=in_v.index,
+            creation_time=creation_time,
+            comment=comment,
+            smart_fragment=self.smart_fragment,
+        )
 
         # Wrap torch's already-current primary context.  FFmpeg's primary_ctx
         # mode tries to change its scheduling flags and fails once torch has
@@ -666,154 +282,6 @@ class VideoEncoder:
         self._encode_thread.start()
         return self
 
-    def _copy_source_metadata(self, in_v, out_v, creation_time: str) -> None:
-        self.dst.metadata.update(self._src.metadata)
-        self.dst.metadata[CREATION_TIME] = creation_time
-        if self.settings is not None:
-            for key in [key for key in self.dst.metadata if key.lower() == "comment"]:
-                del self.dst.metadata[key]
-            comment = settings_comment(self.settings, encoder=self.encoder_name, options=self.encoder_options)
-            self.dst.metadata["comment"] = with_source_comment(comment, self._src.metadata)
-            logger.info("%s settings: %s", self.output_path.name, self.dst.metadata["comment"])
-        out_v.metadata.update(with_output_creation_time(in_v.metadata, creation_time))
-        out_v.disposition = in_v.disposition
-        if not self.smart_fragment:
-            self._source_chapters = self._src.chapters()
-            self.dst.set_chapters(self._source_chapters)
-
-    def _setup_source_streams(self, in_v, creation_time: str) -> None:
-        self._source_pipes: dict[int, tuple[str, object, object]] = {}
-        self._source_backlog: deque = deque()
-        self._source_iter = None
-        self._last_source_dts: dict[int, tuple[int, Fraction]] = {}
-        self._warned_source_dts: set[int] = set()
-        self._next_source_audio_pts: dict[int, int] = {}
-        if self.smart_fragment:
-            return
-
-        packet_streams = []
-        output_formats = set(self.dst.format.name.split(","))
-        source_formats = set(self._src.format.name.split(","))
-        source_chapters = self._source_chapters
-        for in_stream in self._src.streams:
-            if in_stream.index == in_v.index:
-                continue
-            if is_mov_chapter_stream(
-                in_stream,
-                source_formats=source_formats,
-                chapters=source_chapters,
-            ):
-                continue
-            if in_stream.type == "attachment" and "matroska" not in output_formats:
-                logger.warning(
-                    "Skipping attachment stream %s: %s output does not support attachments",
-                    in_stream.index,
-                    self.output_path.suffix,
-                )
-                continue
-            if in_stream.codec_context is None and in_stream.type != "attachment":
-                logger.warning(
-                    "Skipping %s stream %s: it has no copyable codec",
-                    in_stream.type,
-                    in_stream.index,
-                )
-                continue
-
-            source_audio_layout = (
-                in_stream.codec_context.layout
-                if in_stream.type == "audio"
-                else None
-            )
-            audio_layout = (
-                _normalized_audio_layout(source_audio_layout)
-                if source_audio_layout is not None
-                else None
-            )
-            if in_stream.type == "audio" and needs_audio_reencode(
-                in_stream.codec_context.name,
-                self.output_path.suffix,
-                self.dst.supported_codecs,
-            ):
-                logger.info(
-                    "re-encoding audio %s -> aac for %s",
-                    in_stream.codec_context.name,
-                    self.output_path.suffix,
-                )
-                out_stream = self.dst.add_stream(
-                    "aac", rate=in_stream.codec_context.sample_rate
-                )
-                out_stream.codec_context.layout = audio_layout
-                out_stream.bit_rate = 256_000
-                processor = av.AudioResampler(
-                    format="fltp",
-                    layout=audio_layout,
-                    rate=in_stream.codec_context.sample_rate,
-                )
-                kind = "transcode"
-            else:
-                try:
-                    out_stream = self.dst.add_stream_from_template(
-                        in_stream, opaque=True
-                    )
-                except ValueError as exc:
-                    transcode_codec = subtitle_transcode_codec(
-                        in_stream.codec_context.name,
-                        output_formats=output_formats,
-                        supported_codecs=self.dst.supported_codecs,
-                    )
-                    if in_stream.type != "subtitle" or transcode_codec is None:
-                        logger.warning(
-                            "Skipping %s stream %s: %s",
-                            in_stream.type,
-                            in_stream.index,
-                            exc,
-                        )
-                        continue
-                    logger.info(
-                        "re-encoding subtitle %s -> %s for %s",
-                        in_stream.codec_context.name,
-                        transcode_codec,
-                        self.output_path.suffix,
-                    )
-                    out_stream = self.dst.add_stream(transcode_codec)
-                    subtitle_time_base = in_stream.time_base or Fraction(1, 1_000)
-                    out_stream.time_base = subtitle_time_base
-                    out_stream.codec_context.time_base = subtitle_time_base
-                    out_stream.codec_context.subtitle_header = b""
-                    processor = None
-                    kind = "subtitle_transcode"
-                else:
-                    if (
-                        audio_layout is not None
-                        and audio_layout is not source_audio_layout
-                    ):
-                        out_stream.codec_context.layout = audio_layout
-                    processor = self._aac_copy_filter(
-                        in_stream, out_stream, output_formats
-                    )
-                    kind = "copy"
-
-            out_stream.metadata.update(with_output_creation_time(in_stream.metadata, creation_time))
-            out_stream.disposition = in_stream.disposition
-            if in_stream.type == "attachment":
-                continue
-            self._source_pipes[in_stream.index] = (kind, out_stream, processor)
-            packet_streams.append(in_stream)
-
-        if packet_streams:
-            self._source_iter = self._src.demux(packet_streams)
-
-    @staticmethod
-    def _aac_copy_filter(in_stream, out_stream, output_formats):
-        if (
-            in_stream.type == "audio"
-            and in_stream.codec_context.name == "aac"
-            and output_formats & {"mp4", "mov"}
-            and out_stream.codec_context.extradata
-        ):
-            return av.bitstream.BitStreamFilterContext("aac_adtstoasc", in_stream)
-        return None
-
     def __exit__(self, exc_type, exc_value, traceback):
         self._close(flush_video=exc_type is None, copy_rest_of_source=exc_type is None)
 
@@ -835,7 +303,7 @@ class VideoEncoder:
                 for packet in self.out_stream.encode(None):
                     self._mux_video(packet)
                 if copy_rest_of_source:
-                    self._drain_source_streams()
+                    self._source_streams.drain()
         finally:
             self.dst.close()
             self._src.close()
@@ -893,137 +361,7 @@ class VideoEncoder:
         if not self._options_validated:
             self._validate_encoder_options()
         if threshold is not None:
-            self._pump_source_streams(threshold)
-
-    def _produce_source_packets(self, in_packet) -> list:
-        kind, out_stream, processor = self._source_pipes[in_packet.stream.index]
-        if kind == "copy":
-            return self._copy_source_packets(in_packet, out_stream, processor)
-        if kind == "subtitle_transcode":
-            if in_packet.size == 0:
-                return []
-            subtitle = in_packet.stream.codec_context.decode2(in_packet)
-            if subtitle is None:
-                return []
-            packet = out_stream.codec_context.encode_subtitle(subtitle)
-            output_time_base = (
-                out_stream.time_base
-                or out_stream.codec_context.time_base
-                or in_packet.time_base
-                or Fraction(1, 1_000)
-            )
-
-            def rescale(value):
-                if value is None or in_packet.time_base is None:
-                    return value
-                return round(value * in_packet.time_base / output_time_base)
-
-            packet.stream = out_stream
-            packet.pts = rescale(in_packet.pts)
-            packet.dts = rescale(
-                in_packet.dts if in_packet.dts is not None else in_packet.pts
-            )
-            packet.duration = rescale(in_packet.duration)
-            packet.time_base = output_time_base
-            return [packet]
-        out_packets = []
-        sample_time_base = Fraction(1, out_stream.codec_context.sample_rate)
-        for aframe in in_packet.decode():
-            aframe.pts = self._source_audio_frame_pts(
-                aframe, in_packet.stream.index, sample_time_base
-            )
-            aframe.time_base = sample_time_base
-            for rframe in processor.resample(aframe):
-                out_packets.extend(out_stream.encode(rframe))
-        return out_packets
-
-    def _source_audio_frame_pts(
-        self, aframe, stream_index: int, sample_time_base: Fraction
-    ) -> int | None:
-        """A decoder that splits one packet into several frames stamps only the first;
-        the rest follow on from the frame before."""
-        if aframe.pts is None:
-            pts = self._next_source_audio_pts.get(stream_index)
-        else:
-            pts = round(aframe.pts * aframe.time_base / sample_time_base)
-        if pts is not None:
-            self._next_source_audio_pts[stream_index] = pts + aframe.samples
-        return pts
-
-    @staticmethod
-    def _copy_source_packets(in_packet, out_stream, bitstream_filter):
-        if in_packet.size == 0:
-            return []
-        if bitstream_filter is None:
-            packets = [in_packet]
-        else:
-            packets = bitstream_filter.filter(in_packet)
-        for packet in packets:
-            packet.stream = out_stream
-        return packets
-
-    def _pump_source_streams(self, upto_seconds: float | None):
-        if self._source_iter is None:
-            return
-        while True:
-            if self._source_backlog:
-                packet = self._source_backlog[0]
-                ts = packet.dts if packet.dts is not None else packet.pts
-                if (
-                    upto_seconds is not None
-                    and ts is not None
-                    and packet.time_base is not None
-                    and float(ts * packet.time_base) > upto_seconds
-                ):
-                    return
-                self._source_backlog.popleft()
-                self._mux_source_packet(packet)
-                continue
-            in_packet = next(self._source_iter, None)
-            if in_packet is None:
-                self._source_iter = None
-                return
-            self._source_backlog.extend(self._produce_source_packets(in_packet))
-
-    def _drain_source_streams(self):
-        self._pump_source_streams(None)
-        for kind, out_stream, processor in self._source_pipes.values():
-            if kind != "transcode":
-                continue
-            packets = []
-            for rframe in processor.resample(None):
-                packets.extend(out_stream.encode(rframe))
-            packets.extend(out_stream.encode(None))
-            for packet in packets:
-                self._mux_source_packet(packet)
-
-    def _mux_source_packet(self, packet):
-        if packet.dts is not None:
-            last = self._last_source_dts.get(packet.stream.index)
-            if last is not None:
-                time_base = Fraction(packet.time_base or packet.stream.time_base)
-                minimum_time = (last[0] + 1) * last[1]
-                if packet.dts * time_base < minimum_time:
-                    first_nudge = packet.stream.index not in self._warned_source_dts
-                    self._warned_source_dts.add(packet.stream.index)
-                    logger.log(
-                        logging.WARNING if first_nudge else logging.DEBUG,
-                        "Source DTS %s at %s overlaps last muxed DTS %s at %s in output stream %s; nudging forward",
-                        packet.dts,
-                        time_base,
-                        last[0],
-                        last[1],
-                        packet.stream.index,
-                    )
-                    packet.dts = math.ceil(minimum_time / time_base)
-                    if packet.pts is not None and packet.pts < packet.dts:
-                        packet.pts = packet.dts
-        self.dst.mux(packet)
-        if packet.dts is not None:
-            self._last_source_dts[packet.stream.index] = (
-                packet.dts,
-                Fraction(packet.time_base or packet.stream.time_base),
-            )
+            self._source_streams.pump(threshold)
 
     def _clamp_pts_monotonic(self, pts: int) -> int:
         last = self._last_emitted_pts

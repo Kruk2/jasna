@@ -12,7 +12,7 @@ import pytest
 import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
-from factories import video_metadata
+from factories import video_metadata, yuv_to_rgb
 from jasna.media.video_decoder import VideoReader
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 
@@ -89,7 +89,7 @@ def _reference_rgb(y_val, u_val, v_val, w, h, color_space, full_range, ten_bit):
     uv[..., 0] = u_val * shift
     uv[..., 1] = v_val * shift
     converter = YuvToRgbConverter(h, w, color_space, full_range, ten_bit, torch.device("cpu"))
-    return converter.convert(y, uv.to(dtype))
+    return yuv_to_rgb(converter, y, uv.to(dtype))
 
 
 def test_ffv1_returns_cuda_uint8_rgb_batches(ffv1_video):

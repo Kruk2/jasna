@@ -147,10 +147,6 @@ class RgbToYuvConverter:
         self._kernel = Kernel(_KERNEL_MODULE, variant, _RGB_TO_YUV_ARG_TYPES) if has_precompiled_kernels(device) else None
         self._scratch: YuvScratch | None = None
 
-    @property
-    def uses_kernel(self) -> bool:
-        return self._kernel is not None
-
     def convert(self, frame: torch.Tensor) -> torch.Tensor:
         _, height, width = frame.shape
         packed = torch.empty(

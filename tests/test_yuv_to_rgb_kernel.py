@@ -4,6 +4,7 @@ from av.video.reformatter import Colorspace as AvColorspace
 
 from jasna.media.cuda_kernel import has_precompiled_kernels
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
+from factories import yuv_to_rgb
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available() or not has_precompiled_kernels(torch.device("cuda:0")),
@@ -31,10 +32,10 @@ def _planes(height: int, width: int, ten_bit: bool) -> tuple[torch.Tensor, torch
 def test_kernel_matches_the_eager_reference_within_one_code(color_space, full_range, ten_bit):
     height, width = 64, 96
     y, uv = _planes(height, width, ten_bit)
-    reference = YuvToRgbConverter(height, width, color_space, full_range, ten_bit, CPU).convert(y, uv)
+    reference = yuv_to_rgb(YuvToRgbConverter(height, width, color_space, full_range, ten_bit, CPU), y, uv)
 
     converter = YuvToRgbConverter(height, width, color_space, full_range, ten_bit, GPU)
     assert converter._cuda_kernel is not None
-    ours = converter.convert(y.to(GPU), uv.to(GPU)).cpu()
+    ours = yuv_to_rgb(converter, y.to(GPU), uv.to(GPU)).cpu()
 
     assert (ours.int() - reference.int()).abs().max().item() <= 1
