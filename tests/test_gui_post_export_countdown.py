@@ -73,9 +73,10 @@ def _locked_screen_never_shows(window) -> None:
 def test_countdown_runs_while_the_screen_is_locked(tk_root, clock, monkeypatch):
     monkeypatch.setattr(ShutdownCountdownDialog, "wait_visibility", _locked_screen_never_shows)
     expired: list[bool] = []
+    # A dialog of a hidden window is never shown, like any window while the screen is locked.
+    tk_root.withdraw()
     dialog = ShutdownCountdownDialog(tk_root, 60, lambda: expired.append(True), lambda: None)
 
-    dialog.withdraw()
     tk_root.update()
     assert not dialog.winfo_viewable()
 
