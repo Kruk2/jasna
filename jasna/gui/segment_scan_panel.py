@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import replace
@@ -38,7 +39,12 @@ from jasna.mosaic_scan import ltx_auto_segments, mosaic_boxes, segments_from_sco
 from jasna.segments import SegmentRange, format_timestamp
 
 _MASK_CACHE_SIZE = 256
-OLD_SCAN_JOIN_SECONDS = 10.0
+OLD_SCAN_WAIT_SECONDS = 10.0
+
+
+def old_scan_given_up(waiting_since: float, now: float) -> bool:
+    """Whether a new scan stops waiting for the previous worker to stop and starts beside it."""
+    return now - waiting_since >= OLD_SCAN_WAIT_SECONDS
 
 
 def clamp_scan_threshold(value: float) -> float:
@@ -88,6 +94,8 @@ class ScanPanel(ctk.CTkFrame):
         self._on_detection_changed = on_detection_changed
 
         self._worker: MosaicScanWorker | None = None
+        self._stopping_worker: MosaicScanWorker | None = None
+        self._start_waiting_since: float | None = None
         self._active = False
         self._low_vram = False
         self._was_stopped = False
@@ -372,25 +380,38 @@ class ScanPanel(ctk.CTkFrame):
             Tooltip(widget, t("segments_scan_ltx_auto_hint"))
 
     def poll(self) -> None:
+        if self._start_waiting_since is not None:
+            self._start_when_old_scan_stopped()
         if self._worker is None:
             return
         for event in queued_now(self._worker.events):
             self._handle_event(event)
 
     def stop(self) -> None:
-        if self._worker is None or not self._active:
+        if not self._active:
+            return
+        if self._start_waiting_since is not None:
+            self._cancel_pending_start()
+            return
+        if self._worker is None:
             return
         self._worker.stop()
         self._stop_btn.configure(state="disabled")
         self._set_status(t("segments_scan_stopping"), dot_color=Colors.STATUS_WARNING)
 
     def close(self) -> None:
-        if self._worker is not None:
-            self._worker.close()
+        if self._start_waiting_since is not None:
+            self._start_waiting_since = None
+            self._release_gpu()
+        for worker in (self._stopping_worker, self._worker):
+            if worker is not None:
+                worker.close()
 
     def join(self, timeout: float) -> None:
-        if self._worker is not None:
-            self._worker.join(timeout)
+        deadline = time.monotonic() + timeout
+        for worker in (self._stopping_worker, self._worker):
+            if worker is not None:
+                worker.join(max(0.0, deadline - time.monotonic()))
 
     def destroy(self) -> None:
         for after_id in (self._threshold_after, self._ltx_percent_after):
@@ -444,24 +465,8 @@ class ScanPanel(ctk.CTkFrame):
             self._set_status(t("segments_restore_gpu_busy"), color=Colors.STATUS_ERROR)
             self._set_ui_state("message")
             return
-        if self._worker is not None:
-            self._worker.close()
-            self._worker.join(OLD_SCAN_JOIN_SECONDS)
-            self._worker = None
+        self._retire_worker()
         self._claim_gpu()
-        try:
-            worker = MosaicScanWorker(
-                self._video_path,
-                self._metadata,
-                self.video_settings(),
-                stride_seconds=float(self._interval.get_value()),
-                on_stopped=self._release_gpu,
-            )
-            worker.start()
-        except Exception:
-            self._release_gpu()
-            raise
-        self._worker = worker
         self._result = None
         self._low_vram = False
         self._was_stopped = False
@@ -472,6 +477,42 @@ class ScanPanel(ctk.CTkFrame):
         self._progress.set(0.0)
         self._set_status(t("segments_scan_loading_model"), dot_color=Colors.STATUS_PROCESSING)
         self._set_locked(True)
+        self._start_waiting_since = time.monotonic()
+        self._start_when_old_scan_stopped()
+
+    def _start_when_old_scan_stopped(self) -> None:
+        """Start the pending scan once the previous worker has left the GPU; ``poll`` retries."""
+        old = self._stopping_worker
+        if old is not None and old.is_alive() and not old_scan_given_up(self._start_waiting_since, time.monotonic()):
+            return
+        # Past the wait limit the old worker is left to finish on its own.
+        self._stopping_worker = None
+        try:
+            worker = MosaicScanWorker(
+                self._video_path,
+                self._metadata,
+                self.video_settings(),
+                stride_seconds=float(self._interval.get_value()),
+                on_stopped=self._release_gpu,
+            )
+            worker.start()
+        except Exception:
+            self._cancel_pending_start()
+            raise
+        self._start_waiting_since = None
+        self._worker = worker
+
+    def _cancel_pending_start(self) -> None:
+        self._start_waiting_since = None
+        self._release_gpu()
+        self._set_locked(False)
+
+    def _retire_worker(self) -> None:
+        """Close the worker; the next scan starts only after it has stopped."""
+        if self._worker is not None:
+            self._worker.close()
+            self._stopping_worker = self._worker
+            self._worker = None
 
     def _set_locked(self, locked: bool) -> None:
         self._active = locked
@@ -506,9 +547,7 @@ class ScanPanel(ctk.CTkFrame):
             self._low_vram = True
             self._set_status(t("segments_scan_low_vram"), dot_color=Colors.STATUS_WARNING)
         elif isinstance(event, ScanFailed):
-            if self._worker is not None:
-                self._worker.close()
-            self._worker = None
+            self._retire_worker()
             self._set_locked(False)
             self._set_status(t("segments_scan_failed", message=event.message), color=Colors.STATUS_ERROR)
             self._set_ui_state("message")
@@ -716,9 +755,7 @@ class ScanPanel(ctk.CTkFrame):
         self._threshold = clamp_scan_threshold(recommended_score_threshold(str(model)))
         self._threshold_slider.set(self._threshold)
         self._threshold_label.configure(text=f"{self._threshold:.2f}")
-        if self._worker is not None:
-            self._worker.close()
-            self._worker = None
+        self._retire_worker()
         self._result = None
         self._proposals = ()
         self._mask_cache.clear()

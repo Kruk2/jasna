@@ -58,6 +58,9 @@ class CommandWorker:
     def join(self, timeout: float | None = None) -> None:
         self._thread.join(timeout=timeout)
 
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
     def close(self) -> None:
         if self._closed.is_set():
             return

@@ -24,7 +24,7 @@ from jasna.gui.locales import t
 from jasna.gui.ltx_models import model_key
 from jasna.gui.ltx_seed_preview import LtxSeedPreviewWorker, SeedFrame, SeedProgress, SeedReady
 from jasna.gui.models import AppSettings, JobItem
-from jasna.gui.mosaic_scan import MosaicScanResult, ScanCompleted
+from jasna.gui.mosaic_scan import MosaicScanResult, MosaicScanWorker, ScanCompleted
 from jasna.gui.segment_editor import SegmentEditor
 from jasna.gui.restoration_preview import RestorationClip, RestorationFrame, RestorationPreviewWorker, RestoredClipFrame
 from jasna.ltx.inference import Cancelled
@@ -162,6 +162,36 @@ def finish_scan(monkeypatch):
         return worker
 
     return finish
+
+
+@pytest.fixture
+def slow_scan_workers(monkeypatch):
+    """Scan workers that keep running after ``close`` until the returned event is set; ``started`` lists them."""
+    started: list[MosaicScanWorker] = []
+    may_stop = threading.Event()
+
+    class SlowStoppingScanWorker(MosaicScanWorker):
+        def start(self) -> None:
+            started.append(self)
+            super().start()
+
+        def _run(self) -> None:
+            self._closed.wait()
+            may_stop.wait(5)
+
+    monkeypatch.setattr(segment_scan_panel, "MosaicScanWorker", SlowStoppingScanWorker)
+    yield started, may_stop
+    may_stop.set()
+
+
+def _record_gpu_owners(owners: set):
+    return lambda owner, busy: (owners.add if busy else owners.discard)(owner)
+
+
+def _finish_first_scan(editor: SegmentEditor, started: list[MosaicScanWorker]) -> None:
+    editor._scan_panel._scan_btn.invoke()
+    started[0].events.put(ScanCompleted(_scan_result((0.0, 0.9)), stopped=False))
+    editor._poll_workers()
 
 
 @pytest.fixture
@@ -1131,3 +1161,72 @@ def test_join_workers_waits_up_to_the_timeout_for_workers_closed_with_the_editor
     _SlowStoppingRestorationWorker.finish.set()
     editor.join_workers(timeout=5)
     assert not worker._thread.is_alive()
+
+
+@pytest.mark.parametrize("change_model_first", [False, True])
+def test_new_scan_starts_only_after_the_old_worker_stopped(build_editor, slow_scan_workers, change_model_first) -> None:
+    started, may_stop = slow_scan_workers
+    editor = build_editor()
+    panel = editor._scan_panel
+    _finish_first_scan(editor, started)
+    if change_model_first:
+        panel._on_model_changed("rfdetr-v6-large")
+
+    panel._scan_btn.invoke()
+    panel._scan_btn.invoke()
+    editor._poll_workers()
+
+    assert len(started) == 1
+    assert panel.active
+    assert panel._status.cget("text") == t("segments_scan_loading_model")
+    assert panel._stop_btn.cget("state") == "normal"
+
+    may_stop.set()
+    started[0].join(5)
+    editor._poll_workers()
+
+    assert len(started) == 2
+    assert started[1].is_alive()
+    assert panel.active
+
+
+def test_cancelling_a_scan_that_waits_for_the_old_worker_starts_nothing(build_editor, slow_scan_workers) -> None:
+    started, may_stop = slow_scan_workers
+    gpu_owners: set = set()
+    editor = build_editor(set_preview_gpu_busy=_record_gpu_owners(gpu_owners))
+    panel = editor._scan_panel
+    _finish_first_scan(editor, started)
+    panel._scan_btn.invoke()
+
+    panel._stop_btn.invoke()
+
+    assert not panel.active
+    assert not gpu_owners
+    may_stop.set()
+    started[0].join(5)
+    editor._poll_workers()
+    assert len(started) == 1
+    assert not panel.active
+
+
+def test_closing_the_editor_drops_a_waiting_scan_and_joins_the_old_worker(build_editor, slow_scan_workers) -> None:
+    started, may_stop = slow_scan_workers
+    gpu_owners: set = set()
+    editor = build_editor(set_preview_gpu_busy=_record_gpu_owners(gpu_owners))
+    _finish_first_scan(editor, started)
+    editor._scan_panel._scan_btn.invoke()
+
+    editor._finish_close()
+    editor.join_workers(timeout=0.01)
+    assert started[0].is_alive()
+
+    may_stop.set()
+    editor.join_workers(timeout=5)
+    assert not started[0].is_alive()
+    assert len(started) == 1
+    assert not gpu_owners
+
+
+@pytest.mark.parametrize(("waited", "given_up"), [(0.0, False), (9.9, False), (10.0, True)])
+def test_new_scan_stops_waiting_for_an_old_worker_after_ten_seconds(waited, given_up) -> None:
+    assert segment_scan_panel.old_scan_given_up(100.0, 100.0 + waited) is given_up
