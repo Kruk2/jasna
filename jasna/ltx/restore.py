@@ -35,14 +35,13 @@ from jasna.ltx.encode_pass import encode_span
 from jasna.ltx.inference import ModelRuntime
 from jasna.ltx.model_files import LtxModelFiles
 from jasna.ltx.plan import TrackPlan, plan_summary, plan_video, plan_window_lines
-from jasna.ltx.resume_files import plans_to_arrays
-from jasna.ltx.tracks import Region
 from jasna.ltx.progress import SPEED_TEST_FRAMES, Progress, StageBar, timing_marks
 from jasna.ltx.regions import regions_per_frame
 from jasna.ltx.resume_files import (
     LatentStore,
     final_stores,
     plan_path,
+    plans_to_arrays,
     saved_frames,
     saved_plans,
     span_stores,
@@ -60,6 +59,7 @@ from jasna.ltx.spans import (
     segment_batches,
 )
 from jasna.ltx.super_res import LtxSuperRes
+from jasna.ltx.tracks import Region
 from jasna.ltx.vram_budget import DecodeBudget, free_vram_budget
 from jasna.mosaic.detections import Detections
 from jasna.os_utils import atomic_write, scratch_folder
@@ -224,10 +224,10 @@ def prepare_spans(
         try:
             with progress.bar("encode", progress.frames, marks=timing_marks(encoder)) as bar:
                 encoded = [p.windows > 0 or not done.windows for p, done in zip(pending, prepared)]
-                saved_frames = sum(
+                reused_frames = sum(
                     saved_frames(p.span, directory) for p, encode in zip(prepared, encoded) if not encode
                 )
-                bar.reuse(saved_frames, saved_frames, reused)
+                bar.reuse(reused_frames, reused_frames, reused)
                 for p, encode in zip(pending, encoded):
                     if encode:
                         encode_span(

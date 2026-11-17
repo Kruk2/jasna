@@ -1603,6 +1603,21 @@ def test_resuming_only_the_remaining_span_uses_its_original_latents(fakes, monke
     assert {pts for pts, marker in writer.frames if marker} == set(range(220, 480, 10))
 
 
+def test_resume_encodes_only_the_span_whose_encode_was_interrupted(fakes, monkeypatch, tmp_path):
+    video = _video(50, range(2, 48))
+    spans = [
+        ltx_spans.LtxSpan(_source(video[:20]), (ltx_spans.LtxSegment(20, 180, 7),), _Writer),
+        ltx_spans.LtxSpan(_source(video, 20), (ltx_spans.LtxSegment(220, 480, 9),), _Writer),
+    ]
+    _record_latent_writes(monkeypatch, "reference", fail_at=2)
+    with pytest.raises(RuntimeError, match="reference write interrupted"):
+        _resume_spans(tmp_path, spans)
+    encoded = _record_latent_writes(monkeypatch, "reference")
+    _resume_spans(tmp_path, spans)
+    assert len(encoded) == 1
+    assert _Transformer.seeds == [[7], [9]]
+
+
 @pytest.mark.parametrize(("frame_h", "frame_w"), [(720, 1280), (1080, 1920), (2160, 3840)])
 def test_the_speed_test_mosaics_plan_two_windows_on_each_canvas(frame_h, frame_w):
     detections = restore._SpeedTestMosaics()(torch.zeros(1, 3, 8, 8), target_hw=(frame_h, frame_w))
