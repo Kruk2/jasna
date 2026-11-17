@@ -4,6 +4,7 @@ import os
 import signal
 import sys
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, get_args
 
@@ -405,45 +406,17 @@ def _reject_options_of_other_restoration_backend(
             parser.error(f"{option} needs --restoration-model-name {needed_models}")
 
 
-def _stop_like_ctrl_c(signum, frame) -> None:
-    raise KeyboardInterrupt
+@dataclass(frozen=True)
+class _CliPaths:
+    input: Path | None
+    output: Path | None
+    lut: str | None
+    input_is_image: bool
+    input_is_dir: bool
 
 
-def stop_on_termination_signals() -> None:
-    """SIGTERM, and on Windows Ctrl+Break (the only signal a parent can send a console process group), stop Jasna
-    like Ctrl+C, so exit handlers still release resources."""
-    signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
-    if sys.platform == "win32":
-        signal.signal(signal.SIGBREAK, _stop_like_ctrl_c)
-
-
-def main() -> None:
-    stop_on_termination_signals()
-    try:
-        _main()
-    except KeyboardInterrupt:
-        print("Stopped")
-        sys.exit(130)
-
-
-def _main() -> None:
-    escape_unencodable_output(sys.stdout, sys.stderr)
-    parser = build_parser()
-    args = parser.parse_args()
-    if run_activation_options(parser, args, _configure_logging):
-        return
-
-    if not args.benchmark:
-        from jasna.license_status import start_pc_license_refresh
-
-        start_pc_license_refresh()
-    if args.benchmark:
-        from jasna.benchmark import run_benchmark_cli
-
-        _configure_runtime(args)
-        run_benchmark_cli(args)
-        return
-
+def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> _CliPaths:
+    """Option checks that need no GPU or runtime setup; each mistake is a usage error."""
     is_streaming = bool(args.stream)
     if is_streaming and args.retarget_high_fps:
         parser.error("--retarget-high-fps is only supported for offline exports")
@@ -453,17 +426,9 @@ def _main() -> None:
         parser.error("--frame-generation is only supported for offline exports")
     if is_streaming and args.upscale != "none":
         parser.error("--upscale is only supported for offline exports")
-    from jasna.post_export_action import run_post_export_action_safely, validate_post_export_action
+    from jasna.post_export_action import validate_post_export_action
     with _usage_errors(parser):
         validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
-
-    def _run_post_export_action() -> None:
-        run_post_export_action_safely(
-            str(args.post_export_action),
-            str(args.post_export_command),
-            lambda message: print(f"Warning: {message}"),
-        )
-
     if args.input is None and not is_streaming:
         parser.error("--input is required when not using --benchmark or --stream")
     if args.output is None and not is_streaming:
@@ -477,7 +442,7 @@ def _main() -> None:
     if lut_arg and not Path(lut_arg).exists():
         parser.error(f"--lut file not found: {lut_arg}")
 
-    from jasna.media.media_files import folder_output_path, is_image, path_collision_key
+    from jasna.media.media_files import is_image, path_collision_key
     input_is_image = input_video is not None and is_image(input_video)
     input_is_dir = input_video is not None and input_video.is_dir()
     if (
@@ -538,9 +503,64 @@ def _main() -> None:
                 parser.error(f"{model_option} supports --denoise only with --ltx-auto-split")
         _reject_options_of_other_restoration_backend(parser, args, restoration_backend)
 
+    return _CliPaths(input_video, output_video, lut_arg or None, input_is_image, input_is_dir)
+
+
+def _stop_like_ctrl_c(signum, frame) -> None:
+    raise KeyboardInterrupt
+
+
+def stop_on_termination_signals() -> None:
+    """SIGTERM, and on Windows Ctrl+Break (the only signal a parent can send a console process group), stop Jasna
+    like Ctrl+C, so exit handlers still release resources."""
+    signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
+    if sys.platform == "win32":
+        signal.signal(signal.SIGBREAK, _stop_like_ctrl_c)
+
+
+def main() -> None:
+    stop_on_termination_signals()
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print("Stopped")
+        sys.exit(130)
+
+
+def _main() -> None:
+    escape_unencodable_output(sys.stdout, sys.stderr)
+    parser = build_parser()
+    args = parser.parse_args()
+    if run_activation_options(parser, args, _configure_logging):
+        return
+
+    if not args.benchmark:
+        from jasna.license_status import start_pc_license_refresh
+
+        start_pc_license_refresh()
+    if args.benchmark:
+        from jasna.benchmark import run_benchmark_cli
+
+        _configure_runtime(args)
+        run_benchmark_cli(args)
+        return
+
+    paths = _validate_args(parser, args)
+    restoration_backend = CLI_RESTORATION_MODELS[args.restoration_model_name][0]
+
+    from jasna.media.media_files import folder_output_path
+    from jasna.post_export_action import run_post_export_action_safely
+
+    def _run_post_export_action() -> None:
+        run_post_export_action_safely(
+            str(args.post_export_action),
+            str(args.post_export_command),
+            lambda message: print(f"Warning: {message}"),
+        )
+
     _configure_runtime(args)
     _check_system(args)
-    if args.frame_generation != "none" and not input_is_image:
+    if args.frame_generation != "none" and not paths.input_is_image:
         from jasna.accelerator import supports_frame_generation
         from jasna.session_factory import FRAME_GENERATION_NEEDS_RTX_40
 
@@ -550,8 +570,8 @@ def _main() -> None:
     folder_images: list[Path] = []
     folder_videos: list[Path] = []
     folder_output_dir: Path | None = None
-    if input_is_dir:
-        folder_images, folder_videos, folder_output_dir = _plan_folder(parser, args, input_video, output_video)
+    if paths.input_is_dir:
+        folder_images, folder_videos, folder_output_dir = _plan_folder(parser, args, paths.input, paths.output)
         if folder_images:
             _restore_images(
                 args,
@@ -562,8 +582,8 @@ def _main() -> None:
             _run_post_export_action()
             return
 
-    if input_is_image:
-        _restore_images(args, [(input_video, output_video)], folder_total=None)
+    if paths.input_is_image:
+        _restore_images(args, [(paths.input, paths.output)], folder_total=None)
         _run_post_export_action()
         return
 
@@ -609,12 +629,12 @@ def _main() -> None:
             detection_model_path=detection_model_path,
             detection_score_threshold=detection_score_threshold,
             restoration_model_path=restoration_model_path,
-            lut_path=lut_arg or None,
+            lut_path=paths.lut,
         )
 
     segment_job = (
-        _plan_segments(parser, args, config, input_video, output_video, codec_was_explicit=args.codec is not None)
-        if segments_spec else None
+        _plan_segments(parser, args, config, paths.input, paths.output, codec_was_explicit=args.codec is not None)
+        if str(args.segments).strip() else None
     )
     ensure_ltx_model(config, segment_job.splice_plan.segments if segment_job is not None else None)
     ensure_dlss5_runtime(config)
@@ -629,22 +649,22 @@ def _main() -> None:
             return build_job_pipeline(config, session, vid_input, out_path, job, progress_callback=None)
 
         def output_path_for(vid: Path) -> Path:
-            if input_is_dir:
+            if paths.input_is_dir:
                 return folder_output_path(folder_output_dir, vid, args.output_pattern)
-            return output_video
+            return paths.output
 
         try:
-            if is_streaming:
-                _run_streaming(args, make_pipeline, input_video)
+            if args.stream:
+                _run_streaming(args, make_pipeline, paths.input)
                 return
             all_commands_ok = _run_videos(
                 args,
                 make_pipeline,
-                folder_videos if input_is_dir else [input_video],
+                folder_videos if paths.input_is_dir else [paths.input],
                 output_path_for,
-                in_folder=input_is_dir,
+                in_folder=paths.input_is_dir,
                 first_index=len(folder_images) + 1,
-                total=len(folder_images) + len(folder_videos) if input_is_dir else 1,
+                total=len(folder_images) + len(folder_videos) if paths.input_is_dir else 1,
             )
             _run_post_export_action()
             if not all_commands_ok:
