@@ -68,7 +68,7 @@ $env:TEMP = 'Z:\Temp'
 | `--denoise` | `none` | Removes noise in restored areas: `low`, `medium`, `high`. |
 
 The `--ltx-*` options need `--restoration-model-name ltx-basic`, `ltx`, `ltx-4step`, `ltx-8step` or `ltx-undistilled`.
-`--no-compile-basicvsrpp` works only with `basicvsrpp`.
+`--no-compile-basicvsrpp` works only with `basicvsrpp` or `--ltx-auto-split`.
 
 ## Detection
 

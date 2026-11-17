@@ -394,16 +394,18 @@ def _ask_to_replace_progress(error) -> bool:
 
 
 def _reject_options_of_other_restoration_backend(
-    parser: argparse.ArgumentParser, args: argparse.Namespace, restoration_backend: str
+    parser: argparse.ArgumentParser, args: argparse.Namespace, restoration_backend: str, *, auto_split: bool
 ) -> None:
-    if restoration_backend == "ltx":
-        foreign_dests, needed_models = BASICVSRPP_ONLY_ARG_DESTS, "basicvsrpp"
+    if restoration_backend != "ltx":
+        foreign_dests, needed = LTX_ONLY_ARG_DESTS, "ltx-basic, ltx, ltx-4step, ltx-8step or ltx-undistilled"
+    elif auto_split:  # its smaller mosaics run BasicVSR++
+        return
     else:
-        foreign_dests, needed_models = LTX_ONLY_ARG_DESTS, "ltx-basic, ltx, ltx-4step, ltx-8step or ltx-undistilled"
+        foreign_dests, needed = BASICVSRPP_ONLY_ARG_DESTS, "basicvsrpp or --ltx-auto-split"
     for dest in foreign_dests:
         if getattr(args, dest) != parser.get_default(dest):
             option = "--" + dest.replace("_", "-")
-            parser.error(f"{option} needs --restoration-model-name {needed_models}")
+            parser.error(f"{option} needs --restoration-model-name {needed}")
 
 
 @dataclass(frozen=True)
@@ -501,7 +503,7 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
                 )
             if "denoise_strength" in unsupported:
                 parser.error(f"{model_option} supports --denoise only with --ltx-auto-split")
-        _reject_options_of_other_restoration_backend(parser, args, restoration_backend)
+        _reject_options_of_other_restoration_backend(parser, args, restoration_backend, auto_split=auto_split)
 
     return _CliPaths(input_video, output_video, lut_arg or None, input_is_image, input_is_dir)
 

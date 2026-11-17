@@ -65,7 +65,7 @@ $env:TEMP = 'Z:\Temp'
 | `--denoise` | `none` | 去除修复区域中的噪点：`low`、`medium`、`high`。 |
 
 `--ltx-*` 选项需要 `--restoration-model-name ltx-basic`、`ltx`、`ltx-4step`、`ltx-8step` 或 `ltx-undistilled`。
-`--no-compile-basicvsrpp` 只能与 `basicvsrpp` 一起使用。
+`--no-compile-basicvsrpp` 只能与 `basicvsrpp` 或 `--ltx-auto-split` 一起使用。
 
 ## 检测
 

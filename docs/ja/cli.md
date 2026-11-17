@@ -68,7 +68,7 @@ $env:TEMP = 'Z:\Temp'
 | `--denoise` | `none` | 復元した部分のノイズを除去します: `low`、`medium`、`high`。 |
 
 `--ltx-*` オプションには `--restoration-model-name ltx-basic`、`ltx`、`ltx-4step`、`ltx-8step` または `ltx-undistilled` が必要です。
-`--no-compile-basicvsrpp` は `basicvsrpp` でのみ使えます。
+`--no-compile-basicvsrpp` は `basicvsrpp` または `--ltx-auto-split` でのみ使えます。
 
 ## 検出
 
