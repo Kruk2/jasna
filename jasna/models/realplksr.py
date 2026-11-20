@@ -13,6 +13,10 @@ from torch.nn import functional as F
 from jasna.models.safetensors_conv import conv_from_weights
 
 REALPLKSR_NORM_GROUPS = 4
+# On bright, high-contrast detail the large-kernel conv outputs exceed fp16's 65504 (~1.2e5 seen at
+# 720p); the overflow reaches the group norm and turns the whole frame into NaN. Those channels are
+# stored divided by this and the convs reading them multiplied by it: same fp32 result, fp16 headroom.
+LARGE_KERNEL_SHRINK = 16
 
 
 def group_norm(features: torch.Tensor, norm: nn.GroupNorm) -> torch.Tensor:
@@ -44,6 +48,12 @@ class _Block(nn.Module):
         self.norm.weight = nn.Parameter(weights[f"{name}.norm.weight"], requires_grad=False)
         self.norm.bias = nn.Parameter(weights[f"{name}.norm.bias"], requires_grad=False)
         self.partial = self.large_kernel.in_channels
+        self.large_kernel.weight = nn.Parameter(self.large_kernel.weight / LARGE_KERNEL_SHRINK, requires_grad=False)
+        self.large_kernel.bias = nn.Parameter(self.large_kernel.bias / LARGE_KERNEL_SHRINK, requires_grad=False)
+        regrow = torch.ones(dim, 1, 1, dtype=self.refine.weight.dtype)
+        regrow[: self.partial] = LARGE_KERNEL_SHRINK
+        for conv in (self.attention, self.refine):
+            conv.weight = nn.Parameter(conv.weight * regrow, requires_grad=False)
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         mixed = self.mix_out(F.mish(self.mix_in(features)))

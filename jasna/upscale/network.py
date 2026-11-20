@@ -38,14 +38,18 @@ class UpscaleNetwork:
     weights_path: Path
     scale: int
     load: Callable[[Path, int], nn.Module]
+    engine_stem: str
+    """Engine file name prefix; a new one when the exported network changes, so old engines are rebuilt."""
 
     def network(self) -> nn.Module:
         return self.load(self.weights_path, self.scale)
 
 
 UPSCALE_NETWORKS: dict[str, UpscaleNetwork] = {
-    "span": UpscaleNetwork(model_weights_dir() / "span-nomosuni-2x.safetensors", 2, _load_span),
-    "realplksr": UpscaleNetwork(model_weights_dir() / "realplksr-nomoswebphoto-4x.safetensors", 4, _load_realplksr),
+    "span": UpscaleNetwork(model_weights_dir() / "span-nomosuni-2x.safetensors", 2, _load_span, "span-nomosuni-2x"),
+    "realplksr": UpscaleNetwork(
+        model_weights_dir() / "realplksr-nomoswebphoto-4x.safetensors", 4, _load_realplksr, "realplksr-nomoswebphoto-4x.v2"
+    ),
 }
 """The ``SessionConfig.upscale_model`` values that run a network, and their network."""
 
@@ -63,9 +67,8 @@ def network_input_sizes(network: UpscaleNetwork, source_size: Size, output_size:
 
 def network_engine_path(network: UpscaleNetwork, input_size: Size, *, fp16: bool) -> Path:
     width, height = input_size
-    stem = network.weights_path.with_suffix("").name
     return network.weights_path.with_name(
-        f"{stem}.{width}x{height}.{engine_precision_name(fp16=fp16)}{engine_system_suffix()}.engine"
+        f"{network.engine_stem}.{width}x{height}.{engine_precision_name(fp16=fp16)}{engine_system_suffix()}.engine"
     )
 
 

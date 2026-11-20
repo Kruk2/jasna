@@ -397,6 +397,27 @@ def test_realplksr_adds_its_detail_to_a_nearest_neighbour_upscale():
     assert torch.equal(upscaled, F.interpolate(image, scale_factor=4, mode="nearest"))
 
 
+def test_realplksr_large_kernel_features_past_fp16_range_still_give_the_fp32_upscale_in_fp16():
+    from jasna.models.realplksr import RealPlksr
+
+    weights = _realplksr_weights(blocks=2, dim=8, scale=2)
+    image = torch.rand(1, 3, 16, 24, generator=torch.Generator().manual_seed(1))
+    expected = RealPlksr(weights, scale=2)(image)
+    # The same network with its large-kernel features 2**18 times louder (~1e5, past fp16's 65504).
+    loud = dict(weights)
+    for block in (1, 2):
+        loud[f"feats.{block}.lk.conv.weight"] = weights[f"feats.{block}.lk.conv.weight"] * 2**18
+        loud[f"feats.{block}.lk.conv.bias"] = weights[f"feats.{block}.lk.conv.bias"] * 2**18
+        for reader in ("attn.f.0", "refine"):
+            quieter = weights[f"feats.{block}.{reader}.weight"].clone()
+            quieter[:, :2] /= 2**18
+            loud[f"feats.{block}.{reader}.weight"] = quieter
+
+    upscaled = RealPlksr(loud, scale=2).half()(image.half()).float()
+
+    assert torch.allclose(upscaled, expected, atol=2e-2)
+
+
 NETWORK_GPU_SCRIPT = """
 import sys
 import torch
