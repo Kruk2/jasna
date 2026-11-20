@@ -459,3 +459,21 @@ def test_an_upgrade_keeps_a_legacy_engine_that_runs_on_this_gpu(monkeypatch, tmp
 
     assert engine.exists() is built_here
     assert len(compiler_runs) == (0 if built_here else 1)
+
+
+@pytest.mark.parametrize("copied_activation", [False, True], ids=["never-activated", "copied-from-another-pc"])
+def test_an_unlicensed_unet4x_stops_before_compiling_and_says_what_to_do(monkeypatch, tmp_path: Path, copied_activation):
+    pytest.importorskip("jasna.protection.license_store")
+    from jasna.license_api import LicenseCheckStopped
+    from jasna.protection import license_store, offline
+
+    monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", tmp_path / "unet-4x.onnx")
+    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda fp16=True: tmp_path / "missing.enc")
+    monkeypatch.setattr(license_store, "is_licensed", lambda: False)
+    monkeypatch.setattr(offline, "saved_grant", lambda: ("JT1-" + "a" * 64, b"", {}) if copied_activation else None)
+    monkeypatch.setattr("jasna.engine_compiler._run_compiler_subprocess", lambda *args: pytest.fail("compiled"))
+
+    with pytest.raises((LicenseCheckStopped, RuntimeError)) as refused:
+        ensure_engines_compiled(EngineCompilationRequest(device="cuda:0", fp16=True, unet4x=True))
+    assert isinstance(refused.value, LicenseCheckStopped) is copied_activation
+    assert getattr(refused.value, "code", None) == ("offline_check" if copied_activation else None)

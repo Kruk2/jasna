@@ -204,9 +204,11 @@ def ensure_engines_compiled(
         from jasna.engine_paths import unet4x_plaintext_available
         if not unet4x_plaintext_available():
             require_protection()
-            from jasna.protection import license_store
+            from jasna.protection import lease, license_store, offline
 
             if not license_store.is_licensed():
+                if offline.saved_grant() is not None:
+                    raise lease.LeaseError("offline_check")
                 raise RuntimeError("unet-4x is a supporter feature. Enter your license to enable it.")
 
     if req.basicvsrpp and nvidia:
