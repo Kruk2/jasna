@@ -9,7 +9,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from jasna.gui import scaling
-from jasna.gui.components import AutoHidingScrollableFrame, Tooltip
+from jasna.gui.components import AutoHidingScrollableFrame, ScrollableFrame, Tooltip
 from jasna.gui.locales import t
 from jasna.gui.segment_editor_state import RangeOutOfBoundsError, SegmentEditorState
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -93,7 +93,7 @@ class RangePanel(ctk.CTkFrame):
         self._undo_btn.pack(side="right", padx=4)
         Tooltip(self._redo_btn, t("segments_redo"))
 
-        self._segment_list = ctk.CTkScrollableFrame(
+        self._segment_list = ScrollableFrame(
             self,
             fg_color=Colors.BG_PANEL,
             corner_radius=Sizing.BORDER_RADIUS,

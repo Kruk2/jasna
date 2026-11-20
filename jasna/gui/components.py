@@ -335,7 +335,15 @@ class StatusPill(ctk.CTkFrame):
         self._label.configure(text=t(f"status_{self._status_key}").upper())
 
 
-class AutoHidingScrollableFrame(ctk.CTkScrollableFrame):
+class ScrollableFrame(ctk.CTkScrollableFrame):
+    """CTkScrollableFrame whose global wheel handler ignores widgets Tkinter does not know."""
+
+    def _check_if_valid_scroll(self, widget) -> bool:
+        # Tk-made widgets (file dialogs, menu clones) arrive as path strings, which have no .master (#843).
+        return not isinstance(widget, str) and super()._check_if_valid_scroll(widget)
+
+
+class AutoHidingScrollableFrame(ScrollableFrame):
     """Scrollable frame whose scrollbar is gridded only while the content overflows."""
 
     def __init__(self, master, **kwargs):
