@@ -118,14 +118,9 @@ def decode_detect_loop(
                 metadata.video_width,
                 metadata.video_height,
             )
-            try:
-                _detect_batches(
-                    ctx, pipeline, reader, timer, end_pts=end_pts, effect_ranges=effect_ranges, progress=progress
-                )
-            except Exception:
-                if progress is not None:
-                    progress.error = True
-                raise
+            _detect_batches(
+                ctx, pipeline, reader, timer, end_pts=end_pts, effect_ranges=effect_ranges, progress=progress
+            )
     except BaseException as e:
         if not ctx.stop_event.is_set():
             log.exception("[decode] thread crashed")

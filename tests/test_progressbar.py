@@ -34,14 +34,6 @@ class TestProgressbarLifecycle:
         # After close with ensure_completed_bar, tqdm.n == tqdm.total
         assert pb.tqdm.total == pb.tqdm.n
 
-    def test_close_no_adjust_on_error(self):
-        pb = Progressbar(total_frames=100, video_fps=30, disable=True)
-        pb.init()
-        pb.update(50)
-        pb.error = True
-        pb.close(ensure_completed_bar=True)
-        assert pb.tqdm.total == 100
-
     def test_callback_invoked(self):
         cb = MagicMock()
         pb = Progressbar(total_frames=10, video_fps=1, disable=True, callback=cb)

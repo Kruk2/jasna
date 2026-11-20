@@ -435,6 +435,7 @@ class Pipeline:
             frame_rate,
             self._job_settings(job_models(self.config.restoration_model_name, self.segments), ltx_large_canvas=None),
         )
+        finished = False
         try:
             self._run_pass(
                 metadata=metadata,
@@ -444,8 +445,9 @@ class Pipeline:
                 effect_ranges=effect_ranges,
                 output_frame_count=output_frame_count,
             )
+            finished = not self._cancel_event.is_set()
         finally:
-            progress.close(ensure_completed_bar=True)
+            progress.close(ensure_completed_bar=finished)
 
     def _ltx_progress(self, frames: int, callback: ProgressCallback | None, *, writer_adds_frame_work: bool):
         from jasna.ltx.progress import Progress
@@ -722,6 +724,7 @@ class Pipeline:
             )
 
         fragments = _FragmentDir(self.resume.directory / "segments")
+        finished = False
         try:
             fragments.directory.mkdir(parents=True, exist_ok=True)
             for span_index, span in enumerate(plan.spans):
@@ -762,8 +765,9 @@ class Pipeline:
             if self._cancel_event.is_set():
                 return
             self._assemble(fragments, plan, comment)
+            finished = True
         finally:
-            progress.close(ensure_completed_bar=True)
+            progress.close(ensure_completed_bar=finished)
 
     def _assemble(self, fragments: _FragmentDir, plan: SplicePlan, comment: str) -> None:
         suffix = ".ts" if self.config.codec in {"h264", "hevc"} else ".mkv"

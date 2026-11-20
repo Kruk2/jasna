@@ -157,12 +157,14 @@ def _detect_one_clip(**kwargs):
     return 2
 
 
-def _run(pipeline, *, metadata=None, frames=None, decode_error=None):
-    """Run ``pipeline`` over ``frames`` with detection faked; returns the readers' and encoder's mocks."""
+def _run(pipeline, *, metadata=None, frames=None, decode_error=None, encode=None):
+    """Run ``pipeline`` over ``frames`` with detection faked and ``encode`` as the encoder's side effect; returns the
+    readers' and encoder's mocks."""
     source = _reader(frames, decode_error)
     blend = _reader(frames)
     reader_cls = MagicMock(side_effect=[source, blend])
     encoder = MagicMock()
+    encoder.encode.side_effect = encode
     with ExitStack() as stack:
         stack.enter_context(patch("jasna.pipeline.get_video_meta_data", return_value=metadata or _fake_metadata()))
         stack.enter_context(patch("jasna.pipeline_threads.VideoReader", reader_cls))
@@ -272,6 +274,34 @@ def test_run_fails_promptly_when_blend_encode_dies_while_secondary_is_blocked():
 
     assert not runner.is_alive(), "restoration pass hung after a thread error"
     assert len(raised) == 1 and "AMF decode failed" in str(raised[0])
+
+
+@pytest.mark.parametrize(("stop", "bar_total"), [(None, 2), ("cancel", 10), ("ctrl_c", 10)])
+def test_the_progress_bar_fills_only_when_the_run_finishes(stop, bar_total):
+    from jasna.progressbar import Progressbar
+
+    pipeline = make_pipeline(
+        restoration_pipeline=RestorationPipeline(_WhitePrimary(), secondary_restorer=None), batch_size=2,
+    )
+    bars = []
+
+    def recorded_bar(**kwargs):
+        bars.append(Progressbar(**kwargs))
+        return bars[-1]
+
+    def stop_on_first_frame(*_args):
+        if stop == "cancel":
+            pipeline.cancel()
+        elif stop == "ctrl_c":
+            raise KeyboardInterrupt
+
+    with patch("jasna.pipeline.Progressbar", side_effect=recorded_bar), ExitStack() as stack:
+        if stop == "ctrl_c":
+            stack.enter_context(pytest.raises(KeyboardInterrupt))
+        _run(pipeline, metadata=video_metadata(num_frames=10), frames=torch.zeros((2, 3, 8, 8), dtype=torch.uint8),
+             encode=stop_on_first_frame)
+
+    assert (bars[0].tqdm.n, bars[0].tqdm.total) == (2, bar_total)
 
 
 def test_retarget_high_fps_halves_the_rate_for_readers_encoder_and_progress():

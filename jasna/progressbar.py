@@ -82,7 +82,6 @@ class Progressbar:
         self.frame_processing_durations_buffer: deque[float] = deque(
             maxlen=max(1, min(total_frames - 1, int(video_fps * 30)))
         )
-        self.error = False
         self.disable = disable
 
         # Bar format: "Processing video: 50%|████     |Processed: 1:23 (2848f) | Remaining: 0:10 | Speed: 35.0fps"
@@ -109,10 +108,10 @@ class Progressbar:
         
         Args:
             ensure_completed_bar: If True, ensure the bar shows 100% even if
-                frame count was estimated incorrectly.
+                frame count was estimated incorrectly; only for a finished run.
         """
         if ensure_completed_bar:
-            if not self.error and self.tqdm.total != self.tqdm.n:
+            if self.tqdm.total != self.tqdm.n:
                 self.tqdm.total = self.tqdm.n
                 self._update_time_remaining_and_speed(completed=True)
                 self.tqdm.refresh()
