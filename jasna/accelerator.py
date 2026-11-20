@@ -7,12 +7,14 @@ from enum import StrEnum
 import functools
 import hashlib
 import importlib.util
+import itertools
 import logging
 import ntpath
 import os
 from pathlib import Path
 import sys
 from typing import Any
+import uuid
 
 import psutil
 import torch
@@ -354,14 +356,162 @@ def _nvml_free_bytes(device: torch.device) -> int:
     return memory.free
 
 
+class _Guid(ctypes.Structure):
+    _fields_ = [("data1", ctypes.c_uint32), ("data2", ctypes.c_uint16), ("data3", ctypes.c_uint16),
+                ("data4", ctypes.c_ubyte * 8)]
+
+
+def _guid(text: str) -> _Guid:
+    return _Guid.from_buffer_copy(uuid.UUID(text).bytes_le)
+
+
+class _DxgiAdapterDesc1(ctypes.Structure):
+    _fields_ = [("description", ctypes.c_wchar * 128), ("vendor_id", ctypes.c_uint32), ("device_id", ctypes.c_uint32),
+                ("sub_sys_id", ctypes.c_uint32), ("revision", ctypes.c_uint32),
+                ("dedicated_video_memory", ctypes.c_size_t), ("dedicated_system_memory", ctypes.c_size_t),
+                ("shared_system_memory", ctypes.c_size_t), ("luid", ctypes.c_ubyte * 8), ("flags", ctypes.c_uint32)]
+
+
+class _DxgiVideoMemoryInfo(ctypes.Structure):
+    _fields_ = [("budget", ctypes.c_uint64), ("current_usage", ctypes.c_uint64),
+                ("available_for_reservation", ctypes.c_uint64), ("current_reservation", ctypes.c_uint64)]
+
+
+_IID_IDXGI_FACTORY1 = "770aae78-f26f-4dba-a829-253c83d1b387"
+_IID_IDXGI_ADAPTER3 = "645967a4-1392-4310-a798-8053ce3e93fd"
+_DXGI_ERROR_NOT_FOUND = 0x887A0002 - (1 << 32)
+_DXGI_MEMORY_SEGMENT_GROUP_LOCAL = 0
+# vtable slots: IUnknown 0-2, IDXGIObject 3-6, IDXGIFactory 7-11, IDXGIFactory1 12-13;
+# IDXGIAdapter 7-9, IDXGIAdapter1 10, IDXGIAdapter2 11, IDXGIAdapter3 12-17
+_QUERY_INTERFACE, _RELEASE = 0, 2
+_FACTORY_ENUM_ADAPTERS1 = 12
+_ADAPTER_GET_DESC1 = 10
+_ADAPTER_QUERY_VIDEO_MEMORY_INFO = 14
+
+
+def _com_method(interface: ctypes.c_void_p, slot: int, *argtypes):
+    function = ctypes.cast(interface, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)))[0][slot]
+    method = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, *argtypes)(function)
+    return lambda *args: method(interface, *args)
+
+
+def _check_hresult(result: int, call: str) -> None:
+    if result < 0:
+        raise OSError(f"DXGI {call} failed (HRESULT 0x{result & 0xFFFFFFFF:08X})")
+
+
+def _adapter_video_memory(adapter: ctypes.c_void_p) -> tuple[bytes, str, int, int]:
+    desc = _DxgiAdapterDesc1()
+    _check_hresult(_com_method(adapter, _ADAPTER_GET_DESC1, ctypes.POINTER(_DxgiAdapterDesc1))(ctypes.byref(desc)),
+                   "GetDesc1")
+    adapter3 = ctypes.c_void_p()
+    _check_hresult(_com_method(adapter, _QUERY_INTERFACE, ctypes.POINTER(_Guid), ctypes.POINTER(ctypes.c_void_p))(
+        ctypes.byref(_guid(_IID_IDXGI_ADAPTER3)), ctypes.byref(adapter3)), "QueryInterface(IDXGIAdapter3)")
+    info = _DxgiVideoMemoryInfo()
+    try:
+        _check_hresult(_com_method(adapter3, _ADAPTER_QUERY_VIDEO_MEMORY_INFO, ctypes.c_uint, ctypes.c_int,
+                                   ctypes.POINTER(_DxgiVideoMemoryInfo))(
+            0, _DXGI_MEMORY_SEGMENT_GROUP_LOCAL, ctypes.byref(info)), "QueryVideoMemoryInfo")
+    finally:
+        _com_method(adapter3, _RELEASE)()
+    return bytes(desc.luid), desc.description, info.budget, info.current_usage
+
+
+def windows_video_memory() -> dict[bytes, tuple[str, int, int]]:
+    """Every display adapter's LUID with its name and this process's budget and use of its dedicated VRAM, as
+    Windows (DXGI) reports them. The budget is what Windows lets this process keep in VRAM; past it Windows
+    moves the process's allocations to system RAM instead of failing them."""
+    factory = ctypes.c_void_p()
+    _check_hresult(ctypes.WinDLL("dxgi").CreateDXGIFactory1(ctypes.byref(_guid(_IID_IDXGI_FACTORY1)),
+                                                            ctypes.byref(factory)), "CreateDXGIFactory1")
+    adapters = {}
+    try:
+        enum_adapters = _com_method(factory, _FACTORY_ENUM_ADAPTERS1, ctypes.c_uint, ctypes.POINTER(ctypes.c_void_p))
+        for index in itertools.count():
+            adapter = ctypes.c_void_p()
+            result = enum_adapters(index, ctypes.byref(adapter))
+            if result == _DXGI_ERROR_NOT_FOUND:
+                return adapters
+            _check_hresult(result, "EnumAdapters1")
+            try:
+                luid, name, budget, usage = _adapter_video_memory(adapter)
+            finally:
+                _com_method(adapter, _RELEASE)()
+            adapters[luid] = (name, budget, usage)
+    finally:
+        _com_method(factory, _RELEASE)()
+
+
+# hipDeviceProp_t (R0600) starts with char name[256] and a 16-byte hipUUID, then char luid[8] (filled on Windows).
+_HIP_PROPERTIES_LUID_OFFSET = 272
+_HIP_PROPERTIES_BYTES = 4096
+
+
+@functools.cache
+def _hip_device_luid(index: int) -> bytes:
+    from jasna.media.cuda_kernel import check_hip, hip_runtime
+
+    hip = hip_runtime()
+    hip.hipGetDevicePropertiesR0600.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    hip.hipGetDevicePropertiesR0600.restype = ctypes.c_int
+    properties = ctypes.create_string_buffer(_HIP_PROPERTIES_BYTES)
+    check_hip(hip.hipGetDevicePropertiesR0600(properties, index), "hipGetDevicePropertiesR0600")
+    return properties.raw[_HIP_PROPERTIES_LUID_OFFSET:_HIP_PROPERTIES_LUID_OFFSET + 8]
+
+
+@functools.cache
+def _warn_no_dxgi_adapter(luid: bytes) -> None:
+    log.warning("VRAM: Windows lists no display adapter for this GPU (LUID %s); sizing from the GPU's own free "
+                "figure, which misses other programs' VRAM", luid.hex())
+
+
+def _amd_windows_video_memory(device: torch.device) -> tuple[int, int] | None:
+    """This process's Windows budget and use of ``device``'s VRAM, on Windows AMD only: HIP's free figure
+    there counts only this process's VRAM and there is no NVML. ``None`` elsewhere or when DXGI lists no
+    adapter with the device's LUID."""
+    if sys.platform != "win32" or not is_amd_device(device):
+        return None
+    index = torch.device(device).index
+    luid = _hip_device_luid(index if index is not None else torch.cuda.current_device())
+    found = windows_video_memory().get(luid)
+    if found is None:
+        _warn_no_dxgi_adapter(luid)
+        return None
+    return found[1], found[2]
+
+
+def budget_capped_free_bytes(free: int, budget: int, usage: int) -> int:
+    """``free`` VRAM capped at what this process's Windows budget has left."""
+    return max(0, min(free, budget - usage))
+
+
+def amd_windows_budget_cap(device: torch.device, free: int) -> int:
+    """``free`` capped by this process's Windows budget on Windows AMD: past the budget Windows quietly moves
+    VRAM to system RAM and kernels wait on PCIe (#823). Elsewhere ``free`` unchanged."""
+    memory = _amd_windows_video_memory(device)
+    return free if memory is None else budget_capped_free_bytes(free, *memory)
+
+
+def warn_over_windows_budget(device: torch.device) -> bool:
+    """Warns, and returns True, when this process holds more of ``device``'s VRAM than its Windows budget
+    (Windows AMD only)."""
+    memory = _amd_windows_video_memory(device)
+    if memory is None or memory[1] <= memory[0]:
+        return False
+    log.warning("VRAM: this process uses %d MiB, more than the %d MiB Windows lets it keep on the GPU; Windows "
+                "moved the rest to system RAM, so the GPU runs slower. Closing other programs that use the GPU helps",
+                memory[1] >> 20, memory[0] >> 20)
+    return True
+
+
 def device_free_bytes(device: torch.device) -> int:
-    """VRAM free on the whole GPU. On Windows, CUDA counts only this process's memory (WDDM
-    hides every other process's), so NVML's device-wide figure caps it on NVIDIA there; AMD
-    reads HIP's figure alone."""
+    """VRAM free on the whole GPU. On Windows, CUDA and HIP count only this process's memory (WDDM
+    hides every other process's), so NVML's device-wide figure caps it on NVIDIA there and the
+    process's Windows budget on AMD."""
     free = torch.cuda.mem_get_info(device)[0]
     if sys.platform == "win32" and is_nvidia_device(device):
         return min(free, _nvml_free_bytes(device))
-    return free
+    return amd_windows_budget_cap(device, free)
 
 
 def device_used_bytes(device: torch.device) -> int:

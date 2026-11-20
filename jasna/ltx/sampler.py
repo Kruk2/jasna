@@ -20,7 +20,7 @@ from pathlib import Path
 import torch
 
 from jasna._frozen import is_frozen
-from jasna.accelerator import allocatable_bytes
+from jasna.accelerator import allocatable_bytes, warn_over_windows_budget
 from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore, gpu_refused_resident_blocks
 from jasna.ltx.host_tensors import read_host_tensors, zero_tensors
@@ -181,6 +181,7 @@ class LtxTransformer:
         self.context: torch.Tensor | None = None
         self.blocks: BlockStore | OpaqueBlockStore | None = None
         self.block_backend = "native opaque store"
+        self._over_budget_warned = False
         self._ropes: dict[tuple[int, int, int], T.Rope] = {}
         try:
             with closing(source):
@@ -215,7 +216,16 @@ class LtxTransformer:
         free = self._free_vram(self.device)
         if self.device.type != "cuda":
             return resident_block_count(sizes, lambda limit: free)
-        return resident_block_count(sizes, lambda limit: allocatable_bytes(self.device, min(free, limit)))
+        probed = []
+
+        def allocatable(limit: int) -> int:
+            probed.append(allocatable_bytes(self.device, min(free, limit)))
+            return probed[-1]
+
+        resident = resident_block_count(sizes, allocatable)
+        logger.info("LTX VRAM at load: %d MiB free, %d MiB allocatable, %d/%d blocks fit resident",
+                    free >> 20, probed[0] >> 20, resident, len(sizes))
+        return resident
 
     def native_vram_bytes(self) -> int:
         return self.blocks.native_vram_bytes() if self.blocks is not None else 0
@@ -268,7 +278,7 @@ class LtxTransformer:
         def denoise(inputs: list[torch.Tensor], step: int) -> list[torch.Tensor]:
             return self._denoise(inputs, self.conditions[step], rope, tokens_per_frame, self.sigmas[step])
 
-        return denoise_windows(
+        latents = denoise_windows(
             references,
             seeds,
             self.sigmas,
@@ -279,6 +289,10 @@ class LtxTransformer:
             advance=advance,
             device=self.device,
         )
+        # the allocator still holds the chain's peak, so this reads it; once per transformer
+        if not self._over_budget_warned:
+            self._over_budget_warned = warn_over_windows_budget(self.device)
+        return latents
 
     def _denoise(
         self,

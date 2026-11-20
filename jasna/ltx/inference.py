@@ -14,7 +14,7 @@ from pathlib import Path
 import torch
 
 from jasna._frozen import is_frozen
-from jasna.accelerator import device_free_bytes, load_gpu_libraries_ahead
+from jasna.accelerator import amd_windows_budget_cap, device_free_bytes, load_gpu_libraries_ahead
 from jasna.ltx.host_tensors import zero_tensors
 from jasna.ltx.model_files import LtxModelFiles, PlaceholderTensors
 from jasna.ltx.sampler import LtxTransformer, TransformerSource
@@ -339,9 +339,10 @@ class ModelRuntime:
 def free_vram_beside_parent(device: torch.device, parent_free_bytes: int) -> Callable[[torch.device], int]:
     """Device-wide free VRAM inside the worker, from the parent's device-wide figure taken just
     before loading: on Windows the worker's CUDA view misses every other process's memory (the
-    parent's included), so that gap is subtracted from it from then on."""
+    parent's included), so that gap is subtracted from it from then on. On Windows AMD the worker's
+    own Windows budget caps it too (``accelerator.amd_windows_budget_cap``)."""
     hidden = max(0, torch.cuda.mem_get_info(device)[0] - parent_free_bytes)
-    return lambda current: max(0, torch.cuda.mem_get_info(current)[0] - hidden)
+    return lambda current: amd_windows_budget_cap(current, max(0, torch.cuda.mem_get_info(current)[0] - hidden))
 
 
 def operation_peak_vram_bytes(torch_peak: int, torch_end: int, native_before: int, native_after: int) -> int:
