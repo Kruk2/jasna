@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
 from contextlib import nullcontext
 import ctypes
 from enum import StrEnum
 import functools
+import hashlib
 import importlib.util
 import logging
+import ntpath
 import os
 from pathlib import Path
 import sys
@@ -72,6 +74,23 @@ def windows_miopen_system_db(platform: str, libraries: Path | None) -> Path | No
     return database if database.is_dir() else None
 
 
+def windows_ascii_miopen_user_folders(platform: str, environ: Mapping[str, str]) -> dict[str, str]:
+    """MIOpen keeps its user database and kernel cache in ``%USERPROFILE%\\.miopen`` and fails every conv
+    with miopenStatusInternalError when that path has non-ASCII letters, e.g. a Chinese user name
+    (issue #808). Then both move to a per-user folder under ProgramData, or Public; values the user set win."""
+    names = [name for name in ("MIOPEN_USER_DB_PATH", "MIOPEN_CUSTOM_CACHE_DIR") if name not in environ]
+    profile = environ.get("USERPROFILE", "")
+    if platform != "win32" or profile.isascii() or not names:
+        return {}
+    root = next((environ[name] for name in ("PROGRAMDATA", "PUBLIC") if environ.get(name) and environ[name].isascii()), None)
+    if root is None:
+        log.warning("MIOpen may fail: the user folder %s has non-ASCII letters and no ASCII folder was found for its cache", profile)
+        return {}
+    user = hashlib.sha256(profile.encode()).hexdigest()[:12]
+    folders = {"MIOPEN_USER_DB_PATH": "db", "MIOPEN_CUSTOM_CACHE_DIR": "cache"}
+    return {name: ntpath.join(root, "Jasna", "miopen", user, folders[name]) for name in names}
+
+
 def configure_rocm_process_env() -> None:
     """Apply the ROCm defaults to this process; call at entry points before GPU work."""
     if not torch.version.hip:
@@ -80,6 +99,10 @@ def configure_rocm_process_env() -> None:
     system_db = windows_miopen_system_db(sys.platform, rocm_libraries_dir())
     if system_db is not None:
         os.environ.setdefault("MIOPEN_SYSTEM_DB_PATH", str(system_db))
+    user_folders = windows_ascii_miopen_user_folders(sys.platform, os.environ)
+    if user_folders:
+        log.info("The user folder name has non-ASCII letters; MIOpen keeps its cache in %s", user_folders)
+        os.environ.update(user_folders)
     # MIOpen then runs channels-last 3D convs in NDHWC instead of transposing every input, weight
     # and output: the compiled LTX VAE encoder 5 % faster and 0.5 GiB lighter on an R9700. Eager
     # encoders (no Triton: Windows ROCm, AMD releases) run 1.6x slower with it, and BasicVSR++ and

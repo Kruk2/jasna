@@ -10,6 +10,7 @@ from jasna.accelerator import (
     apply_rocm_env_defaults,
     configure_rocm_process_env,
     has_aotriton_flash_images,
+    windows_ascii_miopen_user_folders,
     windows_miopen_system_db,
 )
 
@@ -119,6 +120,50 @@ def test_a_user_miopen_system_database_wins(monkeypatch, tmp_path, sdpa_switches
     monkeypatch.setenv("MIOPEN_SYSTEM_DB_PATH", "D:/own")
     configure_rocm_process_env()
     assert os.environ["MIOPEN_SYSTEM_DB_PATH"] == "D:/own"
+
+
+CHINESE_PROFILE = {"USERPROFILE": "C:\\Users\\\u5f20\u4e09", "PROGRAMDATA": "C:\\ProgramData", "PUBLIC": "C:\\Users\\Public"}
+
+
+@pytest.mark.parametrize(("platform", "environ", "expected"), [
+    ("win32", CHINESE_PROFILE, {"MIOPEN_USER_DB_PATH": "db", "MIOPEN_CUSTOM_CACHE_DIR": "cache"}),
+    ("win32", {**CHINESE_PROFILE, "PROGRAMDATA": "D:\\\u6570\u636e"}, {"MIOPEN_USER_DB_PATH": "db", "MIOPEN_CUSTOM_CACHE_DIR": "cache"}),
+    ("win32", {**CHINESE_PROFILE, "MIOPEN_USER_DB_PATH": "D:\\own"}, {"MIOPEN_CUSTOM_CACHE_DIR": "cache"}),
+    ("win32", {**CHINESE_PROFILE, "MIOPEN_USER_DB_PATH": "D:\\own", "MIOPEN_CUSTOM_CACHE_DIR": "D:\\own"}, {}),
+    ("win32", {**CHINESE_PROFILE, "USERPROFILE": "C:\\Users\\anna"}, {}),
+    ("linux", {**CHINESE_PROFILE, "HOME": "/home/\u5f20\u4e09"}, {}),
+], ids=["non-ascii-user", "non-ascii-programdata-uses-public", "user-db-set", "both-set", "ascii-user", "linux"])
+def test_miopen_user_folders_move_only_off_a_non_ascii_user_folder(platform, environ, expected):
+    folders = windows_ascii_miopen_user_folders(platform, environ)
+    assert {name: value.rsplit("\\", 1)[-1] for name, value in folders.items()} == expected
+    root = "C:\\ProgramData\\Jasna\\miopen\\" if environ["PROGRAMDATA"].isascii() else "C:\\Users\\Public\\Jasna\\miopen\\"
+    assert all(value.isascii() and value.startswith(root) for value in folders.values())
+
+
+def test_miopen_user_folders_differ_per_windows_user():
+    other = {**CHINESE_PROFILE, "USERPROFILE": "C:\\Users\\\u674e\u56db"}
+    assert windows_ascii_miopen_user_folders("win32", CHINESE_PROFILE) != windows_ascii_miopen_user_folders("win32", other)
+
+
+def test_miopen_user_folders_warn_without_an_ascii_folder(caplog):
+    environ = {**CHINESE_PROFILE, "PROGRAMDATA": "D:\\\u6570\u636e", "PUBLIC": ""}
+    with caplog.at_level("WARNING", logger="jasna.accelerator"):
+        assert windows_ascii_miopen_user_folders("win32", environ) == {}
+    assert "non-ASCII" in caplog.text
+
+
+def test_process_env_moves_miopen_off_a_non_ascii_windows_user_folder(monkeypatch, sdpa_switches):
+    monkeypatch.setattr(accelerator.sys, "platform", "win32")
+    monkeypatch.setattr(torch.version, "hip", "7.2")
+    monkeypatch.setattr(accelerator, "rocm_libraries_dir", lambda: None)
+    for name, value in CHINESE_PROFILE.items():
+        monkeypatch.setenv(name, value)
+    for name in ("MIOPEN_USER_DB_PATH", "MIOPEN_CUSTOM_CACHE_DIR"):
+        monkeypatch.setenv(name, "restored after the test")
+        monkeypatch.delenv(name)
+    configure_rocm_process_env()
+    assert os.environ["MIOPEN_USER_DB_PATH"].startswith("C:\\ProgramData\\Jasna\\miopen\\")
+    assert os.environ["MIOPEN_CUSTOM_CACHE_DIR"].startswith("C:\\ProgramData\\Jasna\\miopen\\")
 
 
 @pytest.mark.parametrize("triton", [True, False])
