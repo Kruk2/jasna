@@ -302,15 +302,16 @@ def test_cli_online_activates_online_and_needs_a_license_code(monkeypatch, lease
     (["--online"], True, None),
     (["--license-code", "JL1-flag"], True, ("JL1-flag", True)),
 ])
-def test_cli_license_code_environment_variable_activates_only_a_pc_without_activation(monkeypatch, lease_api, arguments,
+def test_cli_license_code_environment_variable_activates_only_a_pc_without_activation(monkeypatch, saved_activation,
+                                                                                       lease_api, arguments,
                                                                                        activated, activated_with):
-    from jasna import cli_activation, main
+    from jasna import main
     from jasna.protection import lease
 
+    saved_activation()
     monkeypatch.setenv("JASNA_LICENSE_CODE", " JL1-env ")
     monkeypatch.setattr(lease, "activated", lambda: activated)
     monkeypatch.setattr(sys, "argv", ["jasna", *arguments, "--activation-status"])
-    monkeypatch.setattr(cli_activation, "_print_activation_status", lambda parser: None)
     main.main()
     if activated_with is None:
         lease_api.assert_not_called()
@@ -468,18 +469,24 @@ def test_cli_activation_status_reports_an_unreachable_service_and_succeeds(monke
     assert output.err == f"Could not check devices in use: {error}\n"
 
 
-def test_cli_activation_status_follows_a_new_activation(monkeypatch, lease_api, saved_activation, capsys):
+@pytest.mark.parametrize(("online_reason", "grant", "token"), [
+    (None, ("JT1-" + "a" * 64, b"", {}), None),
+    ("missing", None, {"token": "t", "models": []}),
+])
+def test_cli_activation_status_after_a_new_activation_says_activated_once(monkeypatch, lease_api, saved_activation,
+                                                                          capsys, online_reason, grant, token):
     from jasna import main
     from jasna.gui.locales import t
     from jasna.protection import lease
 
     monkeypatch.setattr(sys, "platform", "linux")
-    lease_api.return_value = lease.Activated(["ltx-2.5-v2"], None)
-    saved_activation(devices=lease.DeviceUse(1, 3, 0, 1, (), "JT1-1a2b3c4d"))
+    lease_api.return_value = lease.Activated(["ltx-2.5-v2"], online_reason)
+    saved_activation(grant=grant, token=token, devices=lease.DeviceUse(1, 3, 0, 1, (), "JT1-1a2b3c4d"))
     monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", "JL1-code", "--activation-status"])
     main.main()
-    assert capsys.readouterr().out.endswith(
-        t("license_active") + "\n" + t("license_devices_count", used=1, limit=3, offline=0, online=1) + "\n"
+    assert capsys.readouterr().out == (
+        lease.activated_message(online_reason) + "\n"
+        + t("license_devices_count", used=1, limit=3, offline=0, online=1) + "\n"
     )
 
 

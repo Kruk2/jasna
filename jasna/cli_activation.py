@@ -38,7 +38,7 @@ def _saved_activation_exists(parser: argparse.ArgumentParser) -> bool:
 
 
 def _print_activation_status(parser: argparse.ArgumentParser) -> None:
-    from jasna.license_status import device_use_text, license_status_key, read_license_info
+    from jasna.license_status import license_status_key, read_license_info
     from jasna.gui.locales import t
 
     try:
@@ -48,6 +48,11 @@ def _print_activation_status(parser: argparse.ArgumentParser) -> None:
     if not licensed:
         parser.exit(1, t("license_problem_no_activation") + "\n")
     print(t(license_status_key(mode)))
+    _print_devices_in_use()
+
+
+def _print_devices_in_use() -> None:
+    from jasna.license_status import device_use_text
     from jasna.protection import ProtectionError, lease
 
     try:
@@ -85,6 +90,9 @@ def run_activation_options(
         if args.input is None and not args.stream and not args.benchmark and not args.activation_status:
             return True
     if args.activation_status:
-        _print_activation_status(parser)
+        if license_code is None:
+            _print_activation_status(parser)
+        else:
+            _print_devices_in_use()  # the activation message above already says how Jasna checks the license
         return True
     return False
