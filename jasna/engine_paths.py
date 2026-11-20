@@ -1,4 +1,4 @@
-"""Lightweight engine-path helpers — no torch / tensorrt imports at import time."""
+"""Lightweight engine-path helpers — no torch / tensorrt imports."""
 from __future__ import annotations
 
 import logging
@@ -45,34 +45,27 @@ def default_restoration_model_path(model_name: str) -> Path:
     return model_weights_dir() / _DEFAULT_RESTORATION_MODELS[model_name]
 
 
-def engine_gpu_name() -> str:
-    """The current CUDA device's architecture, e.g. ``sm89``: a TensorRT engine runs only on the GPU
-    architecture it was built for."""
-    import torch
-
-    major, minor = torch.cuda.get_device_capability()
-    return f"sm{major}{minor}"
-
-
 def _operating_system_suffix() -> str:
     return ".win" if os.name == "nt" else ".linux"
 
 
-def engine_system_suffix() -> str:
-    return f".{engine_gpu_name()}{_operating_system_suffix()}"
+def engine_system_suffix(gpu: str) -> str:
+    """The end of an engine name: the GPU architecture it was built for (``cuda_arch_name``, e.g. ``sm89``)
+    and the operating system. A TensorRT engine runs only on the GPU architecture it was built for."""
+    return f".{gpu}{_operating_system_suffix()}"
 
 
-def legacy_engine_path(path: str | Path) -> Path:
+def legacy_engine_path(path: str | Path, gpu: str) -> Path:
     """The name Jasna 0.12.3 and older gave the engine at ``path``: without the GPU architecture."""
     path = Path(path)
-    return path.with_name(path.name.replace(engine_system_suffix(), _operating_system_suffix()))
+    return path.with_name(path.name.replace(engine_system_suffix(gpu), _operating_system_suffix()))
 
 
-def adopt_legacy_engine(path: str | Path, runs_on_this_gpu: Callable[[Path], bool]) -> None:
+def adopt_legacy_engine(path: str | Path, gpu: str, runs_on_this_gpu: Callable[[Path], bool]) -> None:
     """Rename a missing engine's legacy file to ``path`` when it runs on this GPU, so an upgrade does
     not recompile it."""
     path = Path(path)
-    legacy = legacy_engine_path(path)
+    legacy = legacy_engine_path(path, gpu)
     if not path.exists() and legacy.is_file() and runs_on_this_gpu(legacy):
         legacy.rename(path)
         logger.info("Renamed TensorRT engine %s to %s", legacy.name, path.name)
@@ -85,6 +78,7 @@ def engine_precision_name(*, fp16: bool) -> str:
 def get_onnx_tensorrt_engine_path(
     onnx_path: str | Path,
     *,
+    gpu: str,
     batch_size: int | None = None,
     fp16: bool = True,
     dynamic_batch: bool = False,
@@ -97,17 +91,17 @@ def get_onnx_tensorrt_engine_path(
             raise ValueError(f"batch_size must be > 0, got {batch_size}")
         suffix += f".bs1-{batch_size}" if dynamic_batch else f".bs{batch_size}"
     suffix += ".fp16" if bool(fp16) else ""
-    suffix += engine_system_suffix()
+    suffix += engine_system_suffix(gpu)
     suffix += ".engine"
     return onnx_path.with_suffix(suffix)
 
 
-def get_yolo_tensorrt_engine_path(model_path: str | Path, *, batch_size: int, fp16: bool) -> Path:
+def get_yolo_tensorrt_engine_path(model_path: str | Path, *, gpu: str, batch_size: int, fp16: bool) -> Path:
     model_path = Path(model_path)
     if model_path.suffix.lower() != ".pt":
         raise ValueError(f"Expected a .pt YOLO checkpoint, got: {model_path}")
     onnx_path = model_path.with_suffix(".onnx")
-    return get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=bool(fp16))
+    return get_onnx_tensorrt_engine_path(onnx_path, gpu=gpu, batch_size=batch_size, fp16=bool(fp16))
 
 
 UNET4X_ONNX_PATH = model_weights_dir() / "unet-4x.onnx"
@@ -119,14 +113,14 @@ SD15_CKPT_PATH = SD15_DIR / "sd15-200000.ckpt"
 SD15_CKPT_ENC_PATH = SD15_DIR / "sd15-200000.ckpt.enc"
 
 
-def get_unet4x_engine_path(onnx_path: str | Path | None = None, fp16: bool = True) -> Path:
+def get_unet4x_engine_path(onnx_path: str | Path | None = None, fp16: bool = True, *, gpu: str) -> Path:
     if onnx_path is None:
         onnx_path = UNET4X_ONNX_PATH
-    return get_onnx_tensorrt_engine_path(onnx_path, batch_size=None, fp16=fp16)
+    return get_onnx_tensorrt_engine_path(onnx_path, gpu=gpu, batch_size=None, fp16=fp16)
 
 
-def get_unet4x_encrypted_engine_path(fp16: bool = True) -> Path:
-    plain = get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=fp16)
+def get_unet4x_encrypted_engine_path(fp16: bool = True, *, gpu: str) -> Path:
+    plain = get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=fp16, gpu=gpu)
     return plain.parent / (plain.name + ".enc")
 
 
@@ -134,13 +128,13 @@ def unet4x_plaintext_available() -> bool:
     return UNET4X_ONNX_PATH.exists() and not is_frozen()
 
 
-def expected_unet4x_engine_path(fp16: bool = True) -> Path:
+def expected_unet4x_engine_path(fp16: bool = True, *, gpu: str) -> Path:
     """The unet-4x engine file that should exist on disk for this build: the plaintext
     engine in source/dev, the encrypted engine in frozen builds. Single source of truth
     for "is unet-4x already compiled?" used by both the compiler and the GUI preflight."""
     if unet4x_plaintext_available():
-        return get_unet4x_engine_path(fp16=fp16)
-    return get_unet4x_encrypted_engine_path(fp16=fp16)
+        return get_unet4x_engine_path(fp16=fp16, gpu=gpu)
+    return get_unet4x_encrypted_engine_path(fp16=fp16, gpu=gpu)
 
 
 BASICVSRPP_DIRECTIONS = ("backward_1", "forward_1", "backward_2", "forward_2")
@@ -161,10 +155,10 @@ def basicvsrpp_sub_engine_dir(model_weights_path: str) -> str:
     return os.path.join(os.path.dirname(model_weights_path), f"{stem}_sub_engines")
 
 
-def get_basicvsrpp_sub_engine_paths(model_weights_path: str, fp16: bool) -> dict[str, str]:
+def get_basicvsrpp_sub_engine_paths(model_weights_path: str, fp16: bool, gpu: str) -> dict[str, str]:
     engine_dir = basicvsrpp_sub_engine_dir(model_weights_path)
     prec = engine_precision_name(fp16=fp16)
-    suf = engine_system_suffix()
+    suf = engine_system_suffix(gpu)
     paths: dict[str, str] = {}
     for d in BASICVSRPP_DIRECTIONS:
         paths[f"loop_body_{d}"] = os.path.join(engine_dir, f"loop_body_{d}.trt_{prec}{suf}.engine")
@@ -177,9 +171,9 @@ def get_basicvsrpp_sub_engine_paths(model_weights_path: str, fp16: bool) -> dict
     return paths
 
 
-def all_basicvsrpp_sub_engines_exist(model_weights_path: str, fp16: bool) -> bool:
+def all_basicvsrpp_sub_engines_exist(model_weights_path: str, fp16: bool, gpu: str) -> bool:
     return all(basicvsrpp_sub_engine_exists(p)
-               for p in get_basicvsrpp_sub_engine_paths(model_weights_path, fp16).values())
+               for p in get_basicvsrpp_sub_engine_paths(model_weights_path, fp16, gpu).values())
 
 
 def basicvsrpp_sub_engine_exists(path: str) -> bool:

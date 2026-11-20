@@ -12,12 +12,11 @@ from jasna.gui.models import AppSettings
 
 
 @pytest.fixture(autouse=True)
-def _nvidia_preflight_in_an_empty_model_folder(monkeypatch, tmp_path):
-    import jasna.accelerator as accelerator
-    from jasna.mosaic import detection_registry
+def _nvidia_preflight_in_an_empty_model_folder(monkeypatch, tmp_path, cuda_capability):
+    import torch
 
-    for module in (accelerator, detection_registry):
-        monkeypatch.setattr(module, "is_amd_device", lambda _device=None: False)
+    cuda_capability((8, 9))
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "model_weights").mkdir()
 
@@ -62,7 +61,7 @@ def test_preflight_counts_engines_from_before_names_carried_the_gpu() -> None:
     settings = AppSettings(secondary_restoration="unet-4x")
     for req in run_engine_preflight(settings).requirements:
         for p in req.paths:
-            _touch(legacy_engine_path(p))
+            _touch(legacy_engine_path(p, "sm89"))
 
     assert run_engine_preflight(settings).missing == ()
 
@@ -110,7 +109,7 @@ def test_preflight_unet4x_encrypted_engine_satisfies(monkeypatch) -> None:
     unet_req = next(r for r in res.requirements if r.key == "unet_4x")
     assert not unet_req.exists
 
-    enc_engine = ep.get_unet4x_encrypted_engine_path(fp16=True)
+    enc_engine = ep.get_unet4x_encrypted_engine_path(fp16=True, gpu="sm89")
     _touch(enc_engine)
 
     res2 = run_engine_preflight(settings)
@@ -119,8 +118,7 @@ def test_preflight_unet4x_encrypted_engine_satisfies(monkeypatch) -> None:
     assert unet_req2.paths == (enc_engine,)
 
 
-def test_preflight_uses_yolo_engine_name_when_selected(monkeypatch) -> None:
-    monkeypatch.setattr("jasna.engine_paths.engine_gpu_name", lambda: "sm89")
+def test_preflight_uses_yolo_engine_name_when_selected() -> None:
     settings = AppSettings(detection_model="lada-yolo-v4")
     res = run_engine_preflight(settings)
 
@@ -134,12 +132,17 @@ def test_preflight_uses_yolo_engine_name_when_selected(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("secondary", ["none", "unet-4x"])
-def test_amd_preflight_has_no_engine_requirements(monkeypatch, secondary) -> None:
-    import jasna.accelerator as accelerator
+@pytest.mark.parametrize("gpu", ["amd", "no-usable-cuda"])
+def test_preflight_off_nvidia_has_no_engine_requirements(monkeypatch, gpu, secondary) -> None:
+    import torch
 
-    # AMD runs RF-DETR (rfdetr torch model) and YOLO through PyTorch and skips
-    # BasicVSR++ TensorRT, so nothing needs precompiling.
-    monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
+    # AMD runs RF-DETR (rfdetr torch model) and YOLO through PyTorch and skips BasicVSR++ TensorRT,
+    # and without a usable NVIDIA GPU nothing can run on TensorRT: nothing needs precompiling.
+    if gpu == "amd":
+        monkeypatch.setattr(torch.version, "hip", "7.1")
+    else:
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: pytest.fail("initialized CUDA"))
 
     result = run_engine_preflight(AppSettings(compile_basicvsrpp=True, secondary_restoration=secondary))
 

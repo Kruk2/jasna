@@ -37,17 +37,17 @@ def _detection_weights_path(settings: AppSettings) -> Path:
     return detection_model_weights_path(coerce_detection_model_name(str(settings.detection_model)))
 
 
-def _engine_on_disk(path: Path) -> bool:
+def _engine_on_disk(path: Path, gpu: str) -> bool:
     """Whether the engine at ``path`` exists, or its legacy file the run renames to it."""
     from jasna.engine_paths import legacy_engine_path
 
-    return path.is_file() or legacy_engine_path(path).is_file()
+    return path.is_file() or legacy_engine_path(path, gpu).is_file()
 
 
 def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
     import torch
 
-    from jasna.accelerator import is_amd_device
+    from jasna.accelerator import cuda_arch_name, is_nvidia_device
     from jasna.engine_paths import (
         default_restoration_model_path,
         expected_unet4x_engine_path,
@@ -61,66 +61,36 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         is_yolo_model,
     )
 
-    reqs: list[EngineRequirement] = []
     device = torch.device("cuda:0")
-    amd = is_amd_device(device)
+    if not is_nvidia_device(device) or not torch.cuda.is_available():
+        # Only NVIDIA GPUs run TensorRT engines; AMD runs every model through PyTorch.
+        return EnginePreflightResult(requirements=())
+    gpu = cuda_arch_name(device)
+    fp16 = bool(settings.fp16_mode)
+    reqs: list[EngineRequirement] = []
 
     det_name = coerce_detection_model_name(str(settings.detection_model))
-    det_weights = _detection_weights_path(settings)
-    if is_rfdetr_model(det_name):
-        if amd:
-            # AMD runs RF-DETR through the rfdetr torch model; no precompiled
-            # engine/cache artifact to check or build.
-            det_engine = None
-            det_exists = True
-        else:
+    for key, matches in (("rfdetr", is_rfdetr_model), ("yolo", is_yolo_model)):
+        if matches(det_name):
             det_engine = detection_engine_path(
-                det_name, det_weights, default_detection_batch_size(device), fp16=bool(settings.fp16_mode)
+                det_name, _detection_weights_path(settings), default_detection_batch_size(device), fp16=fp16, gpu=gpu
             )
-            det_exists = _engine_on_disk(det_engine)
-        if det_engine is not None:
-            reqs.append(
-                EngineRequirement(
-                    key="rfdetr",
-                    paths=(det_engine,),
-                    exists=det_exists,
-                )
-            )
-    elif is_yolo_model(det_name) and not amd:
-        det_engine = detection_engine_path(
-            det_name, det_weights, default_detection_batch_size(device), fp16=bool(settings.fp16_mode)
-        )
-        det_exists = _engine_on_disk(det_engine)
-        reqs.append(
-            EngineRequirement(
-                key="yolo",
-                paths=(det_engine,),
-                exists=det_exists,
-            )
-        )
+            reqs.append(EngineRequirement(key=key, paths=(det_engine,), exists=_engine_on_disk(det_engine, gpu)))
 
     standard_model = settings.restoration_model == "basicvsrpp"
-    restoration_model_path = default_restoration_model_path("basicvsrpp")
-    if standard_model and bool(settings.compile_basicvsrpp) and not amd:
-        sub_paths = get_basicvsrpp_sub_engine_paths(str(restoration_model_path), bool(settings.fp16_mode))
+    if standard_model and bool(settings.compile_basicvsrpp):
+        sub_paths = get_basicvsrpp_sub_engine_paths(str(default_restoration_model_path("basicvsrpp")), fp16, gpu)
         all_engine_paths = tuple(Path(p) for p in sub_paths.values())
         reqs.append(
             EngineRequirement(
                 key="basicvsrpp",
                 paths=all_engine_paths,
-                exists=all(_engine_on_disk(p) for p in all_engine_paths),
+                exists=all(_engine_on_disk(p, gpu) for p in all_engine_paths),
             )
         )
 
-    if standard_model and settings.secondary_restoration == "unet-4x" and not amd:
-        unet_engine = expected_unet4x_engine_path(fp16=bool(settings.fp16_mode))
-        unet_exists = _engine_on_disk(unet_engine)
-        reqs.append(
-            EngineRequirement(
-                key="unet_4x",
-                paths=(unet_engine,),
-                exists=unet_exists,
-            )
-        )
+    if standard_model and settings.secondary_restoration == "unet-4x":
+        unet_engine = expected_unet4x_engine_path(fp16=fp16, gpu=gpu)
+        reqs.append(EngineRequirement(key="unet_4x", paths=(unet_engine,), exists=_engine_on_disk(unet_engine, gpu)))
 
     return EnginePreflightResult(requirements=tuple(reqs))

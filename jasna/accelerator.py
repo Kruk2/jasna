@@ -228,6 +228,12 @@ def supports_frame_generation(device: torch.device | str) -> bool:
     return is_nvidia_device(device) and torch.cuda.get_device_capability(device) >= (8, 9)
 
 
+def cuda_arch_name(device: torch.device | str) -> str:
+    """An NVIDIA GPU's compute capability as TensorRT engine names carry it, e.g. ``sm89``."""
+    major, minor = torch.cuda.get_device_capability(device)
+    return f"sm{major}{minor}"
+
+
 def amd_gpu_architecture(device: torch.device | str) -> str:
     """The AMD GPU's architecture without target features, e.g. ``gfx1201``."""
     return torch.cuda.get_device_properties(device).gcnArchName.split(":")[0]

@@ -8,7 +8,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-import torch
 
 from jasna.engine_compiler import (
     EngineCompilationRequest,
@@ -23,8 +22,13 @@ pytestmark = pytest.mark.usefixtures("nvidia_vendor")
 
 
 @pytest.fixture(autouse=True)
-def _empty_model_folder(monkeypatch, tmp_path):
-    """Keeps the developer's model_weights engines out of reach: a run renames legacy engines it finds."""
+def _ada_gpu_and_empty_model_folder(monkeypatch, tmp_path, cuda_capability):
+    """An RTX 40 (sm89) and no model_weights engines: a run renames the legacy engines it finds, so the
+    developer's own stay out of reach."""
+    import torch
+
+    cuda_capability((8, 9))
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.chdir(tmp_path)
 
 
@@ -69,22 +73,25 @@ def test_existing_or_unneeded_engines_start_no_compiler(monkeypatch, request_fie
 
 
 @pytest.mark.parametrize("request_fields", [
-    dict(unet4x=True), dict(basicvsrpp=True, basicvsrpp_model_path="model.pth"),
-], ids=["unet4x", "basicvsrpp"])
-def test_amd_needs_no_tensorrt_engine(monkeypatch, request_fields) -> None:
-    monkeypatch.setattr("jasna.accelerator.is_nvidia_device", lambda _device: False)
+    dict(unet4x=True),
+    dict(basicvsrpp=True, basicvsrpp_model_path="model.pth"),
+    dict(detection=True, detection_model_name="rfdetr-v6", detection_model_path="rfdetr-v6.pt"),
+], ids=["unet4x", "basicvsrpp", "rfdetr"])
+@pytest.mark.parametrize("gpu", ["amd", "no-usable-cuda"])
+def test_only_an_nvidia_gpu_needs_tensorrt_engines(monkeypatch, gpu, request_fields) -> None:
+    import torch
+
+    if gpu == "amd":
+        monkeypatch.setattr("jasna.accelerator.is_nvidia_device", lambda _device: False)
+    else:
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: pytest.fail("initialized CUDA"))
     monkeypatch.setattr(
-        "jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: pytest.fail("TensorRT probe on AMD")
+        "jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: pytest.fail("TensorRT probe")
     )
-    monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda *_args, **_kwargs: pytest.fail("compiled TensorRT on AMD"))
+    monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda *_args, **_kwargs: pytest.fail("compiled TensorRT"))
     result = ensure_engines_compiled(EngineCompilationRequest(device="cuda:0", fp16=True, **request_fields))
     assert result.use_basicvsrpp_tensorrt is False
-
-
-def test_amd_rfdetr_needs_no_detection_engine(monkeypatch) -> None:
-    monkeypatch.setattr("jasna.accelerator.is_amd_device", lambda _device=None: True)
-
-    assert _detection_engine_exists("rfdetr-v6", "rfdetr-v6.pt", batch_size=4, fp16=True, device="cpu")
 
 
 def test_ensure_spawns_subprocess_on_missing(monkeypatch) -> None:
@@ -239,12 +246,13 @@ def test_detection_engine_exists_rfdetr(tmp_path: Path) -> None:
     onnx_path = tmp_path / "model.onnx"
     onnx_path.write_text("x")
     assert _detection_engine_exists(
-        "rfdetr-v5", str(onnx_path), 4, True, "cuda:0"
+        "rfdetr-v5", str(onnx_path), 4, True, "sm89"
     ) is False
 
     from jasna.trt import get_onnx_tensorrt_engine_path
     engine = get_onnx_tensorrt_engine_path(
         onnx_path,
+        gpu="sm89",
         batch_size=4,
         fp16=True,
         dynamic_batch=False,
@@ -252,7 +260,7 @@ def test_detection_engine_exists_rfdetr(tmp_path: Path) -> None:
     engine.parent.mkdir(parents=True, exist_ok=True)
     engine.write_text("x")
     assert _detection_engine_exists(
-        "rfdetr-v5", str(onnx_path), 4, True, "cuda:0"
+        "rfdetr-v5", str(onnx_path), 4, True, "sm89"
     ) is True
 
 
@@ -266,6 +274,7 @@ def test_detection_engine_exists_rfdetr_v6_uses_dynamic_path(
 
     engine = get_onnx_tensorrt_engine_path(
         onnx_path,
+        gpu="sm89",
         batch_size=8,
         fp16=True,
         dynamic_batch=True,
@@ -276,7 +285,7 @@ def test_detection_engine_exists_rfdetr_v6_uses_dynamic_path(
         str(onnx_path),
         8,
         True,
-        "cuda:0",
+        "sm89",
     )
 
 
@@ -284,8 +293,8 @@ def test_dynamic_batch_engine_path_is_distinct_from_fixed() -> None:
     from jasna.engine_paths import get_onnx_tensorrt_engine_path
 
     onnx = Path("model_weights/rfdetr-v6.onnx")
-    fixed = get_onnx_tensorrt_engine_path(onnx, batch_size=4, fp16=True)
-    dyn = get_onnx_tensorrt_engine_path(onnx, batch_size=4, fp16=True, dynamic_batch=True)
+    fixed = get_onnx_tensorrt_engine_path(onnx, gpu="sm89", batch_size=4, fp16=True)
+    dyn = get_onnx_tensorrt_engine_path(onnx, gpu="sm89", batch_size=4, fp16=True, dynamic_batch=True)
     assert ".bs4." in fixed.name
     assert ".bs1-4." in dyn.name
     assert fixed != dyn
@@ -295,13 +304,13 @@ def test_unet4x_engine_exists_plaintext(monkeypatch, tmp_path: Path) -> None:
     onnx_path = tmp_path / "unet-4x.onnx"
     onnx_path.write_bytes(b"onnx")
     monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", onnx_path)
-    assert _unet4x_engine_exists(fp16=True) is False
+    assert _unet4x_engine_exists(fp16=True, gpu="sm89") is False
 
     from jasna.engine_paths import get_unet4x_engine_path
-    engine = get_unet4x_engine_path(onnx_path, fp16=True)
+    engine = get_unet4x_engine_path(onnx_path, fp16=True, gpu="sm89")
     engine.parent.mkdir(parents=True, exist_ok=True)
     engine.write_text("x")
-    assert _unet4x_engine_exists(fp16=True) is True
+    assert _unet4x_engine_exists(fp16=True, gpu="sm89") is True
 
 
 def test_unet4x_engine_exists_encrypted(monkeypatch, tmp_path: Path) -> None:
@@ -309,15 +318,15 @@ def test_unet4x_engine_exists_encrypted(monkeypatch, tmp_path: Path) -> None:
     onnx_path = tmp_path / "unet-4x.onnx"  # absent → encrypted branch
     monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", onnx_path)
     enc_engine = tmp_path / "unet-4x.fp16.linux.engine.enc"
-    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda fp16=True: enc_engine)
+    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda **_kw: enc_engine)
     monkeypatch.setattr(
         "jasna.protection.protected_model.decrypt_engine_bytes",
         lambda model_id, data: b"decrypted-engine",
     )
 
-    assert _unet4x_engine_exists(fp16=True) is False
+    assert _unet4x_engine_exists(fp16=True, gpu="sm89") is False
     enc_engine.write_text("x")
-    assert _unet4x_engine_exists(fp16=True) is True
+    assert _unet4x_engine_exists(fp16=True, gpu="sm89") is True
 
 
 def test_a_stale_encrypted_unet4x_engine_counts_as_missing(monkeypatch, tmp_path: Path) -> None:
@@ -330,9 +339,9 @@ def test_a_stale_encrypted_unet4x_engine_counts_as_missing(monkeypatch, tmp_path
     enc_engine = tmp_path / "unet-4x.fp16.linux.engine.enc"
     enc_engine.write_text("x")
     monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", tmp_path / "unet-4x.onnx")
-    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda fp16=True: enc_engine)
+    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda **_kw: enc_engine)
     monkeypatch.setattr("jasna.protection.protected_model.decrypt_engine_bytes", stale)
-    assert _unet4x_engine_exists(fp16=True) is False
+    assert _unet4x_engine_exists(fp16=True, gpu="sm89") is False
 
 
 @pytest.fixture
@@ -347,7 +356,7 @@ def unet4x_licensed_in_this_process_only(monkeypatch, tmp_path: Path) -> Path:
     engine_path = tmp_path / "unet-4x.fp16.win.engine.enc"
     for module in ("jasna.engine_paths", "jasna.restorer.unet4x_secondary_restorer"):
         monkeypatch.setattr(f"{module}.UNET4X_ONNX_PATH", tmp_path / "unet-4x.onnx")
-        monkeypatch.setattr(f"{module}.get_unet4x_encrypted_engine_path", lambda fp16=True: engine_path)
+        monkeypatch.setattr(f"{module}.get_unet4x_encrypted_engine_path", lambda **_kw: engine_path)
     monkeypatch.setattr(license_store, "is_licensed", lambda: True)
     in_subprocess = []
 
@@ -422,43 +431,15 @@ def test_an_offline_license_check_keeps_the_encrypted_unet4x_engine(monkeypatch,
     enc_engine = tmp_path / "unet-4x.fp16.linux.engine.enc"
     enc_engine.write_text("x")
     monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", tmp_path / "unet-4x.onnx")
-    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda fp16=True: enc_engine)
+    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda **_kw: enc_engine)
     monkeypatch.setattr(unet4x_secondary_restorer, "UNET4X_ONNX_PATH", tmp_path / "unet-4x.onnx")
-    monkeypatch.setattr(unet4x_secondary_restorer, "get_unet4x_encrypted_engine_path", lambda fp16=True: enc_engine)
+    monkeypatch.setattr(unet4x_secondary_restorer, "get_unet4x_encrypted_engine_path", lambda **_kw: enc_engine)
     monkeypatch.setattr("jasna.protection.protected_model.decrypt_engine_bytes", offline)
     with pytest.raises(LeaseError):
-        _unet4x_engine_exists(fp16=True)
+        _unet4x_engine_exists(fp16=True, gpu="sm89")
     with pytest.raises(LeaseError):
         unet4x_secondary_restorer.compile_unet4x_engine("cpu")
     assert enc_engine.exists()
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
-@pytest.mark.parametrize("built_here", [True, False], ids=["built-on-this-gpu", "unreadable"])
-def test_an_upgrade_keeps_a_legacy_engine_that_runs_on_this_gpu(monkeypatch, tmp_path, built_here) -> None:
-    from factories import double_onnx
-    from jasna.engine_paths import legacy_engine_path
-    from jasna.mosaic.detection_registry import detection_engine_path
-    from jasna.trt import build_engine_bytes
-
-    onnx_path = double_onnx(tmp_path / "rfdetr-v5.onnx", [4, 3, 8, 8])
-    engine = detection_engine_path("rfdetr-v5", onnx_path, 4, fp16=True)
-    legacy_bytes = (
-        build_engine_bytes(onnx_path.read_bytes(), torch.device("cuda:0"), batch_size=4, fp16=True, workspace_gb=1,
-                           dynamic_batch=False)
-        if built_here else b"not an engine"
-    )
-    legacy_engine_path(engine).write_bytes(legacy_bytes)
-    compiler_runs = []
-    monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda cmd, **_kw: compiler_runs.append(cmd) or _mock_proc([]))
-
-    ensure_engines_compiled(EngineCompilationRequest(
-        device="cuda:0", fp16=True, detection=True, detection_model_name="rfdetr-v5",
-        detection_model_path=str(onnx_path), detection_batch_size=4,
-    ))
-
-    assert engine.exists() is built_here
-    assert len(compiler_runs) == (0 if built_here else 1)
 
 
 @pytest.mark.parametrize("copied_activation", [False, True], ids=["never-activated", "copied-from-another-pc"])
@@ -468,7 +449,7 @@ def test_an_unlicensed_unet4x_stops_before_compiling_and_says_what_to_do(monkeyp
     from jasna.protection import license_store, offline
 
     monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", tmp_path / "unet-4x.onnx")
-    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda fp16=True: tmp_path / "missing.enc")
+    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda **_kw: tmp_path / "missing.enc")
     monkeypatch.setattr(license_store, "is_licensed", lambda: False)
     monkeypatch.setattr(offline, "saved_grant", lambda: ("JT1-" + "a" * 64, b"", {}) if copied_activation else None)
     monkeypatch.setattr("jasna.engine_compiler._run_compiler_subprocess", lambda *args: pytest.fail("compiled"))

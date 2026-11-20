@@ -65,9 +65,10 @@ def compile_unet4x_engine(
         )
 
     require_protection()
+    from jasna.accelerator import cuda_arch_name
     from jasna.trt import compile_onnx_bytes_to_encrypted_engine
 
-    engine_path = get_unet4x_encrypted_engine_path(fp16=bool(fp16))
+    engine_path = get_unet4x_encrypted_engine_path(fp16=bool(fp16), gpu=cuda_arch_name(device))
     if engine_path.exists():
         if decrypt_unet4x_engine(engine_path) is not None:
             return engine_path
@@ -136,17 +137,19 @@ class Unet4xSecondaryRestorer:
         self._infer()
 
     def _load_trt_runner(self) -> None:
+        from jasna.accelerator import cuda_arch_name
         from jasna.trt import require_engine_file
         from jasna.trt.trt_runner import TrtRunner
 
+        gpu = cuda_arch_name(self.device)
         if use_plaintext_unet4x():
-            self.engine_path = require_engine_file(get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=self.fp16))
+            self.engine_path = require_engine_file(get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=self.fp16, gpu=gpu))
             self.runner = TrtRunner(
                 self.engine_path, input_shapes=UNET4X_INPUT_SHAPES, device=self.device,
             )
         else:
             require_protection()
-            self.engine_path = require_engine_file(get_unet4x_encrypted_engine_path(fp16=self.fp16))
+            self.engine_path = require_engine_file(get_unet4x_encrypted_engine_path(fp16=self.fp16, gpu=gpu))
             from jasna.protection import protected_model
             engine_bytes = decrypt_unet4x_engine(self.engine_path)
             if engine_bytes is None:

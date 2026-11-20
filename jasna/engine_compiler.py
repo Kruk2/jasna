@@ -57,21 +57,16 @@ def _detection_engine_exists(
     detection_model_path: str,
     batch_size: int,
     fp16: bool,
-    device: str,
+    gpu: str,
 ) -> bool:
-    import torch
-
-    from jasna.accelerator import is_amd_device
     from jasna.mosaic.detection_registry import detection_engine_path
 
-    if is_amd_device(torch.device(device)):
-        # AMD runs both RF-DETR (rfdetr torch model) and YOLO through PyTorch;
-        # there is no compiled engine artifact to check for.
-        return True
-    return detection_engine_path(detection_model_name, Path(detection_model_path), batch_size, fp16=fp16).exists()
+    return detection_engine_path(
+        detection_model_name, Path(detection_model_path), batch_size, fp16=fp16, gpu=gpu
+    ).exists()
 
 
-def _unet4x_engine_exists(fp16: bool) -> bool:
+def _unet4x_engine_exists(fp16: bool, gpu: str) -> bool:
     from jasna.engine_paths import (
         expected_unet4x_engine_path,
         get_unet4x_encrypted_engine_path,
@@ -79,9 +74,9 @@ def _unet4x_engine_exists(fp16: bool) -> bool:
     )
 
     if unet4x_plaintext_available():
-        return expected_unet4x_engine_path(fp16=fp16).exists()
+        return expected_unet4x_engine_path(fp16=fp16, gpu=gpu).exists()
 
-    engine_path = get_unet4x_encrypted_engine_path(fp16=fp16)
+    engine_path = get_unet4x_encrypted_engine_path(fp16=fp16, gpu=gpu)
     if not engine_path.exists():
         return False
 
@@ -97,30 +92,33 @@ class _MissingEngines(typing.NamedTuple):
     upscale_input_sizes: tuple[tuple[int, int], ...] = ()
 
 
-def _missing_engines(req: EngineCompilationRequest, *, nvidia: bool) -> _MissingEngines:
+def _missing_engines(req: EngineCompilationRequest, *, gpu: str | None) -> _MissingEngines:
+    """The engines ``req`` still needs on a GPU of ``gpu`` (``cuda_arch_name``); None off NVIDIA, where
+    nothing runs on TensorRT (AMD runs RF-DETR and YOLO through PyTorch)."""
+    nvidia = gpu is not None
     return _MissingEngines(
         basicvsrpp=nvidia and req.basicvsrpp and req.fp16
-        and not all_basicvsrpp_sub_engines_exist(req.basicvsrpp_model_path, req.fp16),
-        detection=req.detection and not _detection_engine_exists(
+        and not all_basicvsrpp_sub_engines_exist(req.basicvsrpp_model_path, req.fp16, gpu),
+        detection=nvidia and req.detection and not _detection_engine_exists(
             req.detection_model_name,
             req.detection_model_path,
             req.detection_batch_size,
             req.fp16,
-            req.device,
+            gpu,
         ),
-        unet4x=nvidia and req.unet4x and not _unet4x_engine_exists(req.fp16),
-        upscale_input_sizes=_missing_upscale_engines(req) if nvidia and req.upscale_model else (),
+        unet4x=nvidia and req.unet4x and not _unet4x_engine_exists(req.fp16, gpu),
+        upscale_input_sizes=_missing_upscale_engines(req, gpu) if nvidia and req.upscale_model else (),
     )
 
 
-def _missing_upscale_engines(req: EngineCompilationRequest) -> tuple[tuple[int, int], ...]:
+def _missing_upscale_engines(req: EngineCompilationRequest, gpu: str) -> tuple[tuple[int, int], ...]:
     from jasna.upscale.network import UPSCALE_NETWORKS, missing_network_engines
 
     network = UPSCALE_NETWORKS[req.upscale_model]
-    return missing_network_engines(network, tuple(req.upscale_input_sizes), fp16=req.fp16)
+    return missing_network_engines(network, tuple(req.upscale_input_sizes), fp16=req.fp16, gpu=gpu)
 
 
-def _adopt_legacy_engines(req: EngineCompilationRequest, device) -> None:
+def _adopt_legacy_engines(req: EngineCompilationRequest, device, gpu: str) -> None:
     """Keep the engines Jasna 0.12.3 and older named without their GPU architecture. Only on a single-GPU PC:
     there loading an engine proves it was built for this GPU, while with more GPUs torch_tensorrt
     loads it on another GPU it matches."""
@@ -132,43 +130,41 @@ def _adopt_legacy_engines(req: EngineCompilationRequest, device) -> None:
         get_basicvsrpp_sub_engine_paths,
         unet4x_plaintext_available,
     )
+    from jasna.trt import engine_runs_here
 
     if torch.cuda.device_count() != 1:
         return
+
+    def engine_file_runs_here(path: Path) -> bool:
+        return engine_runs_here(path.read_bytes(), device)
+
     if req.basicvsrpp and req.fp16:
-        for path in get_basicvsrpp_sub_engine_paths(req.basicvsrpp_model_path, req.fp16).values():
-            adopt_legacy_engine(path, lambda legacy: _torchtrt_export_runs_here(legacy, device))
+        for path in get_basicvsrpp_sub_engine_paths(req.basicvsrpp_model_path, req.fp16, gpu).values():
+            adopt_legacy_engine(path, gpu, lambda legacy: _torchtrt_export_runs_here(legacy, device))
     if req.detection:
         from jasna.mosaic.detection_registry import detection_engine_path
 
         engine = detection_engine_path(
-            req.detection_model_name, Path(req.detection_model_path), req.detection_batch_size, fp16=req.fp16
+            req.detection_model_name, Path(req.detection_model_path), req.detection_batch_size, fp16=req.fp16, gpu=gpu
         )
-        adopt_legacy_engine(engine, _engine_file_runs_here)
+        adopt_legacy_engine(engine, gpu, engine_file_runs_here)
     if req.unet4x:
-        runs_here = _engine_file_runs_here if unet4x_plaintext_available() else _encrypted_unet4x_engine_runs_here
-        adopt_legacy_engine(expected_unet4x_engine_path(fp16=req.fp16), runs_here)
+        def unet4x_runs_here(path: Path) -> bool:
+            if unet4x_plaintext_available():
+                return engine_file_runs_here(path)
+            require_protection()
+            from jasna.restorer.unet4x_secondary_restorer import decrypt_unet4x_engine
+
+            engine_bytes = decrypt_unet4x_engine(path)
+            return engine_bytes is not None and engine_runs_here(engine_bytes, device)
+
+        adopt_legacy_engine(expected_unet4x_engine_path(fp16=req.fp16, gpu=gpu), gpu, unet4x_runs_here)
     if req.upscale_model:
         from jasna.upscale.network import UPSCALE_NETWORKS, network_engine_path
 
         for size in req.upscale_input_sizes:
-            engine = network_engine_path(UPSCALE_NETWORKS[req.upscale_model], size, fp16=req.fp16)
-            adopt_legacy_engine(engine, _engine_file_runs_here)
-
-
-def _engine_file_runs_here(path: Path) -> bool:
-    from jasna.trt import engine_runs_here
-
-    return engine_runs_here(path.read_bytes())
-
-
-def _encrypted_unet4x_engine_runs_here(path: Path) -> bool:
-    require_protection()
-    from jasna.restorer.unet4x_secondary_restorer import decrypt_unet4x_engine
-    from jasna.trt import engine_runs_here
-
-    engine_bytes = decrypt_unet4x_engine(path)
-    return engine_bytes is not None and engine_runs_here(engine_bytes)
+            engine = network_engine_path(UPSCALE_NETWORKS[req.upscale_model], size, fp16=req.fp16, gpu=gpu)
+            adopt_legacy_engine(engine, gpu, engine_file_runs_here)
 
 
 def _torchtrt_export_runs_here(path: Path, device) -> bool:
@@ -191,15 +187,16 @@ def ensure_engines_compiled(
 ) -> EngineCompilationResult:
     import torch
 
-    from jasna.accelerator import is_nvidia_device
+    from jasna.accelerator import cuda_arch_name, is_nvidia_device
 
     result = EngineCompilationResult()
     device = torch.device(req.device)
-    nvidia = is_nvidia_device(device)
+    nvidia = is_nvidia_device(device) and torch.cuda.is_available()
+    gpu = cuda_arch_name(device) if nvidia else None
 
     if nvidia:
-        _adopt_legacy_engines(req, device)
-    missing = _missing_engines(req, nvidia=nvidia)
+        _adopt_legacy_engines(req, device, gpu)
+    missing = _missing_engines(req, gpu=gpu)
     if missing.unet4x:
         from jasna.engine_paths import unet4x_plaintext_available
         if not unet4x_plaintext_available():
@@ -225,7 +222,7 @@ def ensure_engines_compiled(
         _run_compiler_subprocess(replace(req, unet4x=False), log_callback)
         if req.basicvsrpp and nvidia:
             result.use_basicvsrpp_tensorrt = all_basicvsrpp_sub_engines_exist(
-                req.basicvsrpp_model_path, req.fp16
+                req.basicvsrpp_model_path, req.fp16, gpu
             )
 
     if missing.unet4x:
@@ -297,11 +294,11 @@ def compile_missing_engines(req: EngineCompilationRequest) -> None:
     from jasna.bootstrap import configure_process
     configure_process()
     import torch
-    from jasna.accelerator import is_nvidia_device, set_device
+    from jasna.accelerator import cuda_arch_name, is_nvidia_device
 
     device = torch.device(req.device)
-    set_device(device)  # engine names carry the current device's GPU architecture
-    missing = _missing_engines(req, nvidia=is_nvidia_device(device))
+    nvidia = is_nvidia_device(device) and torch.cuda.is_available()
+    missing = _missing_engines(req, gpu=cuda_arch_name(device) if nvidia else None)
 
     if missing.basicvsrpp:
         from jasna.restorer.basicvsrpp_sub_engines import compile_basicvsrpp_engines

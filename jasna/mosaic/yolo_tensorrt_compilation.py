@@ -36,7 +36,11 @@ def compile_yolo_to_tensorrt_engine(
     if not model_path.exists():
         raise FileNotFoundError(str(model_path))
 
-    engine_path = get_yolo_tensorrt_engine_path(model_path, batch_size=int(batch), fp16=bool(fp16))
+    from jasna.accelerator import cuda_arch_name
+
+    engine_path = get_yolo_tensorrt_engine_path(
+        model_path, gpu=cuda_arch_name(device), batch_size=int(batch), fp16=bool(fp16)
+    )
     if engine_path.exists():
         return engine_path
 

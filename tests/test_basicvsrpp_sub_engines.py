@@ -32,7 +32,7 @@ def test_sub_engine_dir_uses_stem() -> None:
 
 
 def _make_engine_files(model_path: str) -> dict[str, str]:
-    paths = get_sub_engine_paths(model_path, fp16=True)
+    paths = get_sub_engine_paths(model_path, True, "sm89")
     for p in paths.values():
         Path(p).parent.mkdir(parents=True, exist_ok=True)
         Path(p).write_text("x", encoding="utf-8")
@@ -41,16 +41,17 @@ def _make_engine_files(model_path: str) -> dict[str, str]:
 
 def test_sub_engines_exist_only_when_all_six_of_this_precision_do(tmp_path: Path) -> None:
     model_path = str(tmp_path / "model.pth")
-    assert not all_sub_engines_exist(model_path, fp16=True)
+    assert not all_sub_engines_exist(model_path, True, "sm89")
     paths = list(_make_engine_files(model_path).values())
-    assert len(paths) == 6 and all_sub_engines_exist(model_path, fp16=True)
-    assert not all_sub_engines_exist(model_path, fp16=False)
+    assert len(paths) == 6 and all_sub_engines_exist(model_path, True, "sm89")
+    assert not all_sub_engines_exist(model_path, False, "sm89")
     Path(paths[-1]).unlink()
-    assert not all_sub_engines_exist(model_path, fp16=True)
+    assert not all_sub_engines_exist(model_path, True, "sm89")
 
 
-def test_load_sub_engines_returns_none_when_missing(tmp_path: Path) -> None:
-    result = load_sub_engines(str(tmp_path / "model.pth"), torch.device("cpu"), fp16=True)
+def test_load_sub_engines_returns_none_when_missing(tmp_path: Path, cuda_capability) -> None:
+    cuda_capability((8, 9))
+    result = load_sub_engines(str(tmp_path / "model.pth"), torch.device("cuda:0"), fp16=True)
     assert result is None
 
 

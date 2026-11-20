@@ -6,7 +6,13 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
 import torch
+
+
+@pytest.fixture(autouse=True)
+def _ada_gpu(cuda_capability):
+    cuda_capability((8, 9))
 
 
 def _touch(path: Path) -> None:
@@ -21,7 +27,6 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
         raise ImportError("unverified runtime library", path="libnvidia-ml.so.1")
 
     monkeypatch.setattr(torch.cuda, "device_count", reject_gpu_enumeration)
-    monkeypatch.setattr("jasna.engine_paths.engine_gpu_name", lambda: "sm89")
     monkeypatch.chdir(tmp_path)
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
 
@@ -55,7 +60,7 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
 
     def _fake_compile(onnx_path, device, *, batch_size=None, fp16=True, **_kwargs):
         assert device == torch.device("cuda:0")
-        engine = jt.get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=fp16)
+        engine = jt.get_onnx_tensorrt_engine_path(onnx_path, gpu="sm89", batch_size=batch_size, fp16=fp16)
         _touch(engine)
         return engine
 
@@ -63,7 +68,7 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
 
     from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine, get_yolo_tensorrt_engine_path
 
-    expected = get_yolo_tensorrt_engine_path(pt, batch_size=8, fp16=True)
+    expected = get_yolo_tensorrt_engine_path(pt, gpu="sm89", batch_size=8, fp16=True)
     engine_path = compile_yolo_to_tensorrt_engine(pt, batch=8, fp16=True, imgsz=640, device=torch.device("cuda:0"))
     assert engine_path == expected
     assert engine_path.is_file()
@@ -92,7 +97,7 @@ def test_compile_yolo_to_tensorrt_engine_skips_when_present(monkeypatch, tmp_pat
     monkeypatch.setitem(sys.modules, "ultralytics.utils", ultra_utils)
 
     from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path, compile_yolo_to_tensorrt_engine
-    engine = get_yolo_tensorrt_engine_path(pt, batch_size=8, fp16=True)
+    engine = get_yolo_tensorrt_engine_path(pt, gpu="sm89", batch_size=8, fp16=True)
     _touch(engine)
 
 
@@ -129,7 +134,7 @@ def test_compile_yolo_restores_cuda_visible_devices(monkeypatch, tmp_path: Path)
     import jasna.trt as jt
 
     def _fake_compile(onnx_path, device, *, batch_size=None, fp16=True, **_kwargs):
-        engine = jt.get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=fp16)
+        engine = jt.get_onnx_tensorrt_engine_path(onnx_path, gpu="sm89", batch_size=batch_size, fp16=fp16)
         _touch(engine)
         return engine
 
@@ -145,7 +150,7 @@ def test_compile_yolo_restores_cuda_visible_devices(monkeypatch, tmp_path: Path)
     # Case 2: var had a value before -> must be restored to that value.
     (pt.with_suffix(".onnx")).unlink()
     from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path
-    get_yolo_tensorrt_engine_path(pt, batch_size=8, fp16=True).unlink()
+    get_yolo_tensorrt_engine_path(pt, gpu="sm89", batch_size=8, fp16=True).unlink()
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
     compile_yolo_to_tensorrt_engine(pt, batch=8, fp16=True, imgsz=640, device=torch.device("cuda:0"))
     assert os.environ["CUDA_VISIBLE_DEVICES"] == "0"
@@ -175,7 +180,7 @@ def test_yolo_engine_built_for_another_batch_size_is_missing(monkeypatch, tmp_pa
     import jasna.trt as jt
 
     def _fake_compile(onnx_path, device, *, batch_size=None, fp16=True, **_kwargs):
-        engine = jt.get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=fp16)
+        engine = jt.get_onnx_tensorrt_engine_path(onnx_path, gpu="sm89", batch_size=batch_size, fp16=fp16)
         _touch(engine)
         return engine
 
@@ -186,8 +191,8 @@ def test_yolo_engine_built_for_another_batch_size_is_missing(monkeypatch, tmp_pa
 
     compile_yolo_to_tensorrt_engine(pt, batch=4, fp16=True, imgsz=640, device=torch.device("cuda:0"))
 
-    assert _detection_engine_exists("lada-yolo-v4", str(pt), 4, True, "cuda:0") is True
-    assert _detection_engine_exists("lada-yolo-v4", str(pt), 8, True, "cuda:0") is False
+    assert _detection_engine_exists("lada-yolo-v4", str(pt), 4, True, "sm89") is True
+    assert _detection_engine_exists("lada-yolo-v4", str(pt), 8, True, "sm89") is False
 
 
 def test_compile_yolo_exports_onnx_without_onnxruntime(monkeypatch, tmp_path: Path) -> None:
@@ -214,7 +219,7 @@ def test_compile_yolo_exports_onnx_without_onnxruntime(monkeypatch, tmp_path: Pa
 
     def _fake_compile(onnx_path, device, *, batch_size=None, fp16=True, **_kwargs):
         exported_onnx.append(Path(onnx_path))
-        engine = jt.get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=fp16)
+        engine = jt.get_onnx_tensorrt_engine_path(onnx_path, gpu="sm89", batch_size=batch_size, fp16=fp16)
         _touch(engine)
         return engine
 

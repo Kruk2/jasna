@@ -32,6 +32,7 @@ def _build_yolo_model(*, batch_size=2, imgsz=640):
 
     with (
         patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path", return_value=_mock_engine_path()),
+        patch("torch.cuda.get_device_capability", return_value=(8, 9)),
         patch("jasna.trt.trt_runner.TrtRunner", return_value=mock_runner),
     ):
         model = YoloMosaicDetectionModel(

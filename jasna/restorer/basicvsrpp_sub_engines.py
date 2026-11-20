@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
-from jasna.accelerator import is_nvidia_device
+from jasna.accelerator import cuda_arch_name, is_nvidia_device
 from jasna.engine_paths import (
     BASICVSRPP_DIRECTIONS as DIRECTIONS,
     BASICVSRPP_PREPROCESS_BATCH as PREPROCESS_BATCH,
@@ -270,7 +270,7 @@ def compile_basicvsrpp_sub_engines(
 
     dtype = torch.float16 if fp16 else torch.float32
     os.makedirs(basicvsrpp_sub_engine_dir(model_weights_path), exist_ok=True)
-    engine_paths = get_basicvsrpp_sub_engine_paths(model_weights_path, fp16)
+    engine_paths = get_basicvsrpp_sub_engine_paths(model_weights_path, fp16, cuda_arch_name(device))
     workspace_size = get_workspace_size_bytes()
 
     mid = generator.mid_channels
@@ -369,9 +369,10 @@ def load_sub_engines(
     fp16: bool,
 ) -> tuple[dict[str, nn.Module], nn.Module, nn.Module] | None:
     """Returns ``(loop_body_engines, preprocess, upsample)`` or *None*."""
-    if not all_basicvsrpp_sub_engines_exist(model_weights_path, fp16):
+    gpu = cuda_arch_name(device)
+    if not all_basicvsrpp_sub_engines_exist(model_weights_path, fp16, gpu):
         return None
-    paths = get_basicvsrpp_sub_engine_paths(model_weights_path, fp16)
+    paths = get_basicvsrpp_sub_engine_paths(model_weights_path, fp16, gpu)
 
     loop_body_engines: dict[str, nn.Module] = {}
     for d in DIRECTIONS:
@@ -776,7 +777,8 @@ def compile_basicvsrpp_engines(model_weights_path: str, device: torch.device, fp
     """Compile the six BasicVSR++ TensorRT sub-engines if missing; True when they all exist."""
     if not is_nvidia_device(device) or not torch.cuda.is_available():
         return False
-    if all_basicvsrpp_sub_engines_exist(model_weights_path, fp16):
+    gpu = cuda_arch_name(device)
+    if all_basicvsrpp_sub_engines_exist(model_weights_path, fp16, gpu):
         return True
     if _gpu_vram_gb(device) < 4:
         logger.info("Skipping TRT compilation: GPU VRAM < 4 GB.")
@@ -792,4 +794,4 @@ def compile_basicvsrpp_engines(model_weights_path: str, device: torch.device, fp
     del generator
     gc.collect()
     torch.cuda.empty_cache()
-    return all_basicvsrpp_sub_engines_exist(model_weights_path, fp16)
+    return all_basicvsrpp_sub_engines_exist(model_weights_path, fp16, gpu)

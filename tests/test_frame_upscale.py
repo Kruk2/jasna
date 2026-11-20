@@ -71,7 +71,7 @@ def test_a_network_runs_twice_only_when_one_pass_leaves_the_frame_much_smaller(
 
 def test_each_network_input_size_and_precision_has_its_own_engine():
     paths = {
-        network_engine_path(network, size, fp16=fp16).name
+        network_engine_path(network, size, fp16=fp16, gpu="sm89").name
         for network in UPSCALE_NETWORKS.values() for size in ((1920, 1080), (1280, 720)) for fp16 in (True, False)
     }
 
@@ -421,6 +421,7 @@ def test_realplksr_large_kernel_features_past_fp16_range_still_give_the_fp32_ups
 NETWORK_GPU_SCRIPT = """
 import sys
 import torch
+from jasna.accelerator import cuda_arch_name
 from jasna.upscale.network import UPSCALE_NETWORKS, NetworkFrameUpscaler, compile_network_engine, network_engine_path
 
 network = UPSCALE_NETWORKS[sys.argv[1]]
@@ -428,7 +429,7 @@ device = torch.device("cuda")
 torch.manual_seed(0)
 frame = (torch.rand(3, 36, 64) * 255).to(torch.uint8).to(device)
 output = (64 * network.scale, 36 * network.scale)
-engine = network_engine_path(network, (64, 36), fp16=True)
+engine = network_engine_path(network, (64, 36), fp16=True, gpu=cuda_arch_name(device))
 compile_network_engine(network, (64, 36), device, fp16=True)
 try:
     upscaler = NetworkFrameUpscaler(network, device, source_size=(64, 36), output_size=output, fp16=True, strength=1.0)

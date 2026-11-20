@@ -12,7 +12,7 @@ def test_torch_unet_matches_tensorrt_across_temporal_frames(monkeypatch):
 
     if not torch.cuda.is_available() or not accelerator.is_nvidia_device():
         pytest.skip("TensorRT reference needs an NVIDIA GPU")
-    if not UNET4X_ONNX_PATH.is_file() or not get_unet4x_engine_path().is_file():
+    if not UNET4X_ONNX_PATH.is_file() or not get_unet4x_engine_path(gpu=accelerator.cuda_arch_name("cuda:0")).is_file():
         pytest.skip("needs the UNet ONNX model and its TensorRT engine")
     pytest.importorskip("tensorrt")
     device = torch.device("cuda:0")

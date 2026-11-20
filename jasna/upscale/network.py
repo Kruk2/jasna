@@ -65,15 +65,17 @@ def network_input_sizes(network: UpscaleNetwork, source_size: Size, output_size:
     return tuple((width * network.scale**index, height * network.scale**index) for index in range(passes))
 
 
-def network_engine_path(network: UpscaleNetwork, input_size: Size, *, fp16: bool) -> Path:
+def network_engine_path(network: UpscaleNetwork, input_size: Size, *, fp16: bool, gpu: str) -> Path:
     width, height = input_size
     return network.weights_path.with_name(
-        f"{network.engine_stem}.{width}x{height}.{engine_precision_name(fp16=fp16)}{engine_system_suffix()}.engine"
+        f"{network.engine_stem}.{width}x{height}.{engine_precision_name(fp16=fp16)}{engine_system_suffix(gpu)}.engine"
     )
 
 
-def missing_network_engines(network: UpscaleNetwork, input_sizes: tuple[Size, ...], *, fp16: bool) -> tuple[Size, ...]:
-    return tuple(size for size in input_sizes if not network_engine_path(network, size, fp16=fp16).exists())
+def missing_network_engines(
+    network: UpscaleNetwork, input_sizes: tuple[Size, ...], *, fp16: bool, gpu: str
+) -> tuple[Size, ...]:
+    return tuple(size for size in input_sizes if not network_engine_path(network, size, fp16=fp16, gpu=gpu).exists())
 
 
 def compile_network_engine(network: UpscaleNetwork, input_size: Size, device: torch.device, *, fp16: bool) -> Path:
@@ -89,7 +91,9 @@ def compile_network_engine(network: UpscaleNetwork, input_size: Size, device: to
     engine = build_engine_bytes(
         onnx.getvalue(), device, batch_size=None, fp16=fp16, workspace_gb=_ENGINE_WORKSPACE_GB, dynamic_batch=False
     )
-    return save_engine(network_engine_path(network, input_size, fp16=fp16), engine)
+    from jasna.accelerator import cuda_arch_name
+
+    return save_engine(network_engine_path(network, input_size, fp16=fp16, gpu=cuda_arch_name(device)), engine)
 
 
 class NetworkFrameUpscaler:
@@ -103,7 +107,7 @@ class NetworkFrameUpscaler:
         fp16: bool,
         strength: float,
     ) -> None:
-        from jasna.accelerator import is_nvidia_device
+        from jasna.accelerator import cuda_arch_name, is_nvidia_device
 
         self._output_size = output_size
         self._strength = strength
@@ -113,7 +117,7 @@ class NetworkFrameUpscaler:
             from jasna.trt.trt_runner import TrtRunner
 
             for width, height in input_sizes:
-                path = network_engine_path(network, (width, height), fp16=fp16)
+                path = network_engine_path(network, (width, height), fp16=fp16, gpu=cuda_arch_name(device))
                 self._runners.append(TrtRunner(path, {"image": (1, 3, height, width)}, device))
             self._dtype = self._runners[0].input_dtypes["image"]
             self._passes = [lambda image, runner=runner: runner.infer({"image": image})["upscaled"] for runner in self._runners]

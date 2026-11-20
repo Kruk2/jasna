@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from ultralytics.utils import nms, ops
 
-from jasna.accelerator import is_nvidia_device
+from jasna.accelerator import cuda_arch_name, is_nvidia_device
 from jasna.engine_paths import get_yolo_tensorrt_engine_path
 from jasna.media.resize_normalize import ResizeNormalizer
 from jasna.mosaic.detections import Detections
@@ -138,7 +138,9 @@ class YoloMosaicDetectionModel:
             from jasna.trt import require_engine_file
 
             runtime_path = require_engine_file(
-                get_yolo_tensorrt_engine_path(self.model_path, batch_size=self.batch_size, fp16=self.fp16)
+                get_yolo_tensorrt_engine_path(
+                    self.model_path, gpu=cuda_arch_name(self.device), batch_size=self.batch_size, fp16=self.fp16
+                )
             )
 
         if runtime_path.suffix.lower() == ".engine":

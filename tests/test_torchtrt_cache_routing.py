@@ -14,7 +14,7 @@ export_cache = pytest.importorskip("jasna.protection.export_cache")
 def test_frozen_engine_preflight_checks_each_cached_module(monkeypatch):
     monkeypatch.setattr(engine_paths, "is_frozen", lambda: True)
     monkeypatch.setattr(sys, "platform", "linux")
-    paths = engine_paths.get_basicvsrpp_sub_engine_paths("models/example.pth", True)
+    paths = engine_paths.get_basicvsrpp_sub_engine_paths("models/example.pth", True, "sm89")
     seen = []
 
     def available(path):
@@ -22,10 +22,10 @@ def test_frozen_engine_preflight_checks_each_cached_module(monkeypatch):
         return True
 
     monkeypatch.setattr(export_cache, "available", available)
-    assert engine_paths.all_basicvsrpp_sub_engines_exist("models/example.pth", True)
+    assert engine_paths.all_basicvsrpp_sub_engines_exist("models/example.pth", True, "sm89")
     assert seen == list(paths.values())
     monkeypatch.setattr(export_cache, "available", lambda path: False)
-    assert not engine_paths.all_basicvsrpp_sub_engines_exist("models/example.pth", True)
+    assert not engine_paths.all_basicvsrpp_sub_engines_exist("models/example.pth", True, "sm89")
 
 
 def test_frozen_module_loading_uses_the_runtime_reader(monkeypatch):

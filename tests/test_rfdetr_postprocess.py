@@ -90,6 +90,7 @@ def _build_rfdetr_model(*, dynamic_batch: bool = True):
 
     with (
         patch("jasna.mosaic.rfdetr.is_nvidia_device", return_value=True),
+        patch("torch.cuda.get_device_capability", return_value=(8, 9)),
         patch("jasna.mosaic.rfdetr.get_onnx_tensorrt_engine_path", return_value=engine_path),
         patch("jasna.trt.trt_runner.TrtRunner", return_value=mock_runner),
     ):

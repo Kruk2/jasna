@@ -9,7 +9,7 @@ from torch.nn import functional as F
 
 logger = logging.getLogger(__name__)
 
-from jasna.accelerator import current_stream, is_amd_device, is_nvidia_device, new_stream, stream_context
+from jasna.accelerator import cuda_arch_name, current_stream, is_amd_device, is_nvidia_device, new_stream, stream_context
 from jasna.engine_paths import get_onnx_tensorrt_engine_path
 from jasna.media.resize_normalize import ResizeNormalizer
 from jasna.mosaic.detections import Detections
@@ -91,7 +91,7 @@ class RfDetrMosaicDetectionModel:
             from jasna.trt.trt_runner import TrtRunner
 
             self.engine_path = get_onnx_tensorrt_engine_path(
-                self.weights_path, batch_size=self.batch_size, fp16=bool(fp16),
+                self.weights_path, gpu=cuda_arch_name(self.device), batch_size=self.batch_size, fp16=bool(fp16),
                 dynamic_batch=self.dynamic_batch,
             )
             self.runner = TrtRunner(

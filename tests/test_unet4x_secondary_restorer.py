@@ -95,6 +95,7 @@ def _fake_engine_restorer(tmp_path: Path, engine_dtype: torch.dtype):
     mock_stream.cuda_stream = 0
     with (
         patch("jasna.restorer.unet4x_secondary_restorer.get_unet4x_engine_path", return_value=fake_engine),
+        patch("torch.cuda.get_device_capability", return_value=(8, 9)),
         patch("jasna.trt.trt_runner.TrtRunner", return_value=_make_fake_runner(device, engine_dtype)),
         patch("torch.cuda.current_stream", return_value=mock_stream),
     ):

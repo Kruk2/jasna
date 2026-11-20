@@ -167,9 +167,11 @@ def compile_onnx_to_tensorrt_engine(
     workspace_gb: int,
     dynamic_batch: bool = False,
 ) -> Path:
+    from jasna.accelerator import cuda_arch_name
+
     onnx_path = Path(onnx_path)
     engine_path = get_onnx_tensorrt_engine_path(
-        onnx_path, batch_size=batch_size, fp16=bool(fp16), dynamic_batch=dynamic_batch,
+        onnx_path, gpu=cuda_arch_name(device), batch_size=batch_size, fp16=bool(fp16), dynamic_batch=dynamic_batch,
     )
 
     if engine_path.exists():
@@ -229,8 +231,9 @@ def save_engine(engine_path: Path, engine_bytes: bytes) -> Path:
     return engine_path
 
 
-def engine_runs_here(engine_bytes: bytes) -> bool:
-    """Whether a serialized engine loads on the current CUDA device; TensorRT refuses one built for another GPU."""
+def engine_runs_here(engine_bytes: bytes, device: torch.device) -> bool:
+    """Whether a serialized engine loads on ``device``; TensorRT refuses one built for another GPU."""
     import tensorrt as trt
 
-    return trt.Runtime(get_trt_logger()).deserialize_cuda_engine(engine_bytes) is not None
+    with torch.cuda.device(device):
+        return trt.Runtime(get_trt_logger()).deserialize_cuda_engine(engine_bytes) is not None
