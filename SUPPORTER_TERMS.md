@@ -2,9 +2,10 @@
 
 Last updated: 20 November 2026
 
-These terms cover License codes and the supporter models they unlock in the
-official Jasna release. They are between you and Kruk2, the author of Jasna
-("we"). Using a License code means you accept them.
+These terms cover License codes and the paid version of Jasna they unlock:
+the official Jasna release with its supporter features and supporter models.
+They are between you and Kruk2, the author of Jasna ("we"). Using a License
+code means you accept them.
 
 They do not change the licenses of Jasna's public source code or of
 third-party components, described in [LICENSING.md](LICENSING.md). Nothing
@@ -12,21 +13,22 @@ here limits your rights under AGPL-3.0 or any other open-source license.
 
 ## What you get
 
-- A License code unlocks the supporter models of the tier it was issued for.
-  See [Supporting the project](README.md#supporting-the-project).
-- You may use those models in the official Jasna release, on your own
-  devices, on up to 3 devices at the same time.
-- The License code does not expire. It stays valid after your membership or
+- A License code gives you a license to use the paid version of Jasna: the
+  official release with the supporter features of the tier the code was
+  issued for. See [Supporting the project](README.md#supporting-the-project).
+- You may use it on your own devices, on up to 3 devices at the same time.
+- The license does not expire. It stays valid after your membership or
   subscription ends.
-- You get a right to use the models, not ownership. You get no copyright in
-  Jasna or the supporter models and no right to sublicense them.
+- You get a right to use, not ownership. You get no copyright in Jasna or the
+  supporter models and no right to sublicense them.
 
 ## Updates
 
 - New Jasna versions are free for everyone.
-- Updates of the supporter models covered by your License code are included
-  at no extra cost, with no time limit. This includes future updates of the
-  LTX model in the $25 tier. We decide whether and when to release updates.
+- Updates of the supporter features covered by your License code, including
+  their models, are included at no extra cost, with no time limit. This
+  includes future updates of the LTX model. We decide whether and when to
+  release updates.
 
 ## What you may not do
 
