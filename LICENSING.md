@@ -64,5 +64,5 @@ detectors are licensed under Apache-2.0. Lada models retain AGPL-3.0. The
 NomosUni SPAN and NomosWebPhoto RealPLKSR upscaler weights are CC-BY-4.0
 (Philip Hofmann). Encrypted
 supporter models are proprietary and may be used only under their stated
-supporter-model terms.
+supporter-model terms and the [supporter license terms](SUPPORTER_TERMS.md).
 

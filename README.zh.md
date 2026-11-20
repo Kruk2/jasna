@@ -163,6 +163,8 @@ Jasna 是免费的。你的支持用于训练新模型，主要是租用 GPU。�
 详细说明和问题处理：[激活支持者模型](docs/zh/gui.md#激活支持者模型)。租用 GPU：见
 [云 GPU](docs/zh/cloud.md)。
 
+使用许可证码即表示你接受[支持者许可条款](SUPPORTER_TERMS.md)（英文）。
+
 ## 高级
 
 ### Jasna 如何工作

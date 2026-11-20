@@ -167,6 +167,9 @@ Elsewhere it needs internet while it uses supporter models. Details and help:
 [Activate supporter models](docs/en/gui.md#activate-supporter-models). Rented
 GPU: see [Cloud GPUs](docs/en/cloud.md).
 
+Using a License code means you accept the
+[supporter license terms](SUPPORTER_TERMS.md).
+
 ## Advanced
 
 ### How Jasna works
