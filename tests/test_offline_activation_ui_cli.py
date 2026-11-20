@@ -136,6 +136,26 @@ def test_cli_license_code_failure_is_safe_and_stops_processing(monkeypatch, leas
     assert code not in output.out + output.err
 
 
+def test_cli_license_refusal_during_a_run_prints_its_message_without_a_traceback(monkeypatch, lease_api, tmp_path,
+                                                                                    capsys):
+    from jasna import main
+    from jasna.protection import lease
+
+    refusal = lease.LeaseError("offline_check")
+    photo = tmp_path / "photo.png"
+    photo.touch()
+    monkeypatch.setattr(sys, "argv", ["jasna", "--input", str(photo), "--output", str(tmp_path / "out.png")])
+
+    def refuse(args):
+        raise refusal
+
+    monkeypatch.setattr(main, "_check_system", refuse)
+    with pytest.raises(SystemExit) as exc:
+        main.main()
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == f"{refusal}\n"
+
+
 def test_activation_worker_runs_io_and_errors_off_the_main_thread(lease_api):
     from jasna.gui.activation_worker import start_lease_activation
 

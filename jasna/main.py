@@ -12,6 +12,7 @@ from jasna.cli_activation import run_activation_options
 from jasna.cli_downloads import ensure_dlss5_runtime, ensure_ltx_model
 from jasna.cli_parser import BASICVSRPP_ONLY_ARG_DESTS, CLI_RESTORATION_MODELS, LTX_ONLY_ARG_DESTS, build_parser
 from jasna.engine_paths import default_restoration_model_path
+from jasna.license_api import LicenseCheckStopped
 from jasna.media.probe import UnsupportedVideoError
 from jasna.os_utils import check_amd_amf_runtime, confirm_in_terminal, escape_unencodable_output
 from jasna.system_requirements import (
@@ -527,6 +528,9 @@ def main() -> None:
     except KeyboardInterrupt:
         print("Stopped")
         sys.exit(130)
+    except LicenseCheckStopped as exc:
+        print(exc, file=sys.stderr)
+        sys.exit(1)
 
 
 def _main() -> None:
