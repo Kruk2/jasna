@@ -12,8 +12,6 @@ from jasna.gui.models import JobItem, JobStatus, AppSettings
 from jasna.post_export_action import PostExportVideoCommandError
 from factories import gui_processor, job_queue
 
-pytestmark = pytest.mark.usefixtures("tk_garbage_collected")
-
 
 def _make_jobs(*names: str) -> list[JobItem]:
     return [JobItem(path=Path(n)) for n in names]

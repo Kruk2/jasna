@@ -7,7 +7,7 @@ from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, AppSettings, JobItem, JobSt
 from jasna.gui.processor import ProgressUpdate
 from factories import gui_processor, job_queue, video_metadata
 
-pytestmark = pytest.mark.usefixtures("no_gpu_cleanup", "tk_garbage_collected")
+pytestmark = pytest.mark.usefixtures("no_gpu_cleanup")
 
 
 def _run_queue(processor, jobs, tmp_path, settings, output_pattern="{original}_restored.mp4"):

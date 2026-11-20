@@ -130,7 +130,13 @@ def rocm_probe(monkeypatch, tmp_path):
 
 @pytest.fixture
 def tk_root():
-    """A CTk root window, destroyed after the test; skips when there is no display."""
+    """A CTk root window, destroyed after the test; skips when there is no display.
+
+    Teardown also frees the window's CTk widgets, which live in reference cycles: a garbage
+    collection on a later test's worker thread would otherwise finalize their fonts there, and
+    each Tk call off the main thread waits a second for a main loop that tests never run, so a
+    few thousand leftovers stall a test that joins such a thread for minutes.
+    """
     from tkinter import TclError
 
     import customtkinter as ctk
@@ -141,6 +147,7 @@ def tk_root():
         pytest.skip(f"Tk display unavailable: {exc}")
     yield root
     root.destroy()
+    gc.collect()
 
 
 @pytest.fixture
@@ -200,6 +207,7 @@ def make_jasna_app(monkeypatch, tmp_path, user_config_dir):
             app._stop_system_stats_poller()
             app._main_thread.close()
             app.destroy()
+    gc.collect()  # see tk_root
 
 
 @pytest.fixture
@@ -254,17 +262,6 @@ def show_window():
         assert window.winfo_viewable()
 
     return show
-
-
-@pytest.fixture
-def tk_garbage_collected():
-    """Finalize Tk objects left by earlier GUI tests on the main thread.
-
-    Code that runs ``gc.collect()`` on a worker thread (the GUI processor does after every
-    job) would otherwise finalize them there, and each Tk call off the main thread waits a
-    second for a main loop that tests never run, outlasting the tests' join timeouts.
-    """
-    gc.collect()
 
 
 @pytest.fixture

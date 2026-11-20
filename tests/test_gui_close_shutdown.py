@@ -1,13 +1,9 @@
 import threading
 from pathlib import Path
 
-import pytest
-
 from jasna.gui.processor import Processor
 from jasna.gui.models import JobItem, AppSettings
 from factories import gui_processor, job_queue
-
-pytestmark = pytest.mark.usefixtures("tk_garbage_collected")
 
 
 def _start(processor: Processor, folder: Path) -> None:

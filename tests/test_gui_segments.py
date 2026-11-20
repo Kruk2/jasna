@@ -10,7 +10,7 @@ from jasna.segments import SegmentRange
 
 from factories import gui_processor, job_queue
 
-pytestmark = pytest.mark.usefixtures("nvidia_vendor", "no_gpu_cleanup", "tk_garbage_collected")
+pytestmark = pytest.mark.usefixtures("nvidia_vendor", "no_gpu_cleanup")
 
 
 def test_pending_job_segments_can_be_replaced() -> None:
