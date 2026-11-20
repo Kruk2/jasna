@@ -18,6 +18,7 @@
 - LTX には Vast を使ってください。今のところ RunPod と Modal では LTX が使えません
   （BasicVSR++ は使えます）。
 - Docker: コンテナーを `--pid=host` で起動しないでください。
+- LTX には実際の GPU か GPU パススルーが必要です。すべてのプログラムに独自のライブラリを追加する仮想 GPU サービス（`/etc/ld.so.preload`）では起動しません。
 
 ## インストール
 

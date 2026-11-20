@@ -15,6 +15,7 @@
 - 用 `root` 登录。RunPod 和 Vast 默认就是。
 - 要用 LTX 请选 Vast。目前 RunPod 和 Modal 上不能用 LTX（BasicVSR++ 可以用）。
 - Docker：不要用 `--pid=host` 启动容器。
+- LTX 需要真实 GPU 或 GPU 直通。在给每个程序加载自己库的虚拟 GPU 服务（`/etc/ld.so.preload`）上无法启动。
 
 ## 安装
 

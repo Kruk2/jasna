@@ -17,6 +17,8 @@ while Jasna runs, and it needs internet while you use supporter models. GitHub s
 - For LTX, use Vast. LTX doesn't work on RunPod or Modal for now; BasicVSR++
   does.
 - Docker: don't start the container with `--pid=host`.
+- LTX needs a real GPU or GPU passthrough. It doesn't start on virtual GPU services that
+  add their own libraries to every program (`/etc/ld.so.preload`).
 
 ## Install
 
