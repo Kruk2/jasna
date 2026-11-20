@@ -666,6 +666,40 @@ def test_decode_latent_computes_in_the_decoder_dtype_and_returns_the_latent_dtyp
     assert torch.equal(video, reference.bfloat16())
 
 
+def _refuse_tiled_decodes(monkeypatch, decoder: DiffusionVideoDecoder, refusals: int) -> None:
+    """The first ``refusals`` decodes draw noise and then run out of GPU memory, as a real one can mid-way."""
+    tiled_decode = decoder.tiled_decode
+    left = [refusals]
+
+    def refusing(latent, tiling, generator):
+        if left[0]:
+            left[0] -= 1
+            torch.randn(4, generator=generator)
+            raise torch.OutOfMemoryError("CUDA out of memory")
+        return tiled_decode(latent, tiling, generator)
+
+    monkeypatch.setattr(decoder, "tiled_decode", refusing)
+
+
+def test_a_decode_the_gpu_refuses_runs_again_with_a_smaller_budget_and_the_same_noise(monkeypatch):
+    decoder = _tiny_decoder()
+    latent = torch.randn(1, 8, 3, 3, 4)
+    reference = loader.decode_latent(decoder, latent, 8 << 30, torch.Generator().manual_seed(1))
+    _refuse_tiled_decodes(monkeypatch, decoder, refusals=1)
+
+    video = loader.decode_latent(decoder, latent, 8 << 30, torch.Generator().manual_seed(1))
+
+    assert torch.equal(video, reference)
+
+
+def test_a_decode_refused_down_to_the_smallest_tile_raises_out_of_memory(monkeypatch):
+    decoder = _tiny_decoder()
+    _refuse_tiled_decodes(monkeypatch, decoder, refusals=100)
+
+    with pytest.raises(torch.OutOfMemoryError):
+        loader.decode_latent(decoder, torch.randn(1, 8, 3, 3, 4), 8 << 30, torch.Generator().manual_seed(1))
+
+
 @pytest.mark.parametrize("stage", ("encoder", "decoder"))
 def test_vae_reader_close_failure_clears_loaded_weights(tmp_path, monkeypatch, stage):
     path = tmp_path / "vae.safetensors"

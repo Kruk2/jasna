@@ -278,15 +278,43 @@ def decode_latent(
 
     The decoder computes in its own dtype; the pixels come back in ``latent``'s. The tile layout
     is chosen from ``free_bytes`` (activation budget); raises ``ValueError`` when even the
-    minimum tile does not fit.
+    minimum tile does not fit. When the GPU still runs out of memory (on Windows it can refuse
+    part of what it reports free), the window decodes again with the same noise in the tiles
+    of a quarter less budget, until even the smallest tile does not fit (#839).
     """
     _b, _c, frames, height, width = latent.shape
     scale = decoder.video_downscale_factors
-    pixel_frames, pixel_height, pixel_width = (frames - 1) * scale.time + 1, height * scale.height, width * scale.width
-    tiling = decoder.recommended_tiling_config(
-        height=pixel_height, width=pixel_width, num_frames=pixel_frames, free_bytes=free_bytes
-    )
-    layout = (pixel_frames, pixel_height, pixel_width, tiling)
+    pixels = (frames - 1) * scale.time + 1, height * scale.height, width * scale.width
+    noise = generator.get_state() if generator is not None else None
+    tiling = _decode_tiling(decoder, pixels, free_bytes)
+    while True:
+        try:
+            return _decode_in_tiles(decoder, latent, pixels, tiling, generator)
+        except torch.OutOfMemoryError as refused:
+            free_bytes = free_bytes * 3 // 4
+            try:
+                tiling = _decode_tiling(decoder, pixels, free_bytes)
+            except ValueError:
+                raise refused from None
+            logger.warning("LTX decode ran out of GPU memory; decoding again in smaller tiles")
+        _free_compile_garbage()
+        if noise is not None:
+            generator.set_state(noise)
+
+
+def _decode_tiling(decoder: DiffusionVideoDecoder, pixels: tuple[int, int, int], free_bytes: int) -> TileSizeConfig:
+    frames, height, width = pixels
+    return decoder.recommended_tiling_config(height=height, width=width, num_frames=frames, free_bytes=free_bytes)
+
+
+def _decode_in_tiles(
+    decoder: DiffusionVideoDecoder,
+    latent: torch.Tensor,
+    pixels: tuple[int, int, int],
+    tiling: TileSizeConfig,
+    generator: torch.Generator | None,
+) -> torch.Tensor:
+    layout = (*pixels, tiling)
     first_of_layout = layout not in _decoded_layouts
     if first_of_layout:
         _log_tiling(*layout)
