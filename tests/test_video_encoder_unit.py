@@ -25,6 +25,7 @@ from jasna.media.source_streams import SourceStreamCopier, _normalized_audio_lay
 from jasna.media.video_encoder import (
     ENCODE_BUFFER_SIZE,
     EncodeOrder,
+    SlotHandoff,
     _mov_container_options,
     VideoEncoder,
     nvenc_yuv_frame,
@@ -421,6 +422,40 @@ def test_encode_worker_failure_is_raised_when_the_output_closes(tmp_path):
         with encoder:
             for pts in range(ENCODE_BUFFER_SIZE):
                 encoder.encode(host_frame, pts)
+
+
+class TestSlotHandoff:
+    def test_slots_alternate_and_come_back_only_after_their_item_was_consumed(self):
+        log = []
+        handoff = SlotHandoff(2, lambda slot, item: log.append(("consumed", slot, item)), name="TestHandoff")
+        for item in range(6):
+            slot = handoff.acquire()
+            log.append(("acquired", slot, item))
+            handoff.hand_off(slot, item)
+
+        assert handoff.close() is None
+        consumed = [(slot, item) for kind, slot, item in log if kind == "consumed"]
+        assert consumed == [(0, 0), (1, 1), (0, 2), (1, 3), (0, 4), (1, 5)]
+        for position, (kind, slot, item) in enumerate(log):
+            if kind == "acquired" and item >= 2:
+                assert log.index(("consumed", slot, item - 2)) < position
+
+    def test_consume_failure_drops_later_items_and_is_raised(self):
+        consumed = []
+
+        def consume(slot, item):
+            if item == 0:
+                raise RuntimeError("encode failed")
+            consumed.append(item)
+
+        handoff = SlotHandoff(2, consume, name="TestHandoff")
+        handoff.hand_off(handoff.acquire(), 0)
+        handoff.hand_off(handoff.acquire(), 1)
+
+        with pytest.raises(RuntimeError, match="encode failed"):
+            handoff.acquire()
+        assert str(handoff.close()) == "encode failed"
+        assert consumed == []
 
 
 class TestSourceStreamPump:

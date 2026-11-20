@@ -70,6 +70,7 @@ _COLOR_VARIANTS = {
 
 _NVENC_PITCH_ALIGNMENT = 16
 ENCODE_BUFFER_SIZE = 8
+AMF_HOST_BUFFERS = 2
 
 
 def nvenc_yuv_frame(height: int, width: int, dtype: torch.dtype, device: torch.device) -> torch.Tensor:
@@ -125,6 +126,50 @@ class EncodeOrder:
             pts = self._last_pts + 1
         self._last_pts = pts
         return self._frames.popleft(), pts
+
+
+class SlotHandoff:
+    """Hands items on ``slots`` reusable buffers to ``consume(slot, item)`` on its own thread,
+    in hand-off order. A slot is handed out again only after ``consume`` returned for it. Once
+    ``consume`` raised, later items are dropped and ``acquire`` raises that error."""
+
+    def __init__(self, slots: int, consume, *, name: str):
+        self._consume = consume
+        self._free: queue.Queue[int] = queue.Queue()
+        for slot in range(slots):
+            self._free.put(slot)
+        self._ready: queue.Queue = queue.Queue()
+        self.error: Exception | None = None
+        self._thread = threading.Thread(target=self._run, name=name, daemon=True)
+        self._thread.start()
+
+    def acquire(self) -> int:
+        slot = self._free.get()
+        if self.error is not None:
+            self._free.put(slot)
+            raise self.error
+        return slot
+
+    def hand_off(self, slot: int, item) -> None:
+        self._ready.put((slot, item))
+
+    def close(self) -> Exception | None:
+        """Waits for every handed-off item and returns the first ``consume`` error."""
+        self._ready.put(None)
+        self._thread.join()
+        return self.error
+
+    def _run(self) -> None:
+        while (entry := self._ready.get()) is not None:
+            slot, item = entry
+            try:
+                if self.error is None:
+                    self._consume(slot, item)
+            except Exception as exc:
+                self.error = exc
+                logger.exception("[%s] crashed", self._thread.name)
+            finally:
+                self._free.put(slot)
 
 
 class VideoEncoder:
@@ -277,7 +322,9 @@ class VideoEncoder:
         height = self.metadata.video_height
         width = self.metadata.video_width
         self._cuda_ctx = None
-        self._host_yuv = None
+        self._host_yuv: list[torch.Tensor] = []
+        self._host_ready: list = []
+        self._amf_handoff: SlotHandoff | None = None
         self.stream = new_stream(self.device)
         if self._cas is not None:
             with stream_context(self.stream):
@@ -298,10 +345,19 @@ class VideoEncoder:
                     dtype=self._converter.sample_dtype,
                     device=self.device,
                 )
-            self._host_yuv = torch.empty(
-                (height + height // 2, width),
-                dtype=torch.uint16 if self.spec.ten_bit else torch.uint8,
-                pin_memory=True,
+            # The copy of the next frame into one pinned buffer overlaps AMF
+            # encoding the last one from the other.
+            self._host_yuv = [
+                torch.empty(
+                    (height + height // 2, width),
+                    dtype=torch.uint16 if self.spec.ten_bit else torch.uint8,
+                    pin_memory=True,
+                )
+                for _ in range(AMF_HOST_BUFFERS)
+            ]
+            self._host_ready = [new_event(self.device) for _ in self._host_yuv]
+            self._amf_handoff = SlotHandoff(
+                len(self._host_yuv), self._encode_host_frame, name="AmfEncodeWorker"
             )
         self._order = EncodeOrder(hold=ENCODE_BUFFER_SIZE // 2, pts_origin=self.pts_origin)
         self._video_started = False
@@ -330,6 +386,10 @@ class VideoEncoder:
             self._encode_queue.join()
             self._encode_queue.put(self._stop_sentinel)
             self._encode_thread.join()
+            if self._amf_handoff is not None:
+                amf_error = self._amf_handoff.close()
+                if self._worker_error is None:
+                    self._worker_error = amf_error
 
             if flush_video and self._worker_error is None and self.out_stream.codec_context.is_open:
                 for packet in self.out_stream.encode(None):
@@ -416,8 +476,8 @@ class VideoEncoder:
     def _packed_frame(self, height: int, width: int) -> torch.Tensor:
         # NVENC takes the device frame by pointer and still owns it after
         # encode() returns, so NVIDIA hands it a fresh one every time. AMF has
-        # no zero-copy path: the AMD branch synchronizes then blocking-copies
-        # this buffer into pinned host memory, so one buffer can serve every frame.
+        # no zero-copy path: the AMD branch copies this buffer into pinned host
+        # memory on the same stream, so one buffer can serve every frame.
         if self._packed is not None:
             return self._packed
         return nvenc_yuv_frame(height, width, self._converter.sample_dtype, self.device)
@@ -454,21 +514,30 @@ class VideoEncoder:
                     stream=self.stream.cuda_stream,
                     cuda_context=self._cuda_ctx,
                 )
+            else:
+                slot = self._amf_handoff.acquire()
+                self._host_yuv[slot].copy_(
+                    packed.view(torch.uint16) if self.spec.ten_bit else packed,
+                    non_blocking=True,
+                )
+                self._host_ready[slot].record(self.stream)
+                self._amf_handoff.hand_off(slot, pts)
+                return
+        self._send_frame(hw_frame, pts)
 
-        if self.vendor is AcceleratorVendor.AMD:
-            # AMF reads host planes, and reading them while a non-blocking copy
-            # was still in flight corrupted frames (issue #252): finish the
-            # conversion, then blocking-copy into pinned memory.
-            self.stream.synchronize()
-            self._host_yuv.copy_(
-                packed.view(torch.uint16) if self.spec.ten_bit else packed,
-                non_blocking=False,
-            )
-            planes = [self._host_yuv[:height], self._host_yuv[height:]]
-            hw_frame = av.VideoFrame.from_dlpack(
-                planes,
-                format=self.spec.frame_format,
-            )
+    def _encode_host_frame(self, slot: int, pts: int):
+        # AMF reads host planes, and reading them while the copy was still in
+        # flight corrupted frames (issue #252).
+        self._host_ready[slot].synchronize()
+        host_yuv = self._host_yuv[slot]
+        height = self.metadata.video_height
+        hw_frame = av.VideoFrame.from_dlpack(
+            [host_yuv[:height], host_yuv[height:]],
+            format=self.spec.frame_format,
+        )
+        self._send_frame(hw_frame, pts)
+
+    def _send_frame(self, hw_frame: av.VideoFrame, pts: int):
         hw_frame.pts = pts
         hw_frame.time_base = self.time_base
         try:
