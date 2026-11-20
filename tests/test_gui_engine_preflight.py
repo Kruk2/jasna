@@ -56,6 +56,17 @@ def test_preflight_no_warning_when_all_expected_engines_exist() -> None:
     assert res.missing == ()
 
 
+def test_preflight_counts_engines_from_before_names_carried_the_gpu() -> None:
+    from jasna.engine_paths import legacy_engine_path
+
+    settings = AppSettings(secondary_restoration="unet-4x")
+    for req in run_engine_preflight(settings).requirements:
+        for p in req.paths:
+            _touch(legacy_engine_path(p))
+
+    assert run_engine_preflight(settings).missing == ()
+
+
 def test_preflight_uses_fixed_batch_path_for_rfdetr_v5() -> None:
     settings = AppSettings(
         detection_model="rfdetr-v5",
@@ -108,7 +119,8 @@ def test_preflight_unet4x_encrypted_engine_satisfies(monkeypatch) -> None:
     assert unet_req2.paths == (enc_engine,)
 
 
-def test_preflight_uses_yolo_engine_name_when_selected() -> None:
+def test_preflight_uses_yolo_engine_name_when_selected(monkeypatch) -> None:
+    monkeypatch.setattr("jasna.engine_paths.engine_gpu_name", lambda: "sm89")
     settings = AppSettings(detection_model="lada-yolo-v4")
     res = run_engine_preflight(settings)
 
@@ -117,7 +129,7 @@ def test_preflight_uses_yolo_engine_name_when_selected() -> None:
     assert "rfdetr" not in keys
 
     yolo_req = next(r for r in res.requirements if r.key == "yolo")
-    suffix = ".bs4.fp16.win.engine" if os.name == "nt" else ".bs4.fp16.linux.engine"
+    suffix = ".bs4.fp16.sm89.win.engine" if os.name == "nt" else ".bs4.fp16.sm89.linux.engine"
     assert yolo_req.paths == (Path("model_weights") / f"lada_mosaic_detection_model_v4_fast{suffix}",)
 
 

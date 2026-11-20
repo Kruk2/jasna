@@ -2,26 +2,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-import onnx
 import pytest
 import torch
-from onnx import TensorProto, helper
 
-from jasna.trt import compile_onnx_to_tensorrt_engine, get_onnx_tensorrt_engine_path, save_engine
+from factories import double_onnx
+from jasna.trt import compile_onnx_to_tensorrt_engine, engine_runs_here, get_onnx_tensorrt_engine_path, save_engine
 from jasna.trt.trt_runner import TrtRunner
 
 needs_gpu = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
-
-
-def _double_onnx(path: Path, shape: list) -> Path:
-    """An ONNX model computing ``y = x + x`` for an input of ``shape`` (strings are dynamic axes)."""
-    graph = helper.make_graph(
-        [helper.make_node("Add", ["x", "x"], ["y"])], "double",
-        [helper.make_tensor_value_info("x", TensorProto.FLOAT, shape)],
-        [helper.make_tensor_value_info("y", TensorProto.FLOAT, shape)],
-    )
-    onnx.save(helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)]), path)
-    return path
 
 
 def _compile(onnx_path: Path, **options) -> Path:
@@ -81,7 +69,7 @@ def test_an_existing_engine_is_reused_without_its_onnx(tmp_path):
     (["batch", 3, "height", 8], {"batch_size": 4}, "non-batch dynamic shape"),
 ])
 def test_compile_refuses_shapes_it_cannot_build(tmp_path, shape, options, error):
-    onnx_path = _double_onnx(tmp_path / "model.onnx", shape)
+    onnx_path = double_onnx(tmp_path / "model.onnx", shape)
     with pytest.raises(ValueError, match=error):
         compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), workspace_gb=1, **options)
 
@@ -89,7 +77,7 @@ def test_compile_refuses_shapes_it_cannot_build(tmp_path, shape, options, error)
 @needs_gpu
 @pytest.mark.parametrize("fp16, dtype", [(True, torch.float16), (False, torch.float32)])
 def test_dynamic_batch_engine_runs_every_batch_up_to_its_maximum(tmp_path, fp16, dtype):
-    engine = _compile(_double_onnx(tmp_path / "model.onnx", ["batch", 3, 8, 8]),
+    engine = _compile(double_onnx(tmp_path / "model.onnx", ["batch", 3, 8, 8]),
                       batch_size=4, fp16=fp16, dynamic_batch=True)
     runner = TrtRunner(engine, {"x": (4, 3, 8, 8)}, torch.device("cuda:0"))
     assert runner.dynamic_batch and runner.input_dtypes == {"x": dtype}
@@ -102,7 +90,7 @@ def test_dynamic_batch_engine_runs_every_batch_up_to_its_maximum(tmp_path, fp16,
 @needs_gpu
 @pytest.mark.parametrize("batch_axis", [4, "batch"])
 def test_fixed_batch_engine_pads_a_short_batch_and_refuses_a_longer_one(tmp_path, batch_axis):
-    engine = _compile(_double_onnx(tmp_path / "model.onnx", [batch_axis, 3, 8, 8]), batch_size=4, fp16=False)
+    engine = _compile(double_onnx(tmp_path / "model.onnx", [batch_axis, 3, 8, 8]), batch_size=4, fp16=False)
     runner = TrtRunner(engine, {"x": (4, 3, 8, 8)}, torch.device("cuda:0"))
     assert not runner.dynamic_batch
     x = torch.rand(1, 3, 8, 8, device="cuda:0")
@@ -117,3 +105,10 @@ def test_an_unreadable_engine_fails_to_load(tmp_path):
     engine.write_bytes(b"not an engine")
     with pytest.raises(RuntimeError, match="Failed to deserialize"):
         TrtRunner(engine, {"x": (1, 3, 8, 8)}, torch.device("cuda:0"))
+
+
+@needs_gpu
+def test_only_a_real_engine_counts_as_running_here(tmp_path):
+    engine = _compile(double_onnx(tmp_path / "model.onnx", [1, 3, 8, 8]), batch_size=1, fp16=False)
+    assert engine_runs_here(engine.read_bytes())
+    assert not engine_runs_here(b"not an engine")

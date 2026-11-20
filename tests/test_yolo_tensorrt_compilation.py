@@ -21,6 +21,7 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
         raise ImportError("unverified runtime library", path="libnvidia-ml.so.1")
 
     monkeypatch.setattr(torch.cuda, "device_count", reject_gpu_enumeration)
+    monkeypatch.setattr("jasna.engine_paths.engine_gpu_name", lambda: "sm89")
     monkeypatch.chdir(tmp_path)
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
 

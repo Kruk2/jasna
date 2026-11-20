@@ -1,9 +1,10 @@
-"""Lightweight engine-path helpers — no torch / tensorrt imports."""
+"""Lightweight engine-path helpers — no torch / tensorrt imports at import time."""
 from __future__ import annotations
 
 import logging
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from jasna._frozen import is_frozen
@@ -44,8 +45,37 @@ def default_restoration_model_path(model_name: str) -> Path:
     return model_weights_dir() / _DEFAULT_RESTORATION_MODELS[model_name]
 
 
-def engine_system_suffix() -> str:
+def engine_gpu_name() -> str:
+    """The current CUDA device's architecture, e.g. ``sm89``: a TensorRT engine runs only on the GPU
+    architecture it was built for."""
+    import torch
+
+    major, minor = torch.cuda.get_device_capability()
+    return f"sm{major}{minor}"
+
+
+def _operating_system_suffix() -> str:
     return ".win" if os.name == "nt" else ".linux"
+
+
+def engine_system_suffix() -> str:
+    return f".{engine_gpu_name()}{_operating_system_suffix()}"
+
+
+def legacy_engine_path(path: str | Path) -> Path:
+    """The name Jasna 0.12.3 and older gave the engine at ``path``: without the GPU architecture."""
+    path = Path(path)
+    return path.with_name(path.name.replace(engine_system_suffix(), _operating_system_suffix()))
+
+
+def adopt_legacy_engine(path: str | Path, runs_on_this_gpu: Callable[[Path], bool]) -> None:
+    """Rename a missing engine's legacy file to ``path`` when it runs on this GPU, so an upgrade does
+    not recompile it."""
+    path = Path(path)
+    legacy = legacy_engine_path(path)
+    if not path.exists() and legacy.is_file() and runs_on_this_gpu(legacy):
+        legacy.rename(path)
+        logger.info("Renamed TensorRT engine %s to %s", legacy.name, path.name)
 
 
 def engine_precision_name(*, fp16: bool) -> str:

@@ -34,6 +34,20 @@ from jasna.session_config import SessionConfig
 from jasna.session_factory import RestorationSession
 
 
+def double_onnx(path: Path, shape: list) -> Path:
+    """An ONNX model computing ``y = x + x`` for an input of ``shape`` (strings are dynamic axes)."""
+    import onnx
+    from onnx import TensorProto, helper
+
+    graph = helper.make_graph(
+        [helper.make_node("Add", ["x", "x"], ["y"])], "double",
+        [helper.make_tensor_value_info("x", TensorProto.FLOAT, shape)],
+        [helper.make_tensor_value_info("y", TensorProto.FLOAT, shape)],
+    )
+    onnx.save(helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)]), path)
+    return path
+
+
 class TemporalUpscaler(torch.nn.Module):
     """Small recurrent network for exercising secondary restoration on the CPU."""
 

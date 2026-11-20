@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import torch
 
 from jasna.engine_compiler import (
     EngineCompilationRequest,
@@ -19,6 +20,12 @@ from jasna.engine_compiler import (
 )
 
 pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
+
+@pytest.fixture(autouse=True)
+def _empty_model_folder(monkeypatch, tmp_path):
+    """Keeps the developer's model_weights engines out of reach: a run renames legacy engines it finds."""
+    monkeypatch.chdir(tmp_path)
 
 
 def _mock_proc(lines: list[str], returncode: int = 0) -> MagicMock:
@@ -424,3 +431,31 @@ def test_an_offline_license_check_keeps_the_encrypted_unet4x_engine(monkeypatch,
     with pytest.raises(LeaseError):
         unet4x_secondary_restorer.compile_unet4x_engine("cpu")
     assert enc_engine.exists()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
+@pytest.mark.parametrize("built_here", [True, False], ids=["built-on-this-gpu", "unreadable"])
+def test_an_upgrade_keeps_a_legacy_engine_that_runs_on_this_gpu(monkeypatch, tmp_path, built_here) -> None:
+    from factories import double_onnx
+    from jasna.engine_paths import legacy_engine_path
+    from jasna.mosaic.detection_registry import detection_engine_path
+    from jasna.trt import build_engine_bytes
+
+    onnx_path = double_onnx(tmp_path / "rfdetr-v5.onnx", [4, 3, 8, 8])
+    engine = detection_engine_path("rfdetr-v5", onnx_path, 4, fp16=True)
+    legacy_bytes = (
+        build_engine_bytes(onnx_path.read_bytes(), torch.device("cuda:0"), batch_size=4, fp16=True, workspace_gb=1,
+                           dynamic_batch=False)
+        if built_here else b"not an engine"
+    )
+    legacy_engine_path(engine).write_bytes(legacy_bytes)
+    compiler_runs = []
+    monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda cmd, **_kw: compiler_runs.append(cmd) or _mock_proc([]))
+
+    ensure_engines_compiled(EngineCompilationRequest(
+        device="cuda:0", fp16=True, detection=True, detection_model_name="rfdetr-v5",
+        detection_model_path=str(onnx_path), detection_batch_size=4,
+    ))
+
+    assert engine.exists() is built_here
+    assert len(compiler_runs) == (0 if built_here else 1)

@@ -227,3 +227,10 @@ def save_engine(engine_path: Path, engine_bytes: bytes) -> Path:
     with atomic_write(engine_path, "wb") as stream:
         stream.write(engine_bytes)
     return engine_path
+
+
+def engine_runs_here(engine_bytes: bytes) -> bool:
+    """Whether a serialized engine loads on the current CUDA device; TensorRT refuses one built for another GPU."""
+    import tensorrt as trt
+
+    return trt.Runtime(get_trt_logger()).deserialize_cuda_engine(engine_bytes) is not None

@@ -37,6 +37,13 @@ def _detection_weights_path(settings: AppSettings) -> Path:
     return detection_model_weights_path(coerce_detection_model_name(str(settings.detection_model)))
 
 
+def _engine_on_disk(path: Path) -> bool:
+    """Whether the engine at ``path`` exists, or its legacy file the run renames to it."""
+    from jasna.engine_paths import legacy_engine_path
+
+    return path.is_file() or legacy_engine_path(path).is_file()
+
+
 def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
     import torch
 
@@ -70,7 +77,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
             det_engine = detection_engine_path(
                 det_name, det_weights, default_detection_batch_size(device), fp16=bool(settings.fp16_mode)
             )
-            det_exists = det_engine.is_file()
+            det_exists = _engine_on_disk(det_engine)
         if det_engine is not None:
             reqs.append(
                 EngineRequirement(
@@ -83,7 +90,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         det_engine = detection_engine_path(
             det_name, det_weights, default_detection_batch_size(device), fp16=bool(settings.fp16_mode)
         )
-        det_exists = det_engine.is_file()
+        det_exists = _engine_on_disk(det_engine)
         reqs.append(
             EngineRequirement(
                 key="yolo",
@@ -101,13 +108,13 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
             EngineRequirement(
                 key="basicvsrpp",
                 paths=all_engine_paths,
-                exists=all(p.is_file() for p in all_engine_paths),
+                exists=all(_engine_on_disk(p) for p in all_engine_paths),
             )
         )
 
     if standard_model and settings.secondary_restoration == "unet-4x" and not amd:
         unet_engine = expected_unet4x_engine_path(fp16=bool(settings.fp16_mode))
-        unet_exists = unet_engine.is_file()
+        unet_exists = _engine_on_disk(unet_engine)
         reqs.append(
             EngineRequirement(
                 key="unet_4x",

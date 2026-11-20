@@ -774,10 +774,10 @@ def _gpu_vram_gb(device: torch.device) -> float:
 
 def compile_basicvsrpp_engines(model_weights_path: str, device: torch.device, fp16: bool) -> bool:
     """Compile the six BasicVSR++ TensorRT sub-engines if missing; True when they all exist."""
-    if all_basicvsrpp_sub_engines_exist(model_weights_path, fp16):
-        return True
     if not is_nvidia_device(device) or not torch.cuda.is_available():
         return False
+    if all_basicvsrpp_sub_engines_exist(model_weights_path, fp16):
+        return True
     if _gpu_vram_gb(device) < 4:
         logger.info("Skipping TRT compilation: GPU VRAM < 4 GB.")
         return False
