@@ -381,6 +381,7 @@ _IID_IDXGI_FACTORY1 = "770aae78-f26f-4dba-a829-253c83d1b387"
 _IID_IDXGI_ADAPTER3 = "645967a4-1392-4310-a798-8053ce3e93fd"
 _DXGI_ERROR_NOT_FOUND = 0x887A0002 - (1 << 32)
 _DXGI_MEMORY_SEGMENT_GROUP_LOCAL = 0
+_LOAD_LIBRARY_SEARCH_SYSTEM32 = 0x800
 # vtable slots: IUnknown 0-2, IDXGIObject 3-6, IDXGIFactory 7-11, IDXGIFactory1 12-13;
 # IDXGIAdapter 7-9, IDXGIAdapter1 10, IDXGIAdapter2 11, IDXGIAdapter3 12-17
 _QUERY_INTERFACE, _RELEASE = 0, 2
@@ -422,7 +423,8 @@ def windows_video_memory() -> dict[bytes, tuple[str, int, int]]:
     Windows (DXGI) reports them. The budget is what Windows lets this process keep in VRAM; past it Windows
     moves the process's allocations to system RAM instead of failing them."""
     factory = ctypes.c_void_p()
-    _check_hresult(ctypes.WinDLL("dxgi").CreateDXGIFactory1(ctypes.byref(_guid(_IID_IDXGI_FACTORY1)),
+    dxgi = ctypes.WinDLL("dxgi.dll", winmode=_LOAD_LIBRARY_SEARCH_SYSTEM32)
+    _check_hresult(dxgi.CreateDXGIFactory1(ctypes.byref(_guid(_IID_IDXGI_FACTORY1)),
                                                             ctypes.byref(factory)), "CreateDXGIFactory1")
     adapters = {}
     try:
@@ -460,22 +462,28 @@ def _hip_device_luid(index: int) -> bytes:
 
 
 @functools.cache
-def _warn_no_dxgi_adapter(luid: bytes) -> None:
-    log.warning("VRAM: Windows lists no display adapter for this GPU (LUID %s); sizing from the GPU's own free "
-                "figure, which misses other programs' VRAM", luid.hex())
+def _warn_without_windows_budget(reason: str) -> None:
+    log.warning("VRAM: no Windows budget for this GPU (%s); sizing from the GPU's own free figure, which misses "
+                "other programs' VRAM", reason)
 
 
 def _amd_windows_video_memory(device: torch.device) -> tuple[int, int] | None:
     """This process's Windows budget and use of ``device``'s VRAM, on Windows AMD only: HIP's free figure
     there counts only this process's VRAM and there is no NVML. ``None`` elsewhere or when DXGI lists no
-    adapter with the device's LUID."""
+    adapter with the device's LUID or DXGI fails (unverified inside the restricted LTX worker; the cap is then
+    lost, never the job)."""
     if sys.platform != "win32" or not is_amd_device(device):
         return None
     index = torch.device(device).index
     luid = _hip_device_luid(index if index is not None else torch.cuda.current_device())
-    found = windows_video_memory().get(luid)
+    try:
+        adapters = windows_video_memory()
+    except OSError as error:
+        _warn_without_windows_budget(str(error))
+        return None
+    found = adapters.get(luid)
     if found is None:
-        _warn_no_dxgi_adapter(luid)
+        _warn_without_windows_budget(f"Windows lists no display adapter with LUID {luid.hex()}")
         return None
     return found[1], found[2]
 

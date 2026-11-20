@@ -32,14 +32,19 @@ _IGPU_LUID = bytes.fromhex("1c7b010000000000")
 
 @pytest.fixture
 def amd_windows(monkeypatch):
-    """Windows AMD with an RX 9070 XT and an iGPU; ``set_adapters`` sets what DXGI lists."""
+    """Windows AMD with an RX 9070 XT and an iGPU; ``set_adapters`` sets what DXGI lists, or the error it raises."""
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(torch.version, "hip", "7.16.26385")
     monkeypatch.setattr(accelerator, "_nvml_free_bytes", lambda device: pytest.fail("NVML read on AMD"))
     monkeypatch.setattr(accelerator, "_hip_device_luid", lambda index: _DGPU_LUID)
 
     def set_adapters(adapters):
-        monkeypatch.setattr(accelerator, "windows_video_memory", lambda: adapters)
+        def listed():
+            if isinstance(adapters, OSError):
+                raise adapters
+            return adapters
+
+        monkeypatch.setattr(accelerator, "windows_video_memory", listed)
 
     return set_adapters
 
@@ -59,6 +64,8 @@ def test_free_vram_is_capped_at_what_the_windows_budget_has_left(free, budget, u
          12 * GIB),
         # no adapter with the GPU's LUID: HIP's figure, as before
         ({_IGPU_LUID: ("AMD Radeon(TM) Graphics", 30 * GIB, 0)}, 20 * GIB),
+        # DXGI refused (as it might inside the restricted LTX worker): HIP's figure, the job goes on
+        (OSError("DXGI CreateDXGIFactory1 failed (HRESULT 0x80070005)"), 20 * GIB),
     ],
 )
 def test_amd_windows_caps_hip_with_the_gpus_windows_budget(monkeypatch, amd_windows, adapters, expected):
