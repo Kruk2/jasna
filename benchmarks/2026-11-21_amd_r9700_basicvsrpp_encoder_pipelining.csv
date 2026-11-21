@@ -1,0 +1,6 @@
+date,gpu,commit,run,wall_s,pipeline_s,fps,startup_s,peak_vram_mib,detect_track_s,restore_s,blend_s,write_s,result_wait_s,notes
+2026-11-21,Radeon AI PRO R9700,d5ba960f,warmup,166.5,,,,,,,,,,"first run of the session (MIOpen user cache filled), not counted"
+2026-11-21,Radeon AI PRO R9700,d5ba960f,1,120.1,107.3,56.4,11.3,5616,102.7,76.1,54.2,30.8,19.9,"S610 1080p h264 6056 frames; hevc"
+2026-11-21,Radeon AI PRO R9700,5229c642,1,113.2,99.7,60.7,12.0,5276,96.0,64.3,40.2,24.4,32.8,"S610 1080p h264 6056 frames; hevc"
+2026-11-21,Radeon AI PRO R9700,d5ba960f,2,118.9,106.1,57.1,11.3,5790,102.3,74.3,52.8,31.0,19.9,"S610 1080p h264 6056 frames; hevc"
+2026-11-21,Radeon AI PRO R9700,5229c642,2,114.5,101.5,59.7,11.4,5384,97.7,64.3,38.3,25.0,36.1,"S610 1080p h264 6056 frames; hevc"
