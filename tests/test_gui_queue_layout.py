@@ -436,23 +436,29 @@ class _XTestPointer:
         self._x11.XCloseDisplay(self._display)
 
 
-def test_one_handle_drag_moves_the_bottom_job_to_the_top(tk_root, show_window) -> None:
+@pytest.fixture
+def x_pointer(tk_root):
+    pointer = _XTestPointer(tk_root)
+    yield pointer
+    pointer.button(pressed=False)
+    pointer.close()
+
+
+def test_one_handle_drag_moves_the_bottom_job_to_the_top(tk_root, show_window, x_pointer) -> None:
     tk_root.geometry("320x800+0+0")
     panel = _paged_panel(tk_root, 4)
     show_window(tk_root)
-    pointer = _XTestPointer(tk_root)
     dragged_job = panel.get_jobs()[3]
     handle = panel._job_widgets[3]._handle
     x = handle.winfo_rootx() + handle.winfo_width() // 2
     start_y = handle.winfo_rooty() + handle.winfo_height() // 2
     top_y = panel._job_widgets[0].winfo_rooty()
 
-    pointer.move(x, start_y)
-    pointer.button(pressed=True)
+    x_pointer.move(x, start_y)
+    x_pointer.button(pressed=True)
     for y in range(start_y, top_y - 1, -8):
-        pointer.move(x, y)
-    pointer.button(pressed=False)
-    pointer.close()
+        x_pointer.move(x, y)
+    x_pointer.button(pressed=False)
 
     assert panel.get_jobs()[0] is dragged_job
     assert _shown_jobs(panel)[0] is dragged_job
