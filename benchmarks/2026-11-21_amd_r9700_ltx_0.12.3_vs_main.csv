@@ -1,0 +1,5 @@
+date,gpu,commit,run,clip,model,vae,block_path,ltx_s,scan_s,encode_s,denoise_s,compose_s,encode_s_per_window,denoise_s_per_window_step,decode_s_per_window,wall_s,peak_vram_mib
+2026-11-21,Radeon AI PRO R9700,f652800a,cold,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,native,1238.6,49.1,241.2,575.4,372.9,1.00,1.43,1.31,1608.4,16236
+2026-11-21,Radeon AI PRO R9700,f652800a,warm,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,native,1016.1,47.6,162.5,588.8,217.2,0.99,1.43,1.31,1166.7,16048
+2026-11-21,Radeon AI PRO R9700,b91a751d,cold,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,native,1169.7,47.7,238.6,560.2,323.2,0.99,1.43,1.34,1455.7,16452
+2026-11-21,Radeon AI PRO R9700,b91a751d,warm,S610 1080p 6056 frames,ltx (distilled2 int8),full/full,native,1011.1,50.6,161.5,533.5,265.6,0.99,1.43,1.33,1220.4,16182
