@@ -586,11 +586,10 @@ class QueuePanel(ctk.CTkFrame):
             self._on_jobs_changed()
 
     def _repack(self) -> None:
+        # Reorder without pack_forget: unmapping the dragged row ends X11's pointer grab mid-drag.
         shown = [widget for widget in self._job_widgets if widget is not None]
-        for widget in shown:
-            widget.pack_forget()
-        for widget in shown:
-            widget.pack(fill="x", pady=(0, 4))
+        for previous, widget in zip(shown, shown[1:]):
+            widget.pack(fill="x", pady=(0, 4), after=previous)
 
     def set_running(self, running: bool, processing_job_id: int | None = None):
         """Set queue running state.

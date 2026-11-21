@@ -397,3 +397,62 @@ def test_dropped_paths_with_spaces_and_braces_are_queued_as_dropped(tk_root, tmp
     panel._on_file_drop(drop)
 
     assert [job.path for job in panel.get_jobs()] == dropped
+
+
+class _XTestPointer:
+    """Drives the real X pointer, so the server's implicit button grab decides which window
+    gets motion and release - the part ``event_generate`` skips."""
+
+    def __init__(self, root) -> None:
+        import ctypes
+        import ctypes.util
+
+        if root.tk.call("tk", "windowingsystem") != "x11" or not ctypes.util.find_library("Xtst"):
+            pytest.skip("needs an X11 display with the XTEST extension")
+        self._x11 = ctypes.CDLL(ctypes.util.find_library("X11"))
+        self._xtst = ctypes.CDLL(ctypes.util.find_library("Xtst"))
+        self._x11.XOpenDisplay.restype = ctypes.c_void_p
+        self._x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        self._x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self._x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+        self._xtst.XTestFakeMotionEvent.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+        self._xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+        self._display = self._x11.XOpenDisplay(root.winfo_screen().encode())
+        self._root = root
+
+    def _sync(self) -> None:
+        self._x11.XSync(self._display, 0)
+        self._root.update()
+
+    def move(self, x: int, y: int) -> None:
+        self._xtst.XTestFakeMotionEvent(self._display, -1, x, y, 0)
+        self._sync()
+
+    def button(self, pressed: bool) -> None:
+        self._xtst.XTestFakeButtonEvent(self._display, 1, int(pressed), 0)
+        self._sync()
+
+    def close(self) -> None:
+        self._x11.XCloseDisplay(self._display)
+
+
+def test_one_handle_drag_moves_the_bottom_job_to_the_top(tk_root, show_window) -> None:
+    tk_root.geometry("320x800+0+0")
+    panel = _paged_panel(tk_root, 4)
+    show_window(tk_root)
+    pointer = _XTestPointer(tk_root)
+    dragged_job = panel.get_jobs()[3]
+    handle = panel._job_widgets[3]._handle
+    x = handle.winfo_rootx() + handle.winfo_width() // 2
+    start_y = handle.winfo_rooty() + handle.winfo_height() // 2
+    top_y = panel._job_widgets[0].winfo_rooty()
+
+    pointer.move(x, start_y)
+    pointer.button(pressed=True)
+    for y in range(start_y, top_y - 1, -8):
+        pointer.move(x, y)
+    pointer.button(pressed=False)
+    pointer.close()
+
+    assert panel.get_jobs()[0] is dragged_job
+    assert _shown_jobs(panel)[0] is dragged_job
