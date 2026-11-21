@@ -214,6 +214,9 @@ jasna --input input_folder --output output_folder
 - [Running from source](docs/en/development.md): for developers. From source
   you can use the free BasicVSR++; activation and supporter models need the
   official release.
+- [Windows on Arm](docs/en/windows-arm64.md): running from source on ARM64
+  Windows machines (NVIDIA GB10 / RTX Spark), including the wheel-index and
+  pin overrides the x86_64 instructions do not need.
 
 ### Benchmarks
 
