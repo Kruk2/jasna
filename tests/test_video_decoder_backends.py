@@ -14,7 +14,12 @@ from av.codec.context import ThreadType
 
 import jasna.media.video_decoder as module
 from jasna.accelerator import AcceleratorVendor
-from factories import video_metadata, write_dated_source, write_unbounded_reorder_h264_source
+from factories import (
+    video_metadata,
+    write_dated_source,
+    write_deeper_reorder_after_sps_change_h264_source,
+    write_unbounded_reorder_h264_source,
+)
 
 TEST_CLIP = Path("assets/test_clip1_1080p.mp4")
 
@@ -332,10 +337,15 @@ def test_vali_backend_matches_pyav_hw_output() -> None:
     not torch.cuda.is_available() or not _vali_fork_available(),
     reason="needs a GPU and the python_vali fork",
 )
-def test_vali_keeps_frame_order_when_the_sps_sets_no_reorder_limit(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "write_source",
+    [write_unbounded_reorder_h264_source, write_deeper_reorder_after_sps_change_h264_source],
+    ids=["sps-without-reorder-limit", "deeper-reorder-after-sps-change"],
+)
+def test_vali_keeps_frame_order_of_reordered_h264(tmp_path, write_source) -> None:
     from jasna.media.probe import get_video_meta_data
 
-    path = str(write_unbounded_reorder_h264_source(tmp_path / "unbounded.mp4"))
+    path = str(write_source(tmp_path / "source.mp4"))
     metadata = get_video_meta_data(path)
     device = torch.device("cuda", 0)
 

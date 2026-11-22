@@ -642,6 +642,37 @@ def write_unbounded_reorder_h264_source(path: Path) -> Path:
     return path
 
 
+def write_deeper_reorder_after_sps_change_h264_source(path: Path) -> Path:
+    """352x288 H.264 MP4 whose first half second has no B-frames and one
+    reference, then a new SPS of the same size with three pyramid B-frames and
+    four references, as in recordings joined from parts. Every frame is a flat
+    gray level of its own."""
+    ffmpeg = resolve_executable("ffmpeg")
+    joined = path.with_name(f"{path.stem}-joined.h264")
+    with joined.open("wb") as out:
+        for first_frame, seconds, x264_params in (
+            (0, 0.5, "ref=1:bframes=0:keyint=30:scenecut=0"),
+            (15, 1, "ref=4:bframes=3:b-pyramid=normal:b-adapt=0:keyint=60:scenecut=0"),
+        ):
+            out.write(subprocess.run(
+                [
+                    ffmpeg, "-loglevel", "error",
+                    "-f", "lavfi", "-i",
+                    f"color=black:size=352x288:rate=30:duration={seconds},format=gray,"
+                    f"geq=lum='mod((N+{first_frame})*23,200)+20',format=yuv420p",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-x264-params", x264_params,
+                    "-f", "h264", "-",
+                ],
+                capture_output=True, check=True,
+            ).stdout)
+    subprocess.run(
+        [ffmpeg, "-y", "-loglevel", "error", "-r", "30", "-i", str(joined), "-c", "copy", str(path)],
+        check=True,
+    )
+    joined.unlink()
+    return path
+
+
 def ltx_models(root, directory: Path, *, installed: bool, on_change=lambda: None):
     """A real ``LtxModels`` over ``directory``; ``installed`` puts every model file there."""
     from jasna.gui.ltx_models import LtxModels

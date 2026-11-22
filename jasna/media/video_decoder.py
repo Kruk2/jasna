@@ -206,6 +206,10 @@ _VALI_OPTIONS = {
     # cuvid keeps 3 spare surfaces but holds up to 4 frames for display; an H.264
     # SPS without a reorder limit then lets a later frame overwrite a waiting one.
     "extra_hw_frames": "1",
+    # cuvid sizes its surfaces from the first SPS and keeps them when a later SPS of the same size
+    # (joined recordings) needs a deeper DPB; every few frames then show a later one (#857). 20 is
+    # the largest H.264/HEVC DPB (16) plus the 4 frames cuvid holds for display.
+    "surfaces": "20",
 }
 
 
