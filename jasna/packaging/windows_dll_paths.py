@@ -85,14 +85,19 @@ def frozen_dll_directories(root: Path) -> list[Path]:
     return out
 
 
-def ambiguous_dll_names(root: Path) -> list[str]:
-    """DLL names that more than one DLL search folder provides; the loader would pick either.
-    A release has none, so in an installed release they are files an older version left behind."""
+def dll_names_in_several(root: Path, directories: list[Path]) -> list[str]:
+    """DLL names that more than one of ``directories`` (folders under ``root``) provides."""
     providers = {}
-    for directory in frozen_dll_directories(root):
+    for directory in directories:
         for path in directory.glob("*.dll"):
             providers.setdefault(path.name.casefold(), []).append(path.relative_to(root).as_posix())
     return sorted(" = ".join(sorted(names)) for names in providers.values() if len(names) > 1)
+
+
+def ambiguous_dll_names(root: Path) -> list[str]:
+    """DLL names that more than one DLL search folder provides; the loader would pick either.
+    A release has none, so in an installed release they are files an older version left behind."""
+    return dll_names_in_several(root, frozen_dll_directories(root))
 
 
 def configure_windows_dll_search_paths() -> None:
