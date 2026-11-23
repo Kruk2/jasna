@@ -146,6 +146,52 @@ AMF encodes nothing smaller than 96x38 (H.264), 384x128 (HEVC) or 320x128 (AV1) 
 smaller frames fail or hang, so `encoder_settings.require_encodable_size` rejects such
 videos before the job. `av1_amf` pads the width to a multiple of 8 (854 → 856); that is left as is.
 
+## Windows on Arm (ARM64)
+
+The official installers are x86_64 only; on Windows 11 on Arm, run from source.
+The GPU path is verified on NVIDIA GB10 hardware (RTX Spark class, `sm_121`)
+using native `win_arm64` CUDA wheels. Snapdragon X has no CUDA path and is
+untested.
+
+Prerequisites: Python 3.13 through [uv](https://docs.astral.sh/uv/) (python.org
+ships no ARM64 installers; the CUDA wheels below are built for cp313) and a
+native ARM64 FFmpeg 8 on `PATH` (e.g. the `winarm64` builds from
+[BtbN's FFmpeg builds](https://github.com/BtbN/FFmpeg-Builds/releases)).
+
+```powershell
+uv python install 3.13
+uv venv --python 3.13 .venv
+.venv\Scripts\activate
+uv pip install torch==2.14.0+cu134 torchvision==0.29.0+cu134 --extra-index-url https://pypi.nvidia.com/nvtorch_oot
+"opencv-python==5.1.0.95" | Out-File -Encoding ascii override.txt
+uv pip install -e . --extra-index-url https://pypi.nvidia.com/nvtorch_oot --override override.txt
+uv pip install triton-windows==3.8.0.post29
+```
+
+Do not use `.[nvidia]` here: `tensorrt`, `torch-tensorrt` and `python_vali`
+have no `win_arm64` wheels at all, and `torch` for `win_arm64` comes from
+NVIDIA's index above. The override covers two pins: `opencv-python<5` (first
+`win_arm64` wheel is 5.1.0.95) and `triton-windows==3.7.1.post27`
+(`win_amd64` only; 3.8.0.post29 has `win_arm64`). Check:
+
+```powershell
+python -c "import torch; print(torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))"
+```
+
+On GB10 this prints
+`NVIDIA RTX Spark N1X (6144-core Blackwell RTX GPU) (12, 1)`.
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| PyTorch CUDA | works | native `win_arm64` wheels from [NVIDIA's index](https://pypi.nvidia.com/nvtorch_oot/), `sm_121` |
+| Restoration inference (torch path, e.g. BasicVSR++ checkpoints) | works | model forward passes verified on GB10 hardware |
+| Mosaic detection (RF-DETR / YOLO) | does not work yet | the NVIDIA path builds TensorRT engines; `tensorrt==10.16.1.11` has no `win_arm64` wheel, and engine builds with the 11.x ARM64 wheels fail |
+| Output encoding | does not work yet | PyAV `win_arm64` wheels ship without NVENC (`hevc_nvenc` missing in `av==18.1.0`) and there is no CPU encoder fallback |
+| LTX | not verified | `comfy-kitchen==0.2.38` does ship a `win_arm64` wheel; the Triton kernels have not been exercised on `sm_121` |
+
+The detection and encoder gaps are being worked on as separate small PRs,
+tracked in [#641](https://github.com/Kruk2/jasna/issues/641).
+
 ## Run
 
 ```bash
