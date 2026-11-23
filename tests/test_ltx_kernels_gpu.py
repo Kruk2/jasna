@@ -173,6 +173,18 @@ def test_quantize_fp4_is_bit_exact(kernels):
 
 
 @needs_blackwell
+def test_fp4_pack_preserves_ties_and_zero_signs(kernels):
+    values = [6, -0.0, float("nan"), 0.0, -0.125, 0.125, 0.25, -0.75,
+              1.25, -1.75, 2.5, -3.5, 5.0, -5.0, -6.0, 0.75]
+    x = torch.tensor(values, dtype=torch.bfloat16, device="cuda").repeat(3, 8)
+    packed, _ = kernels.quantize_fp4(x, torch.ones((), device=x.device), False)
+
+    # Six anchors every group at scale one. A tiny negative rounds to negative zero.
+    expected = torch.tensor([0x70, 0x00, 0x80, 0x0A, 0x2C, 0x4E, 0x6E, 0xF2], dtype=torch.uint8, device=x.device)
+    assert torch.equal(packed, expected.repeat(3, 8))
+
+
+@needs_blackwell
 @pytest.mark.parametrize("heads, rows, head_dim", [(32, 300, 128), (16, 333, 256)])
 def test_gated_fp4_quantization_is_the_native_gate_then_quantize_fp4_bit_for_bit(kernels, heads, rows, head_dim):
     """Attention heads gated with gate_heads' 2 * (1 / (1 + exp(-logit))) and quantized from their heads

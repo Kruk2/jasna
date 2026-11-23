@@ -27,6 +27,7 @@ from jasna.ltx.kernel_policy import (
     CUBLAS_EPILOGUE_TILE,
     CUBLAS_EPILOGUE_WARPS,
     CUBLAS_INT8_MM,
+    FP4_ARCHS,
     FP4_QUANTIZE_COLS,
     FP4_QUANTIZE_ROWS,
     FP4_QUANTIZE_WARPS,
@@ -430,6 +431,12 @@ def _quantize_fp4_gated_kernel(
     _quantize_fp4_tile(x, rows, row_mask, ts_ptr, q_ptr, s_ptr, K, BM, BK)
 
 
+@tl.core.builtin
+def _has_fp4_pack(_semantic=None):
+    # AOT builds can run on a different GPU from the target.
+    return tl.constexpr(any(_semantic.builder.options.arch == f"sm{major}{minor}" for major, minor in FP4_ARCHS))
+
+
 @triton.jit
 def _quantize_fp4_tile(x, rows, row_mask, ts_ptr, q_ptr, s_ptr, K, BM: tl.constexpr, BK: tl.constexpr):
     """Stores the NVFP4 codes and block scales of the fp32 ``[BM, BK]`` tile ``x`` of ``rows`` (column tile
@@ -441,16 +448,26 @@ def _quantize_fp4_tile(x, rows, row_mask, ts_ptr, q_ptr, s_ptr, K, BM: tl.conste
     divisor = scale8.to(tl.float32) * tensor_scale
     divisor = tl.where(divisor > 0, divisor, 1.0)
     v = tl.math.div_rn(blocks, divisor[:, :, None])
-    mag = tl.abs(v)
-    # E2M1 round half to even: ties at 0.25, 1.25, 2.5, 5 go down, at 0.75, 1.75, 3.5 up
-    code = (
-        (mag > 0.25).to(tl.uint8) + (mag >= 0.75).to(tl.uint8) + (mag > 1.25).to(tl.uint8)
-        + (mag >= 1.75).to(tl.uint8) + (mag > 2.5).to(tl.uint8) + (mag >= 3.5).to(tl.uint8)
-        + (mag > 5.0).to(tl.uint8)
-    ) | ((v < 0).to(tl.uint8) << 3)
-    hi, lo = tl.split(tl.reshape(code, (BM, BK // 2, 2)))
+    if _has_fp4_pack():
+        # Match fp4_codes for signed zeros and NaNs while preserving the sign of tiny nonzero values.
+        v = tl.where(tl.abs(v) > 0.0, v, 0.0)
+        hi, lo = tl.split(tl.reshape(v, (BM, BK // 2, 2)))
+        packed = tl.inline_asm_elementwise(
+            asm="{ .reg .b8 bits; cvt.rn.satfinite.e2m1x2.f32 bits, $1, $2; mov.b16 $0, {bits, 0}; }",
+            constraints="=h,f,f", args=[hi, lo], dtype=tl.uint16, is_pure=True, pack=1,
+        ).to(tl.uint8)
+    else:
+        mag = tl.abs(v)
+        # E2M1 ties at 0.25, 1.25, 2.5, 5 round down and at 0.75, 1.75, 3.5 round up.
+        code = (
+            (mag > 0.25).to(tl.uint8) + (mag >= 0.75).to(tl.uint8) + (mag > 1.25).to(tl.uint8)
+            + (mag >= 1.75).to(tl.uint8) + (mag > 2.5).to(tl.uint8) + (mag >= 3.5).to(tl.uint8)
+            + (mag > 5.0).to(tl.uint8)
+        ) | ((v < 0).to(tl.uint8) << 3)
+        hi, lo = tl.split(tl.reshape(code, (BM, BK // 2, 2)))
+        packed = (hi << 4) | lo
     packed_cols = tl.program_id(1) * (BK // 2) + tl.arange(0, BK // 2)
-    tl.store(q_ptr + rows[:, None] * (K // 2) + packed_cols[None, :], (hi << 4) | lo, mask=row_mask[:, None])
+    tl.store(q_ptr + rows[:, None] * (K // 2) + packed_cols[None, :], packed, mask=row_mask[:, None])
     # cuBLAS 128x4 tiles: (row // 128, col // 4, row % 32, row // 32 % 4, col % 4)
     scale_cols = tl.program_id(1) * (BK // 16) + tl.arange(0, BK // 16)
     col_tiles = tl.cdiv(K // 16, 4)
