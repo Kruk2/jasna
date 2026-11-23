@@ -171,8 +171,8 @@ Good to know:
   devices running supporter models online right now, with **(this PC)** next
   to the one you're on.
 - Offline PCs keep their slot. Reinstalling the system or changing the GPU,
-  disk or RAM keeps it; a new motherboard or a security chip reset in the BIOS
-  counts as a new PC.
+  disk or RAM keeps it; a new motherboard, a BIOS update or security chip
+  reset, or on AMD PCs a new CPU counts as a new PC.
 - Online devices count only while Jasna runs, and each open Jasna counts.
   "In use on 3 devices"? Close Jasna on another device and start again. If
   Jasna crashed or was force-closed, wait up to 15 minutes.
