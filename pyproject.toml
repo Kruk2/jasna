@@ -18,9 +18,10 @@ dependencies = [
   "safetensors>=0.6",
   "requests",
   "mmengine==0.10.7",
-  "opencv-python<5; platform_machine != 'ARM64'",
-  # The first opencv-python release shipping win_arm64 wheels is the 5.x series.
-  "opencv-python==5.1.0.95; platform_machine == 'ARM64'",
+  # 5.1.0.95 is the first release shipping win_arm64 wheels; pinned across all
+  # platforms. The 252 cv2 functions jasna uses are bit-for-bit identical to
+  # 4.10.0.84 (verified on GB10 hardware), and 5.x removes no API we touch.
+  "opencv-python==5.1.0.95",
   "Pillow",
   "tqdm",
   "customtkinter==6.0.0",

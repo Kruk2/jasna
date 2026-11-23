@@ -166,10 +166,12 @@ uv pip install -e .[nvidia] --extra-index-url https://pypi.nvidia.com/nvtorch_oo
 ```
 
 The `nvidia` extra carries `win_arm64` markers: `torch`/`torchvision` resolve to
-the `+cu134` builds from NVIDIA's index above, `opencv-python` to 5.1.0.95
-(first `win_arm64` wheel) and `triton-windows` to 3.8.0.post29; `tensorrt`,
-`torch-tensorrt`, `nvidia-vfx` and `python_vali` are excluded because they
-have no `win_arm64` wheels at all. Check:
+the `+cu134` builds from NVIDIA's index above and `triton-windows` to
+3.8.0.post29; `tensorrt`, `torch-tensorrt`, `nvidia-vfx` and `python_vali` are
+excluded because they have no `win_arm64` wheels at all. `opencv-python` is
+pinned to 5.1.0.95 on every platform (the first release with a `win_arm64`
+wheel; its API surface is verified compatible with the previous 4.10 pin).
+Check:
 
 ```powershell
 python -c "import torch; print(torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))"
