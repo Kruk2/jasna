@@ -18,7 +18,9 @@ dependencies = [
   "safetensors>=0.6",
   "requests",
   "mmengine==0.10.7",
-  "opencv-python<5",
+  "opencv-python<5; platform_machine != 'ARM64'",
+  # The first opencv-python release shipping win_arm64 wheels is the 5.x series.
+  "opencv-python==5.1.0.95; platform_machine == 'ARM64'",
   "Pillow",
   "tqdm",
   "customtkinter==6.0.0",
@@ -38,20 +40,28 @@ jasna = "jasna.main:main"
 
 [project.optional-dependencies]
 nvidia = [
-  "torch==2.12.1+cu130",
-  "torchvision==0.27.1+cu130",
-  "tensorrt==10.16.1.11",
-  "torch-tensorrt==2.12.0",
-  "nvidia-vfx==0.2.0.0",
+  "torch==2.12.1+cu130; platform_machine != 'ARM64'",
+  "torchvision==0.27.1+cu130; platform_machine != 'ARM64'",
+  # win_arm64 CUDA builds live on NVIDIA's index (pypi.nvidia.com/nvtorch_oot),
+  # see "Windows on Arm" in docs/development.md.
+  "torch==2.14.0+cu134; platform_machine == 'ARM64'",
+  "torchvision==0.29.0+cu134; platform_machine == 'ARM64'",
+  # The four below have no win_arm64 wheels (see issue #641), so the ARM64
+  # nvidia extra stops short of the TensorRT/VALI path.
+  "tensorrt==10.16.1.11; platform_machine != 'ARM64'",
+  "torch-tensorrt==2.12.0; platform_machine != 'ARM64'",
+  "nvidia-vfx==0.2.0.0; platform_machine != 'ARM64'",
   # LTX self-attention kernel (INT8, prebuilt abi3 wheels for Linux and Windows).
   "comfy-kitchen==0.2.38",
   "scipy",
   # torch.compile and the LTX Triton kernels; Linux torch wheels bring triton 3.7.1 themselves.
-  "triton-windows==3.7.1.post27; sys_platform == 'win32'",
+  "triton-windows==3.7.1.post27; sys_platform == 'win32' and platform_machine != 'ARM64'",
+  # 3.7.1.post27 ships win_amd64 only; 3.8.0.post29 adds win_arm64.
+  "triton-windows==3.8.0.post29; sys_platform == 'win32' and platform_machine == 'ARM64'",
   # The VALI decode backend needs the corruption-tolerant fork (codeberg.org/Kruk2/vali,
   # DecodeSingleSurfaceAsyncDetailed); with the stock PyPI wheel the reader
   # falls back to PyAV at open time. Release builds use the fork wheel.
-  "python_vali==4.8.8",
+  "python_vali==4.8.8; platform_machine != 'ARM64'",
 ]
 amd = [
   # Exact AMD builds from stable.repo.amd.com/rocm/whl-next on both OSes.

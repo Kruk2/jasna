@@ -162,17 +162,14 @@ native ARM64 FFmpeg 8 on `PATH` (e.g. the `winarm64` builds from
 uv python install 3.13
 uv venv --python 3.13 .venv
 .venv\Scripts\activate
-uv pip install torch==2.14.0+cu134 torchvision==0.29.0+cu134 --extra-index-url https://pypi.nvidia.com/nvtorch_oot
-"opencv-python==5.1.0.95" | Out-File -Encoding ascii override.txt
-uv pip install -e . --extra-index-url https://pypi.nvidia.com/nvtorch_oot --override override.txt
-uv pip install triton-windows==3.8.0.post29
+uv pip install -e .[nvidia] --extra-index-url https://pypi.nvidia.com/nvtorch_oot
 ```
 
-Do not use `.[nvidia]` here: `tensorrt`, `torch-tensorrt` and `python_vali`
-have no `win_arm64` wheels at all, and `torch` for `win_arm64` comes from
-NVIDIA's index above. The override covers two pins: `opencv-python<5` (first
-`win_arm64` wheel is 5.1.0.95) and `triton-windows==3.7.1.post27`
-(`win_amd64` only; 3.8.0.post29 has `win_arm64`). Check:
+The `nvidia` extra carries `win_arm64` markers: `torch`/`torchvision` resolve to
+the `+cu134` builds from NVIDIA's index above, `opencv-python` to 5.1.0.95
+(first `win_arm64` wheel) and `triton-windows` to 3.8.0.post29; `tensorrt`,
+`torch-tensorrt`, `nvidia-vfx` and `python_vali` are excluded because they
+have no `win_arm64` wheels at all. Check:
 
 ```powershell
 python -c "import torch; print(torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0))"
