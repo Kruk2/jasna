@@ -1,7 +1,8 @@
-# Linux NVIDIA release: 0.12.3 vs 0.12.4 (2026-11-17)
+# Linux NVIDIA release: 0.12.3 vs a main build (2026-11-17)
 
 RTX 5090 on the maintainer's desktop, Linux, same day, same config folder for both versions. The v0.12.3 Linux
-NVIDIA archive against the 0.12.4 release build (main `59b444e0`), default settings. Standard LTX (`ltx`,
+NVIDIA archive against a release build of main `59b444e0` (an early 0.12.4 build, not the published one),
+default settings. Standard LTX (`ltx`,
 2-step distilled INT8), 512 canvas; all 48 transformer blocks stayed resident in every run. BasicVSR++ with
 compiled engines.
 
@@ -9,12 +10,12 @@ Each table shows the mean, with every run in brackets. Per-run values are in the
 
 ## LTX whole job
 
-| Clip | Release 0.12.3 | Release 0.12.4 | change |
+| Clip | Release 0.12.3 | main 59b444e0 | change |
 |---|---|---|---|
 | M284 | 61.3 s (61.2, 61.3) | 60.2 s (60.4, 59.9) | -1.1 s (-2 %) |
 | S610 | 400.6 s (400.2, 401.0) | 371.6 s (384.0, 359.1) | -29.0 s (-7 %) |
 
-0.12.4 is faster on both clips: on M284 by more than the spread of either version (0.1 and 0.5 s), on S610
+59b444e0 is faster on both clips: on M284 by more than the spread of either version (0.1 and 0.5 s), on S610
 its slower run is still 16 s faster than the faster 0.12.3 run.
 
 ## LTX per-step rates
@@ -22,7 +23,7 @@ its slower run is still 16 s faster than the faster 0.12.3 run.
 Lower is better for s/window, higher is better for frames/s. A step counts as changed only if the difference
 is larger than the run-to-run spread.
 
-| Step | Clip | Release 0.12.3 | Release 0.12.4 | |
+| Step | Clip | Release 0.12.3 | main 59b444e0 | |
 |---|---|---|---|---|
 | Scan, frames/s | M284 | 625 (631, 620) | 625 (651, 599) | same |
 | Scan, frames/s | S610 | 340 (337, 343) | 361 (363, 358) | faster |
@@ -35,27 +36,27 @@ is larger than the run-to-run spread.
 | Compose, frames/s | M284 | 111 (109, 112) | 128 (127, 129) | faster |
 | Compose, frames/s | S610 | 61.1 (61.6, 60.6) | 67.5 (62.9, 72.0) | faster in one of two runs |
 
-Encode is about 30 % faster per window in 0.12.4, and M284 decode and compose are faster too. The first 0.12.4
+Encode is about 30 % faster per window in 59b444e0, and M284 decode and compose are faster too. The first 59b444e0
 S610 run denoised at 0.70 s/window-step against 0.64 for 0.12.3; a second S610 run per version (the planned
-order had one) gave 0.64 for both, so denoise did not change. The same first 0.12.4 run also had the slower
+order had one) gave 0.64 for both, so denoise did not change. The same first 59b444e0 run also had the slower
 decode and compose of its two runs.
 
 Both versions report 15946 MiB in the LTX log. 0.12.3 prints no app-startup or LTX-worker-start `[timing]`
-lines; for 0.12.4 they were 5.5–12.5 s to the first job and 12.3–13.3 s for the worker start.
+lines; for 59b444e0 they were 5.5–12.5 s to the first job and 12.3–13.3 s for the worker start.
 
 ## BasicVSR++ whole job
 
 `scripts/benchmark_releases.py` with its settings (clip size 180, overlap 15, no secondary restoration),
 compiled engines, one discarded warm-up per version, then two runs per version in the order A B B A.
 
-| Clip | Release 0.12.3 | Release 0.12.4 | |
+| Clip | Release 0.12.3 | main 59b444e0 | |
 |---|---|---|---|
 | S610 1080p H.264 | 57.3 s (62.6, 52.0) | 53.0 s (53.8, 52.2) | same |
 | S610 2160p H.264 | 80.8 s (80.7, 80.9) | 80.5 s (80.5, 80.4) | same |
 
 The first 0.12.3 1080p run took 10 s longer than its second; without it the two versions are within 0.2 s.
 On 2160p the difference (0.3 s) is about the spread. Peak VRAM of the process: 5.7 / 5.9 GB on 1080p and
-11.0 / 11.1 GB on 2160p (0.12.3 / 0.12.4).
+11.0 / 11.1 GB on 2160p (0.12.3 / 59b444e0).
 
 ## Setup
 
@@ -76,7 +77,7 @@ On 2160p the difference (0.3 s) is about the spread. Peak VRAM of the process: 5
 
 - A desktop machine with other apps open, not an idle instance: the desktop's own GPU use changed during the
   runs.
-- Two runs per version and clip. The 0.12.4 S610 runs differ by 25 s, so the S610 gain is roughly 16–42 s.
+- Two runs per version and clip. The 59b444e0 S610 runs differ by 25 s, so the S610 gain is roughly 16–42 s.
 - BasicVSR++ per-run times are taken from the benchmark log file times (about ±1 s); the means are the script's
   own. Only the 1080p and 2160p H.264 clips were run.
 - The BasicVSR++ engines of both versions were compiled at the same time, while other jobs used the GPU.
