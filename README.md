@@ -9,7 +9,7 @@
 Jasna restores mosaics in videos and images. It is free, has a simple app
 and a command line, and runs on your GPU.
 
-<img width="1200" height="907" alt="image" src="https://github.com/user-attachments/assets/d59a914b-482d-4f37-ae72-5c59eb5dc9bb" />
+<img width="1280" height="820" alt="Jasna main window" src="assets/jasna-main-window.png" />
 
 ## Contents
 

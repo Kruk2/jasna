@@ -7,7 +7,7 @@
 Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应用和命令行，在你的 GPU
 上运行。
 
-<img width="1200" height="907" alt="image" src="https://github.com/user-attachments/assets/d59a914b-482d-4f37-ae72-5c59eb5dc9bb" />
+<img width="1280" height="820" alt="Jasna main window" src="assets/jasna-main-window.png" />
 
 ## 目录
 
