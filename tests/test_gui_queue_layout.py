@@ -462,3 +462,103 @@ def test_one_handle_drag_moves_the_bottom_job_to_the_top(tk_root, show_window, x
 
     assert panel.get_jobs()[0] is dragged_job
     assert _shown_jobs(panel)[0] is dragged_job
+
+
+def test_reset_jobs_for_run_preserves_pending_elapsed_seconds_and_clears_finished(tk_root, tmp_path: Path) -> None:
+    panel = QueuePanel(tk_root)
+    panel.pack(fill="both", expand=True)
+    paused = JobItem(path=tmp_path / "paused.mp4", elapsed_seconds=42.0)
+    done = JobItem(path=tmp_path / "done.mp4")
+    errored = JobItem(path=tmp_path / "err.mp4")
+    skipped = JobItem(path=tmp_path / "skip.mp4")
+    panel.add_jobs([paused, done, errored, skipped])
+    panel.update_job_status(done.id, JobStatus.COMPLETED, 1.0, elapsed_seconds=18.0)
+    errored.elapsed_seconds = 9.0
+    panel.update_job_status(errored.id, JobStatus.ERROR)
+    skipped.elapsed_seconds = 4.0
+    panel.update_job_status(skipped.id, JobStatus.SKIPPED)
+
+    panel.reset_jobs_for_run()
+
+    assert paused.elapsed_seconds == 42.0
+    assert done.elapsed_seconds is None
+    assert errored.elapsed_seconds is None
+    assert skipped.elapsed_seconds is None
+
+
+@pytest.mark.usefixtures("nvidia_vendor")
+@pytest.mark.parametrize("terminal_status", [JobStatus.ERROR, JobStatus.SKIPPED])
+def test_requeue_after_error_or_skipped_clears_stale_start_time(
+    jasna_app, monkeypatch, tmp_path: Path, terminal_status: JobStatus
+) -> None:
+    from types import SimpleNamespace
+
+    from jasna.gui import app as app_module
+    from jasna.gui.processor import ProgressUpdate
+
+    clock = [10.0]
+    monkeypatch.setattr(app_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    video = tmp_path / "clip.mp4"
+    video.touch()
+    jasna_app._queue_panel.add_jobs([JobItem(path=video)])
+    job = jasna_app._queue_panel.get_jobs()[0]
+
+    jasna_app._handle_progress(ProgressUpdate(job_id=job.id, status=JobStatus.PROCESSING, resumable=True))
+    clock[0] = 30.0
+    jasna_app._handle_progress(ProgressUpdate(job_id=job.id, status=terminal_status, message="failed"))
+    assert job.id not in jasna_app._job_start_times
+
+    jasna_app._queue_panel._requeue_job(job)
+    assert job.status is JobStatus.PENDING
+    assert job.elapsed_seconds is None
+
+    clock[0] = 200.0
+    jasna_app._handle_progress(ProgressUpdate(job_id=job.id, status=JobStatus.PROCESSING, resumable=True))
+    clock[0] = 207.0
+    jasna_app._handle_progress(ProgressUpdate(job_id=job.id, status=JobStatus.COMPLETED, progress=100.0))
+    jasna_app._handle_complete(queue_finished=True)
+
+    assert job.elapsed_seconds == pytest.approx(7.0)
+    assert jasna_app._queue_panel._job_widgets[0]._status_label.cget("text").endswith("7s")
+    assert jasna_app._control_bar._fps_label.cget("text").endswith("7s")
+
+
+@pytest.mark.usefixtures("nvidia_vendor")
+def test_requeue_completed_job_mid_run_excludes_superseded_time_from_control_bar(
+    jasna_app, monkeypatch, tmp_path: Path
+) -> None:
+    from types import SimpleNamespace
+
+    from jasna.gui import app as app_module
+    from jasna.gui.processor import ProgressUpdate
+
+    clock = [10.0]
+    monkeypatch.setattr(app_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    first, second = JobItem(path=tmp_path / "a.mp4"), JobItem(path=tmp_path / "b.mp4")
+    jasna_app._queue_panel.add_jobs([first, second])
+
+    jasna_app._handle_progress(ProgressUpdate(job_id=first.id, status=JobStatus.PROCESSING, resumable=True))
+    clock[0] = 20.0
+    jasna_app._handle_progress(ProgressUpdate(job_id=first.id, status=JobStatus.COMPLETED, progress=100.0))
+
+    jasna_app._handle_progress(ProgressUpdate(job_id=second.id, status=JobStatus.PROCESSING, resumable=True))
+    clock[0] = 25.0
+    jasna_app._handle_progress(ProgressUpdate(job_id=second.id, status=JobStatus.PENDING))
+
+    jasna_app._queue_panel._requeue_job(first)
+
+    clock[0] = 50.0
+    jasna_app._handle_progress(ProgressUpdate(job_id=second.id, status=JobStatus.PROCESSING, resumable=True))
+    clock[0] = 53.0
+    jasna_app._handle_progress(ProgressUpdate(job_id=second.id, status=JobStatus.COMPLETED, progress=100.0))
+
+    jasna_app._handle_progress(ProgressUpdate(job_id=first.id, status=JobStatus.PROCESSING, resumable=True))
+    clock[0] = 65.0
+    jasna_app._handle_progress(ProgressUpdate(job_id=first.id, status=JobStatus.COMPLETED, progress=100.0))
+    jasna_app._handle_complete(queue_finished=True)
+
+    assert second.elapsed_seconds == pytest.approx(8.0)
+    assert first.elapsed_seconds == pytest.approx(12.0)
+    assert jasna_app._control_bar._fps_label.cget("text").endswith("20s")

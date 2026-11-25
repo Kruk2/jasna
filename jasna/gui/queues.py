@@ -126,8 +126,18 @@ class MainThreadCalls:
 
     def _run_pending(self) -> None:
         self._after_id = self._widget.after(self._interval_ms, self._run_pending)
+        self.drain_pending()
+
+    def drain_pending(self, *, ignore_tcl_error: bool = False) -> None:
+        """Run callbacks currently queued without scheduling another Tk timer."""
+        import tkinter as tk
+
         for callback in queued_now(self._pending):
-            callback()
+            try:
+                callback()
+            except tk.TclError:
+                if not ignore_tcl_error:
+                    raise
 
     def close(self) -> None:
         self._widget.after_cancel(self._after_id)

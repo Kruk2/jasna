@@ -89,7 +89,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._logs_visible = False
         self._processor: Processor | None = None
         self._job_start_times: dict[int, float] = {}
-        self._processing_start_time: float = 0.0
+        self._job_resumable: dict[int, bool] = {}
+        self._completed_job_elapsed: dict[int, float] = {}
+        self._queue_elapsed_seconds: float = 0.0
+        self._closing = False
         self._preview_gpu_owners: set[object] = set()
         self._video_player_dialog = None
         self._segment_editor = None
@@ -331,15 +334,39 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         if not self._close_segment_editor():
             return
         try:
+            self._closing = True
             if self._processor:
                 self._processor.stop()
                 self._processor.join(timeout=5.0)
+            self._flush_active_jobs_for_close()
             self._save_queue()
         finally:
             self._tray.hide()
             self._stop_system_stats_poller()
             self._main_thread.close()
             self.destroy()
+
+    def _pause_active_job(self, job, job_id: int, now: float) -> None:
+        start = self._job_start_times.pop(job_id, None)
+        resumable = self._job_resumable.pop(job_id, False)
+        if job is None:
+            return
+        if resumable:
+            if start is not None:
+                job.elapsed_seconds = (job.elapsed_seconds or 0.0) + max(0.0, now - start)
+        else:
+            job.elapsed_seconds = None
+
+    def _flush_active_jobs_for_close(self) -> None:
+        drain = getattr(self._main_thread, "drain_pending", None)
+        if drain is not None:
+            drain(ignore_tcl_error=True)
+        if not self._job_start_times:
+            return
+        now = time.monotonic()
+        jobs_by_id = {job.id: job for job in self._queue_panel.get_jobs()}
+        for job_id in list(self._job_start_times):
+            self._pause_active_job(jobs_by_id.get(job_id), job_id, now)
         
     def _show_options(self):
         OptionsDialog(self, tray.tray_support(), self._on_update_check_changed)
@@ -413,6 +440,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             
     def _on_jobs_changed(self):
         jobs = self._queue_panel.get_jobs()
+        if self._completed_job_elapsed:
+            completed_ids = {job.id for job in jobs if job.status is JobStatus.COMPLETED}
+            for job_id in [job.id for job in jobs if job.id in self._completed_job_elapsed and job.id not in completed_ids]:
+                del self._completed_job_elapsed[job_id]
+            self._queue_elapsed_seconds = sum(self._completed_job_elapsed.values())
         self._control_bar.set_queue_total(len(jobs))
         self._update_start_button_state()
         self._save_queue()
@@ -620,6 +652,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._control_bar.set_trial(trial)
         if not continuing:
             self._queue_panel.reset_jobs_for_run()
+            self._completed_job_elapsed.clear()
+            self._queue_elapsed_seconds = 0.0
         
         self._header_bar.set_status("PROCESSING", Colors.STATUS_PROCESSING)
         self._control_bar.set_resumable(any(job_is_resumable(job, settings) for job in jobs))
@@ -635,8 +669,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._log_panel.info(f"Output pattern: {output_pattern}")
         self._log_panel.info(f"Files queued: {len(jobs)}")
 
-        self._processing_start_time = time.time()
         self._job_start_times.clear()
+        self._job_resumable.clear()
         self._processor.start(
             self._queue_panel.job_queue,
             settings,
@@ -692,6 +726,44 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._main_thread.post(lambda: self._handle_progress(update))
         
     def _handle_progress(self, update: ProgressUpdate):
+        jobs = self._queue_panel.get_jobs()
+        job_id = update.job_id
+        job = next((item for item in jobs if item.id == job_id), None)
+        now = time.monotonic()
+
+        if update.status == JobStatus.PROCESSING:
+            if update.resumable is not None:
+                self._job_resumable[job_id] = update.resumable
+            if update.reset_elapsed:
+                if job is not None:
+                    job.elapsed_seconds = None
+                self._job_start_times[job_id] = now
+            else:
+                self._job_start_times.setdefault(job_id, now)
+        elif update.status == JobStatus.PENDING:
+            self._pause_active_job(job, job_id, now)
+        elif update.status in (JobStatus.ERROR, JobStatus.SKIPPED):
+            self._job_start_times.pop(job_id, None)
+            resumable = self._job_resumable.pop(job_id, False)
+            if job is not None and not resumable:
+                job.elapsed_seconds = None
+
+        job_elapsed: float | None = None
+        if update.status == JobStatus.COMPLETED:
+            start = self._job_start_times.pop(job_id, None)
+            self._job_resumable.pop(job_id, None)
+            interval = max(0.0, now - start) if start is not None else 0.0
+            prior = job.elapsed_seconds if job is not None and job.elapsed_seconds is not None else 0.0
+            job_elapsed = prior + interval
+            self._completed_job_elapsed[job_id] = job_elapsed
+            self._queue_elapsed_seconds = sum(self._completed_job_elapsed.values())
+
+        if self._closing:
+            if job is not None:
+                job.status = update.status
+                job.progress = update.progress / 100.0
+            return
+
         if update.license_problem:
             self._show_from_tray()
         if update.license_problem == "unofficial_key":
@@ -700,13 +772,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             from tkinter import messagebox
 
             messagebox.showerror(t("license_problem_title"), update.message, parent=self)
-        jobs = self._queue_panel.get_jobs()
-        job_id = update.job_id
-        
+
         if update.status == JobStatus.PROCESSING:
             if update.resumable is not None:
                 self._control_bar.set_resumable(update.resumable)
-            self._job_start_times.setdefault(job_id, time.time())
             # Resolve current queue position for control bar display
             filename = ""
             queue_current = 0
@@ -726,12 +795,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             )
             self._tray.set_title(f"Jasna - {update.progress:.0f}% ({queue_current}/{len(jobs)})")
             self._queue_panel.set_running(True, processing_job_id=job_id)
-        if update.status == JobStatus.PENDING:
-            self._job_start_times.pop(job_id, None)
-        job_elapsed: float | None = None
-        if update.status == JobStatus.COMPLETED:
-            start = self._job_start_times.pop(job_id, None)
-            job_elapsed = time.time() - start if start is not None else 0.0
         self._queue_panel.update_job_status(
             job_id,
             update.status,
@@ -745,17 +808,20 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._save_queue()
             
     def _on_processor_log(self, level: str, message: str):
-        self._main_thread.post(lambda: self._log_panel.add_log(level, message))
+        self._main_thread.post(lambda: None if self._closing else self._log_panel.add_log(level, message))
         
     def _on_processor_complete(self, queue_finished: bool):
         self._main_thread.post(lambda: self._handle_complete(queue_finished))
 
     def _handle_complete(self, queue_finished: bool):
+        if self._closing:
+            return
         self._header_bar.set_status("IDLE", Colors.STATUS_PENDING)
         self._tray.set_title("Jasna")
         if queue_finished:
-            elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
-            self._control_bar.set_completed(elapsed_seconds)
+            self._control_bar.set_completed(self._queue_elapsed_seconds)
+            self._completed_job_elapsed.clear()
+            self._queue_elapsed_seconds = 0.0
             self._log_panel.info("All jobs completed")
         else:
             self._control_bar.reset()

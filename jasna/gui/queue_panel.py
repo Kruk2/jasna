@@ -434,7 +434,8 @@ class QueuePanel(ctk.CTkFrame):
         for job in self._queue:
             job.error_message = ""
             job.output_path = None
-            job.elapsed_seconds = None
+            if job.status is not JobStatus.PENDING:
+                job.elapsed_seconds = None
             self.update_job_status(job.id, JobStatus.PENDING)
         self._refresh_conflicts()
         

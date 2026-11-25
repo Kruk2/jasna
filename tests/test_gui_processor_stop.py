@@ -350,3 +350,261 @@ def test_overwrite_never_writes_over_the_input(tmp_path, fake_job_pipelines):
 
     assert [pipeline.output_path for pipeline in fake_job_pipelines.built] == [tmp_path / "clip (1).mp4"]
     assert job.status is JobStatus.COMPLETED
+
+
+def _pump_until(app, predicate, timeout: float = 5.0) -> None:
+    import time as stdlib_time
+
+    deadline = stdlib_time.monotonic() + timeout
+    while not predicate():
+        app._main_thread.drain_pending()
+        assert stdlib_time.monotonic() < deadline
+        threading.Event().wait(0.005)
+    app._main_thread.drain_pending()
+
+
+@pytest.mark.usefixtures("nvidia_vendor")
+def test_processing_time_accumulates_across_multiple_pause_resume_cycles(
+    jasna_app, fake_job_pipelines, monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from jasna.gui import app as app_module
+    import jasna.gui.processor as processor_module
+    from jasna.segments import SegmentRange
+
+    clock = [100.0]
+    monkeypatch.setattr(app_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr("jasna.gui.app.start_blocker", lambda *_a, **_k: None)
+    monkeypatch.setattr("jasna.gui.engine_preflight.run_engine_preflight", lambda *_a, **_k: SimpleNamespace(missing=()))
+    monkeypatch.setattr(processor_module, "splice_source", MagicMock())
+    monkeypatch.setattr(
+        processor_module, "plan_segment_job", MagicMock(return_value=MagicMock(reencodes_whole_video=False))
+    )
+
+    attempt_durations = [10.0, 20.0, 30.0, 15.0]
+    pause_on_calls = {2, 3}
+    paused_run = threading.Event()
+    started_cv = threading.Condition()
+    starts_seen = 0
+    call_count = 0
+
+    original_handle = jasna_app._handle_progress
+
+    def tracking_handle(update: ProgressUpdate):
+        nonlocal starts_seen
+        original_handle(update)
+        if update.status is JobStatus.PROCESSING and update.message.startswith("Starting "):
+            with started_cv:
+                starts_seen += 1
+                started_cv.notify_all()
+
+    monkeypatch.setattr(jasna_app, "_handle_progress", tracking_handle)
+
+    def restore(pipeline):
+        nonlocal call_count
+        call_count += 1
+        attempt = call_count
+        with started_cv:
+            assert started_cv.wait_for(lambda: starts_seen >= attempt, timeout=5.0)
+        clock[0] += attempt_durations[attempt - 1]
+        if attempt in pause_on_calls:
+            paused_run.set()
+            while not pipeline.cancel_requested:
+                threading.Event().wait(0.01)
+
+    fake_job_pipelines.restore = restore
+    job1 = JobItem(path=tmp_path / "one.mp4", segments=(SegmentRange(1, 2),))
+    job2 = JobItem(path=tmp_path / "two.mp4", segments=(SegmentRange(1, 2),))
+    job1.path.touch()
+    job2.path.touch()
+    jasna_app._queue_panel.add_jobs([job1, job2])
+
+    jasna_app._on_start()
+    _pump_until(jasna_app, paused_run.is_set)
+    jasna_app._on_stop()
+    jasna_app._processor.join(timeout=5.0)
+    jasna_app._main_thread.drain_pending()
+
+    assert job1.status is JobStatus.COMPLETED
+    assert job1.elapsed_seconds == pytest.approx(10.0)
+    assert job2.status is JobStatus.PENDING
+    assert job2.elapsed_seconds == pytest.approx(20.0)
+
+    clock[0] += 500.0
+    paused_run.clear()
+    jasna_app._on_start()
+    _pump_until(jasna_app, paused_run.is_set)
+    jasna_app._on_stop()
+    jasna_app._processor.join(timeout=5.0)
+    jasna_app._main_thread.drain_pending()
+
+    assert job2.status is JobStatus.PENDING
+    assert job2.elapsed_seconds == pytest.approx(50.0)
+
+    clock[0] += 1000.0
+    jasna_app._on_start()
+    _pump_until(jasna_app, lambda: not jasna_app._processor.is_running())
+    jasna_app._processor.join(timeout=5.0)
+    jasna_app._main_thread.drain_pending()
+
+    assert job2.status is JobStatus.COMPLETED
+    assert job2.elapsed_seconds == pytest.approx(65.0)
+    assert jasna_app._queue_panel._job_widgets[1]._status_label.cget("text").endswith("1m 5s")
+    assert jasna_app._control_bar._fps_label.cget("text").endswith("1m 15s")
+
+
+@pytest.mark.usefixtures("nvidia_vendor")
+@pytest.mark.parametrize("kind", ["whole_basicvsrpp", "reencodes_whole_video"])
+def test_non_resumable_stop_resets_processing_time(jasna_app, fake_job_pipelines, monkeypatch, tmp_path, kind):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from jasna.gui import app as app_module
+    import jasna.gui.processor as processor_module
+    from jasna.segments import SegmentRange
+
+    clock = [100.0]
+    monkeypatch.setattr(app_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr("jasna.gui.app.start_blocker", lambda *_a, **_k: None)
+    monkeypatch.setattr("jasna.gui.engine_preflight.run_engine_preflight", lambda *_a, **_k: SimpleNamespace(missing=()))
+
+    if kind == "reencodes_whole_video":
+        monkeypatch.setattr(processor_module, "splice_source", MagicMock())
+        monkeypatch.setattr(
+            processor_module, "plan_segment_job", MagicMock(return_value=MagicMock(reencodes_whole_video=True))
+        )
+        segments = (SegmentRange(2.5, 3.0),)
+    else:
+        segments = ()
+
+    entered = threading.Event()
+    started_cv = threading.Condition()
+    starts_seen = 0
+    calls = 0
+
+    original_handle = jasna_app._handle_progress
+
+    def tracking_handle(update: ProgressUpdate):
+        nonlocal starts_seen
+        original_handle(update)
+        if update.status is JobStatus.PROCESSING and update.message.startswith("Starting "):
+            with started_cv:
+                starts_seen += 1
+                started_cv.notify_all()
+
+    monkeypatch.setattr(jasna_app, "_handle_progress", tracking_handle)
+
+    def restore(pipeline):
+        nonlocal calls
+        calls += 1
+        attempt = calls
+        with started_cv:
+            assert started_cv.wait_for(lambda: starts_seen >= attempt, timeout=5.0)
+        if attempt == 1:
+            clock[0] += 30.0
+            entered.set()
+            while not pipeline.cancel_requested:
+                threading.Event().wait(0.01)
+        else:
+            clock[0] += 12.0
+
+    fake_job_pipelines.restore = restore
+    job = JobItem(path=tmp_path / "clip.mp4", segments=segments)
+    job.path.touch()
+    jasna_app._queue_panel.add_jobs([job])
+
+    jasna_app._on_start()
+    _pump_until(jasna_app, entered.is_set)
+    jasna_app._on_stop()
+    jasna_app._processor.join(timeout=5.0)
+    jasna_app._main_thread.drain_pending()
+
+    assert job.status is JobStatus.PENDING
+    assert job.elapsed_seconds is None
+
+    clock[0] += 200.0
+    jasna_app._on_start()
+    _pump_until(jasna_app, lambda: not jasna_app._processor.is_running())
+    jasna_app._processor.join(timeout=5.0)
+    jasna_app._main_thread.drain_pending()
+
+    assert job.status is JobStatus.COMPLETED
+    assert job.elapsed_seconds == pytest.approx(12.0)
+    assert jasna_app._queue_panel._job_widgets[0]._status_label.cget("text").endswith("12s")
+    assert jasna_app._control_bar._fps_label.cget("text").endswith("12s")
+
+
+@pytest.mark.usefixtures("nvidia_vendor")
+def test_outdated_progress_start_over_emits_reset_and_discards_prior_and_modal_time(
+    jasna_app, fake_job_pipelines, monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from jasna.gui import app as app_module
+    import jasna.gui.processor as processor_module
+    from jasna.job_resume import ResumeMismatchError
+    from jasna.segments import SegmentRange
+
+    clock = [100.0]
+    monkeypatch.setattr(app_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr("jasna.gui.app.start_blocker", lambda *_a, **_k: None)
+    monkeypatch.setattr("jasna.gui.engine_preflight.run_engine_preflight", lambda *_a, **_k: SimpleNamespace(missing=()))
+    monkeypatch.setattr(processor_module, "splice_source", MagicMock())
+    monkeypatch.setattr(
+        processor_module, "plan_segment_job", MagicMock(return_value=MagicMock(reencodes_whole_video=False))
+    )
+
+    saved = tmp_path / "saved-progress"
+    saved.mkdir()
+    updates_seen: list[ProgressUpdate] = []
+    started_cv = threading.Condition()
+    initial_started = False
+    reset_drained = threading.Event()
+    original_handle = jasna_app._handle_progress
+
+    def tracking_handle(update: ProgressUpdate):
+        nonlocal initial_started
+        updates_seen.append(update)
+        original_handle(update)
+        if update.status is JobStatus.PROCESSING and update.message.startswith("Starting "):
+            with started_cv:
+                initial_started = True
+                started_cv.notify_all()
+        if update.reset_elapsed:
+            reset_drained.set()
+
+    monkeypatch.setattr(jasna_app, "_handle_progress", tracking_handle)
+
+    def ask_start_over(*_args, **_kwargs):
+        clock[0] += 40.0
+        return True
+
+    monkeypatch.setattr("tkinter.messagebox.askyesno", ask_start_over)
+
+    def restore(pipeline):
+        with started_cv:
+            assert started_cv.wait_for(lambda: initial_started, timeout=5.0)
+        if saved.exists():
+            clock[0] += 5.0
+            raise ResumeMismatchError(saved)
+        assert reset_drained.wait(5.0)
+        clock[0] += 15.0
+
+    fake_job_pipelines.restore = restore
+    job = JobItem(path=tmp_path / "clip.mp4", segments=(SegmentRange(1, 2),), elapsed_seconds=50.0)
+    job.path.touch()
+    jasna_app._queue_panel.add_jobs([job])
+
+    jasna_app._on_start()
+    _pump_until(jasna_app, lambda: not jasna_app._processor.is_running())
+    jasna_app._processor.join(timeout=5.0)
+    jasna_app._main_thread.drain_pending()
+
+    assert any(u.reset_elapsed for u in updates_seen)
+    assert job.status is JobStatus.COMPLETED
+    assert job.elapsed_seconds == pytest.approx(15.0)
+    assert jasna_app._queue_panel._job_widgets[0]._status_label.cget("text").endswith("15s")
+    assert jasna_app._control_bar._fps_label.cget("text").endswith("15s")

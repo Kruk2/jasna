@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Iterable, get_args
 
@@ -30,6 +31,17 @@ def _optional_path(value) -> Path | None:
     return None if text is None else Path(text)
 
 
+def _optional_elapsed(value) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"unexpected value {value!r}")
+    elapsed = float(value)
+    if not math.isfinite(elapsed) or elapsed < 0:
+        raise ValueError(f"invalid elapsed_seconds {value!r}")
+    return elapsed
+
+
 def _segment_to_dict(segment: SegmentRange) -> dict:
     restoration = segment.restoration
     return {
@@ -51,7 +63,7 @@ def _segment_from_dict(data: dict) -> SegmentRange:
 def job_to_dict(job: JobItem) -> dict:
     """What a queue item keeps across restarts: its input, its own options and the output its
     unfinished run left. Status and progress are left out; every restored item is pending."""
-    return {
+    data = {
         "path": str(job.path),
         "duration_seconds": job.duration_seconds,
         "segments": [_segment_to_dict(segment) for segment in job.snapshot_segments()],
@@ -60,6 +72,9 @@ def job_to_dict(job: JobItem) -> dict:
         "vr_projection": job.vr_projection,
         "unfinished_output": None if job.unfinished_output is None else str(job.unfinished_output),
     }
+    if job.elapsed_seconds is not None:
+        data["elapsed_seconds"] = job.elapsed_seconds
+    return data
 
 
 def job_from_dict(data: dict) -> JobItem:
@@ -73,6 +88,7 @@ def job_from_dict(data: dict) -> JobItem:
         detection_score_threshold=None if threshold is None else float(threshold),
         vr_projection=_optional(data["vr_projection"], str),
         unfinished_output=_optional_path(data["unfinished_output"]),
+        elapsed_seconds=_optional_elapsed(data.get("elapsed_seconds")),
     )
 
 

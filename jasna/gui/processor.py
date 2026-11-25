@@ -53,6 +53,7 @@ class ProgressUpdate:
     stage: StageProgress | None = None
     resumable: bool | None = None
     license_problem: str = ""
+    reset_elapsed: bool = False
 
 
 class ProgressGate:
@@ -420,9 +421,19 @@ class Processor:
         return self._video_sessions.get(settings, build)
 
     def _run_video_job(self, job_id, input_path, output_path, *, segments, settings):
+        def replace_outdated(error: ResumeMismatchError) -> bool:
+            if not self._replaces_outdated_progress(error):
+                return False
+            self._progress(ProgressUpdate(
+                job_id=job_id,
+                status=JobStatus.PROCESSING,
+                reset_elapsed=True,
+            ))
+            return True
+
         run_with_resume_prompt(
             lambda: self._run_video_pipeline(job_id, input_path, output_path, segments=segments, settings=settings),
-            self._replaces_outdated_progress,
+            replace_outdated,
         )
 
     def _replaces_outdated_progress(self, error: ResumeMismatchError) -> bool:
