@@ -292,7 +292,8 @@ median of three runs, with `--max-clip-size 180 --temporal-overlap 15
 change touches decode, encode or pixel formats; H.264 hides decode differences.
 
 ```bash
-scripts/run_benchmarks.sh benchmarks/scratch [--codecs] [--scan]       # ~8 min
+PYTHON=python scripts/run_benchmarks.sh benchmarks/scratch             # ~8 min
+# Add --codecs for extra codecs or --scan for the GUI mosaic scan.
 P=python   # the venv Python with jasna installed
 $P scripts/benchmark_decode_backends.py --backends vali pyav-hw pyav-sw   # e2e per decoder
 $P scripts/benchmark_scan_backends.py --backends vali                     # GUI mosaic scan
@@ -310,8 +311,12 @@ The second encode line decides a GPU's entry in `ENCODER_HEADS`
 the fastest `kitchenN` beats the bf16 encoder (`eager+cl3d+compile`) with
 latents no further from `fp32`. The third line then prints the entry's
 `triton_convs`: the head convs where the Triton conv beats kitchen, each with
-its fastest launch; keep it if `shipped` gets faster without moving further
-from `fp32`. Both need only `model_weights/ltx-restore/vae.safetensors`.
+its fastest launch. Add `--verify` to that command to compare candidate heads
+with the kitchen head on the sample clip at both canvas sizes. It selects
+the fastest candidate that beats the kitchen head at both sizes and stays
+within the FP32 error tolerance. The encode benchmark and this verification
+use `model_weights/ltx-restore/vae.safetensors` and the checked-in
+`assets/test_clip1_1080p.mp4` by default.
 
 `scripts/bench_common.py` holds what the benchmark scripts share: the RAM/VRAM
 sampler (VRAM through `nvidia-smi`, so AMD runs report 0), frame counts, GPU
