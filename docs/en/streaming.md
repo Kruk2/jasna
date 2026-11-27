@@ -17,6 +17,10 @@ On Windows use the same file as the app: `jasna.exe --stream`.
 Useful options: `--stream-port` (default `8765`) and `--no-browser` if you want
 to open the player yourself.
 
+The streaming server listens on all IPv4 interfaces and requires no login.
+Allow access only from devices you trust, and keep the port off the public
+internet.
+
 Streaming always uses BasicVSR++ (not LTX) and H.264. To watch inside the app
 instead, use the [Video Player](gui.md#video-player).
 
