@@ -102,10 +102,12 @@ set JASNA_TRT_CUDAGRAPHS=0
 jasna.exe
 ```
 
-Linux (on AMD start `./run_jasna_amd.sh` instead of `./jasna`):
+On Windows the setting lasts until you close that window. On Linux, prefix
+the command with the variable to apply it to that launch:
 
 ```bash
+# NVIDIA
 JASNA_TRT_CUDAGRAPHS=0 ./jasna
+# AMD
+JASNA_AMD_GRAPHS=0 ./run_jasna_amd.sh
 ```
-
-The setting lasts until you close that window.

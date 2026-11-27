@@ -103,10 +103,12 @@ set JASNA_TRT_CUDAGRAPHS=0
 jasna.exe
 ```
 
-Linux（AMD では `./jasna` の代わりに `./run_jasna_amd.sh` を起動）:
+Windows では、そのウィンドウを閉じるまで設定が有効です。Linux ではコマンドの
+先頭に変数を指定すると、その起動時だけ設定が適用されます。
 
 ```bash
+# NVIDIA
 JASNA_TRT_CUDAGRAPHS=0 ./jasna
+# AMD
+JASNA_AMD_GRAPHS=0 ./run_jasna_amd.sh
 ```
-
-この設定は、そのウィンドウを閉じるまで有効です。
