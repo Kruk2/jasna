@@ -367,4 +367,10 @@ kernel timing and the measured commit.
 3. Every bundled model hash matches `assets/THIRD_PARTY_MODELS.md`.
 4. Upload every archive part **and** its `.sha256` to the same GitHub release.
 
+PyPI yanked `av==18.1.0` because decoding audio with custom channel layouts
+can corrupt memory. [PyAV 18.1.1](https://github.com/PyAV-Org/PyAV/releases/tag/v18.1.1)
+fixes that issue. Update the release PyAV and VALI wheels together against
+matching FFmpeg libraries, validate them on the supported release targets,
+and record the selected versions in `RELEASE_SOURCES.md`.
+
 Official release packaging is maintained separately.
